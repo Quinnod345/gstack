@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- **Stacked PRs** (Fixes #3570): after a stack parent lands and the child is retargeted to the base with the base merged in, `carry --base <base>` compares HEAD's product diff against the base with the range the receipt reviewed against the parent branch. That is the recorded `product_patch_id`, or the range against `origin/<parent>` for an older receipt. HEAD's side is its whole product diff against the base, so a parent's `package.json` change that never reached the base refuses too. Equal carries with the reason `stack parent <branch> landed` and rebinds the receipt's `base` to the base; anything else refuses. Until now every stacked child paid a full /ship once its parent merged (gstack-evals#19).
+
+### Tests
+- `test/ship-receipt-carry-squash.test.ts`: a child carries after its parent squash-merges and main is merged in, names main as its base, and carries again across a later main merge. A test-only child carries. A child edited after the merge, a parent that never landed, a parent `package.json` change that never reached main, and a merge that keeps the child's tree over the landed parent refuse. An older receipt falls back to `origin/<parent>` and refuses once that branch is deleted.
+
+## [Unreleased]
+
 **A later autoplan gate that asks nothing new is now answered with the owner's earlier words instead of another round trip.** Captains were carrying approvals across gate revisions by hand (GSTA-140 reused a rev-1 "Do it" on rev 2; ALPH-50 lost about 27 minutes to one), and a replay over 23 recorded runs found 14 later gates, 8 of them holding only post-cap delta items.
 
 ### Added

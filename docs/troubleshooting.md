@@ -4770,8 +4770,10 @@ to HEAD: the PR body has no valid receipt, the working tree has uncommitted or
 untracked changes (a carry certifies a commit, never a tree that differs from
 it), the receipt's head left HEAD's history and the receipt records no tree to
 compare (a receipt written before `head_tree`, whose head is not in this
-clone), or git could not compare the two product diffs or read the working
-tree's status. It also refuses when an owner exception the receipt records
+clone), the PR was retargeted to the base after its stack parent landed but
+the receipt records no `product_patch_id` and `origin/<parent>` no longer
+resolves, so the reviewed range cannot be recomputed, or git could not
+compare the two product diffs or read the working tree's status. It also refuses when an owner exception the receipt records
 no longer stands, and, for a receipt from a gstack that records review
 depth, when HEAD needs a deeper review than the receipt records, `--head` is
 not the checked-out HEAD, or the receipt records `gstack_version` without
@@ -4782,9 +4784,10 @@ ready` refuses `QUEUE_RECEIPT_STALE`.
 **Fix.** Commit or stash every working-tree change, then rerun
 `gstack-ship-receipt carry --pr <n>` at the new head. When the history is
 already rewritten and the receipt predates `head_tree`, run /ship on the new
-head; next time merge the base in instead of rebasing. For a depth or
-exception refusal, run /ship on the new head (or check out `--head` and carry
-there).
+head; next time merge the base in instead of rebasing. For a retargeted stacked
+PR whose older receipt lost its parent branch, or a depth or exception
+refusal, run /ship on the new head. When `--head` is not the checked-out HEAD,
+check it out and carry there.
 
 <a id="review-loop-exception-invalid"></a>
 ### `REVIEW_LOOP_EXCEPTION_INVALID`
@@ -4823,13 +4826,18 @@ registered output the pregate's regen check proved (listed under `proven`,
 checked against the same base registry), nor part of the base merge has
 a different patch than the reviewed head had. After a rebase it means HEAD has
 the reviewed tree but the base moved under it, so the diff a reviewer would see
-is not the reviewed one. The reviewed verdict does not cover HEAD, so the
-receipt is not carried. The refusal names the changed product paths.
+is not the reviewed one. For a stacked PR retargeted to the base after its
+parent landed, it means HEAD's product diff against the base is not the range
+reviewed against the parent branch: the parent has not fully landed, or the
+branch changed since. The reviewed verdict does not cover HEAD, so the
+receipt is not carried. The refusal names the changed product paths, or for a
+retargeted stacked PR the parent branch and the base.
 
 **Fix.** Run /ship on the new head. The receipt carries only across a
 conflict-only base merge, a test-only change, release metadata, a registered
-output the pregate's regen check proved, or a rebase onto a covered tree with
-the recorded product diff, which the
+output the pregate's regen check proved, a rebase onto a covered tree with
+the recorded product diff, or a stacked PR's retarget once its parent fully
+landed on the base, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
