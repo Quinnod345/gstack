@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+**`gstack-pregate sealed` no longer prints a line that reads like a push confirmation.** On gstack-evals#29 the lane read `pushed aeb2413` in the `SEALED:` line as the push landing, while the remote stayed at 9036ab1 (#3565). `sealed` never pushes: it checks the commits a push would publish. `pushed <sha>` was its label for the commit whose `sealed` policy it read beside the base branch's.
+
+### Fixed
+- **`lib/sealed-guard.ts`**: that label now reads `commit <sha12>` (`policy=origin/main + commit aeb2413f0ca1`), in the `SEALED:` line, in the managed pre-push hook's messages and in the unreadable-policy error.
+- **`gstack-pregate --help`** and **docs/pregate.md#sealed** say the command never pushes and that `git ls-remote <remote> <ref>` confirms a push.
+
+### Tests
+- `test/sealed-guard.test.ts`: `gstack-pregate sealed` names the checked commit, prints no `pushed`, and leaves the remote's refs exactly as they were. It failed before the fix on `policy=origin/main + pushed <sha>`.
+
+## [Unreleased]
+
 **/office-hours now has eval tasks for the shared skill eval, and /write-skill's diet locks its tasks before a paid run.** gstack-evals' Lane A will re-check the office-hours diet from #3525. To do that it needs office-hours' tasks in gstack's contract format, a sidecar for what Lane A adds, and a diet step that commits the lock a paid run requires. #3525 never committed the task set GSTA-134 ran, so these tasks rebuild it from the pilot's written summary.
 
 ### Added
