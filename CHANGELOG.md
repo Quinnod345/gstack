@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Tests
+- `test/review-depth.test.ts`: the #19 shape plans fix-check, Red Team and native adversarial; full depth, a fail-closed classification, `--depth-floor full`, a 151-line, missing or unread range and a gate-touching fix keep the full pass; a forced specialist and changed numbers keep their reviewers; 150, 151 and a docs-only range; the scoped pass counts toward the cap and a blocker it leaves stops; `DEPTH_RULES` moves with the constant.
+- `test/review-plan-cli.test.ts`: `--range-base` plans `NEXT: scoped`; a 151-line range, no range, an unknown base and uncommitted fixes plan full.
+- `test/review-scope.test.ts`: `raised_by` from the explicit field, the specialist tag or `unknown`.
+- `test/ship-receipt-depth.test.ts`: the queue binds a receipt whose pass 2 was scoped.
+
+### Gate integrity
+- Addition to the 1.91.316.0 entry below: **Pass 2 after a blocking fix now reviews the fix in proportion to its size.** When pass 1 fixed a blocking finding on a diff below full depth and the fix range has at most 150 runtime lines, /ship runs a scoped pass: one fix-check, the Red Team and the native adversarial pass on the range, instead of the specialist army. On gstack-evals#19 a 3-file fix range (+18/-6) was planned for nine reviewers. Full depth, `--depth-floor full`, a fix that touched a gate path, a larger range, or a range it cannot read keeps the full pass 2. The two-pass cap and the stop for the owner are unchanged.
+- Addition to the 1.91.316.0 entry below: **`gstack-review-plan --range-base <sha>`** (`lib/review-depth.ts`): counts the committed fix range `<sha>..HEAD` the way the depth counts runtime lines, prints `FIX_RANGE: runtime_lines=<n>|unread (<why>) base=<sha>` (`fix_range` in `--json`), and `NEXT: scoped` when the scoped pass applies. `nextStep` takes the depth and `History.rangeRuntimeLines`; `SCOPED_RANGE_LINES` (150) joins `DEPTH_RULES`, so `rules=` changes. `REVIEW_PLAN:` ends with the step's `reason="…"`. Uncommitted or untracked edits, a range base that is not an ancestor of HEAD, an empty range, and a range the classifier cannot count all plan the full pass. A full pass 1 always gets a full pass 2: `--pass1-depth` carries pass 1's `REVIEW_DEPTH` (absent counts as full), so a fix that reverts a gate, auth, migration or gate-tagged edit cannot lower pass 2. The fix range is classified with its own `gstack-diff-scope` and `gstack-gate-diff` input, and a gate-class range plans the full pass and sets `fix_range.touched_gate`.
+- Addition to the 1.91.316.0 entry below: **Scoped dispatches**: the fix-check, every force-included specialist, the Red Team, the native adversarial pass when the range changes runtime lines, and the outside voice when published numbers changed. Step 11's voices that have not run yet stay listed. A light diff's raise to standard applies to the scoped set only.
+- Addition to the 1.91.316.0 entry below: **Step 9** (`ship/sections/review-army.md`): the repeat decision passes `--range-base $PASS_HEAD` and maps `NEXT: scoped` to decision 3; a scoped pass logs a full-pass `review` row with `"scope":"scoped"`, so it counts toward the cap and its roles land in `review_loop.dispatches` with no receipt schema change.
+- Addition to the 1.91.316.0 entry below: **`raised_by` on classified findings** (`gstack-review-scope classify`, `lib/review-scope.ts`): the reviewer that raised each finding (`core`, `qa`, a specialist, `red-team`, `adversarial-native`, `outside-voice`, `fix-check`), from the finding's `raised_by` or `specialist` tag, else `unknown`. Step 9 copies it into the review-log row. Older rows without it still summarize.
+- Addition to the 1.91.316.0 entry below: **Docs**: docs/review-policy.md (rule 3, the transitions table, a scoped-pass section and Behavior changes) and docs/ship-policy.md rule 3.
+
+## [Unreleased]
+
 **A PR screen no longer runs the whole paid gate just because a changed file sits on every case's import path.** Editing a file like `lib/restamp.ts` reached all 113 gate cases through the derived-reference closure, so 19 of the 41 full screens between Oct 20 and 29 ran the full $33 gate for that reason alone. A narrow screen (`gstack-ship-queue ready --screen`, and `bun run eval:bg:pr`) now leaves such a file's cases to the train gate's full census, which runs every case before anything merges. Replayed on those 41 screens with today's maps, this saves about $457 a week, and the screens that caught real PR-caused reds (#3434, #3453) still run the full gate.
 
 ### Changed
