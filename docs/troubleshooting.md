@@ -1737,8 +1737,11 @@ restate them. Rotate the secret if it was real.
 
 **Meaning.** The record is kept per branch (one Capy thread ships one branch), and
 HEAD is detached or the working directory is not a git repository. Exit 3.
+From `import --autoplan <dir> --stack <b1,b2,...>` it means a listed branch exists
+neither locally nor on origin; the line names it, and no branch's record was written.
 
-**Fix.** Check out the branch the work ships from, or pass `--branch <name>`.
+**Fix.** Check out the branch the work ships from, or pass `--branch <name>`. For
+`--stack`, correct or fetch the named branch and import again.
 
 <a id="approval-record-unavailable"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_UNAVAILABLE)`
@@ -1777,7 +1780,9 @@ import again. Imports are idempotent, so a retry never records an answer twice.
 ### `gstack-owner-brief render --captain: ... (CAPTAIN_BRIEF_INCOMPLETE)`
 
 **Meaning.** The plan is missing at least one section the brief needs: `## Before → after`,
-`## Why it matters`, `## What caused this work`, `## Big decisions`. The brief still prints,
+`## Why it matters`, `## What caused this work`, `## Big decisions`, and `## ELI5` (alias
+`## In plain words`) on a run whose `gate.json` carries an `eli5` field (gstack 1.91.305 and
+later; older runs render as before). The brief still prints,
 but it opens with "Not ready for approval" and has no reply invitation. Exit 1.
 
 **Fix.** Add the named sections to the plan (`gstack-autoplan revise --plan <file>` if

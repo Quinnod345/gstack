@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**A later autoplan gate that asks nothing new is now answered with the owner's earlier words instead of another round trip.** Captains were carrying approvals across gate revisions by hand (GSTA-140 reused a rev-1 "Do it" on rev 2; ALPH-50 lost about 27 minutes to one), and a replay over 23 recorded runs found 14 later gates, 8 of them holding only post-cap delta items.
+
+### Added
+- **Carry-forward** (`lib/autoplan-carry.ts`): when gate_rev N+1 asks nothing new and gate_rev N was fully answered by the owner with `rec` or "do it", gstack answers N+1 with those recorded words and prints `CARRIED: gate_rev=<n> <- gate_rev=<m> …`; anything else prints `CARRY: no (<why>)` and goes to the owner. `--no-carry-forward` on the first `next` turns it off.
+- **"do it" covers new low-risk items.** When the owner's own words were "do it", a new item that changes no scope, cost, direction or plan text takes its recommendation, is marked `carried_under: do it`, and is listed in the approval record and the Captain brief as not shown to the owner. A Captain's "do it" never counts.
+- **Delta check.** A "plan changed after cap" item gets one reviewer from another model family on the delta first (`CARRY_CHECK:`, `gstack-autoplan check`), within a per-gate spend cap (`--carry-check-cap`, default $5). High or above, no reviewer, an owner answer, or a plan edit after dispatch leaves the gate for the owner and releases the reservation. The verdict is recorded on `gate.json`, the decision rows and `decisions.tsv`.
+- **`eli5` in gate.json**: the plan's `## ELI5` and the four approvals-shape sections; `gstack-gate render` opens page 1 with them, and the Captain brief requires `## ELI5` (older runs render as before).
+- **`gstack-approvals import --autoplan <dir> --stack b1,b2`** writes the same rows to every branch of a stack, or to none when one branch is unknown.
+- **`REVIEW_ESTIMATE:`** on the first `next`: phases, voices, rounds, attempts and the reservation total.
+
+### Changed
+- `lib/decision-trail.ts` holds the trail append rules shared by `gstack-decision-trail` and the carry.
+
 ## [1.91.313.0] - 2026-10-29
 
 **The PII scanner stops flagging two kinds of ordinary text: a bare power-of-two or hash constant in code, and a package@version-style filename.** Eval artifacts and PR bodies that print a PRNG range or name a versioned results file no longer raise a MEDIUM phone or email finding, and real phone numbers and addresses next to them still report.
