@@ -1823,6 +1823,92 @@ all the command prints `SHOT_PNG: unavailable (...)` and exits 0 instead.
 
 **Fix.** Screenshot `shot.html` with your own browser at 880 px wide, or use `text.md`.
 
+## /ship token budget and fresh-context handoffs (gstack-ship-budget)
+
+The flow, the BUDGET line field by field and the meters are in [ship-budget.md](ship-budget.md).
+Exit 2 lines go to stderr; exit 3 lines (a stop) go to stdout with the STOP, RECOVER and
+GSTACK_RESULT lines.
+
+<a id="budget-cap-reached"></a>
+### `gstack-ship-budget: ... (BUDGET_CAP_REACHED)`
+
+**Meaning.** The next step or dispatch batch would push used + open reservations + unknown
+charges + its projection + the tail and stop reserve past the admission cap, so it did not
+start. Exit 3. `gstack-review-log --start` prints the same code (exit 1) for a dispatch
+after the run stopped. The cap admits work; it cannot stop a turn already running, so the
+overshoot is bounded by the misprojection of work admitted before the stop.
+
+**Fix.** The run ended status=incomplete with a resumable record. Raising the cap is the
+owner's call: run the printed `RECOVER:` line; its resume needs
+`--approved-by <who> --words "<their words>"`.
+
+<a id="budget-reading-missing"></a>
+### `gstack-ship-budget: ... (BUDGET_READING_MISSING)`
+
+**Meaning.** The run's meter is the Capy root counter, a cap is set, and the command got no
+`--reading`. Exit 2. No gstack binary can call Capy's API, so the agent reads it.
+
+**Fix.** In one execute program return only
+`(await tools.thread.get({ thread_id: "this" })).cost.tokens` and pass it as `--reading <n>`.
+
+<a id="budget-reading-rejected"></a>
+### `gstack-ship-budget: ... (BUDGET_READING_REJECTED)`
+
+**Meaning.** The reading breaks the run's meter contract: it is lower than the last reading
+of the same epoch, `--prior-reading` is above `--reading`, or `--reading` went to a meter that
+reads its own source (Claude Code journals, the estimate). Exit 2; nothing changed.
+
+**Fix.** Pass the counter the run started with (the BUDGET line names meter, unit and epoch).
+A different meter opens a new epoch that keeps prior usage:
+`gstack-ship-budget resume --run <id> --meter <m>`.
+
+<a id="budget-meter-unavailable"></a>
+### `gstack-ship-budget: ... (BUDGET_METER_UNAVAILABLE)`
+
+**Meaning.** A cap is set and no meter is readable: no `--reading`, no bound Claude Code
+session, no `--meter estimate`; or a `--session`/`--nonce` matched zero or several journals.
+The line names what it tried. Exit 2.
+
+**Fix.** Capy: `--reading <n>`. Claude Code: `--session <id>`, or echo the nonce the line prints
+once and rerun with `--nonce <value>`. Elsewhere, with the owner's consent, `--meter estimate`.
+
+<a id="budget-ledger-invalid"></a>
+### `gstack-ship-budget: ... (BUDGET_LEDGER_INVALID)`
+
+**Meaning.** The ledger (`<state root>/ship-runs/<run>/budget.json`), the record's
+gstack-budget block, a handoff brief's block or a checkpoint is missing, unparseable, from
+another schema version, or not bound to the run (identity or sha256 mismatch). The line names
+the path, the schema version and the parse location. Exit 2.
+
+**Fix.** After a machine change, `gstack-ship-budget resume --run <id>` restores the ledger and
+record from the Drive checkpoint. Otherwise rebuild:
+`resume --record <path> --rebuild-from-record --reading <n>`; open reservations are charged as unknown.
+
+<a id="budget-check-skipped"></a>
+### `gstack-review-log: ... (BUDGET_CHECK_SKIPPED)` / `gstack-ship-budget: ... role=<r> step=<s> started=<t> spend=unknown (BUDGET_CHECK_SKIPPED)`
+
+**Meaning.** Under a cap, `gstack-review-log --start` got no reservation id, an id from another run
+or a step reservation (mismatched), or an id already used (one-shot); it refused before the
+dispatch (exit 1, nothing captured). From `close`: a review-log row of this run had no
+reservation before it started; one line per dispatch, and the run ends status=incomplete (exit 3).
+
+**Fix.** Run `gstack-ship-budget check --run <id> --step <s> --next dispatch:<roles>` before the
+batch and pass the printed id once with `--reservation`. A reservation is never created after the
+fact: the owner accepts the unreserved spend with `close --approved-by <who> --words "<their words>"`
+or the dispatches rerun under reservations.
+
+<a id="handoff-pin-moved"></a>
+### `gstack-ship-budget: ... (HANDOFF_PIN_MOVED)`
+
+**Meaning.** `verify-handoff` found the brief no longer matches its tree: HEAD, the merge base
+with the base ref, the working-tree fingerprint (`gstack-wtree`) or the reviewed tree moved, or the
+brief's sha256 is not the one the parent recorded. Each line names the pin with its expected
+and actual value. Main moving alone keeps the merge base and never refuses. Exit 3; the child
+wrote its return with status=refused.
+
+**Fix.** The parent reconciles the refusal and regenerates the handoff at the current tree
+(`gstack-ship-budget handoff ...`) or stops.
+
 ## Browser
 
 <a id="browse-runtime-version-skew"></a>

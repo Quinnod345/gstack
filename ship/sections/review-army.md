@@ -99,7 +99,7 @@ This pass is static; defer product probes to Step 9.2.1.
 
 1. Read `~/.claude/skills/gstack/review/checklist.md`. If the file cannot be read, **STOP** and report the error.
 
-2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>` (`git diff $RANGE_BASE` from pass 2 on). Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
+2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START (under a token cap, first reserve this pass's dispatch batch with `gstack-ship-budget check` and add `--reservation <id>`). Then run `git diff origin/<base>` (`git diff $RANGE_BASE` from pass 2 on). Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
 
    Every pass captures a full token (no `--fix-range`), so the record binds the
    whole tree even when reviewers read only the range.
@@ -826,7 +826,7 @@ Other scopes apply decisions 2–4 in order.
    past what the request needs (a helper, a guard, a case nothing takes), cut that
    growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
-3.5. **One fix-check.** Take a `gstack-review-log --start review-fix-check` token; write the
+3.5. **One fix-check.** Take a `gstack-review-log --start review-fix-check` token (`--reservation <id>` under a cap); write the
    fix list, touched hunks (`git diff $PASS_HEAD`), callers of changed symbols and
    test results to `.gstack/tmp/fix-check-*.txt`; dispatch one full-effort reviewer
    on `gstack-review-plan --fix-check-prompt --fix-list <f> --hunks <f> --tests <f>
