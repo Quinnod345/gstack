@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+**The PII scanner stops flagging two kinds of ordinary text: a bare power-of-two or hash constant in code, and a package@version-style filename.** Eval artifacts and PR bodies that print a PRNG range or name a versioned results file no longer raise a MEDIUM phone or email finding, and real phone numbers and addresses next to them still report.
+
+### Fixed
+- **`lib/redact-patterns.ts`**: `pii.phone.e164` skips a bare number that is exactly a power of two from 2^30 through 2^49, one less than one, or one of eleven well-known 32-bit hash and PRNG constants. The same digits written with a `+`, spaces, dashes, dots or parentheses still report (#3577).
+- **`lib/redact-patterns.ts`**: `pii.email` skips a filename whose part after the `@` is a version or tag followed by file extensions no top-level domain uses, or a dotted version followed by an extension that doubles as one. A file named after a real address, an address at a numeric domain such as 163.com, and an address under a top-level domain that doubles as an extension (`.sh`, `.md`) still report (#3576).
+
+### Tests
+- `test/redact-constant-and-at-filename.test.ts`: pins both exemptions in both directions, including files named after a real address.
+
+## [Unreleased]
+
 **An install check run from inside /ship no longer upgrades gstack under it.** /ship's docs step runs `scripts/install.sh --for document-release`. That run fast-forwarded the checkout from 1.91.298 to 1.91.299 in the middle of a lane's /ship, so the receipt writer's rules changed partway through the run (#3571).
 
 ### Fixed
