@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+**A sealed policy can now refuse `sealed/<set>/tasks.json` while allowing the `MANIFEST.json` beside it, and can catch `HELDOUT/` with a `heldout` glob.** The sealed guard only had deny globs and one-commit waivers, so the gstack-evals layout, which keeps a public manifest of hashes and counts next to its sealed tasks, needed a fresh `.gstack/sealed-allow.tsv` line for every manifest commit (gstack-evals wiki/board/2026-10-28-gsta-9-sealed-manifest-glob-gap.md). Their first draft also wrote `sealed/**`, which never matched their nested `tasks/<id>/sealed/` directories, and garrytan/gstack-evals#3 (dc54796) hand-listed `Sealed/`, `HELDOUT/` and other case variants.
+
+### Added
+- **`sealed.allow_paths`** (`lib/sealed-guard.ts`): globs that exempt publishable files from `sealed.path` and `sealed.transcript`, applied after the deny globs and before sha waivers. They are read from the destination base branch only, so a push cannot widen its own exceptions; a pushed copy is still validated and refuses when malformed. Text rules still read an exempt file, so a manifest that quotes a sealed answer still refuses. An entry whose file name contains `**` or is only wildcards before its extension (`**`, `sealed/*`, `**/*.json`) is refused. Each exempt path prints `exempt <rule>  <file>  commit <sha> (sealed.allow_paths <glob>)` on every push.
+- **`sealed.case_insensitive: true`**: `paths` and `transcripts` match regardless of case, so `**/heldout/**` also refuses `HELDOUT/` and `HeldOut/`. The value is the base branch's OR the pushed one, because it only tightens. `allow_paths` never fold case. Separator and spelling variants such as `hold-out/` still need their own globs.
+
+### Changed
+- `gstack-pregate sealed` prints `exempt=<n>` after `waived=<n>` on its `SEALED:` line (`policy=` stays last), and `--json` carries an `exempt` array. Both bins build their error report through one `sealedErrorReport`.
+- An unknown `sealed` key now says to upgrade gstack if the key comes from a newer one. A gstack older than this release refuses `allow_paths` and `case_insensitive` this way on every push and `gstack-pregate run`, so a repository raises `min_gstack_version` before landing either key.
+- `docs/pregate.md` § Sealed output explains glob anchoring: patterns match from the repository root, so `sealed/**` misses `tasks/x/sealed/a.json` and the docs say to write `**/sealed/**`. It also documents case handling, exceptions and the version skew.
+
+### Gate integrity
+- This is a gate edit: `allow_paths` lets the sealed guard pass files it refused before, but only from the reviewed base branch. No existing test, threshold or allowlist changed. New cases in `test/sealed-guard.test.ts` (10) and `test/pregate-guards.test.ts` cover an allowed exception, a non-matching one, an exception added on the pushed head, a text rule inside an exempt file, transcripts, the waiver order, the error report, case folding in both directions and the root-anchoring example.
+
+## [Unreleased]
+
 **The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
 
 ### Fixed
