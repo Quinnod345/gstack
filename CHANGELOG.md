@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+**The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
+
+### Fixed
+- **`/review` Step 5.8**: an unresolved non-gate defect (an unanswered question) is recorded as `open`, so every finding has a record action. A repeat pass's reruns of superseded probes are revalidation, so they run after smoke expiry, in the same probe directory; earlier provisional QA sections link checkpoints and only the final pass runs the once-only `materialize`.
+- **`/plan-eng-review`**: the shared Voice now loads once. Eng no longer carries a near-copy whose only difference was its em-dash clause; the Scope gate's format precedence says required formats keep their em dashes.
+- **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
+
+### Changed
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, wrapper attempts and 429 waits, HTTP requests and statuses (so the SDK's own retries show), connection, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason (at most 200 characters). Counts only, never content; an observer that throws cannot change a judge result. Deadlines, effort, samples and thresholds are unchanged.
+
+### Tests
+- `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events, one cancelled after headers, an SDK-retried 429, a cancelled 429 wait, an event the observer cannot read and an overlong reason, with no-abort controls; each fails with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
+
+### Gate integrity
+- No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
+## [Unreleased]
+
 **You can now render gstack with whole skills, skill sections, model overlays or preamble pieces left out, as a byte-exact tree with a lock file, so an eval can measure which instructions a model actually needs.** Garry asked for "95% of the outcome but with 50% of the token use", and the free ceiling measurement on train gate run 40705984271 found skill text is about 21% of billed eval cost (35 of 103 tests), so trimming it per model is worth measuring. Nothing changes for anyone today. Every model rung and unknown models load `full`, and the committed SKILL.md files are byte-identical to the previous release. A smaller loadout ships only after GSTA-2 measures it.
 
 ### Added
