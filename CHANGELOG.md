@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**A free-suite flake now keeps the assertion that failed.** Four free-test flakes in the flaky ledger (plan-seed-submission, native-paste, qa-only preparation-late and the gstack-upgrade fresh-shell positive control) could not be diagnosed: each failed once on a Ubicloud or remote-pregate run, passed on the serial retry, and its log died with the machine that pulled it. The runner's console printed only the failing test's name, and the flake ledger recorded only the file.
+
+### Changed
+- **`scripts/test-free-shards.ts`**: the result reporter keeps the error bun printed before each `(fail)` line: from its first `error:` line, without blanks or CI annotations, at most 8 lines of 240 characters. The FAIL epilogue prints that excerpt under each `✗ <file> — <test>` line, so it reaches the console stream that remote pregates relay. A FLAKY-PASS ledger entry now records `tests: [{ name, excerpt }]` for each file. Existing ledger readers ignore the new field. Verdicts, retries and their cap are unchanged.
+
+### Tests
+- `test/test-free-shards.test.ts` replays the Windows team-init PowerShell failure as bun printed it (run 39448730953, attempt 1) and checks the excerpt and the epilogue. The real CLI flaky-retry routes (`retry-reader`, `retry-exclusive`) now check that the ledger entry names the failed test with `Expected: 2` / `Received: 1`.
+
 ## [1.91.173.0] - 2026-10-20
 
 **Merge trains can merge slot 2 onward.** After slot 1 merges, main carries the new stamp, so every later pin conflicts with main on the stamp files and GitHub can't squash it. A lane makes its PR mergeable by merging main into the pin before it stamps. `verify --pr <n> --train <nonce>` refused that head as moved off its pin. Now it also accepts a head whose tree equals the slot's train prefix (T<i>) modulo stamps: exactly the tree the train's gate covered, and what main becomes once the PR squash-merges. The first live train stopped at slot 2 on this (gate.train-ac4baf961759-43d6ed28f2bf-9a1dbb). Plan GSTA-49.
