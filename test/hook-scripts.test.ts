@@ -377,6 +377,52 @@ describe('check-careful.sh', () => {
       expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
       expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('SQL TRUNCATE');
     });
+
+    // Quote-aware awk scanner: a single-quoted message whose content looks like
+    // a flag boundary must not swallow real commands that follow via &&.
+    test('warns when rm follows a single-quoted message that embeds a double-quote', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput(`git commit -m 'note -m "' && rm -rf build && echo '"'`),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    // A double-quoted message containing $(...) is not masked — the substitution
+    // content remains visible to the MEDIUM checks.
+    test('warns when a commit message contains a command substitution with rm', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "$(rm -rf build)"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    // A force-push chained after a commit must still warn even after the message is masked.
+    test('warns on force-push chained after git commit', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "x" && git push --force'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('force-push');
+    });
+
+    // -am shorthand: the message is masked, so "drop table" in the message text
+    // does not trigger the SQL DROP warning.
+    test('does not warn on drop-table text in -am commit message', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -am "drop table notes"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
   });
 
   // --- Shell obfuscation ---

@@ -224,17 +224,76 @@ esac
 WARN=""
 PATTERN=""
 
-# Mask quoted -m argument content in git commit commands so that descriptive
-# commit messages (e.g. "fix: prevent drop table in migration") do not trigger
-# false positives. Real destructive commands outside the quoted string still
-# match because the rest of the command is preserved. Fall back to $CMD when
-# sed is unavailable.
+# Mask quoted -m/-am/--message argument content in git commit commands so that
+# descriptive commit messages do not trigger false positives. Uses a
+# quote-aware awk scanner that tracks shell quoting state so it cannot swallow
+# real commands that follow a commit via &&/; (e.g. `git commit -m 'note -m "'
+# && rm -rf build` keeps the rm visible). Double-quoted messages containing $,
+# backtick or backslash are left unmasked so command substitutions remain
+# visible to the MEDIUM checks. Falls back to $CMD when awk is unavailable.
 CMD_MEDIUM="$CMD"
 CMD_MEDIUM_LOWER="$CMD_LOWER"
 if printf '%s' "$CMD" | grep -qE '(^|[;&|][[:space:]]*)git[[:space:]]+commit[[:space:]]' 2>/dev/null; then
-  _cmd_masked=$(printf '%s' "$CMD" \
-    | sed 's/-m[[:space:]]*"[^"]*"/-m ""/g
-           s/-m[[:space:]]*'"'"'[^'"'"']*'"'"'/-m '"'"''"'"'/g' 2>/dev/null) \
+  _AWK_MASK_PROG=$(cat <<'_AWKEOF'
+function handle_msg(s, n, i,    j, safe) {
+  if (i > n) return i
+  if (substr(s, i, 1) == "'") {
+    result = result "'"
+    i++
+    while (i <= n && substr(s, i, 1) != "'") i++
+    result = result "'"
+    if (i <= n) i++
+  } else if (substr(s, i, 1) == "\"") {
+    j = i+1; safe = 1
+    while (j <= n && substr(s, j, 1) != "\"") {
+      if (substr(s,j,1) == "$" || substr(s,j,1) == "`" || substr(s,j,1) == "\\") safe = 0
+      j++
+    }
+    if (safe) { result = result "\"\""; i = j+1 }
+    else {
+      result = result substr(s, i, j-i)
+      if (j <= n) result = result "\""
+      i = j+1
+    }
+  }
+  return i
+}
+{
+  n = length($0); sq = 0; dq = 0; bs = 0; i = 1
+  while (i <= n) {
+    c = substr($0, i, 1)
+    if (bs) { result = result c; bs = 0; i++; continue }
+    if (!sq && dq && c == "\\") { result = result c; bs = 1; i++; continue }
+    if (!dq && c == "'") { sq = !sq; result = result c; i++; continue }
+    if (!sq && c == "\"") { dq = !dq; result = result c; i++; continue }
+    if (sq || dq) { result = result c; i++; continue }
+    rest = substr($0, i)
+    if (rest ~ /^--message=/) {
+      result = result "--message="; i += 10
+      i = handle_msg($0, n, i); continue
+    }
+    if (rest ~ /^--message([ \t]|$)/) {
+      result = result "--message"; i += 9
+      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
+      i = handle_msg($0, n, i); continue
+    }
+    if (rest ~ /^-am([ \t]|$)/) {
+      result = result "-am"; i += 3
+      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
+      i = handle_msg($0, n, i); continue
+    }
+    if (rest ~ /^-m([ \t]|$)/) {
+      result = result "-m"; i += 2
+      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
+      i = handle_msg($0, n, i); continue
+    }
+    result = result c; i++
+  }
+  printf "%s", result
+}
+_AWKEOF
+)
+  _cmd_masked=$(printf '%s' "$CMD" | awk "$_AWK_MASK_PROG" 2>/dev/null) \
     && CMD_MEDIUM="$_cmd_masked" || true
   CMD_MEDIUM_LOWER=$(printf '%s' "$CMD_MEDIUM" | tr '[:upper:]' '[:lower:]')
 fi
