@@ -280,12 +280,19 @@ policy (`ISOLATION_POLICY_HASH`, which covers the `cso-isolation-v1` policy
 version and every limit), `preparationSha256` (a digest of every source byte
 compiled or copied into a runtime image: the import closure of the image's
 verifier and preparation helpers plus the image build context), and the
-`build-inputs.json` revision. The staging run's `reviewed-inputs` job records
+`build-inputs.json` revision. Each helper entrypoint's leading `#!` line is
+hashed as absent: it is compiled into the binary as an unused string and never
+runs inside the image. Every other byte of the helpers counts, and so does
+every byte of every other file, shebang lines included. The staging run's `reviewed-inputs` job records
 these values for its source commit as the `cso-requalification-triggers`
 artifact. The ingress downloads that artifact from the verified staging run
 into the evidence, and the promotion generator writes it into
-`promotion.requalification`. Generation refuses triggers that differ from the
-promoting checkout, so a trigger that changed between staging and promotion
+`promotion.requalification`. When a recorded `preparationSha256` differs from
+the promoting checkout's, generation re-measures it at the staged commit from
+the checkout's git history. The record must match that commit under either the
+current rule or the earlier rule that also hashed the helpers' `#!` lines, and
+the current-rule value is what gets compared and recorded. Generation refuses
+triggers that differ from the promoting checkout, so a trigger that changed between staging and promotion
 requires a new staging run. The free suite's
 [`cso-requalification.test.ts`](../test/cso-requalification.test.ts) compares
 the committed catalog's recorded triggers with the current source and fails
