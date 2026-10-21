@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.174.0] - 2026-10-21
 
 **Two paid eval flakes from the 2026-10-20 trains are repaired at their cause, with no threshold, trial count or case kind changed.** ship-local-hook-preservation failed in train gate 39440559183 even though the agent told the user "you'll need to set it up by hand": the manual-integration detector knew "set up" and "wire in" only with the particle right after the verb. ship-docsync-current lost a focused trial to an unquoted `grep … --include=*`, which the shared read-only grammar refuses on purpose because the shell expands the glob first; the grammar's declared interface said "unquoted glob matches included" and never said that an option's glob has to be quoted.
 
