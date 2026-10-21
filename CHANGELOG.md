@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**The /cso docs say what the qualified catalogs now allow.** AGENTS.md, the README and `docs/cso-release-qualification.md` still said that no qualified runtime or scanner image existed, so /cso ran static assessment only. The scanner catalog has been qualified since #3042. The runtime catalog becomes qualified with the runtime promotion PR that ships alongside this one.
+
+### Changed
+- **AGENTS.md**, **README.md** and **`docs/cso-release-qualification.md`**: the /cso entries name the ten qualified runtime images and the twelve scanner images, and say when /cso still falls back to static assessment: without Docker, or where no profile matches.
+
 ## [1.91.176.0] - 2026-10-21
 
 **A qualified /cso runtime set can be released again after the S1 shebang change.** The release contract fingerprints every source byte compiled into a runtime image (`preparationSha256`). S1 (#3312) changed only line 1 of the two compiled helpers, `lib/cso/verifier.ts` and `lib/cso/preparation-container.ts`, from `#!/usr/bin/env bun` to the isolated shebang. That line is embedded in the compiled binary as an unused string and never runs in the image, but it moved the fingerprint. Qualify run 39535948607 therefore refused the run-5 statements, staged at 133cb36, with `STALE_RUNTIME_QUALIFICATION: preparationSha256`. Garry chose this narrow rule change over a re-stage and a fresh paid qualification (2026-10-21, option 2).

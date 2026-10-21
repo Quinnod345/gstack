@@ -26,11 +26,12 @@ The dedicated Windows CI job checks startup, argument forwarding, and runtime
 injection separately from static audit and private-state support. POSIX
 watchdog execution remains unavailable there.
 
-No qualified runtime or scanner image exists yet, so contained runtime and
-scanner execution is unavailable and setup preloads nothing: the scanner
-catalog is empty while its build inputs await review, and the runtime catalog's
-profiles stay unqualified until a private evaluator, still being built, can
-qualify them.
+Both catalogs are qualified. The scanner catalog
+(`lib/cso/scanner-images/catalog.json`) lists twelve scanner images: six
+scanners, each on linux/amd64 and linux/arm64. The runtime catalog
+(`lib/cso/runtime-catalog.json`) lists ten runtime images: Node, Bun, Python,
+Rails and PostgreSQL, each on both platforms. The private evaluator qualified
+them, and `cso-runtime-promote.yml` promoted them (described below).
 
 Every successful fresh install or upgrade asks the trusted launcher to preload
 the current host platform's qualified runtime and scanner images. This is the
