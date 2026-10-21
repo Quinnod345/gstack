@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**Two paid eval flakes from the 2026-10-20 trains are repaired at their cause, with no threshold, trial count or case kind changed.** ship-local-hook-preservation failed in train gate 39440559183 even though the agent told the user "you'll need to set it up by hand": the manual-integration detector knew "set up" and "wire in" only with the particle right after the verb. ship-docsync-current lost a focused trial to an unquoted `grep … --include=*`, which the shared read-only grammar refuses on purpose because the shell expands the glob first; the grammar's declared interface said "unquoted glob matches included" and never said that an option's glob has to be quoted.
+
+### Fixed
+- **`test/helpers/ship-hook-actor.ts`**: the manual-integration sentence now accepts a pronoun object inside the phrasal verb (`set it up`, `set both up`, `wire them in`). The rest of the rule is unchanged: the sentence still needs "yourself", or "by hand" plus an addressee.
+- **`test/helpers/read-only-commands.ts`**: the declared interface now says that an unquoted glob may stand only as a path operand, and shows the quoted option form (`--include='*.md'`, `-name '*.md'`). A refused globbed option names the quoted form in its reason (`globbed option: --include=*; quote the glob: --include='*'`). The grammar accepts and refuses exactly the same commands as before.
+
+### Gate integrity
+- Gate edit: the ship-local-hook-preservation detector (above). `test/ship-hook-actor.test.ts` replays all 8 Opus 5.5 train and backstop gate replies for the case (`test/fixtures/ship-local-hook-train-replies.json`, runs 39363705692–39515353585). Without the fix, the 39440559183 reply fails. New negative controls keep these refused: a first-person "I set it up by hand", a passive "It was set up by hand", "Whoever … needs to work out how to combine them" (no by-hand step), and "I wired them in myself".
+- No grammar acceptance change. `test/read-only-command-grammar.test.ts` replays the captured `--include=*` command: it is still refused, its reason names the quoted form, the docsync interface carries the new sentence, and the quoted form and both examples are accepted.
+
 ## [1.91.173.0] - 2026-10-20
 
 **Merge trains can merge slot 2 onward.** After slot 1 merges, main carries the new stamp, so every later pin conflicts with main on the stamp files and GitHub can't squash it. A lane makes its PR mergeable by merging main into the pin before it stamps. `verify --pr <n> --train <nonce>` refused that head as moved off its pin. Now it also accepts a head whose tree equals the slot's train prefix (T<i>) modulo stamps: exactly the tree the train's gate covered, and what main becomes once the PR squash-merges. The first live train stopped at slot 2 on this (gate.train-ac4baf961759-43d6ed28f2bf-9a1dbb). Plan GSTA-49.
