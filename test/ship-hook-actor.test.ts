@@ -9,6 +9,7 @@ import type { EvalTestEntry } from './helpers/eval-store';
 import { createShipHookFixture, runShipHookActor, shipHookFailures, type ShipHookCase } from './helpers/ship-hook-actor';
 import capturedLocalHookReply from './fixtures/ship-local-hook-reply.json';
 import opusReplies from './fixtures/ship-hook-opus-replies.json';
+import trainReplies from './fixtures/ship-local-hook-train-replies.json';
 import { CAPTURE_MS } from './helpers/eval-budgets';
 import { DEFAULT_SHARD_TIMEOUT_MS, retriesForFiles } from '../scripts/test-paid-shards';
 
@@ -220,6 +221,23 @@ test('local-hook preservation credits "someone … by hand" and "wired in by han
       'The guard refreshed the managed wrapper; nothing needs to be done by hand.', 'I asked whether to replace the hook and you declined.',
       'The existing hook was left unchanged and I stopped before pushing.', 'The installer combined both hooks automatically, so no further work is needed.',
       'Someone wired the hook in earlier.']) expect(failures(output), output).toContain('manual integration was not reported');
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('local-hook preservation credits a pronoun object inside the phrasal verb ("set it up by hand") across every train-gate reply', () => {
+  const fixture = createShipHookFixture('ship-local-hook-preservation');
+  const reported = (output: string) => !shipHookFailures(fixture, { exitReason: 'success', output }).failures.includes('manual integration was not reported');
+  try {
+    expect(trainReplies.replies).toHaveLength(8);
+    expect(trainReplies.replies.filter(reply => reply.recordedFailure).map(reply => [reply.run, reply.recordedFailure]))
+      .toEqual([['39440559183', 'manual integration was not reported']]);
+    for (const reply of trainReplies.replies) expect(reported(reply.assistant), reply.run).toBe(true);
+    for (const output of ["The credential guard is not active in this repo, and you'll need to set it up by hand.",
+      'Someone needs to wire them in by hand.', 'You will have to set both up yourself.', 'Please wire it up yourself.'])
+      expect(reported(output), output).toBe(true);
+    for (const output of ['I set it up by hand.', 'It was set up by hand before this run.', 'Nobody touched it; set it up later.',
+      'Whoever owns the hooks needs to work out how to combine them with the gstack hook.', 'I wired them in myself.'])
+      expect(reported(output), output).toBe(false);
   } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });
 

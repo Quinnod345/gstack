@@ -112,7 +112,7 @@ const FIND_PATHS = new Set(['-newer', '-anewer', '-cnewer', '-samefile']);
 
 /** Interface text an opted-in fixture declares to its actor. */
 export function readOnlyInterfaceText(root: string): string {
-  return `Shared read-only grammar: Bash also accepts pure local reads whose every path, unquoted glob matches included, resolves inside ${root} with no .., symlink or absolute-path escape: ${Object.keys(READ_TOOLS).join(', ')} (find without -exec, -ok, -delete or -fprint*; sed only as -n with a line-range print script such as sed -n 1,200p; no output-file, symlink-following or external-program options; echo and printf with literal arguments only, no printf -v; tr only after a pipe, with -c, -C, -d, -s or -t and one or two literal sets that hold no $, backtick, brace or unquoted glob). Join only these reads with ;, && or ||, pipe only into ${[...STDIN_TOOLS].join(', ')}, and cd only into a directory inside that root. Redirects other than 2>/dev/null or 2>&1 right after a read's arguments, tee, substitutions, variables, tilde or brace expansion, background jobs, multi-line commands and every other tool stay outside this grammar.`;
+  return `Shared read-only grammar: Bash also accepts pure local reads whose every path, unquoted glob matches included, resolves inside ${root} with no .., symlink or absolute-path escape: ${Object.keys(READ_TOOLS).join(', ')} (find without -exec, -ok, -delete or -fprint*; sed only as -n with a line-range print script such as sed -n 1,200p; no output-file, symlink-following or external-program options; echo and printf with literal arguments only, no printf -v; tr only after a pipe, with -c, -C, -d, -s or -t and one or two literal sets that hold no $, backtick, brace or unquoted glob). An unquoted glob may stand only as a path operand; quote a glob inside an option or pattern (grep -rn word . --include='*.md', find . -name '*.md'), because the shell expands an unquoted one before the command runs. Join only these reads with ;, && or ||, pipe only into ${[...STDIN_TOOLS].join(', ')}, and cd only into a directory inside that root. Redirects other than 2>/dev/null or 2>&1 right after a read's arguments, tee, substitutions, variables, tilde or brace expansion, background jobs, multi-line commands and every other tool stay outside this grammar.`;
 }
 
 export function readOnlyCommandAllowed(command: string, scope: ReadOnlyScope): boolean {
@@ -260,7 +260,7 @@ function commandRejection(words: Word[], piped: boolean, cwds: string[], context
     const arg = args[i];
     if (endOfOptions || !arg.text.startsWith('-') || arg.text === '-') { operands.push(arg); continue; }
     if (arg.text === '--') { endOfOptions = true; continue; }
-    if (arg.glob) return `globbed option: ${arg.text}`;
+    if (arg.glob) return `globbed option: ${arg.text}; quote the glob: ${arg.text.replace(/^(--?[^=]+=)?(.*)$/s, "$1'$2'")}`;
     options.push(arg.text);
     const attached = spec.pathAttached?.exec(arg.text);
     if (attached) { paths.push({ text: attached[1], glob: false, quoted: true }); patternGiven = true; continue; }
