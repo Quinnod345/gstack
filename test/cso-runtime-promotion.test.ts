@@ -1,9 +1,9 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import committedCatalog from '../lib/cso/runtime-catalog.json';
 import buildInputs from '../lib/cso/images/build-inputs.json';
 import { isEvaluationRuntimeCatalog, validateRuntimeCatalog } from '../lib/cso/runtime-catalog';
@@ -11,6 +11,7 @@ import { imageBuildMatrix, type ImageBuildRow } from '../scripts/cso-image-matri
 import { catalogPromotionCandidate, evaluationCandidateCatalog, releaseCandidate, validateEvaluationCandidate, validateRuntimeCatalogTransition, type RuntimeQualificationStatement } from '../scripts/cso-runtime-promotion';
 import { assertVersionOutput, probesForBuildRow } from '../scripts/cso-verify-runtime-base';
 import { committedPreparation, requalificationTriggers } from '../scripts/cso-requalification';
+import { gitArgvIn } from './helpers/scratch-repo';
 
 const TRIGGERS = await requalificationTriggers();
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -221,58 +222,73 @@ describe('CSO evaluation-only runtime catalogs', () => {
   });
 });
 
-/** Staged by run 39325583697; its cso-requalification-triggers artifact recorded STAGED_LEGACY. */
-const STAGED = '133cb360842d0a7cf88fc1d10dcb624f2b7b841f';
-const STAGED_LEGACY = 'b069f7ef9b19dba9a770cac02a5b6b4b5d60fa68ac058321864b614de14d59f6';
-/** main after S1 (#3312) rewrote both helpers' shebang lines. */
-const AFTER_S1 = '6b2b5f350de0c5c044aa2ecb64e426cbeb45e1a6';
-
-function committedLib(commit: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'cso-release-contract-'));
-  const archive = spawnSync('git', ['archive', '--format=tar', commit, 'lib'], { cwd: join(import.meta.dir, '..'), timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
-  expect(archive.status, `${commit} must be in this checkout's history`).toBe(0);
-  expect(spawnSync('tar', ['-x', '-C', dir], { input: archive.stdout, timeout: 60_000 }).status).toBe(0);
-  return dir;
-}
+/** preparationSha256 recorded by staging run 39325583697 at 133cb36 (cso-requalification-triggers), before S1. */
+const RUN5_RECORD = 'b069f7ef9b19dba9a770cac02a5b6b4b5d60fa68ac058321864b614de14d59f6';
+const HELPERS = ['lib/cso/verifier.ts', 'lib/cso/preparation-container.ts'];
+const CHECKOUT = join(import.meta.dir, '..');
 
 describe.skipIf(process.platform === 'win32')('CSO release contract preparation fingerprint', () => {
-  const staged = () => statements().map(statement => ({ ...statement, sourceCommit: STAGED }));
+  const temps: string[] = [];
+  afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+  const rewrite = (root: string, file: string, change: (lines: string[]) => void) => {
+    const lines = readFileSync(join(root, file), 'utf8').split('\n'); change(lines); writeFileSync(join(root, file), lines.join('\n'));
+  };
+  /** A copy of the checkout's tracked lib/ tree, optionally edited. */
+  const trackedLib = (edit?: (root: string) => void): string => {
+    const root = mkdtempSync(join(tmpdir(), 'cso-release-contract-')); temps.push(root);
+    const listed = spawnSync('git', ['ls-files', '-z', 'lib'], { cwd: CHECKOUT, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+    expect(listed.status).toBe(0);
+    for (const file of listed.stdout.split('\0').filter(Boolean)) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      copyFileSync(join(CHECKOUT, file), join(root, file));
+    }
+    edit?.(root);
+    return root;
+  };
+  const current = (edit?: (root: string) => void) => requalificationTriggers(trackedLib(edit));
+  /** The staged commit, rebuilt in a scratch repository: this tree with both helpers' S1 shebang reverted. */
+  const stagedCommit = () => {
+    const repo = trackedLib(root => { for (const helper of HELPERS) rewrite(root, helper, lines => { lines[0] = '#!/usr/bin/env bun'; }); });
+    for (const args of [['init', '-q'], ['add', '-A'], ['commit', '-q', '-m', 'staged']]) expect(gitArgvIn(repo, args, 30_000).status).toBe(0);
+    const commit = gitArgvIn(repo, ['rev-parse', 'HEAD'], 30_000).stdout.toString().trim();
+    return { repo, commit, evidence: statements().map(statement => ({ ...statement, sourceCommit: commit })) };
+  };
 
-  test('the staged run-5 commit and main after S1 measure the same fingerprint, and only the legacy rule tells them apart', async () => {
-    const [before, after] = await Promise.all([committedPreparation(STAGED), committedPreparation(AFTER_S1)]);
-    expect(before.legacy).toBe(STAGED_LEGACY);
-    expect(after.legacy).not.toBe(before.legacy);
-    expect(after.current).toBe(before.current);
+  test('the run-5 record is this tree with S1\'s shebangs reverted, and the release contract accepts it under the current rule', async () => {
+    const staged = stagedCommit();
+    const measured = await committedPreparation(staged.commit, staged.repo);
+    const main = await current();
+    const record = { ...main, preparationSha256: RUN5_RECORD };
+    if (measured.legacy !== RUN5_RECORD) {
+      // An image source moved since run 5 beyond the shebangs, so its record can no longer be released.
+      await expect(releaseCandidate(staged.evidence, record, main, staged.repo)).rejects.toThrow(/STALE_RUNTIME_QUALIFICATION|REQUALIFICATION_TRIGGERS_MISMATCH/);
+      return;
+    }
+    // The same SHA-256 over every image source byte: the rebuilt commit is 133cb36's image source, byte for byte.
+    expect(main.preparationSha256).not.toBe(RUN5_RECORD);
+    expect(measured.current).toBe(main.preparationSha256);
+    const released = await releaseCandidate(staged.evidence, record, main, staged.repo);
+    expect(released.promotion!.requalification).toEqual(main);
   }, 120_000);
 
-  test('the release contract re-measures a legacy staging record and ignores only a compiled helper\'s leading #! line', async () => {
-    const recordedAt = (current: Awaited<ReturnType<typeof requalificationTriggers>>, preparationSha256 = STAGED_LEGACY) => ({ ...current, preparationSha256 });
-    const variant = async (edit?: (root: string) => void) => {
-      const root = committedLib(AFTER_S1);
-      try { edit?.(root); return await requalificationTriggers(root); } finally { rmSync(root, { recursive: true, force: true }); }
-    };
-    const rewrite = (root: string, file: string, change: (lines: string[]) => void) => {
-      const lines = readFileSync(join(root, file), 'utf8').split('\n'); change(lines); writeFileSync(join(root, file), lines.join('\n'));
-    };
+  test('the release contract ignores only a compiled helper\'s leading #! line, on both sides', async () => {
+    const staged = stagedCommit();
+    const legacy = (await committedPreparation(staged.commit, staged.repo)).legacy;
+    const recordFor = (triggers: Awaited<ReturnType<typeof requalificationTriggers>>, preparationSha256 = legacy) => ({ ...triggers, preparationSha256 });
+    const release = (triggers: Awaited<ReturnType<typeof requalificationTriggers>>, preparationSha256?: string) =>
+      releaseCandidate(staged.evidence, recordFor(triggers, preparationSha256), triggers, staged.repo);
 
-    const main = await variant();
-    const released = await releaseCandidate(staged(), recordedAt(main), main);
-    expect(released.promotion!.requalification.preparationSha256).toBe(main.preparationSha256);
-    expect((await committedPreparation(STAGED)).current).toBe(main.preparationSha256);
-
-    for (const helper of ['lib/cso/verifier.ts', 'lib/cso/preparation-container.ts']) {
-      const reshebanged = await variant(root => rewrite(root, helper, lines => { lines[0] = '#!/usr/bin/env node'; }));
-      expect(reshebanged.preparationSha256).toBe(main.preparationSha256);
-      const drifted = await variant(root => rewrite(root, helper, lines => { lines.splice(1, 0, '// drift'); }));
-      await expect(releaseCandidate(staged(), recordedAt(drifted), drifted)).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
+    const main = await current();
+    expect((await release(main)).promotion!.requalification.preparationSha256).toBe(main.preparationSha256);
+    for (const helper of HELPERS) {
+      expect((await current(root => rewrite(root, helper, lines => { lines[0] = '#!/usr/bin/env node'; }))).preparationSha256).toBe(main.preparationSha256);
+      const drifted = await current(root => rewrite(root, helper, lines => { lines.splice(1, 0, '// drift'); }));
+      await expect(release(drifted)).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
     }
-    const dockerfile = await variant(root => writeFileSync(join(root, 'lib/cso/images/rails.Dockerfile'), '\n', { flag: 'a' }));
-    await expect(releaseCandidate(staged(), recordedAt(dockerfile), dockerfile)).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
-    const entrypoint = await variant(root => rewrite(root, 'lib/cso/images/entrypoint', lines => { lines[0] = '#!/bin/bash'; }));
-    await expect(releaseCandidate(staged(), recordedAt(entrypoint), entrypoint)).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
-
-    await expect(releaseCandidate(staged(), recordedAt(main, 'd'.repeat(64)), main)).rejects.toThrow('REQUALIFICATION_TRIGGERS_MISMATCH');
-    const fresh = await releaseCandidate(staged(), recordedAt(main, main.preparationSha256), main, join(tmpdir(), 'no-such-checkout'));
-    expect(fresh.promotion!.requalification).toEqual(main);
+    await expect(release(await current(root => writeFileSync(join(root, 'lib/cso/images/rails.Dockerfile'), '\n', { flag: 'a' })))).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
+    await expect(release(await current(root => rewrite(root, 'lib/cso/images/entrypoint', lines => { lines[0] = '#!/bin/bash'; })))).rejects.toThrow('STALE_RUNTIME_QUALIFICATION: preparationSha256');
+    await expect(release(main, 'd'.repeat(64))).rejects.toThrow('REQUALIFICATION_TRIGGERS_MISMATCH');
+    const recordedUnderCurrentRule = await releaseCandidate(staged.evidence, main, main, join(tmpdir(), 'no-such-checkout'));
+    expect(recordedUnderCurrentRule.promotion!.requalification).toEqual(main);
   }, 180_000);
 });
