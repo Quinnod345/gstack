@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+**The /cso runtime promotion workflow can finish.** Promote run 39691485727 failed after its `cso-runtime-release` approval. Its "Generate a fail-closed catalog candidate" step calls `gh api …/compare` to prove the staged commit is an ancestor of the qualification head, but the step had no `GH_TOKEN`. On a hosted runner `gh` then exits 4 ("set the GH_TOKEN environment variable"). The run stopped before it signed, pushed or opened anything.
+
+### Fixed
+- **`.github/workflows/cso-runtime-promote.yml`**: the candidate step gets `GH_TOKEN: ${{ github.token }}`, like every other step there that calls `gh`.
+- **`test/workflow-gh-token.test.ts`** (new): fails when any step in any workflow invokes `gh` with no `GH_TOKEN` or `GITHUB_TOKEN` in its step, job or workflow env. actionlint does not check this. This step was the only one in the repository missing a token.
+
 ## [1.91.176.0] - 2026-10-21
 
 **A qualified /cso runtime set can be released again after the S1 shebang change.** The release contract fingerprints every source byte compiled into a runtime image (`preparationSha256`). S1 (#3312) changed only line 1 of the two compiled helpers, `lib/cso/verifier.ts` and `lib/cso/preparation-container.ts`, from `#!/usr/bin/env bun` to the isolated shebang. That line is embedded in the compiled binary as an unused string and never runs in the image, but it moved the fingerprint. Qualify run 39535948607 therefore refused the run-5 statements, staged at 133cb36, with `STALE_RUNTIME_QUALIFICATION: preparationSha256`. Garry chose this narrow rule change over a re-stage and a fresh paid qualification (2026-10-21, option 2).
