@@ -311,6 +311,18 @@ describe.skipIf(process.platform === 'win32')('free replays of the captured slip
     expect(docsNativeInterface(fixture)).toContain(readOnlyInterfaceText(fixture.home));
   });
 
+  // GSTA-57 focused trial r3 t4 of ship-docsync-current: an unquoted --include=* stays refused (#3288, the shell expands
+  // it first), so the declared interface and the refusal reason both show the quoted form, which is a pure read.
+  test('docsync steers a globbed option to its quoted form (ship-docsync-current r3 t4)', () => {
+    const slip = 'grep -rn -i "banned" ' + fixture.repo + ' --include=* -l';
+    expect(docsCommandAllowed(slip, fixture)).toBe(false);
+    expect(readOnlyCommandRejection(slip, { root: fixture.home, cwd: fixture.repo })).toBe("globbed option: --include=*; quote the glob: --include='*'");
+    expect(readOnlyCommandRejection('rg word -g*.md', { root: fixture.home, cwd: fixture.repo })).toBe("globbed option: -g*.md; quote the glob: '-g*.md'");
+    expect(docsNativeInterface(fixture)).toContain("quote a glob inside an option or pattern (grep -rn word . --include='*.md', find . -name '*.md')");
+    for (const command of [slip.replace('--include=*', "--include='*'"), "grep -rn word . --include='*.md'", "find . -name '*.md'"])
+      expect(docsCommandAllowed(command, fixture), command).toBe(true);
+  });
+
   // PR #3288 E2E run 39186278010 (Fable 5.1) joined Git reads into grammar lines; #3288 told the actor not to, but
   // Opus kept joining them (run 39347827595), so joined declared Git reads are now accepted. These reads of the
   // Claude config dir pass, and the run's NUL-to-newline tr filter is a pipe-only read (GSTA-57); an unlisted sink is not.
