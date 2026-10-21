@@ -683,6 +683,15 @@ export interface FreeRunFailure {
   /** Planned relative path when attributable, else the raw header path, else null. */
   file: string | null;
   testName: string;
+  /** The error bun printed before the (fail) line (message, Expected/Received, location), bounded. */
+  excerpt?: string[];
+}
+
+/** The failing assertion from a test's own output: from its first error: line, without blanks or CI annotations. */
+export function failureExcerpt(output: string[]): string[] {
+  const lines = output.filter((line) => line.trim() !== '' && !line.startsWith('::'));
+  const start = lines.findIndex((line) => line.startsWith('error:'));
+  return (start < 0 ? lines.slice(-3) : lines.slice(start, start + 8)).map((line) => line.trimEnd().slice(0, 240));
 }
 
 export interface FreeRunReport {
@@ -759,6 +768,7 @@ export class FreeRunReporter {
   private filesRan: number | null = null;
   private sawSummary = false;
   private lastOutputLine: string | null = null;
+  private testOutput: string[] = [];
 
   constructor(
     private readonly plannedFiles: string[],
@@ -848,6 +858,7 @@ export class FreeRunReporter {
       if (this.currentFile && this.currentFile !== file) this.progressFor(this.currentFile).ended = true;
       this.currentFile = file;
       this.progressFor(file).headerSeen = true;
+      this.testOutput = [];
     } else {
       const fail = parseBunFailureResult(line);
       const retry = fail ? null : CRASH_RETRY_RE.exec(line);
@@ -862,8 +873,10 @@ export class FreeRunReporter {
         const key = `${this.currentFile ?? ''}\u0000${fail}`;
         if (!recapDuplicate && !this.failureKeys.has(key)) {
           this.failureKeys.add(key);
-          this.failures.push({ file: this.currentFile, testName: fail });
+          const excerpt = failureExcerpt(this.testOutput);
+          this.failures.push({ file: this.currentFile, testName: fail, ...(excerpt.length ? { excerpt } : {}) });
         }
+        this.testOutput = [];
       } else if (retry) {
         // The file will run again — a crash+retry does not end its chunk.
         visible = true;
@@ -873,7 +886,10 @@ export class FreeRunReporter {
         const file = this.canonicalize(final[1]);
         this.crashed.add(file);
         this.progressFor(file).ended = true;
+      } else if (/^\((?:pass|skip|todo)\) /.test(line)) {
+        this.testOutput = [];
       } else {
+        this.testOutput = [...this.testOutput.slice(-39), line];
         const summary = TERMINAL_SUMMARY_CAPTURE_RE.exec(line);
         if (summary) {
           visible = true;
@@ -943,6 +959,7 @@ export function buildRunEpilogue(
   ];
   for (const failure of report.failures) {
     lines.push(`  ✗ ${failure.file ?? '(unattributed)'} — ${failure.testName}`);
+    for (const line of failure.excerpt ?? []) lines.push(`      ${line}`);
   }
   if (report.unreportedFailures > 0) {
     lines.push(`  ⚠ ${report.unreportedFailures} failure(s) reported without named result lines`);
@@ -993,6 +1010,8 @@ export interface FlakeLedgerEntry {
    *  promotion evidence needs exactly that. */
   branch?: string;
   git_sha?: string;
+  /** The tests that failed in the first run, with the error each printed. */
+  tests?: Array<{ name: string; excerpt: string[] }>;
 }
 
 export function flakeLedgerPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -1054,6 +1073,8 @@ export interface FreeShardOutcome {
    * hole the strict classifier exists to close.
    */
   unattributedFailures: number;
+  /** Named failures with their excerpts, so a flaky pass records what failed the first time. */
+  failures?: FreeRunFailure[];
 }
 
 export interface ShardCommand {
@@ -1722,6 +1743,7 @@ export async function runFreeShard(
       + (report.sawTerminalSummary ? 0 : 1);
   const outcome: FreeShardOutcome = {
     shard: shardNumber, files, status, exitCode, elapsedMs: Date.now() - startedAt, groupPid, failingFiles, unattributedFailures,
+    ...(status === 'passed' ? {} : { failures: report.failures }),
     summary: { testsRan: report.testsRan, filesRan: report.filesRan, sawTerminalSummary: report.sawTerminalSummary },
   };
   log(shardEpilogue(outcome, totalShards));
@@ -1856,6 +1878,7 @@ async function retryFailedFreeFiles(
             kind: 'flaky-pass' as const,
             file,
             shard: outcomes.find((o) => o.failingFiles.includes(file))?.shard,
+            tests: outcomes.flatMap((o) => o.failures ?? []).filter((f) => f.file === file).map((f) => ({ name: f.testName, excerpt: f.excerpt ?? [] })),
             ...(ledgerBranch ? { branch: ledgerBranch } : {}),
             ...(ledgerSha ? { git_sha: ledgerSha.slice(0, 12) } : {}),
           })),
