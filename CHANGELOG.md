@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.177.0] - 2026-10-22
 
 **The /cso runtime promotion workflow can finish.** Promote run 39691485727 failed after its `cso-runtime-release` approval. Its "Generate a fail-closed catalog candidate" step calls `gh api …/compare` to prove the staged commit is an ancestor of the qualification head, but the step had no `GH_TOKEN`. On a hosted runner `gh` then exits 4 ("set the GH_TOKEN environment variable"). The run stopped before it signed, pushed or opened anything.
 
