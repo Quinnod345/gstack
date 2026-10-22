@@ -10,6 +10,25 @@
 - **`bin/gstack-docs-candidate`**: snapshot lists `ls-files` once instead of twice and hashes with `Bun.CryptoHasher`. A snapshot spawn went from 68 ms to 46 ms, and the record it writes is byte-identical.
 - **`test/docsync-fault-interface.test.ts`**: the nested callback run is split into three outer tests by test-name pattern (10, 12 and 14 cases). Each part asserts its exact pass count, its exact filtered-out count and `0 fail`, so all 36 cases still run and the patterns are disjoint.
 
+## [1.91.178.0] - 2026-10-22
+
+**A /qa run no longer gets a hint that another report root could change its verdict.** Train gate 39646086155 failed qa-functional-webhook-fix once, and gate 39166935531 failed qa-functional-cli-fix the same way on 2026-10-18. Both times the agent ran `gstack-qa-evidence materialize`, read a fail verdict that ended "this verdict is final for this report root", and its very next call wrote a stray placeholder file in the fixture's parent directory (`qa-reports-placeholder-unused`, `qa-Q3vLqZ-placeholder`) before writing `report.md`. Each agent then reported the stray file itself. The out-of-fixture write detector was right both times and is unchanged.
+
+### Fixed
+- **`lib/qa-evidence.ts`**: materialize's `next` instruction now ends "this verdict is final. Next, write the Markdown report beside evidence.json." It names the next write and where it goes, instead of qualifying the verdict by report root.
+- **`test/helpers/qa-functional-eval.ts`**: the functional fixture's declared interface says that every Write/Edit targets an owned path inside the working directory, and that a write anywhere else, including the parent directory, fails acceptance. That was already the acceptance rule; the prompt now states it.
+
+### Gate integrity
+- No detector, threshold, trial count or case kind changed. `test/qa-evidence.test.ts` pins the new `next` wording and checks that it no longer mentions a report root.
+
+## [1.91.177.0] - 2026-10-22
+
+**The /cso runtime promotion workflow can finish.** Promote run 39691485727 failed after its `cso-runtime-release` approval. Its "Generate a fail-closed catalog candidate" step calls `gh api …/compare` to prove the staged commit is an ancestor of the qualification head, but the step had no `GH_TOKEN`. On a hosted runner `gh` then exits 4 ("set the GH_TOKEN environment variable"). The run stopped before it signed, pushed or opened anything.
+
+### Fixed
+- **`.github/workflows/cso-runtime-promote.yml`**: the candidate step gets `GH_TOKEN: ${{ github.token }}`, like every other step there that calls `gh`.
+- **`test/workflow-gh-token.test.ts`** (new): fails when any step in any workflow invokes `gh` with no `GH_TOKEN` or `GITHUB_TOKEN` in its step, job or workflow env. actionlint does not check this. This step was the only one in the repository missing a token.
+
 ## [1.91.176.0] - 2026-10-21
 
 **A qualified /cso runtime set can be released again after the S1 shebang change.** The release contract fingerprints every source byte compiled into a runtime image (`preparationSha256`). S1 (#3312) changed only line 1 of the two compiled helpers, `lib/cso/verifier.ts` and `lib/cso/preparation-container.ts`, from `#!/usr/bin/env bun` to the isolated shebang. That line is embedded in the compiled binary as an unused string and never runs in the image, but it moved the fingerprint. Qualify run 39535948607 therefore refused the run-5 statements, staged at 133cb36, with `STALE_RUNTIME_QUALIFICATION: preparationSha256`. Garry chose this narrow rule change over a re-stage and a fresh paid qualification (2026-10-21, option 2).
