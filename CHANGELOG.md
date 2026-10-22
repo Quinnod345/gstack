@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**docsync-fault-interface fits its budgets under load again.** On 2026-10-18 it timed out under load on a Ubicloud full run. Its nested 36-case suite spent most of its time starting processes: each fault actor spawn loaded about 36 ms of imports (an empty bun takes 5.5 ms), inspect repeated Git reads, and the whole nested run sat under one 120 s outer test. With real Git on 4 cores, inner cases now take a 0.70 s median (max 1.25 s) unloaded, against 1.07 s before. Under 8 busy loops the max is 3.44 s, inside bun's default 5 s; before, cases reached 4.45 s. The worst outer test went from about 100 s of its 120 s cap to 33 s. No timeout, budget, retry, assertion or case changed.
+
+### Fixed
+- **`test/helpers/docsync-fault-actor.ts`**: imports only light helper modules, hashes with `Bun.CryptoHasher` instead of loading `node:crypto`, and loads the redaction engine only on the snapshot-failure path. inspect makes 8 Git calls instead of 11, and the snapshot base check reuses the `--base` it just passed. Each actor spawn now costs 15–19 ms.
+- **`test/helpers/docsync-repo.ts`, `test/helpers/docsync-interface.ts`** (new): the fixture's Git and file helpers and `docsNativeInterface` moved out of the fixture and observer modules, so the actor stops loading the eval store and the QA observer. `docsync-fixture.ts` and `docsync-observer.ts` re-export them, so no importer changed. The fixture writes its Git identity with one append to `.git/config` instead of three `git config` calls.
+- **`bin/gstack-docs-candidate`**: snapshot lists `ls-files` once instead of twice and hashes with `Bun.CryptoHasher`. A snapshot spawn went from 68 ms to 46 ms, and the record it writes is byte-identical.
+- **`test/docsync-fault-interface.test.ts`**: the nested callback run is split into three outer tests by test-name pattern (10, 12 and 14 cases). Each part asserts its exact pass count, its exact filtered-out count and `0 fail`, so all 36 cases still run and the patterns are disjoint.
+
 ## [1.91.176.0] - 2026-10-21
 
 **A qualified /cso runtime set can be released again after the S1 shebang change.** The release contract fingerprints every source byte compiled into a runtime image (`preparationSha256`). S1 (#3312) changed only line 1 of the two compiled helpers, `lib/cso/verifier.ts` and `lib/cso/preparation-container.ts`, from `#!/usr/bin/env bun` to the isolated shebang. That line is embedded in the compiled binary as an unused string and never runs in the image, but it moved the fingerprint. Qualify run 39535948607 therefore refused the run-5 statements, staged at 133cb36, with `STALE_RUNTIME_QUALIFICATION: preparationSha256`. Garry chose this narrow rule change over a re-stage and a fresh paid qualification (2026-10-21, option 2).
