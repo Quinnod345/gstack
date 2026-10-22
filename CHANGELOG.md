@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.178.0] - 2026-10-22
 
 **A /qa run no longer gets a hint that another report root could change its verdict.** Train gate 39646086155 failed qa-functional-webhook-fix once, and gate 39166935531 failed qa-functional-cli-fix the same way on 2026-10-18. Both times the agent ran `gstack-qa-evidence materialize`, read a fail verdict that ended "this verdict is final for this report root", and its very next call wrote a stray placeholder file in the fixture's parent directory (`qa-reports-placeholder-unused`, `qa-Q3vLqZ-placeholder`) before writing `report.md`. Each agent then reported the stray file itself. The out-of-fixture write detector was right both times and is unchanged.
 
