@@ -158,7 +158,7 @@ session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` s
    repaired without a window (its files are renamed over their predecessors),
    and `~/.bun/bin` is never written. The archive is the project's non-CI
    exact pin when gstack carries a verified archive for it
-   (`GSTACK_BUN_VERIFIED`: 1.4.2, 1.4.3); with only CI exact pins, the install
+   (`GSTACK_BUN_VERIFIED`: 1.4.2, 1.4.3, 1.4.4); with only CI exact pins, the install
    default when it is one of them, else the highest verified one; else the
    install default `GSTACK_BUN_DEFAULT` (1.4.3, above the 1.4.2 minimum; one
    CI job runs the quick free tier on it).

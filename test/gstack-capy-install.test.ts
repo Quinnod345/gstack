@@ -202,7 +202,7 @@ describe('gstack-capy-install', () => {
     const unverified = run(g, ['--project', project]);
     expect(unverified.status).toBe(3);
     expect(unverified.stderr).toContain(`${project}/.bun-version pins exactly 1.4.9`);
-    expect(unverified.stderr).toContain('verified archives: 1.4.2 1.4.3');
+    expect(unverified.stderr).toContain('verified archives: 1.4.2 1.4.3 1.4.4');
     expect(unverified.stderr).toContain('(RUNTIME_PIN_CONFLICT; ');
     expect(g.calls().some(l => l.startsWith('curl ') || l.startsWith('setup '))).toBe(false);
   });
@@ -512,6 +512,19 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
     expect(gr.stdout).toContain(`bun 1.4.3 at ${store(g, '1.4.3')}/bun (the project's exact pin`);
   });
 
+  test('GSTA-64: a gbrain-like repo whose CI pins only 1.4.4 refuses ~/.bun 1.4.3 and installs the verified 1.4.4 archive instead of stopping with RUNTIME_PIN_CONFLICT', () => {
+    const f = fixture({ bun: '1.3.14' });
+    withPins(f);
+    realBun(path.join(f.home, '.bun/bin/bun'), '1.4.3');
+    const project = ciProject(f, 'gbrain', '1.4.4');
+    const r = run(f, ['--for', 'review'], { STUB_CURL_ZIP: zipFor(f, '1.4.4') }, project);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('RUNTIME_PIN_CONFLICT');
+    expect(r.stdout).toContain(`judged: bun 1.4.3 at ${f.home}/.bun/bin/bun (BUN_INSTALL)`);
+    expect(f.calls().filter(l => l.startsWith('curl '))).toEqual([expect.stringContaining('https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux')]);
+    expect(r.stdout).toContain(`bun 1.4.4 at ${store(f, '1.4.4')}/bun (the project's exact pin`);
+  });
+
   test('no installed Bun satisfies the pins: the line names the Bun actually judged, the exact pin is published in the store, and the next --check agrees', () => {
     const f = fixture({ bun: '1.3.14' });
     withPins(f);
@@ -604,7 +617,7 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
     const f = fixture({ bun: '1.3.14' });
     const bad = run(f, [], { GSTACK_BUN_INSTALL_VERSION: '1.4.9' });
     expect(bad.status).toBe(3);
-    expect(bad.stderr).toContain('GSTACK_BUN_INSTALL_VERSION=1.4.9 is not a verified Bun at or above gstack\'s supported minimum 1.4.2 (verified archives: 1.4.2 1.4.3)');
+    expect(bad.stderr).toContain('GSTACK_BUN_INSTALL_VERSION=1.4.9 is not a verified Bun at or above gstack\'s supported minimum 1.4.2 (verified archives: 1.4.2 1.4.3 1.4.4)');
     expect(bad.stderr).toContain('(BUN_INSTALL_VERSION_INVALID; https://github.com/garrytan/gstack/blob/main/docs/troubleshooting.md#bun-install-version-invalid)');
     expect(f.calls().some(l => l.startsWith('curl ') || l.startsWith('setup '))).toBe(false);
     const r = run(f, ['--for', 'autoplan'], { GSTACK_BUN_INSTALL_VERSION: '1.4.2', STUB_CURL_ZIP: zipFor(f, '1.4.2') });
