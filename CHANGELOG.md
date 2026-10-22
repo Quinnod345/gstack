@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.180.0] - 2026-10-22
 
 **The /cso docs say what the qualified catalogs now allow.** AGENTS.md, the README and `docs/cso-release-qualification.md` still said that no qualified runtime or scanner image existed, so /cso ran static assessment only. The scanner catalog has been qualified since #3042. The runtime catalog becomes qualified with the runtime promotion PR that ships alongside this one.
 
