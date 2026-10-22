@@ -7,6 +7,9 @@
 ### Added
 - **`lib/cso/runtime-catalog.json`** is now catalog `cso-v3-39674065531-133cb360842d`, which replaces `cso-v3-build-reviewed-2026-09-10`. Promote run 39841502986 generated it from qualification run 39674065531's authenticated statements and attested it. GitHub Actions committed the attested bytes (`sha256:078e0bf6…`). Each runtime's image is pinned to a public `ghcr.io/garrytan/gstack/cso-staging/…@sha256` digest, and each entry records its source commit (133cb36), SBOM and provenance digests, and requalification triggers (`preparationSha256` `c721b585…`).
 
+### For contributors
+- **The /cso free tests no longer assume the committed runtime catalog is empty.** Six tests pinned `runtimes: []` and broke as soon as a promotion landed. Tests that need an unqualified catalog now build one with `unqualifiedRuntimeCatalog()`. The replay tests expect whichever fail-closed rejection the committed catalog produces, so the suite passes with the catalog both before and after a promotion.
+
 ## [1.91.177.0] - 2026-10-22
 
 **The /cso runtime promotion workflow can finish.** Promote run 39691485727 failed after its `cso-runtime-release` approval. Its "Generate a fail-closed catalog candidate" step calls `gh api …/compare` to prove the staged commit is an ancestor of the qualification head, but the step had no `GH_TOKEN`. On a hosted runner `gh` then exits 4 ("set the GH_TOKEN environment variable"). The run stopped before it signed, pushed or opened anything.
