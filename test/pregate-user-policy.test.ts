@@ -97,11 +97,15 @@ describe('gstack-pregate with a user-owned policy', () => {
     const { repo, userPolicy, run } = setup();
     expect(run().out).toContain('(no .gstack/pregate.json)');
 
-    writePolicy(userPolicy, { local: ['free-tests.yml/unit'] });
+    // The lane left off `local` must be foreign to this host: on Windows the windows lane is native and runs anyway.
+    const [named, foreign] = process.platform === 'win32'
+      ? [['windows.yml/windows-shard', 'windows'], ['free-tests.yml/unit', 'linux']]
+      : [['free-tests.yml/unit', 'linux'], ['windows.yml/windows-shard', 'windows']];
+    writePolicy(userPolicy, { local: [named[0]] });
     const partial = run();
     expect(partial.out).toContain(`policy user ${userPolicy}`);
-    expect(partial.out).toContain('requires-remote windows.yml/windows-shard (windows)');
-    expect(partial.out).not.toContain('requires-remote free-tests.yml/unit');
+    expect(partial.out).toContain(`requires-remote ${foreign[0]} (${foreign[1]})`);
+    expect(partial.out).not.toContain(`requires-remote ${named[0]}`);
 
     writePolicy(userPolicy, { local: LOCAL_ALL });
     const all = run(['--explain']);
@@ -110,7 +114,7 @@ describe('gstack-pregate with a user-owned policy', () => {
     const lanes = JSON.parse(fs.readFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), 'utf8')).checks.find((c: { id: string }) => c.id === 'lanes');
     expect(lanes.inputs.policy).toBe(sha256(fs.readFileSync(userPolicy, 'utf8')));
     expect(all.out).toContain('Tiers ran: unit; requires-remote: none');
-    expect(all.out).toContain('lane windows.yml/windows-shard: windows lane satisfied locally (pregate.json local)');
+    expect(all.out).toContain(`lane ${foreign[0]}: ${foreign[1]} lane satisfied locally (pregate.json local)`);
     expect(all.out).toMatch(/^tests {6}lanes {5}pass /m);
   }, 60_000);
 
