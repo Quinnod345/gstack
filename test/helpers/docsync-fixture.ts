@@ -2,69 +2,15 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { buildSeedConfig } from './hermetic-env';
 import { getProjectEvalDir } from './eval-store';
 import type { SkillTestResult } from './session-runner';
+import { DOC_PATH, docsConfigDir, gitAt, repoSnapshot } from './docsync-repo';
+
+export { DOC_PATH, docsConfigDir, gitAt, repoSnapshot, changedFiles, docsSnapshotArgv, gitBlobId, type DocsCandidateRecord } from './docsync-repo';
 
 export const DOCSYNC_ROOT = path.resolve(import.meta.dir, '../..');
-export const DOC_PATH = 'handbook/reference/commands/widget.md.tmpl';
 export type DocsScenario = 'updated' | 'current' | 'risky' | 'store' | 'legacy';
-
-/** The fixture's CLAUDE_CONFIG_DIR: credentials and session transcripts, unreadable to the actor except settings.json. */
-export function docsConfigDir(home: string): string {
-  return path.join(home, 'cc');
-}
-
-export function gitAt(repo: string, ...args: string[]): string {
-  const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 15000,
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
-  if (result.status !== 0) throw new Error(`fixture git ${args.join(' ')}: ${result.stderr}`);
-  return result.stdout.trimEnd();
-}
-
-export function repoSnapshot(repo: string) {
-  const files = gitAt(repo, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean);
-  const contents: Record<string, string> = {};
-  for (const name of new Set(files)) {
-    const file = path.join(repo, name);
-    if (!fs.existsSync(file)) continue;
-    const resolved = fs.realpathSync(file);
-    if (!resolved.startsWith(fs.realpathSync(repo) + path.sep)) throw new Error(`fixture path escaped: ${name}`);
-    if (fs.statSync(file).isFile()) contents[name] = fs.readFileSync(file).toString('base64');
-  }
-  return { head: gitAt(repo, 'rev-parse', 'HEAD'), index: gitAt(repo, 'ls-files', '--stage'), contents };
-}
-
-export function changedFiles(before: ReturnType<typeof repoSnapshot>, after: ReturnType<typeof repoSnapshot>): string[] {
-  return [...new Set([...Object.keys(before.contents), ...Object.keys(after.contents)])]
-    .filter(p => before.contents[p] !== after.contents[p]).sort();
-}
-
-/** The record `gstack-docs-candidate snapshot` writes and `compare` reads (bin/gstack-docs-candidate). */
-export interface DocsCandidateRecord {
-  schema_version: 1; audit_id: string; mode: 'edit' | 'read-only'; base: string; head: string; branch: string;
-  index: string[]; committed: string[]; staged: string[]; unstaged: string[]; untracked: string[];
-  selected: string[]; docs: string[]; hashes: Record<string, string | null>;
-}
-
-/**
- * The installed snapshot command for the fixture's audit selection: every tracked or new path except the
- * user's personal note, with the handbook docs root, against main's commit. Returned as argv; the first
- * element is the installed helper, so the command is the literal form the observation interface admits.
- */
-export function docsSnapshotArgv(fixture: { repo: string; skills: string }, auditId: string, out: string): string[] {
-  const inventory = [...new Set(gitAt(fixture.repo, 'ls-files', '-z', '--cached', '--others', '--exclude-standard')
-    .split('\0').filter(Boolean))].sort();
-  return [path.join(fixture.skills, 'bin/gstack-docs-candidate'), 'snapshot', '--out', out, '--audit-id', auditId,
-    '--mode', 'edit', '--base', gitAt(fixture.repo, 'rev-parse', 'main'),
-    ...inventory.filter(p => p !== 'personal-note.txt').flatMap(p => ['--select', p]), '--docs', 'handbook'];
-}
-
-/** Git blob id of content, the hash representation of `DocsCandidateRecord.hashes`. */
-export function gitBlobId(content: Buffer): string {
-  return createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
-}
 
 export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.DOCSYNC_GENERATED_ROOT || DOCSYNC_ROOT) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-'));
@@ -72,9 +18,7 @@ export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.
   const skills = path.join(home, '.claude/skills/gstack');
   fs.mkdirSync(repo);
   gitAt(repo, 'init', '-b', 'main');
-  gitAt(repo, 'config', 'user.email', 'test@test.com');
-  gitAt(repo, 'config', 'user.name', 'Test');
-  gitAt(repo, 'config', 'commit.gpgsign', 'false');
+  fs.appendFileSync(path.join(repo, '.git/config'), '[user]\n\temail = test@test.com\n\tname = Test\n[commit]\n\tgpgsign = false\n');
   fs.mkdirSync(path.join(repo, '.qa-state'));
   fs.appendFileSync(path.join(repo, '.git/info/exclude'), '\n.qa-state/\n');
   const write = (file: string, text: string) => {

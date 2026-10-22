@@ -22,7 +22,6 @@
  * was permitted; the caller checks those paths against the child's report.
  */
 import { spawnSync } from 'child_process';
-import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -46,8 +45,7 @@ function state(base: string) {
   };
 }
 
-function expand(paths: string[]): string[] {
-  const listed = nul(git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']));
+function expand(listed: string[], paths: string[]): string[] {
   const out = new Set<string>();
   for (const p of paths) {
     const rel = p.replace(/^\.\//, '').replace(/\/+$/, '');
@@ -63,7 +61,7 @@ function hashes(paths: string[]): Record<string, string | null> {
   for (const p of paths) {
     if (!fs.existsSync(p) || !fs.statSync(p).isFile()) { out[p] = null; continue; }
     const content = fs.readFileSync(p);
-    out[p] = createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
+    out[p] = new Bun.CryptoHasher('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
   }
   return out;
 }
@@ -116,9 +114,10 @@ function main(argv: string[]): void {
     const base = git(['rev-parse', '--verify', one(args, '--base') + '^{commit}']).trim();
     process.chdir(top);
     const now = state(base);
-    const selected = flag(args, '--select').length ? expand(flag(args, '--select'))
+    const listed = nul(git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']));
+    const selected = flag(args, '--select').length ? expand(listed, flag(args, '--select'))
       : [...new Set([...now.committed, ...now.staged, ...now.unstaged, ...now.untracked])].sort();
-    const docs = expand(flag(args, '--docs'));
+    const docs = expand(listed, flag(args, '--docs'));
     const tracked = [...new Set([...selected, ...docs, ...now.staged, ...now.unstaged, ...now.untracked])].sort();
     const record = { schema_version: 1, audit_id: one(args, '--audit-id'), mode, base, ...now, selected, docs, hashes: hashes(tracked) };
     fs.writeFileSync(out, JSON.stringify(record, null, 2) + '\n', { mode: 0o600 });
