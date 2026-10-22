@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**/cso can run its contained runtime checks.** Before this release the runtime catalog qualified nothing, so /cso always fell back to static assessment. It now qualifies ten pinned images: Node 24.4.0, Bun 1.3.10, Python 3.13.4 with uv 0.8.0, Rails on Ruby 3.4.4, and PostgreSQL 17.2, each for linux/amd64 and linux/arm64. With Docker installed, comprehensive /cso boots the target app inside the matching image and tests findings and repairs against it. The images passed the private evaluator's release qualification (run-5 statements, re-delivered under Garry's approval). The ingress then checked them in qualify run 39674065531 at 514fbfd.
+
+### Added
+- **`lib/cso/runtime-catalog.json`** is now catalog `cso-v3-39674065531-133cb360842d`, which replaces `cso-v3-build-reviewed-2026-09-10`. Promote run 39841502986 generated it from qualification run 39674065531's authenticated statements and attested it. GitHub Actions committed the attested bytes (`sha256:078e0bf6…`). Each runtime's image is pinned to a public `ghcr.io/garrytan/gstack/cso-staging/…@sha256` digest, and each entry records its source commit (133cb36), SBOM and provenance digests, and requalification triggers (`preparationSha256` `c721b585…`).
+
 ## [1.91.177.0] - 2026-10-22
 
 **The /cso runtime promotion workflow can finish.** Promote run 39691485727 failed after its `cso-runtime-release` approval. Its "Generate a fail-closed catalog candidate" step calls `gh api …/compare` to prove the staged commit is an ancestor of the qualification head, but the step had no `GH_TOKEN`. On a hosted runner `gh` then exits 4 ("set the GH_TOKEN environment variable"). The run stopped before it signed, pushed or opened anything.
