@@ -64,6 +64,7 @@ jobs:
             --name cso-qualified-runtime-statements --dir qualification-evidence
       - name: Generate a fail-closed catalog candidate
         env:
+          GH_TOKEN: ${{ github.token }}
           CSO_QUALIFICATION_RUN: ${{ inputs.qualification_run_id }}
         run: |
           set -euo pipefail
