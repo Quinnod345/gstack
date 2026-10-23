@@ -51,6 +51,8 @@ const WINDOWS_FRAGILE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 // when possible; this list is for environment-/runtime-specific tests where
 // the failure mode is structural rather than detectable via source-file scan.
 export const KNOWN_WINDOWS_INCOMPATIBLE: Array<{ file: string; reason: string }> = [
+  // Like test/paid-rerun.test.ts (excluded by pattern), it replays a gate capture through the paid lane's --report and --rerun-plan CLI.
+  { file: 'test/credential-rejection.test.ts', reason: 'replays run 39696775546 through the --report and --rerun-plan CLI of the paid lane, which runs only on Linux CI; on windows-latest that CLI exits 1 with EINVAL in open() (windows-free-shard run 39982914852)' },
   // Field list 2, W11: the review-voice install is a POSIX launcher contract, exercised end to end on Linux and macOS.
   { file: 'test/capy-review-voice.test.ts', reason: 'copies the checkout with tar -C into the temp root (GNU tar reads a D: path as a remote host) and launches the bash --for review-voice installer with a colon-joined GSTACK_LAUNCH PATH' },
   // C-pregate. Since fix wave PR 5 (item 10b) test/helpers/pregate-fixture.ts and restamp-fixture.ts

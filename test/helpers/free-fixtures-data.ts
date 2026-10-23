@@ -65,6 +65,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/coverage-audit-separator-collision.json': ['test/coverage-audit-evidence.test.ts'],
   'test/fixtures/coverage-audit-summary.json': ['test/coverage-audit-evidence.test.ts'],
   'test/fixtures/coverage-audit-wc-anchor.json': ['test/coverage-audit-evidence.test.ts'],
+  'test/fixtures/credential-rejection-39696775546.json': ['test/credential-rejection.test.ts'],
   'test/fixtures/cso-eval/**': ['scripts/cso-eval.ts', 'test/cso-eval.test.ts', 'test/cso-stack-cold-integration.test.ts', 'test/helpers/cso-eval-oracles.ts'],
   'test/fixtures/cso-http-smoke.c': ['test/cso-docker-integration.test.ts'],
   'test/fixtures/cso-sarif/**': ['test/cso-scanner-cli.test.ts', 'test/cso-scanners.test.ts'],
