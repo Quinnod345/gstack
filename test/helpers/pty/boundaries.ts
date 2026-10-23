@@ -646,18 +646,23 @@ export const engStep0Boundary: Step0BoundaryPredicate = (fp) =>
 export function pickDesignFocusAll(q: NativePlanQuestionCall['questions'][number]): number | null {
   if (q.multiSelect || q.options.length < 2 || q.options.length > 4 || new Set(q.options.map(o => o.label)).size !== q.options.length) return null;
   const text = q.question.trim();
-  const title = text.split(/\r?\n/, 1)[0]!.replace(/^D[1-9]\d*\s*[—–:-]\s*/i, '');
-  const sources = [...text.matchAll(/^Project\/branch\/task:\s*([^\n]+)$/gm)];
-  const explanatory = [text, ...q.options.map(o => o.description ?? '')].join('\n')
-    .replace(/`+[^`]*`+|"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, '').replace(/[✅❌*]/g, '');
-  if (!/^Review all (?:7|seven) (?:design )?(?:dimensions|passes),? or focus(?: on [^?\n]+)?\?$/i.test(title) ||
-      sources.length !== 1 || !/\bplan-design-review of PLAN\.md\b/i.test(sources[0]![1]!) ||
-      /\b(?:historical|archived|quoted|example|foreign|other|another|previous)\b/i.test(sources[0]![1]!) ||
+  const unquote = (value: string) => value.replace(/`+[^`]*`+|"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, '');
+  const sources = [...text.matchAll(/^Project\/branch\/task:\s*([^\n]+)$/gm)].map(match => unquote(match[1]!));
+  const explanatory = unquote([text, ...q.options.flatMap(o => [o.label, o.description ?? ''])].join('\n')).replace(/[✅❌*]/g, '');
+  // Step 0D in the template's own words ("I've rated this plan 2/10 on design completeness. ...
+  // Want me to focus on specific areas instead?", GSTA-65 focused trial) or as a native title
+  // ("Review all 7 design dimensions, or focus?", census 36597762183): its one question is
+  // about focus, and a sentence scores the plan's design out of 10.
+  const sentences = text.split(/(?<=[.!?])\s+|\r?\n/);
+  const asks = sentences.filter(sentence => sentence.includes('?'));
+  if (asks.length !== 1 || !/\bfocus\b/i.test(asks[0]!) ||
+      !sentences.some(sentence => /\bdesign\b/i.test(sentence) && /(?<![\d./])(?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10(?!\d|\.\d)/.test(sentence)) ||
+      sources.length !== 1 || !/\b(?:PLAN\.md|Marketing landing page)\b/i.test(sources[0]!) ||
+      /\b(?:historical|archived|quoted|example|foreign|other|another|previous)\b/i.test(sources[0]!) ||
       (text.match(/\?/g)?.length ?? 0) !== 1 || /```|~~~|^\s*>/m.test(text) ||
-      !/^ELI10:\s*I['’]ve rated this plan (?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10 on design completeness\./mi.test(text) ||
       /(?:^|[.!?;:\n]|\b(?:and|while))\s*(?:(?:also|please|then|now)\s+)*(?:approv(?:e|ing)|deploy(?:ing)?|implement(?:ing)?|ship(?:ping)?|merg(?:e|ing)|delet(?:e|ing))\b/im.test(explanatory)) return null;
   const labels = q.options.map(o => o.label.trim().replace(/^[A-Z][).:]\s+/i, '').replace(/\s*\(recommended\)\s*$/i, ''));
   const all = labels.flatMap((label, i) => /^(?:Review )?All (?:7|seven) (?:design )?(?:dimensions|passes)$/i.test(label) ? [i + 1] : []);
-  if (all.length !== 1 || labels.some((label, i) => i + 1 !== all[0] && !/^(?:Only|Focus)\b/i.test(label))) return null;
+  if (all.length !== 1 || labels.some((label, i) => i + 1 !== all[0] && !/^(?:Only|Focus)\b|\bonly$/i.test(label))) return null;
   return all[0]!;
 }

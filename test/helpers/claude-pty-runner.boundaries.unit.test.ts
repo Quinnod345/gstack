@@ -1791,3 +1791,22 @@ describe('pickDesignFocusAll: the seed-declared all-seven answer for the pending
     const x = q(); mutate(x); expect(pickDesignFocusAll(x)).toBeNull();
   });
 });
+
+describe('pickDesignFocusAll: Step 0D in the template\'s own words (GSTA-65 focused trial)', () => {
+  const captured = require('../fixtures/design-floor-focus-template-0d.json');
+  const q = () => structuredClone(captured.question);
+  test('the pending template-worded menu selects the all-seven option', () => {
+    expect(pickDesignFocusAll(q())).toBe(1);
+  });
+  test.each([
+    ['a question not about focus', (x: any) => { x.question = x.question.replace('Want me to focus on specific areas instead?', 'Want me to apply every fix now?'); }],
+    ['no design score', (x: any) => { x.question = x.question.replace("I've rated this plan 2/10 on design completeness.", "I've reviewed this plan."); }],
+    ['a score that is not about design', (x: any) => { x.question = x.question.replace('2/10 on design completeness', '2/10 on test coverage'); }],
+    ['a foreign plan', (x: any) => { x.question = x.question.replace('Marketing landing page plan on main.', 'Pricing page plan on main.'); }],
+    ['a quoted plan name', (x: any) => { x.question = x.question.replace('Marketing landing page plan on main.', 'OTHER.md, not "Marketing landing page".'); }],
+    ['an alternative that does not narrow', (x: any) => { x.options[1].label = 'Layout/hierarchy first'; }],
+    ['a second question', (x: any) => { x.question = x.question.replace('Net:', 'Ready?\nNet:'); }],
+  ])('%s is not answered', (_name, mutate) => {
+    const x = q(); mutate(x); expect(pickDesignFocusAll(x)).toBeNull();
+  });
+});
