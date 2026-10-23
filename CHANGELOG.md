@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.185.0] - 2026-10-23
 
 **Three flaky paid eval cases get repairs: three harness gaps closed and one fixture rule moved to where the agent reads it.** Today's daily flaky-fix pass took the two repeat flakes and one periodic timeout from the flaky ledger. plan-design-with-ui-scope failed its first attempt in train gate 39852003387 (its fourth flake) because the Opus 5.5 agent rated the plan "4/10 on design" in plain words and the focus check wanted the words "design completeness". ship-docsync-completion failed in train gate 39904966815 and in GSTA-63's focused run with the same slip both times: the agent added `gstack-docs-candidate --help` to the end of its first line of reads, which the fixture interface forbids. plan-design-finding-floor timed out at 610 s in periodic run 39209106033 because nothing answered the owned plan-file Create menu after its title scrolled off screen; two focused trials then showed a second stall, at the Step 0D focus menu the floor actor answers only when it matches one captured wording.
 
