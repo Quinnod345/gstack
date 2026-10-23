@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inspectPreparation, railsTestConfiguration } from '../lib/cso/preparation';
 import { assertRuntimeCompatible, RUNTIME_CATALOG, rollbackCatalog, selectRuntime, validateRuntimeCatalog } from '../lib/cso/runtime-catalog';
-import { completeRuntimeCatalogFixture, qualifiedRuntimeFixture } from './helpers/cso-runtime-catalog';
+import { completeRuntimeCatalogFixture, qualifiedRuntimeFixture, unqualifiedRuntimeCatalog } from './helpers/cso-runtime-catalog';
 
 const roots: string[] = [];
 const hash = 'a'.repeat(64);
@@ -231,10 +231,13 @@ describe('CSO inert Rails preparation', () => {
 describe('CSO runtime catalog admission', () => {
   const runtime = () => qualifiedRuntimeFixture('node');
   const catalog = () => completeRuntimeCatalogFixture('test-1');
-  test('default catalog cannot execute unqualified images', () => {
+  test('default catalog admits only digest-pinned reviewed profiles and unqualified profiles cannot execute', () => {
     expect(RUNTIME_CATALOG.profiles).toHaveLength(10);
-    expect(RUNTIME_CATALOG.runtimes).toEqual([]);
-    expect(() => selectRuntime('node', 'linux/amd64')).toThrow('Reviewed build profile node-24.4.0-amd64 is awaiting a qualified image promotion');
+    for (const runtime of RUNTIME_CATALOG.runtimes) {
+      expect(RUNTIME_CATALOG.profiles.filter(profile => profile.id === runtime.id && profile.stack === runtime.stack && profile.platform === runtime.platform)).toHaveLength(1);
+      expect(runtime.image).toMatch(/@sha256:[a-f0-9]{64}$/);
+    }
+    expect(() => selectRuntime('node', 'linux/amd64', unqualifiedRuntimeCatalog())).toThrow('Reviewed build profile node-24.4.0-amd64 is awaiting a qualified image promotion');
   });
   test('selects exact qualified digest and platform', () => {
     expect(selectRuntime('node', 'linux/amd64', catalog()).image).toContain('@sha256:');

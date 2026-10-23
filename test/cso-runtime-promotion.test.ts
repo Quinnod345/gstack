@@ -69,7 +69,10 @@ describe('CSO runtime catalog promotion', () => {
     const matrix = imageBuildMatrix(buildInputs);
     expect(matrix.include).toHaveLength(10);
     expect(committedCatalog.profiles).toHaveLength(10);
-    expect(committedCatalog.runtimes).toEqual([]);
+    for (const runtime of committedCatalog.runtimes) {
+      expect(committedCatalog.profiles.filter(profile => profile.id === runtime.id && profile.stack === runtime.stack && profile.platform === runtime.platform)).toHaveLength(1);
+      expect(runtime.image).toMatch(/@sha256:[a-f0-9]{64}$/);
+    }
     expect(committedCatalog.buildRevision).toBe(buildInputs.revision);
     expect(matrix.include.find(row => row.stack === 'bun')!.versions).not.toHaveProperty('node');
     validateRuntimeCatalog(committedCatalog);

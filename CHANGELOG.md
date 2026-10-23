@@ -8,6 +8,24 @@
 - **`bin/gstack-bun-version.sh`**: `GSTACK_BUN_VERIFIED` is now 1.4.2 1.4.3 1.4.4, with 1.4.4's checksums for linux-x64, linux-x64-baseline and linux-aarch64, the targets 1.4.3 covers. They come from the release's `SHASUMS256.txt.asc`, whose clearsigned signature verifies against Bun's release key F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 (Robobun, the key oven-sh/bun's own Dockerfiles assert), and each archive was downloaded and hashed to the same value. The 1.4.2 and 1.4.3 entries are unchanged and verify the same way. gstack's own minimum (1.4.2), install default (1.4.3) and CI pins do not move.
 - **`test/gstack-capy-install.test.ts`**: a gbrain-like repo whose CI pins only 1.4.4 refuses `~/.bun` 1.4.3 and installs the 1.4.4 archive. **`test/bun-version-drift.test.ts`**: every verified version must carry a checksum for each installer target. The existing "verified archives" text assertions list 1.4.4.
 
+## [1.91.181.0] - 2026-10-23
+
+**/cso can run its contained runtime checks.** Before this release the runtime catalog qualified nothing, so /cso always fell back to static assessment. It now qualifies ten pinned images: Node 24.4.0, Bun 1.3.10, Python 3.13.4 with uv 0.8.0, Rails on Ruby 3.4.4, and PostgreSQL 17.2, each for linux/amd64 and linux/arm64. With Docker installed, comprehensive /cso boots the target app inside the matching image and tests findings and repairs against it. The images passed the private evaluator's release qualification (run-5 statements, re-delivered under Garry's approval). The ingress then checked them in qualify run 39674065531 at 514fbfd.
+
+### Added
+- **`lib/cso/runtime-catalog.json`** is now catalog `cso-v3-39674065531-133cb360842d`, which replaces `cso-v3-build-reviewed-2026-09-10`. Promote run 39841502986 generated it from qualification run 39674065531's authenticated statements and attested it. GitHub Actions committed the attested bytes (`sha256:078e0bf6…`). Each runtime's image is pinned to a public `ghcr.io/garrytan/gstack/cso-staging/…@sha256` digest, and each entry records its source commit (133cb36), SBOM and provenance digests, and requalification triggers (`preparationSha256` `c721b585…`).
+
+### For contributors
+- **The /cso free tests no longer assume the committed runtime catalog is empty.** Six tests pinned `runtimes: []` and broke as soon as a promotion landed. Tests that need an unqualified catalog now build one with `unqualifiedRuntimeCatalog()`. The replay tests expect whichever fail-closed rejection the committed catalog produces, so the suite passes with the catalog both before and after a promotion.
+
+## [1.91.180.0] - 2026-10-22
+
+**The /cso docs say what the qualified catalogs now allow.** AGENTS.md, the README and `docs/cso-release-qualification.md` still said that no qualified runtime or scanner image existed, so /cso ran static assessment only. The scanner catalog has been qualified since #3042. The runtime catalog becomes qualified with the runtime promotion PR that ships alongside this one.
+
+### Changed
+- **AGENTS.md**, **README.md** and **`docs/cso-release-qualification.md`**: the /cso entries name the ten qualified runtime images and the twelve scanner images, and say when /cso still falls back to static assessment: without Docker, or where no profile matches.
+
+## [1.91.179.0] - 2026-10-22
 
 **docsync-fault-interface fits its budgets under load again.** On 2026-10-18 it timed out under load on a Ubicloud full run. Its nested 36-case suite spent most of its time starting processes: each fault actor spawn loaded about 36 ms of imports (an empty bun takes 5.5 ms), inspect repeated Git reads, and the whole nested run sat under one 120 s outer test. With real Git on 4 cores, inner cases now take a 0.70 s median (max 1.25 s) unloaded, against 1.07 s before. Under 8 busy loops the max is 3.44 s, inside bun's default 5 s; before, cases reached 4.45 s. The worst outer test went from about 100 s of its 120 s cap to 33 s. No timeout, budget, retry, assertion or case changed.
 
