@@ -570,13 +570,14 @@ async function runFormatLifecycle(file: string, id: string, scenario: string) {
   const facts = path.join(dir, 'events.jsonl');
   const script = path.join(dir, 'format.test.ts');
   fs.writeFileSync(script, `
-import { mock, spyOn } from 'bun:test';
+import { jest, mock, spyOn } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 const root = ${JSON.stringify(ROOT)}, selected = ${JSON.stringify(id)}, scenario = ${JSON.stringify(scenario)};
 const event = value => fs.appendFileSync(${JSON.stringify(facts)}, JSON.stringify(value) + '\\n');
 let attempt = 0;
 let currentSignal;
+const elapse = async ms => { jest.advanceTimersByTime(ms); };
 mock.module(path.join(root, 'test/helpers/eval-budgets.ts'), () => ({ CAPTURE_MS: 300, CAPTURE_LONG_MS: 600 }));
 mock.module(path.join(root, 'test/helpers/session-runner.ts'), () => ({
   SESSION_DRAIN_GRACE_MS: 50,
@@ -586,7 +587,7 @@ mock.module(path.join(root, 'test/helpers/session-runner.ts'), () => ({
     event({ kind: 'start', id, timeout: opts.timeout, maxTurns: opts.maxTurns, model: opts.model, cwd: opts.workingDirectory });
     opts.signal?.addEventListener('abort', () => event({ kind: 'abort', id }), { once: true });
     const timeout = scenario === 'both-timeout' || (scenario === 'recover' && id === 1);
-    await new Promise(resolve => setTimeout(resolve, timeout ? opts.timeout + 50 : scenario === 'late-judge' || scenario === 'near-success' ? 220 : 20));
+    await elapse(timeout ? opts.timeout + 50 : scenario === 'late-judge' || scenario === 'near-success' ? 220 : 20);
     event({ kind: 'ready', id, fixtureExists: fs.existsSync(opts.workingDirectory) });
     if (!timeout) {
       const kind = selected.endsWith('-mode') || selected.endsWith('-kind');
@@ -607,7 +608,7 @@ mock.module(path.join(root, 'test/helpers/session-runner.ts'), () => ({
 const fakeJudgeRequest = async (body, options) => {
   event({ kind: 'judge-start', id: attempt, sameSignal: options?.signal === currentSignal, model: body.model });
   const id = attempt;
-  await new Promise(resolve => setTimeout(resolve, scenario === 'late-judge' ? 130 : 10));
+  await elapse(scenario === 'late-judge' ? 130 : 10);
   event({ kind: 'judge-ready', id, aborted: options?.signal?.aborted ?? false });
   return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ reason_substance: scenario === 'bad-score' ? 3 : 5, reasoning: 'fixture specific tradeoff' }) }] };
 };
@@ -624,6 +625,7 @@ spyOn(EvalCollector.prototype, 'finalize').mockImplementation(function() {
   event({ kind: 'finalized' });
   return finalize.call(this);
 });
+jest.useFakeTimers();
 await import(path.join(root, 'test', ${JSON.stringify(file)}));
 `);
   try {

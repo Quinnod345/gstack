@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**The office-hours attempt lifecycle test no longer races the wall clock.** Today's daily flaky-fix pass: in #3341's remote pregate, "recommendation near-success stays inside the shared work deadline" failed once with two judge starts where it expects one, then passed on the serial retry. Its fake runner and judge used real sleeps (220 ms plus 10 ms) against a mocked 300 ms deadline, so a loaded machine could push the first attempt past it. The sibling late-judge case had the same exposure from the other side.
+
+### Tests
+- **`test/office-hours-attempt.test.ts`**: the plan-format lifecycle subprocess now runs on Bun's fake timers, and the fake runner and judge advance them by their scenario durations instead of sleeping. The helper's own deadline (`Date.now()` and its `setTimeout`) moves only when the fixture says so, so near-success always finishes at 230 ms of 300 and late-judge always crosses the deadline, whatever the machine's load. With a 400 ms real stall injected into the fake runner, near-success and late-judge failed before the change and pass after it. The whole file passed 20/20 runs unloaded and 20/20 under 8 busy loops on 4 cores.
+
+### Gate integrity
+- No product code, budget, timeout, threshold or assertion changed: the mocked 300 ms capture budget, the 50 ms drain grace and the scenario durations are the same.
+
 ## [1.91.182.0] - 2026-10-23
 
 **gstack installs on a project that pins Bun 1.4.4 again.** gbrain master moved its CI to Bun 1.4.4 (gbrain #7374, the Brotli CVE-2026-111497 fix), and gstack's Capy installer then stopped every gbrain session with `RUNTIME_PIN_CONFLICT` ("verified archives: 1.4.2 1.4.3 … pins exactly 1.4.4"), because it installs only Bun archives whose SHA-256 it carries. It now carries 1.4.4, so the same run installs the pinned Bun and ends `gstack: ok`.
