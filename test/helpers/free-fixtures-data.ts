@@ -74,6 +74,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/design-count-native-issue-fields.json': ['test/plan-count-completion.test.ts'],
   'test/fixtures/design-detector-source-public.json': ['test/design-detector-source-fixture.test.ts'],
   'test/fixtures/design-floor-focus-36597762183.json': ['test/helpers/claude-pty-runner.boundaries.unit.test.ts'],
+  'test/fixtures/design-floor-focus-review-focus.json': ['test/helpers/claude-pty-runner.boundaries.unit.test.ts'],
   'test/fixtures/design-floor-focus-template-0d.json': ['test/helpers/claude-pty-runner.boundaries.unit.test.ts'],
   'test/fixtures/design-handoff-n-calls.json': ['test/design-completion-handoff-scored.test.ts'],
   'test/fixtures/design-handoff-q-calls.json': ['test/design-completion-handoff-scored.test.ts'],
