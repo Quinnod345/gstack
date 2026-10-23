@@ -234,6 +234,18 @@ test('the installed docs-candidate helper is admitted only with a private .json 
   expect(docsNativeInterface(fixture)).toContain('compare <that .json> and --help commands');
 });
 
+// Train gate 39904966815 (ship-docsync-completion, attempt 1) and GSTA-63's focused run joined the candidate's
+// --help onto a line of reads. The join stays refused; the own-call rule now sits in the sentence naming --help.
+test('a candidate --help joined to reads stays refused, and the interface says so where it names the command', () => {
+  const skills = fixture.skills.split(path.sep).join('/');
+  const joined = `git diff; git diff --cached; cat options.ts; ls -la handbook handbook/reference handbook/reference/commands; ${skills}/bin/gstack-docs-candidate --help`;
+  expect(docsCommandAllowed(joined, fixture)).toBe(false);
+  expect(docsCommandAllowed(`${skills}/bin/gstack-docs-candidate --help`, fixture)).toBe(true);
+  const sentence = docsNativeInterface(fixture).split(/(?<=\.)\s+(?=[A-Z])/).find(part => part.includes('gstack-docs-candidate snapshot'));
+  expect(sentence).toContain('as its own Bash call, with nothing joined before or after it');
+  expect(sentence).toContain('a --help is no exception');
+});
+
 test('the installed lifecycle helpers are admitted for their own --help, which starts nothing', () => {
   const skills = fixture.skills.split(path.sep).join('/');
   for (const helper of ['gstack-skill-start', 'gstack-skill-end']) {

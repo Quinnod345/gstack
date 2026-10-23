@@ -333,9 +333,11 @@ function currentCreatePreview(preview: string, r: any, config: string, cwd: stri
     Buffer.byteLength(event.input.content)>MAX_WRITE_INPUT_BYTES) return false;
   // A crop can keep the pane's file row and rule above the preview while its
   // "Create file" title scrolls away. That row must name the owned path.
+  // It can also start on that single rule, as croppedEditPane allows.
   const header=/^ {0,3}(?![1-9]\d*(?:[ \t]|\n))(\S[^\n]*)\n[╌─━]{3,}[ \t]*\n/.exec(preview);
   if(header && path.resolve(cwd,header[1]!.trim())!==r.expected) return false;
-  const source=event.input.content.split(/\r?\n/), rows=preview.slice(header?.[0].length ?? 0).split('\n');
+  const body=header ? preview.slice(header[0].length) : preview.replace(/^[╌─━]{3,}[ \t]*\n/,'');
+  const source=event.input.content.split(/\r?\n/), rows=body.split('\n');
   const numbered:Array<{line:number;text:string}>=[];
   let leading='';
   for(const row of rows) {

@@ -32,11 +32,12 @@ const designFocusBoundary = (fp: AskUserQuestionFingerprint): boolean =>
     // count may be a numeral or a word; the title must name design, unless the
     // body carries the step's own design-completeness rating (run 39199692993).
     const title = text.split(/\r?\n/, 1)[0]!;
-    // Step 0A's rating is a sentence that scores design completeness out of 10,
+    // Step 0A's rating is a sentence that scores the plan's design out of 10,
     // however it is worded ("rated this plan 4/10 for design completeness", run
-    // 39363705692; "This plan is a 3/10 on design completeness", the 0A example).
+    // 39363705692; "This plan is a 3/10 on design completeness", the 0A example;
+    // the ELI10 plain-words "I rated this plan 4/10 on design.", run 39852003387).
     const rated = (body: string) => body.split(/(?<=[.!?])\s+|\r?\n/).some(sentence =>
-      /\bdesign completeness\b/i.test(sentence) && /(?<![\d./])(?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10(?!\d|\.\d)/.test(sentence));
+      /\bdesign\b/i.test(sentence) && /(?<![\d./])(?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10(?!\d|\.\d)/.test(sentence));
     // Runs 39298269902 a1/a2: a title that only names the focus ("Review focus.",
     // on one line before Project/branch/task:), with the step's own rating in the
     // body and an option that offers all seven dimensions against a narrower one.
