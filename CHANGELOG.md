@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.184.0] - 2026-10-23
 
 **The office-hours attempt lifecycle test no longer races the wall clock.** Today's daily flaky-fix pass: in #3341's remote pregate, "recommendation near-success stays inside the shared work deadline" failed once with two judge starts where it expects one, then passed on the serial retry. Its fake runner and judge used real sleeps (220 ms plus 10 ms) against a mocked 300 ms deadline, so a loaded machine could push the first attempt past it. The sibling late-judge case had the same exposure from the other side.
 
