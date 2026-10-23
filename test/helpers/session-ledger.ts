@@ -19,6 +19,9 @@ export const SESSION_EVIDENCE_MAX = 200;
 export type SessionRunner = 'claude-p' | 'agent-sdk' | 'pty' | 'codex';
 export type SessionEnd = 'completed' | 'session_timeout' | 'observer_timeout' | 'api_error' | 'refusal' | 'aborted' | 'error';
 export const SESSION_ENDS: readonly SessionEnd[] = ['completed', 'session_timeout', 'observer_timeout', 'api_error', 'refusal', 'aborted', 'error'];
+/** A provider rejected the run's credentials: Anthropic's 401 authentication_error body, the CLI's
+ *  authentication_failed code or its "Invalid API key · …" message, or OpenAI's invalid_api_key code. */
+export const CREDENTIAL_REJECTION = /"type"\s*:\s*"authentication_error"|\bauthentication_failed\b|\bInvalid API key\s*·|"code"\s*:\s*"invalid_api_key"/i;
 
 export interface LivenessSummary {
   /** The session streamed partial messages. Without them no stall is ever inferred. */
@@ -189,7 +192,7 @@ export class SessionObserver {
   }
 
   private noteResultText(text: string): void {
-    const line = text.split('\n').map(l => l.trim()).find(l => /^API Error:/i.test(l));
+    const line = text.split('\n').map(l => l.trim()).find(l => /^API Error:/i.test(l) || CREDENTIAL_REJECTION.test(l));
     if (!line) return;
     if (REFUSAL_PHRASE.test(text)) this.phraseRefusal ??= `refusal at turn ${Math.max(1, this.turnIds.size)} (phrase) — ${line}`;
     else this.apiError ??= line;

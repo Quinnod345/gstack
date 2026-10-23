@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**A rejected API key no longer turns a gate into 131 assertion reds and 131 reruns.** Train gate run 39696775546 ran with a rejected `ANTHROPIC_API_KEY`. Every case failed on a 401 before the model ran, and the report counted them as assertion failures. Rule 16 then reran all 131 cases with the same key. A trial whose provider rejected the run's credentials is now INFRA: the gate never reruns it, the verdict counts it under INFRA, and its failure line reads `credentials rejected: Invalid API key · …`. A real assertion failure that only mentions a key keeps its class and is still rerun.
+
+### Fixed
+- **`test/helpers/eval-store.ts`**: `credentialRejection()` finds the evidence in a trial's API-error sessions or its failure text: Anthropic's 401 `authentication_error` body, the CLI's `authentication_failed` code or `Invalid API key ·` message, or OpenAI's `invalid_api_key` code. Both record builders use it. The JUnit census (`scripts/lib/paid-report.ts`, which feeds the rerun plan) and `classifyTrialShard` (trial panels) mark such a trial `infra`. Contract evidence still wins.
+- **Session ledger**: the claude -p and Agent SDK observer (`SessionObserver`) ends a session as `api_error` on the CLI's synthetic `Invalid API key` message, not just on `API Error:` lines. Both PTY ledger writers (`screenPanelEnd` in `test/helpers/pty/screen.ts`) record the rejection line wherever it is on screen, because after one the CLI sits at a plan-mode or manual-mode footer that the idle check doesn't recognize. Before this, `autoplan-guard-pty` recorded `completed` with no evidence.
+- **Report headline**: the INFRA count includes rule cases with an INFRA-class failure, not only trial panels.
+- **Gate integrity (a gate edit):** a credential rejection was already a red, and it is still a red. Only its class changes, from assertion to INFRA, so rule 16 no longer reruns it. No case's pass or fail changes. No threshold, trial count, case kind, judge model, `EVAL_POLICY` constant or `HARNESS_VERSION` changed; the edit is recorded as non-behavioral in `scripts/harness-version.json`. Known gap: local `--case` diagnosis and the train bisect's file-mode trials still classify by shard status.
+
+### For contributors
+- **`test/credential-rejection.test.ts`** replays trimmed captures from run 39696775546 (`test/fixtures/credential-rejection-39696775546.json`) through each runner's evidence path and the real `--report` and `--rerun-plan` CLI paths. Negative controls cover assertion failures that mention a key, an API key or an auth word, and a non-credential API error.
+
 ## [1.91.182.0] - 2026-10-23
 
 **gstack installs on a project that pins Bun 1.4.4 again.** gbrain master moved its CI to Bun 1.4.4 (gbrain #7374, the Brotli CVE-2026-111497 fix), and gstack's Capy installer then stopped every gbrain session with `RUNTIME_PIN_CONFLICT` ("verified archives: 1.4.2 1.4.3 … pins exactly 1.4.4"), because it installs only Bun archives whose SHA-256 it carries. It now carries 1.4.4, so the same run installs the pinned Bun and ends `gstack: ok`.

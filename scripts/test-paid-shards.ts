@@ -64,7 +64,7 @@ import {
 import { PAID_TEST_GLOBS, isPaidTestFile } from '../test/helpers/paid-test-set';
 import { EVAL_POLICY, PERIODIC_CI_EXCLUDE } from '../test/helpers/periodic-exclude-data';
 import {
-  getProjectEvalDir, getClaudeCliVersion, isFinalizedEvalResultFile, failureClassOf, panelVerdict,
+  getProjectEvalDir, getClaudeCliVersion, isFinalizedEvalResultFile, credentialRejection, failureClassOf, panelVerdict,
   sanitizeTrialError, CONTRACT_VIOLATIONS_FILE, TRIAL_ENV, type TrialFailureClass,
   trialCostKnown, trialFailureFields, trialSessions,
 } from '../test/helpers/eval-store';
@@ -134,8 +134,9 @@ export function classifyTrialShard(
     ...trialCostKnown(evidence.records, evidence.sessions),
   };
   const failed = (failureClass: TrialFailureClass, error?: string): ShardTrialRecord => {
-    const cls = evidence.contract !== null ? 'contract' : failureClass;
-    const raw = evidence.contract ?? failedRecord?.error ?? error;
+    const credentials = evidence.contract === null ? credentialRejection({ error: failedRecord?.error ?? error, sessions: evidence.sessions }) : undefined;
+    const cls = evidence.contract !== null ? 'contract' : credentials ? 'infra' : failureClass;
+    const raw = evidence.contract ?? (credentials ? `credentials rejected: ${credentials}` : failedRecord?.error ?? error);
     return { ...base, outcome: 'failed', failure_class: cls,
       ...(failedRecord?.exit_reason ? { exit_reason: String(failedRecord.exit_reason) } : {}),
       ...(Number.isInteger(failedRecord?.timeout_at_turn) ? { timeout_at_turn: failedRecord.timeout_at_turn } : {}),

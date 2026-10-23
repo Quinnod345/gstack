@@ -13,7 +13,7 @@ import { createFilePermissionRecorder } from '../plan-count-file-permission';
 import { createAutoplanArtifactRecorder } from '../autoplan-artifact-recorder';
 import { trustDialogInput } from '../pty-trust-dialog';
 import { resolveClaudeBinary } from './binary';
-import { createPtyScreen, idlePanelEnd, stripAnsi } from './screen';
+import { createPtyScreen, screenPanelEnd, stripAnsi } from './screen';
 import { appendSessionLedger, sessionKey } from '../session-ledger';
 
 export interface ClaudePtyOptions {
@@ -249,7 +249,7 @@ export async function launchClaudePty(
       recorded = true;
       const elapsed = performance.now() - startedMono;
       appendSessionLedger({ key: sessionKey('pty', undefined), runner: 'pty', started_at: startedAt, budget_ms: timeoutMs,
-        elapsed_ms: elapsed, end: elapsed >= timeoutMs ? 'session_timeout' : 'completed', ...idlePanelEnd(handle.visibleText()), billed: false });
+        elapsed_ms: elapsed, end: elapsed >= timeoutMs ? 'session_timeout' : 'completed', ...screenPanelEnd(handle.visibleText()), billed: false });
     }
     return close();
   } });
