@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.183.0] - 2026-10-23
 
 **A rejected API key no longer turns a gate into 131 assertion reds and 131 reruns.** Train gate run 39696775546 ran with a rejected `ANTHROPIC_API_KEY`. Every case failed on a 401 before the model ran, and the report counted them as assertion failures. Rule 16 then reran all 131 cases with the same key. A trial whose provider rejected the run's credentials is now INFRA: the gate never reruns it, the verdict counts it under INFRA, and its failure line reads `credentials rejected: Invalid API key · …`. A real assertion failure that only mentions a key keeps its class and is still rerun.
 
