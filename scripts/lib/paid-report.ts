@@ -7,7 +7,7 @@ import { normalizeRelativePath } from './shard-engine';
 import { EVAL_POLICY } from '../../test/helpers/periodic-exclude-data';
 import { STALL_WINDOW_MS } from '../../test/helpers/eval-budgets';
 import {
-  isFinalizedEvalResultFile, failureClassOf, panelVerdict, sanitizeTrialError, formatTrialOutcomes, TRIAL_OUTCOME_SCHEMA, TRIAL_OUTCOMES_FILE,
+  isFinalizedEvalResultFile, credentialRejection, failureClassOf, panelVerdict, sanitizeTrialError, formatTrialOutcomes, TRIAL_OUTCOME_SCHEMA, TRIAL_OUTCOMES_FILE,
   type EvalCaseKind, type PanelVerdict, type TrialFailureClass, type TrialOutcome, type TrialOutcomeRecord,
   trialCostKnown, trialFailureFields, trialSessions, type TrialFailureDetail,
 } from '../../test/helpers/eval-store';
@@ -277,13 +277,16 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
         const caseOutcome: TrialOutcome = failed ? 'failed' : cases.some(tc => tc.outcome === 'passed') ? 'passed' : 'skipped';
         const mine = records.filter((r: any) => r?.name === id || r?.case_id === id);
         const failedRecord = mine.find((r: any) => r.passed === false);
-        const failureClass: TrialFailureClass | undefined = !failed ? undefined
+        const recorded: TrialFailureClass | undefined = !failed ? undefined
           : failed.failureType === 'TimeoutError' ? 'timeout' : failedRecord ? failureClassOf(failedRecord) : 'assertion';
-        const error = sanitizeTrialError(failedRecord?.error ?? failed?.message);
         const sessions = caseSessions(ledger, id, byCase.size === 1);
+        const credentials = failed && recorded !== 'contract' ? credentialRejection({ error: `${failedRecord?.error ?? ''}\n${failed.message ?? ''}`, sessions }) : undefined;
+        const failureClass = credentials ? 'infra' : recorded;
+        const rawError = credentials ? `credentials rejected: ${credentials}` : failedRecord?.error ?? failed?.message;
+        const error = sanitizeTrialError(rawError);
         // A case's JUnit times sum its concurrent tests (plan-mode-no-op: 346 s in a 176 s shard), so its wall is capped by the shard's.
         const diagnosis = failed && failureClass ? trialFailureFields({ failure_class: failureClass, exit_reason: failedRecord?.exit_reason,
-          error: failedRecord?.error ?? failed.message, sessions, record: failedRecord }, STALL_WINDOW_MS) : undefined;
+          error: rawError, sessions, record: failedRecord }, STALL_WINDOW_MS) : undefined;
         if (failed) census.failedShards.add(key);
         if (caseOutcome === 'skipped') {
           bump(reasons, RUNTIME_SKIP_REASON);
@@ -762,7 +765,7 @@ export function runPaidReport(reportDir: string, options: { writeDurations?: boo
       judge: count('judge'),
       quarantined: { total: panels.filter(p => p.quarantined).length, failingLane: panels.filter(p => p.quarantined && p.failsLane).length },
       skipped: hollowWithoutJUnit.length + panels.filter(p => p.status === 'SKIPPED').length + ruleCases.filter(c => c.outcome === 'skipped').length,
-      infra: primaryTrials.filter(t => t.failure_class === 'infra').length
+      infra: primaryTrials.filter(t => t.failure_class === 'infra').length + ruleCases.filter(c => c.outcome === 'failed' && c.failureClass === 'infra').length
         + results.flatMap(r => r.outcomes).filter(o => !o.trial && o.runnerError !== undefined).length,
       incomplete: panels.filter(p => p.status === 'INCOMPLETE').length,
       unattributed: census.unattributed.length,

@@ -8,7 +8,7 @@
  * former claude-pty-runner.ts. Tests import through claude-pty-runner.ts.
  */
 import { launchClaudePty, type ClaudePtyOptions, type ClaudePtySession } from './launch';
-import { idlePanelEnd } from './screen';
+import { screenPanelEnd } from './screen';
 import { appendSessionLedger, sessionKey, type SessionEnd } from '../session-ledger';
 
 /**
@@ -33,9 +33,9 @@ export const realPtyDriver: PtyDriver = {
   sleep: ms => Bun.sleep(ms),
 };
 
-/** The last idle turn's error panel, if the session can show its text; diagnostics never throw. */
-export function safePanelEnd(session: Pick<ClaudePtySession, 'visibleText'>): ReturnType<typeof idlePanelEnd> {
-  try { return idlePanelEnd(session.visibleText()); } catch { return null; }
+/** The session's end panel (screenPanelEnd), if the session can show its text; diagnostics never throw. */
+export function safePanelEnd(session: Pick<ClaudePtySession, 'visibleText'>): ReturnType<typeof screenPanelEnd> {
+  try { return screenPanelEnd(session.visibleText()); } catch { return null; }
 }
 
 /** One poll step: finish with a result, keep polling, or end the loop as a timeout. */

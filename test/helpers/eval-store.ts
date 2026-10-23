@@ -15,6 +15,7 @@ import { spawnSync } from 'child_process';
 import { isManualReviewEntry } from './cookie-workflow-manual-review';
 import type { ManualJudgeReview } from './cookie-workflow-manual-review';
 import type { CodexTokenUsage } from './codex-session-runner';
+import { CREDENTIAL_REJECTION } from './session-ledger';
 
 // v2: EvalTestEntry.harvest gains optional {insertions, deletions, net} and
 // may be explicitly null (arm-benchmark harvest-failure taxonomy). Readers
@@ -213,6 +214,15 @@ export function trialContextFromEnv(env: NodeJS.ProcessEnv = process.env): Trial
 export function failureClassOf(entry: Pick<EvalTestEntry, 'failure_class' | 'exit_reason'>): TrialFailureClass {
   if (entry.failure_class && FAILURE_CLASSES.includes(entry.failure_class)) return entry.failure_class;
   return entry.exit_reason === 'timeout' ? 'timeout' : 'assertion';
+}
+
+/** Evidence that a failed trial died on rejected credentials, from a session its runner saw end that way or
+ *  from its failure text. The run's key is shared, so a rerun cannot help: the trial is INFRA, never a verdict.
+ *  A failure that merely mentions a key matches no provider rejection and keeps its own class. */
+export function credentialRejection(facts: { error?: string; sessions?: readonly Pick<SessionCauseFacts, 'end' | 'evidence'>[] }): string | undefined {
+  const texts = [...(facts.sessions ?? []).filter((s) => s.end === 'api_error').map((s) => s.evidence), facts.error];
+  const line = texts.flatMap((text) => text?.split(/\r\n?|\n/) ?? []).find((l) => CREDENTIAL_REJECTION.test(l));
+  return oneLine(line, FAILURE_CAUSE_EVIDENCE_MAX);
 }
 
 /** Machine-recorded cause of a failed trial, beside its policy class. failure_class
