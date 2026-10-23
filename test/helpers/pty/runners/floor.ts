@@ -16,7 +16,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { capturePlanCountQuestion, createPlanCountPermissionGuard, matchesNativePlanQuestion, planCountPrerequisitePick, planCountQuestionInput } from '../auq';
 import { resolveClaudeBinary } from '../binary';
-import { pickDesignFocusAll } from '../boundaries';
 import { SANCTIONED_WRITE_SUBSTRINGS, isProseAUQVisible, planCountSubmissionInput } from '../classify';
 import type { ClaudePtySession } from '../launch';
 import { isNumberedOptionListVisible, isPermissionDialogVisible, isPlanReadyVisible, isRejectedSlashCommand, stripPtyResidue } from '../screen';
@@ -145,6 +144,8 @@ export interface PlanSkillFloorOptions {
   productType?: 'sdk-documentation';
   /** Literal persona/journey correction declared before DX setup; approves no offered remedy. */
   devexSetupContext?: string;
+  /** Case-owned answer to a declared setup menu (the design seed's Step 0D focus choice); null leaves the question to the floor review. */
+  pickSetupChoice?: (question: NativePlanQuestionCall['questions'][number]) => number | null;
   /** Installation cwd retained for caller compatibility; review uses an owned seeded project. */
   cwd?: string;
   /** Total budget. Default 600000 (10 min). Tests exit early on AUQ. */
@@ -444,7 +445,7 @@ function floorQuestion(run: FloorRun, session: ClaudePtySession, currentCalls: N
     const chosen = run.setupChoices.get(key) ?? new Set<number>();
     const pick = pickPlanFloorMode(opts.skillName, question) ?? planCountPrerequisitePick(fp, fp)
       ?? (opts.skillName === 'plan-devex-review' ? pickPlanFloorProductType(question, opts.productType) : null)
-      ?? (opts.skillName === 'plan-design-review' ? pickDesignFocusAll(question) : null);
+      ?? opts.pickSetupChoice?.(question) ?? null;
     if (pick !== null) {
       if (!chosen.has(index)) {
         session.send(planCountQuestionInput(viewport, fp, pick));

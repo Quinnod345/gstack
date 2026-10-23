@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { FORCING_FLOOR_DESIGN } from ${JSON.stringify(path.join(ROOT, 'test/fixtures/forcing-finding-seeds.ts'))};
 import { CAPTURE_LONG_MS } from ${JSON.stringify(path.join(ROOT, 'test/helpers/eval-budgets.ts'))};
+import { pickDesignFocusAll } from ${JSON.stringify(path.join(ROOT, 'test/fixtures/design-floor-focus-picker.ts'))};
 const outcome = ${JSON.stringify(outcome)};
 let calls = 0;
 mock.module(${JSON.stringify(path.join(ROOT, 'test/helpers/e2e-gate.ts'))}, () => ({
@@ -35,6 +36,7 @@ mock.module(${JSON.stringify(path.join(ROOT, 'test/helpers/claude-pty-runner.ts'
       requestedPlanPath: '/tmp/gstack-test-plan-design-floor.md',
       timeoutMs: CAPTURE_LONG_MS,
       env: { QUESTION_TUNING: 'false', EXPLAIN_LEVEL: 'default' },
+      pickSetupChoice: pickDesignFocusAll,
     });
     const input = fs.readFileSync(path.join(opts.cwd, 'review-input.md'), 'utf8');
     expect(input).toBe(FORCING_FLOOR_DESIGN);
