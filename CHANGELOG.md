@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**The weekly model-policy freshness check reads OpenAI's deprecations page again (#3155).** It has been red since the 2026-10-19 run: OpenAI's page now writes some deprecated models as a display name followed by the backticked ids, for example ``GPT-4o (`gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`)``, and the parser refused any model cell that did not start with a backtick, so every run stopped with `openai-lifecycle:unrecognized-deprecated-model-cell`. Left alone, the stored pinned-model evidence would have gone stale around 2026-11-11.
+
+### Fixed
+- **`lib/model-policy-freshness-sources.ts`**: an OpenAI deprecated-model cell is accepted when it contains backticked model ids, wherever they sit in the cell, and each id becomes its own lifecycle row. A cell with no backticked id still fails with `unrecognized-deprecated-model-cell`. The live page (42,211 bytes, fetched 2026-10-24) now parses to 177 rows, including the five ids from its four display-name rows.
+
+### Tests
+- `test/fixtures/model-policy-freshness/openai-lifecycle.md` gains a display-name row, and `test/model-policy-freshness.test.ts` checks that both of its ids come out with the row's shutdown date. With the old parser, 16 of the file's 21 tests fail on the new fixture.
+- Negative controls: the existing cell with its backticks removed, and the new display-name row with unticked ids, both still fail with `unrecognized-deprecated-model-cell`.
+
+### Gate integrity
+- One accepted-input change to review: the OpenAI lifecycle parser accepts a model cell with text before its backticked ids. It is a weekly advisory check, not a required check. The negative controls above still fail closed, and no threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
