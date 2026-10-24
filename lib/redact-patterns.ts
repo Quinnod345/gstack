@@ -991,8 +991,11 @@ export const PATTERNS: RedactPattern[] = [
     autoRedactable: true,
     redactToken: "<REDACTED-CC>",
     // A 13-19 digit slice of a digit-only UUID or of a decimal number passes
-    // Luhn often enough to matter; both context checks run before Luhn.
-    validate: (span, match) => !insideUuid(match) && !insideDecimalNumber(match) && luhnValid(span),
+    // Luhn often enough to matter, and so does a compact YYYYMMDDHHMMSS stamp
+    // (an autoplan run id); the only 14-digit cards start with 3, a stamp with
+    // 1 or 2. All three context checks run before Luhn.
+    validate: (span, match) =>
+      !insideUuid(match) && !insideDecimalNumber(match) && !looksLikeCompactTimestamp(span.replace(/[ -]$/, "")) && luhnValid(span),
   },
   {
     id: "pii.ip_public",

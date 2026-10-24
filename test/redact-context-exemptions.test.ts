@@ -192,6 +192,27 @@ describe("db.url_with_password: postgres:postgres only on a loopback host (#2913
   );
 });
 
+// Free Tests flaked test/capy-captain-flow.test.ts in 7 of 57 runs (2026-10-21..23): the autoplan run id
+// run-YYYYMMDDHHMMSS put a 14-digit stamp in the approval row, and one stamp in ten passes Luhn.
+describe("pii.cc: a separator-free YYYYMMDDHHMMSS stamp is not a card number", () => {
+  table(
+    "pii.cc",
+    "MEDIUM",
+    [
+      'Approve the plan "Retry backoff" (autoplan run run-20261024131504, 2 decisions)',
+      "autoplan:run-20261024131504@gate_rev=1",
+      "backup stamp 20261024131512 ran late",
+    ],
+    [
+      "card 30569309025904",
+      "ref 20261324131501",
+      "stamp 202610241315045",
+      "card 2026 1024 1315 04",
+      "card 4111111111111111",
+    ],
+  );
+});
+
 describe("pii.phone.e164: GitHub Actions run and job ids in their id positions", () => {
   table(
     "pii.phone.e164",

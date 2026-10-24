@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
+
+### Fixed
+- **`lib/redact-patterns.ts`**: `pii.cc` skips a separator-free 14-digit span that reads as a valid YYYYMMDDHHMMSS stamp, using the `looksLikeCompactTimestamp` check that `pii.phone.e164` already uses. The only card numbers 14 digits long (Diners Club) start with 3, and an accepted stamp starts with 1 or 2 (years 1900–2999), so no real card loses coverage.
+
+### Tests
+- `test/approval-record.test.ts` imports an autoplan run whose run id `run-20261024131504` passes Luhn. It failed before the fix with the captain-flow error, and passes now.
+- `test/redact-context-exemptions.test.ts` has a new `pii.cc` table. The ask, the source and a log line carrying a Luhn-valid stamp come back clean. These still report MEDIUM: a 14-digit Diners test number, a Luhn-valid 14-digit run that is not a date (month 13), a 15-digit stamp-prefixed run, the same stamp with spaces, and a 16-digit Visa test number.
+
+### Gate integrity
+- One accepted-input change to review: `pii.cc` no longer reports a separator-free 14-digit date-time stamp. The negative controls above are unchanged findings. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.185.0] - 2026-10-23
 
 **Three flaky paid eval cases get repairs: three harness gaps closed and one fixture rule moved to where the agent reads it.** Today's daily flaky-fix pass took the two repeat flakes and one periodic timeout from the flaky ledger. plan-design-with-ui-scope failed its first attempt in train gate 39852003387 (its fourth flake) because the Opus 5.5 agent rated the plan "4/10 on design" in plain words and the focus check wanted the words "design completeness". ship-docsync-completion failed in train gate 39904966815 and in GSTA-63's focused run with the same slip both times: the agent added `gstack-docs-candidate --help` to the end of its first line of reads, which the fixture interface forbids. plan-design-finding-floor timed out at 610 s in periodic run 39209106033 because nothing answered the owned plan-file Create menu after its title scrolled off screen; two focused trials then showed a second stall, at the Step 0D focus menu the floor actor answers only when it matches one captured wording.

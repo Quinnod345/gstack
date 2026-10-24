@@ -135,6 +135,16 @@ describe('import --autoplan', () => {
     expect(bin(['import', '--autoplan', run, '--by', 'Garry'], { cwd, env: { GSTACK_STATE_ROOT: state } }).out).toMatch(/^APPROVAL_IMPORTED: n=0 skipped=2 /);
   });
 
+  test('a default run id whose YYYYMMDDHHMMSS stamp passes Luhn still imports (capy-captain-flow flake)', () => {
+    const run = tmp('appr-run-');
+    autoplanRun(run, [{ by: 'agent:GSTA-1', words: 'rec', at: '2026-10-24T13:15:04.000Z', p1: 'a' }]);
+    fs.writeFileSync(path.join(run, 'run.json'), JSON.stringify({ run: 'run-20261024131504', status: 'complete' }));
+    const rows = importAutoplan(run, 'b', 'Garry');
+    if ('code' in rows) throw new Error(rows.message);
+    expect(rows[0]!.ask).toContain('(autoplan run run-20261024131504, 2 decisions)');
+    expect(rows[0]!.source).toBe('autoplan:run-20261024131504@gate_rev=1');
+  });
+
   test('an unanswered gate imports nothing and says why', () => {
     const run = tmp('appr-run-');
     fs.writeFileSync(path.join(run, 'decisions.jsonl'), JSON.stringify({ schema_version: 1, run: 'run-1', id: 'run-1-p1', label: 'P1', status: 'pending', gate_rev: 1 }) + '\n');
