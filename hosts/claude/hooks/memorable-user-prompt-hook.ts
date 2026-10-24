@@ -405,7 +405,7 @@ async function policyVeto(cwd: string, timeoutMs: number, remaining: () => numbe
   });
   killInflight = null;
   if (raw.timedOut || raw.error || raw.status !== 0) return 'error';
-  const urls = raw.stdout.toString('utf8').split('\0').map((u) => u.trim()).filter(Boolean);
+  const urls = raw.stdout.toString('utf8').split('\0').filter((u) => u !== '');
   if (urls.length === 0) return 'error';
   for (const url of urls) {
     const res = memorableRecallPolicy(url, process.env, Math.max(1, Math.min(STAGE_CAP_MS, remaining())));
