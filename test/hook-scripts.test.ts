@@ -423,6 +423,31 @@ describe('check-careful.sh', () => {
       expect(exitCode).toBe(0);
       expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
     });
+
+    // bash 3.2 (macOS /bin/bash) mis-parses quote characters in a heredoc
+    // inside $( ), so the awk program inline made the whole hook a syntax error
+    // there. It is a file beside the hook, read with awk -f.
+    test('the masking program is a file beside the hook, not a heredoc inside $( )', () => {
+      const source = fs.readFileSync(CAREFUL_SCRIPT, 'utf8');
+      expect(source).not.toMatch(/\$\(cat <</);
+      expect(source).toContain('awk -f "$_MASK_AWK"');
+      expect(fs.existsSync(path.join(path.dirname(CAREFUL_SCRIPT), 'mask-commit-message.awk'))).toBe(true);
+    });
+
+    test('a partial install without the masking program still asks on the message text', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
+      try {
+        for (const file of ['check-careful.sh', 'hook-extract.sh']) {
+          fs.copyFileSync(path.join(path.dirname(CAREFUL_SCRIPT), file), path.join(dir, file));
+        }
+        const { exitCode, output } = runHook(path.join(dir, 'check-careful.sh'), carefulInput('git commit -m "drop table notes"'));
+        expect(exitCode).toBe(0);
+        expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+        expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('SQL DROP');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   // --- Shell obfuscation ---
