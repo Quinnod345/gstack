@@ -134,6 +134,28 @@ function realish(p: string): string {
   while (!fs.existsSync(head) && path.dirname(head) !== head) { tail.unshift(path.basename(head)); head = path.dirname(head); }
   try { return path.join(fs.realpathSync.native(head), ...tail); } catch { return path.resolve(p); }
 }
+/**
+ * Every location the path to `p` passes through, each symlink followed one hop at a time: a link inside the checkout picks
+ * the file even when the last hop points back outside it. A missing component ends the walk with the rest joined lexically.
+ */
+function resolutionChain(p: string): string[] {
+  const chain: string[] = [];
+  let cur = path.parse(path.resolve(p)).root;
+  let rest = path.relative(cur, path.resolve(p)).split(path.sep).filter(Boolean);
+  for (let hops = 0; rest.length && hops <= 40;) {
+    const next = path.join(cur, rest.shift()!);
+    let st: fs.Stats | undefined;
+    try { st = fs.lstatSync(next, { throwIfNoEntry: false }); } catch { st = undefined; }
+    chain.push(st ? next : path.join(next, ...rest));
+    if (!st) break;
+    if (!st.isSymbolicLink()) { cur = next; continue; }
+    hops++;
+    const target = path.resolve(cur, fs.readlinkSync(next));
+    cur = path.parse(target).root;
+    rest = [...path.relative(cur, target).split(path.sep).filter(Boolean), ...rest];
+  }
+  return chain;
+}
 const within = (root: string, p: string) => { const rel = path.relative(root, p); return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel); };
 
 /** Dotenv files Bun loads from the launch directory unless started with --no-env-file. */
@@ -156,7 +178,8 @@ export function defaultUserConfigPath(root: string): string {
 /** Why a user policy path must not be read, or null: a relative path (no HOME) or one a PR could commit is never trusted. */
 export function userConfigRejection(repoRoot: string, file: string): string | null {
   if (!path.isAbsolute(file)) return 'not an absolute path';
-  if (within(path.resolve(repoRoot), path.resolve(file)) || within(realish(repoRoot), realish(file))) return 'inside the repository; a PR could supply it';
+  const repo = path.resolve(repoRoot), real = realish(repoRoot);
+  if (within(repo, path.resolve(file)) || [file, ...resolutionChain(file)].some(p => within(real, realish(p)))) return 'inside the repository; a PR could supply it';
   return null;
 }
 

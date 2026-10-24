@@ -295,6 +295,28 @@ describe('gstack-pregate with a user-owned policy', () => {
     } finally { fs.rmSync(outside, { recursive: true, force: true }); }
   });
 
+  // Value: protects=a policy reached through the checkout is refused even when the last link points back outside it, so a
+  //   branch cannot steer which existing out-of-repo policy governs it; fails_when=containment checks only the lexical path and
+  //   the final target, and a state root or a link hop inside the checkout picks the file; why_new=security review of #3286;
+  //   seam=none; no_claim=case-only path differences
+  test('a policy whose link chain passes through the checkout is inside, even when its final target is outside', () => {
+    const { repo } = setup();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pregate-chain-'));
+    try {
+      const permissive = path.join(outside, 'permissive.json');
+      fs.writeFileSync(permissive, '{}');
+      fs.mkdirSync(path.join(repo.work, '.st', 'projects', 'x'), { recursive: true });
+      fs.symlinkSync(permissive, path.join(repo.work, '.st', 'projects', 'x', 'pregate.json'));
+      fs.symlinkSync(path.join(repo.work, '.st'), path.join(outside, 'root'));
+      expect(userConfigRejection(repo.work, path.join(outside, 'root', 'projects', 'x', 'pregate.json'))).toContain('inside the repository');
+      fs.symlinkSync(permissive, path.join(repo.work, '.st', 'hop.json'));
+      fs.symlinkSync(path.join(repo.work, '.st', 'hop.json'), path.join(outside, 'leaf.json'));
+      expect(userConfigRejection(repo.work, path.join(outside, 'leaf.json'))).toContain('inside the repository');
+      fs.symlinkSync(permissive, path.join(outside, 'direct.json'));
+      expect(userConfigRejection(repo.work, path.join(outside, 'direct.json'))).toBeNull();
+    } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+  });
+
   // Value: protects=--explain says when the user file was looked for and absent, and names a `local` id that matches no workflow lane;
   //   fails_when=either line is dropped and a typo'd slug or lane id silently does nothing; why_new=both lines are new; seam=none;
   //   no_claim=the line wording beyond its path and id
