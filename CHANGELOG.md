@@ -22,6 +22,25 @@
 - No threshold, budget, timeout, trial count or case kind changed. Pregate's lanes now map and run tests for `.rs` files that previously failed closed with "no test lane", and nested vitest/jest packages run under their own runner instead of `bun test`. A `.rs` file outside any crate, a crate with no tests, and a missing cargo or package manager still fail closed or stay incomplete; the tests above cover each.
 - No new dependency (Cargo.toml is parsed with Bun's built-in TOML parser), no network call in pregate itself, no workflow change. As with the root runner detection on main (`npx vitest run`), a nested package's detected runner (`npx`, `bun x`) may fetch a missing tool when it runs under `--allow-repo-commands`.
 
+**A repo that keeps `.gstack/` out of git can give pregate a policy, and name the CI lanes a local run satisfies (#3286).** On a shared repo where gstack is one contributor's tool, pregate fell back to defaults, so every platform lane the machine could not run (an `ubuntu-latest` suite on a Mac, say) became a `requires-remote` obligation that never cleared, even when that suite runs the same here. Ported from #3286 by arlophoenix, whose 13 commits carry the feature (merged with their history kept); our commits on top close two findings from a security-focused review of the port.
+
+### Added
+- **`lib/pregate/context.ts`, `lib/pregate/config.ts`** (arlophoenix): when the base branch carries no `.gstack/pregate.json`, `gstack-pregate run` reads `<state root>/projects/<slug>/pregate.json`. Never under `--policy-from head`, never a relative path or one inside the checkout, and never chosen by a checkout's `.env` (the bin ignores it, and a bare `bun gstack-pregate` beside one refuses). An unreadable file, a dangling link on its path, `sealed` or `price_file` refuses with `PREGATE_CONFIG_INVALID`; a base copy git cannot read refuses with `POLICY_SOURCE_UNAVAILABLE` unless `git ls-tree` confirms it is absent.
+- **`local`** (arlophoenix): `<workflow.yml>/<job>` lanes a local run satisfies run here instead of becoming `requires-remote`. Under 8 cores with a `remote_gate` or remote `test_backend`, the small-machine obligation still stands.
+- **`lib/pregate/index.ts`** (arlophoenix): the record names the user file and its digest, and `verify` goes `PREGATE_STALE` when it is edited, deleted, or appears after a run under the defaults. Fix texts for missing lanes, strays, stalls and `remote_gate` name the active policy file.
+
+### Fixed
+- **`lib/pregate/context.ts`**: a user policy whose path reaches the checkout through any symlink is ignored. Before, only the lexical path and the final target were checked, so a state root linked into the checkout, holding a link back out to another existing policy, let a branch choose a more permissive file without changing its bytes.
+- **`lib/pregate/index.ts`**: `verify` goes `PREGATE_STALE` when a link on the way to the absent user path starts pointing nowhere. A fresh run refuses that state, but verify looked only at the leaf, so an old defaults pass stayed publishable. The loader and verify now share one absence check.
+
+### Tests
+- `test/pregate-user-policy.test.ts` (new, arlophoenix) covers the user file, `local`, the refusals, `.env` isolation and stale receipts. New cases: a link chain through the checkout is refused for both a linked state root and a single in-repo hop, while a direct outside link is still read; and verify goes stale on a dangling parent, with the plain-absent path as the control.
+- `test/pregate-rust.test.ts`: the two cargo-lane cases skipped on Windows carry a `TODO(#3380)` naming the gap.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or skip changed. The user file can relax lanes only where the base has no policy at all, and only from outside the repository; the two fixes make that containment stricter.
+- No new dependency, no network call, no workflow change.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.

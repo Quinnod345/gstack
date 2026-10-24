@@ -85,9 +85,12 @@ else a gstack plugin's data directory, else `~/.gstack` ([docs/state-root.md](st
 (never under `--policy-from head`), it lives outside the repository so a PR still
 cannot reach it, and the record names it (`policy user <path>`) and fingerprints
 its bytes (`policy_digest`, and each check's `inputs.policy`); `verify` and the
-ship receipt treat an edited or deleted user file, or one that appears after a
-run under the defaults, as `PREGATE_STALE`. A path that is relative or resolves
-inside the repository is ignored, since a PR could commit it; `--explain` says
+ship receipt treat an edited or deleted user file, or one that appears (or a
+link on its path that starts pointing nowhere) after a run under the defaults,
+as `PREGATE_STALE`. A path that is relative, resolves inside the repository, or
+reaches it through any symlink on the way (a state root linked into the
+checkout, or a link hop inside it, even when the last hop points back outside)
+is ignored, since a PR could commit it or choose the file; `--explain` says
 so, or says `(absent)` when no file is there. The slug and state root come from
 the caller's environment, never the checkout's `.env`: the bin's shebang passes
 `--no-env-file`, and a bare `bun gstack-pregate` launched beside any `.env` file

@@ -2947,8 +2947,9 @@ or exists but cannot be read (a dangling symlink on its path counts).
 **Fix.** `gstack-pregate validate`. `secrets` and required-lane obligations
 cannot be downgraded; every other check id in `warn` is honoured only from the
 base branch's copy or the user-owned file. For the user-owned file, edit it
-directly at the path the message names. A user file inside the repository is
-ignored rather than read (`--explain` names it).
+directly at the path the message names. A user file inside the repository, or
+reached through a symlink into it, is ignored rather than read (`--explain`
+names it).
 
 <a id="pregate-secrets"></a>
 ### `PREGATE_SECRETS`
@@ -3061,8 +3062,9 @@ file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
 
 **Meaning.** `pregate.json` was recorded against a different working-tree
 fingerprint than the one being published (the final stamp, a regen, any edit),
-or the user-owned policy it ran under was edited or deleted (or one appeared
-after a run under the defaults).
+or the user-owned policy it ran under was edited or deleted (or one appeared,
+or a symlink on its path started pointing nowhere, after a run under the
+defaults).
 
 **Fix.** Rerun `gstack-pregate` after the final generation and stamp; Step 18
 refuses to write the ship receipt otherwise.
