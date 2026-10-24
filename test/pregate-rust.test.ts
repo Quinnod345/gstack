@@ -60,12 +60,19 @@ const CARGO_OK = [
   'echo "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"',
 ].join('\n');
 
-/** A `cargo` on PATH running `body` (default: reports its cwd and argv, then two passed tests and an empty doc-test binary). */
-function cargoShim(repo: FixtureRepo, body = CARGO_OK): { PATH: string } {
+/**
+ * A `cargo` on PATH running `body` (default: reports its cwd and argv, then two passed tests and an empty doc-test binary).
+ * `cargo.cmd` is what Bun.which finds on Windows. The lane puts its Bun's directory first on PATH, and that directory can
+ * hold a real cargo (/usr/local/bin, /opt/homebrew/bin), so on POSIX the lane's bash puts the shim first again through BASH_ENV.
+ */
+function cargoShim(repo: FixtureRepo, body = CARGO_OK): Record<string, string> {
   const dir = path.join(repo.root, 'shim');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'cargo'), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
-  return { PATH: `${dir}:${process.env.PATH ?? ''}` };
+  fs.writeFileSync(path.join(dir, 'cargo.cmd'), `@echo off\r\nbash "%~dp0cargo" %*\r\n`);
+  fs.writeFileSync(path.join(dir, 'path.sh'), `PATH='${dir}':"$PATH"\n`);
+  const PATH = [dir, process.env.PATH ?? ''].join(path.delimiter);
+  return process.platform === 'win32' ? { PATH } : { PATH, BASH_ENV: path.join(dir, 'path.sh') };
 }
 
 const rustTests = (tests: Iterable<string>) => [...tests].filter(t => t.endsWith('.rs')).sort();
