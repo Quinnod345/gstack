@@ -526,6 +526,54 @@ describe('memorable recall opt-in (#3359)', () => {
     expect(r.stderr).toContain('not a readable file');
   });
 
+  test('review hardening: empty, non-object or multi-document stores, and invalid tier values, fail closed in either root', () => {
+    const legacy = path.join(tmpHome, 'legacy');
+    fs.mkdirSync(legacy);
+    const extra = { GSTACK_TEST_LEGACY_ROOT: legacy };
+    const legacyStore = path.join(legacy, 'gbrain-repo-policy.json');
+    run(['set', A, 'read-only']);
+    for (const bad of ['', '  \n', 'null', '[]', '7', '{}{}']) {
+      fs.writeFileSync(legacyStore, bad);
+      const r = memo(A, extra);
+      expect([bad, r.status, r.stdout]).toEqual([bad, 2, '']);
+    }
+    fs.rmSync(legacyStore);
+    for (const value of [false, null, 7, 'none', 'Read-Only']) {
+      fs.writeFileSync(policyFile(), JSON.stringify({ _schema_version: 2, 'github.com/acme/client-a': value }));
+      expect([value, memo(A).status]).toEqual([value, 2]);
+    }
+    fs.writeFileSync(policyFile(), JSON.stringify({ _schema_version: 2, 'github.com/acme/client-a': false }));
+    fs.writeFileSync(legacyStore, JSON.stringify({ 'github.com/acme/client-a': 'read-only', _memorable_recall: { 'github.com/acme/client-a': 'allow' } }));
+    expect(memo(A, extra).status).toBe(2);
+  });
+
+  test('review hardening: a dangling symlink or an unsearchable directory is never read as no store', () => {
+    fs.symlinkSync(path.join(tmpHome, 'missing.json'), policyFile());
+    expect(memo(A).status).toBe(2);
+    fs.rmSync(policyFile());
+    const legacy = path.join(tmpHome, 'legacy');
+    fs.mkdirSync(legacy);
+    fs.symlinkSync(path.join(tmpHome, 'missing.json'), path.join(legacy, 'gbrain-repo-policy.json'));
+    expect(memo(A, { GSTACK_TEST_LEGACY_ROOT: legacy }).status).toBe(2);
+    fs.rmSync(path.join(legacy, 'gbrain-repo-policy.json'));
+    if (!canRevokeReads()) return;
+    fs.writeFileSync(path.join(legacy, 'gbrain-repo-policy.json'), JSON.stringify({ 'github.com/acme/client-a': 'deny' }));
+    fs.chmodSync(legacy, 0o600);
+    try {
+      expect(memo(A, { GSTACK_TEST_LEGACY_ROOT: legacy }).status).toBe(2);
+    } finally {
+      fs.chmodSync(legacy, 0o700);
+    }
+  });
+
+  test('review hardening: the lookup never writes: a schema-less store is not migrated or rewritten', () => {
+    const legacyShape = JSON.stringify({ 'github.com/acme/client-a': 'read-only', 'github.com/acme/old': 'allow', _memorable_recall: { 'github.com/acme/client-a': 'allow' } });
+    fs.writeFileSync(policyFile(), legacyShape);
+    expect(memo(A).stdout).toBe('read-only\tallow');
+    expect(memo('https://github.com/acme/old').stdout).toBe('read-write\toff');
+    expect(fs.readFileSync(policyFile(), 'utf-8')).toBe(legacyShape);
+  });
+
   test('the two metadata keys are never stored as remotes; the _unattributed sentinel still is', () => {
     const r = run(['set', '_memorable_recall', 'read-write']);
     expect(r.status).toBe(2);

@@ -352,10 +352,45 @@ cmd_set() {
   fi
 }
 
+# memorable_store_answer FILE KEY — "<tier> <allow|off>" for KEY in one store,
+# read from a single snapshot of the file with no write, migration or
+# quarantine (tier is none when the file or the key is absent; a legacy
+# "allow" reads as read-write in memory). Dies (exit 2) on anything else: a
+# path that is present but not a readable regular file, a directory that
+# cannot be searched, content that is not exactly one JSON object, or a
+# present key whose value is not a known tier.
+memorable_store_answer() {
+  local store="$1" key="$2" dir raw
+  dir=$(dirname "$store")
+  if [ -d "$dir" ] && ! [ -x "$dir" ]; then
+    die "cannot search $dir for the policy store — refusing the Memorable recall lookup."
+  fi
+  if ! [ -e "$store" ] && ! [ -L "$store" ]; then
+    printf 'none off\n'
+    return 0
+  fi
+  if ! [ -f "$store" ] || ! [ -r "$store" ]; then
+    die "policy store $store exists but is not a readable file — refusing the Memorable recall lookup. Inspect or remove it."
+  fi
+  raw=$(cat -- "$store") || die "cannot read policy store $store — refusing the Memorable recall lookup."
+  printf '%s' "$raw" | jq -e -s -r --arg key "$key" '
+    if length == 1 and (.[0] | type) == "object" then .[0] else error("not one JSON object") end
+    | (if has($key) then
+         (.[$key] | if . == "allow" then "read-write"
+                    elif . == "deny" or . == "read-only" or . == "read-write" then .
+                    else error("invalid tier") end)
+       else "none" end) as $tier
+    | ((._memorable_recall | if type == "object" then .[$key] else null end) == "allow") as $opt
+    | "\($tier) \(if $opt then "allow" else "off" end)"' 2>/dev/null \
+    || die "policy store $store is corrupt (not one JSON object, or an invalid tier for $key) — refusing the Memorable recall lookup. Inspect with: gstack-gbrain-repo-policy list; re-run /setup-gbrain to rebuild the store."
+}
+
 # memorable get — tier plus the effective Memorable recall opt-in, for the
-# recall hook. Read-only: a corrupt store (either root) is a hard error, like
-# get --batch, because quarantining it here would silently lift a set deny or
-# read-only veto. The opt-in counts only when the merged tier is read-only and
+# recall hook. Pure read: each store is read once, never migrated, never
+# quarantined, and any doubt about a present store is a hard error (exit 2),
+# because reading it as "no policy" would silently lift a deny or read-only
+# veto. The tier merges as get does (the ~/.gstack store contributes only deny
+# or read-only). The opt-in counts only when the merged tier is read-only and
 # every store that restricts the remote (deny or read-only) opts it in, so an
 # opt-in can never relax a restriction another store imposed.
 cmd_memorable_get() {
@@ -370,39 +405,26 @@ cmd_memorable_get() {
     printf 'unset\toff\n'
     return 0
   fi
-  local store
-  for store in "$POLICY_FILE" ${_gstack_legacy_root:+"$_gstack_legacy_root/gbrain-repo-policy.json"}; do
-    if { [ -e "$store" ] || [ -L "$store" ]; } && ! { [ -f "$store" ] && [ -r "$store" ]; }; then
-      die "policy store $store exists but is not a readable file — refusing the Memorable recall lookup. Inspect or remove it."
-    fi
-  done
-  if [ -n "$LEGACY_POLICY_FILE" ] && ! jq empty "$LEGACY_POLICY_FILE" 2>/dev/null; then
-    die "policy store $LEGACY_POLICY_FILE is corrupt (invalid JSON) — refusing the Memorable recall lookup. Inspect or remove it; its deny tiers apply to every state root."
+  local answer p_tier p_opt l_tier="none" l_opt="off"
+  answer=$(memorable_store_answer "$POLICY_FILE" "$key") || exit 2
+  read -r p_tier p_opt <<<"$answer"
+  if [ -n "$_gstack_legacy_root" ]; then
+    answer=$(memorable_store_answer "$_gstack_legacy_root/gbrain-repo-policy.json" "$key") || exit 2
+    read -r l_tier l_opt <<<"$answer"
   fi
-  local tier="unset"
-  if [ -f "$POLICY_FILE" ]; then
-    if ! jq empty "$POLICY_FILE" 2>/dev/null; then
-      die "policy store $POLICY_FILE is corrupt (invalid JSON) — refusing the Memorable recall lookup. Inspect with: gstack-gbrain-repo-policy list; re-run /setup-gbrain to rebuild the store."
-    fi
-    ensure_file
-    tier=$(jq -r --arg key "$key" '.[$key] // "unset"' "$POLICY_FILE")
-  fi
-  local merged
-  merged=$(merge_legacy_tier "$key" "$tier")
+  local merged="$p_tier"
+  case "$l_tier" in
+    deny|read-only)
+      if [ "$(_tier_rank "$l_tier")" -lt "$(_tier_rank "$merged")" ]; then merged="$l_tier"; fi ;;
+  esac
   if [ "$merged" != "read-only" ]; then
+    [ "$merged" = "none" ] && merged="unset"
     printf '%s\toff\n' "$merged"
     return 0
   fi
-  local optin="allow" other
-  case "$tier" in
-    deny|read-only) [ "$(memorable_optin "$POLICY_FILE" "$key")" = "allow" ] || optin="off" ;;
-  esac
-  if [ -n "$LEGACY_POLICY_FILE" ]; then
-    other=$(jq -r --arg key "$key" '.[$key] // "none"' "$LEGACY_POLICY_FILE")
-    case "$other" in
-      deny|read-only) [ "$(memorable_optin "$LEGACY_POLICY_FILE" "$key")" = "allow" ] || optin="off" ;;
-    esac
-  fi
+  local optin="allow"
+  case "$p_tier" in deny|read-only) [ "$p_opt" = "allow" ] || optin="off" ;; esac
+  case "$l_tier" in deny|read-only) [ "$l_opt" = "allow" ] || optin="off" ;; esac
   printf 'read-only\t%s\n' "$optin"
 }
 

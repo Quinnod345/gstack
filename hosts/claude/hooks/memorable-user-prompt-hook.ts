@@ -394,8 +394,18 @@ async function policyVeto(cwd: string, timeoutMs: number, remaining: () => numbe
   if (git.status === GIT_NO_REMOTE) return 'ok';
   if (git.status === GIT_FATAL && NOT_A_REPO_RE.test(git.stderrTail.trim())) return 'ok';
   if (git.status !== 0) return 'error';
-  const url = git.stdout.toString('utf8').trim();
-  if (!url) return 'ok';
+  if (!git.stdout.toString('utf8').trim()) return 'ok';
+  // The store is keyed by the configured URL (what `gstack-gbrain-repo-policy
+  // get` and /sync-gbrain read), not the url.*.insteadOf rewrite that
+  // `remote get-url` applies: a rewrite to another host must not dodge a deny.
+  const raw = await runExternal('git', ['config', '--get', 'remote.origin.url'], {
+    cwd, timeoutMs: Math.max(1, Math.min(timeoutMs, remaining())), maxBuffer: GIT_MAX_BUFFER, env: gitEnv(process.env),
+    onSpawn: (kill) => { killInflight = kill; },
+  });
+  killInflight = null;
+  if (raw.timedOut || raw.error || raw.status !== 0) return 'error';
+  const url = raw.stdout.toString('utf8').trim();
+  if (!url) return 'error';
   const res = memorableRecallPolicy(url, process.env, Math.max(1, Math.min(STAGE_CAP_MS, remaining())));
   if (res.error) return 'error';
   // `deny` and `read-only` are the tiers a user picks so a repo's content

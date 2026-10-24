@@ -19,7 +19,7 @@ import * as path from "path";
 import * as os from "os";
 import { spawnSync } from "child_process";
 
-import { memorableRecallPolicy, repoPolicyTier, repoPolicyTierBatch } from "../lib/gbrain-repo-policy-client";
+import { hasRepoPolicyStore, memorableRecallPolicy, repoPolicyTier, repoPolicyTierBatch } from "../lib/gbrain-repo-policy-client";
 import { canonicalizeRemote } from "../lib/gstack-memory-helpers";
 
 const ROOT = path.resolve(import.meta.dir, "..");
@@ -246,6 +246,11 @@ describe("memorableRecallPolicy (#3359: per-remote Memorable recall opt-in)", ()
   });
   test("a tier the client does not know (hand-edited store) is unreadable, never no-policy", () => {
     fs.writeFileSync(policyFile(), JSON.stringify({ _schema_version: 2, "github.com/acme/client-a": 7, _memorable_recall: { "github.com/acme/client-a": "allow" } }));
+    expect(memorableRecallPolicy(A, env())).toEqual({ tier: "none", memorableOptIn: false, error: "unreadable" });
+  });
+  test("a dangling symlink as the only store is not the no-store fast path: unreadable", () => {
+    fs.symlinkSync(path.join(tmpHome, "missing.json"), policyFile());
+    expect(hasRepoPolicyStore(env())).toBe(true);
     expect(memorableRecallPolicy(A, env())).toEqual({ tier: "none", memorableOptIn: false, error: "unreadable" });
   });
   test("a timed-out spawn classifies as unreadable", () => {

@@ -183,8 +183,10 @@ HTTPS spellings of it are one key). It is refused on a `deny` remote, and a
 Changing the remote's tier clears it, so moving a repo back to `read-only`
 later never silently re-opens recall. When `~/.gstack` also makes the remote
 read-only (see [state roots](state-root.md)), that store has to opt it in too.
-A corrupt policy store skips recall for every repo until you fix it; it is
-never reset to "no policy" by the hook. `gstack-gbrain-repo-policy list` shows
+A corrupt, empty or unreadable policy store (or a dangling symlink in its
+place) skips recall for every repo until you fix it; the hook never resets it
+to "no policy" and never rewrites it. The lookup uses the configured
+`remote.origin.url`, not the URL after `url.*.insteadOf` rewriting. `gstack-gbrain-repo-policy list` shows
 opted-in remotes with a `memorable=allow` column. Nothing about gbrain
 ingest changes: the repo stays `read-only` for `/sync-gbrain` and every
 other gbrain writer.

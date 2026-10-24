@@ -17,7 +17,7 @@
  */
 
 import { spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { lstatSync } from "fs";
 import { join } from "path";
 import { mergedStateRoots, resolveStateRoot } from "./state-root";
 
@@ -46,9 +46,20 @@ export function repoPolicyStorePath(env: NodeJS.ProcessEnv = process.env): strin
 /**
  * No store on disk = no policy was ever set (the fast path — no subprocess).
  * The ~/.gstack store counts too: its deny tiers merge into every state root.
+ * Only confirmed absence (ENOENT/ENOTDIR) is "no store": a dangling symlink,
+ * or a path that cannot be checked (an unsearchable directory), counts as a
+ * store, so the caller spawns the script and its own fail-closed rules apply.
  */
 export function hasRepoPolicyStore(env: NodeJS.ProcessEnv = process.env): boolean {
-  return mergedStateRoots(env).some((root) => existsSync(join(root, "gbrain-repo-policy.json")));
+  return mergedStateRoots(env).some((root) => {
+    try {
+      lstatSync(join(root, "gbrain-repo-policy.json"));
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return code !== "ENOENT" && code !== "ENOTDIR";
+    }
+  });
 }
 
 /** The bash script that owns the store — resolved relative to this file (lib/ → bin/), never cwd. */

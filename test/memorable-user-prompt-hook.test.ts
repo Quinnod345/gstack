@@ -290,6 +290,30 @@ describe('gate on: the mediated hand-off', () => {
     }
   });
 
+  test('#3359 review: a url.insteadOf rewrite to another host does not dodge a deny, and a dangling-symlink store fails closed', () => {
+    gateOn();
+    const url = 'https://fixture.invalid/org/denied.git';
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-memo-rewrite-'));
+    try {
+      spawnSync('git', ['init', '-q'], { cwd: repo, timeout: 10_000 });
+      spawnSync('git', ['remote', 'add', 'origin', url], { cwd: repo, timeout: 10_000 });
+      spawnSync('git', ['config', '--local', 'url.https://mirror.invalid/.insteadOf', 'https://fixture.invalid/'], { cwd: repo, timeout: 10_000 });
+      expect(spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: repo, encoding: 'utf8', timeout: 10_000 }).stdout.trim()).toBe('https://mirror.invalid/org/denied.git');
+      expect(spawnSync('bash', [POLICY, 'set', url, 'deny'], { env, encoding: 'utf8', timeout: 20_000 }).status).toBe(0);
+      const prompt = JSON.stringify({ prompt: 'hello', cwd: repo });
+      expect(runHook(prompt, {}, repo).stdout).toBe('');
+      expect(calls()).toBe('');
+      const store = path.join(home, '.gstack', 'gbrain-repo-policy.json');
+      fs.rmSync(store);
+      fs.symlinkSync(path.join(home, 'missing.json'), store);
+      expect(runHook(prompt, {}, repo)).toEqual({ status: 0, stdout: '', stderr: '' });
+      expect(calls()).toBe('');
+      expect(errLog()).toContain('trust policy lookup failed');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   test('gate flipped off between two runs: the second run spawns nothing (the mid-flight re-check itself cannot be interleaved from outside)', () => {
     // The pre-spawn re-check reads the same store; a deterministic mid-flight flip would need a
     // seam inside main(). This pins the observable contract only: once off, no spawn.

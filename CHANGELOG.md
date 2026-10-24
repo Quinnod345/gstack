@@ -12,7 +12,8 @@
 - **`hosts/claude/hooks/memorable-user-prompt-hook.ts`**: a `read-only` remote is recalled only when it is opted in; `deny` is always skipped. The skip line in `hook-errors.log` names the opt-in command.
 
 ### Fixed
-- The recall hook's policy lookup fails closed on a corrupt or non-file policy store, in either state root, and never quarantines it. The opt-in counts only when it is exactly `"allow"` and every store that makes the remote read-only (including `~/.gstack` under a custom state root) opts it in.
+- The recall hook's policy lookup is now a pure read that fails closed in either state root: a corrupt, empty or non-object store, a present key with an unknown tier, a path that is not a readable file (a dangling symlink included) and an unsearchable directory are all errors, never "no policy", and nothing is migrated, quarantined or rewritten. The opt-in counts only when it is exactly `"allow"` and every store that makes the remote read-only (including `~/.gstack` under a custom state root) opts it in.
+- The hook looks policy up by the configured `remote.origin.url`, as `get` and `/sync-gbrain` do, instead of the URL after `url.*.insteadOf` rewriting, so a rewrite to another host no longer dodges a deny. `hasRepoPolicyStore()` treats only confirmed absence as "no store", so a dangling symlink or an unreadable directory reaches the script's fail-closed checks instead of the no-policy fast path.
 
 ### Docs
 - `docs/memorable-workflow-memory.md` has a short "Recall in a read-only repo" section and updated refusal and troubleshooting lines.
@@ -20,10 +21,12 @@
 ### Tests
 - `test/memorable-user-prompt-hook.test.ts` drives the real hook: read-only stays blocked by default, the opt-in recalls on that remote and not on a second read-only remote, `deny` with a hand-written opt-in is skipped, and a corrupt store skips recall and is left in place.
 - `test/gbrain-repo-policy.test.ts` covers the CLI: per-remote keying (a different remote, a prefix-sharing remote and an unset remote stay off; the SSH spelling of the same remote matches), refusal on deny, read-write and unset, clearing on a tier change, malformed opt-ins reading off, corrupt and non-file stores in both roots failing with exit 2, and the second-store rule.
-- `test/gbrain-repo-policy-client.test.ts` covers `memorableRecallPolicy`: fast path, per-remote opt-in, deny, corrupt store, an unknown tier and a timeout.
+- `test/gbrain-repo-policy-client.test.ts` covers `memorableRecallPolicy`: fast path, per-remote opt-in, deny, corrupt store, an unknown tier, a dangling-symlink store and a timeout.
+- Review hardening, each test red at the pre-review head: empty, whitespace, `null`, array, number and two-document stores and `false`/`null`/unknown tier values fail with exit 2 in either root; dangling symlinks and an unsearchable directory fail closed; the lookup leaves a schema-less store byte-for-byte unchanged; and the hook refuses a deny remote whose origin is rewritten to another host.
 
 ### Gate integrity
-- One deliberate widening of a privacy veto, approved by Garry: a read-only remote with an explicit opt-in is recalled. Nothing else is loosened, and the corrupt-store path is tightened. Eight mutations of the new gate (the hook ignoring the opt-in, the hook dropping deny, the CLI reporting the opt-in on any tier, an unkeyed opt-in, a quarantining lookup, the client reading unknown output as no policy, the second store ignored, an opt-in accepted on deny) each turn at least one of the new tests red. No threshold, budget, timeout, trial count or case kind changed.
+- One deliberate widening of a privacy veto, approved by Garry: a read-only remote with an explicit opt-in is recalled. Nothing else is loosened, and the corrupt-store path is tightened. Twelve mutations of the new gate were run against the focused tests. Eleven turn at least one test red: the hook ignoring the opt-in, the hook dropping deny, the CLI reporting the opt-in on any tier, an unkeyed opt-in, a corrupt store read as no policy, the second store ignored, an opt-in accepted on deny, the hook using the rewritten URL, an existsSync fast path, any JSON document accepted, and a non-file path read as absent. The twelfth, the client reading unknown script output as no policy, stays green because the script can no longer produce such output. That check is a second layer and is left in place. No threshold, budget, timeout, trial count or case kind changed.
+- Known limit, unchanged by this PR: remotes that the store already treats as one key (`host:8443/x` and `host/8443/x`, or paths that differ only in case) share the opt-in exactly as they already share a tier.
 
 ## [1.91.186.0] - 2026-10-24
 
