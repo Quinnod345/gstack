@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**`gstack-diff-scope` sees Python tests and nested test directories (#3335).** A branch that changed `components/orch/services/shared/tests/test_native_store_custody.py` reported `SCOPE_TESTS=false`, because the Tests rule only knew `*.test.*`-style suffixes and `test/`, `tests/`, `spec/` and `__tests__/` at the repository root. /ship and /review use that flag to route the testing specialist, so a backend change whose tests follow pytest's `test_*.py` convention skipped it. The test-bootstrap resolver already counted these files, so the two detectors disagreed.
+
+### Fixed
+- **`bin/gstack-diff-scope`**: a changed path is a test when it matches `TEST_PATH_RE`, the same regex the test-bootstrap resolver uses for its TESTFILES count (`scripts/resolvers/testing.ts`): test dirs at any depth, `test_*.py`, `tests.py`, `_test.<ext>`, `.test.`/`.spec.` JS and TS, `_spec.rb` and `*Test.java`/`.kt`. `conftest.py` counts too. The existing globs stay.
+
+### Tests
+- `test/diff-scope.test.ts` adds the issue's three paths, `pkg/test_store.py`, Django's `tests.py`, `conftest.py`, and nested `__tests__/` and `spec/` dirs; all eight fail on main. Controls that stay `SCOPE_TESTS=false`: `latest.py`, `contest_rules.py`, `attest_signer.py` and a `testing/` dir. A new test checks that `TEST_PATH_RE` is byte-identical to the resolver's regex, so the two can't drift again.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
