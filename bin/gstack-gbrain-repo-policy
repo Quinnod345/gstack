@@ -356,18 +356,21 @@ cmd_set() {
 # read from a single snapshot of the file with no write, migration or
 # quarantine (tier is none when the file or the key is absent; a legacy
 # "allow" reads as read-write in memory). Dies (exit 2) on anything else: a
-# path that is present but not a readable regular file, a directory that
-# cannot be searched, content that is not exactly one JSON object, or a
+# path that is present but not a readable regular file, a path whose
+# existence cannot be confirmed (an unsearchable ancestor), content that is not exactly one JSON object, or a
 # present key whose value is not a known tier.
 memorable_store_answer() {
-  local store="$1" key="$2" dir raw
-  dir=$(dirname "$store")
-  if [ -d "$dir" ] && ! [ -x "$dir" ]; then
-    die "cannot search $dir for the policy store — refusing the Memorable recall lookup."
-  fi
+  local store="$1" key="$2" up raw
   if ! [ -e "$store" ] && ! [ -L "$store" ]; then
-    printf 'none off\n'
-    return 0
+    # Absent only if the nearest existing ancestor is a searchable directory:
+    # an unsearchable one hides an existing store from every test above.
+    up=$(dirname "$store")
+    while ! [ -e "$up" ] && ! [ -L "$up" ] && [ "$up" != "/" ] && [ "$up" != "." ]; do up=$(dirname "$up"); done
+    if [ -d "$up" ] && [ -x "$up" ]; then
+      printf 'none off\n'
+      return 0
+    fi
+    die "cannot confirm whether $store exists ($up is not a searchable directory) — refusing the Memorable recall lookup."
   fi
   if ! [ -f "$store" ] || ! [ -r "$store" ]; then
     die "policy store $store exists but is not a readable file — refusing the Memorable recall lookup. Inspect or remove it."

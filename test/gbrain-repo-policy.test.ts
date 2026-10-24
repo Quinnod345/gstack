@@ -564,6 +564,19 @@ describe('memorable recall opt-in (#3359)', () => {
     } finally {
       fs.chmodSync(legacy, 0o700);
     }
+    const nested = path.join(tmpHome, 'ancestor', 'nested');
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, 'gbrain-repo-policy.json'), JSON.stringify({ 'github.com/acme/client-a': 'deny' }));
+    fs.chmodSync(path.join(tmpHome, 'ancestor'), 0o600);
+    try {
+      const r = memo(A, { GSTACK_TEST_LEGACY_ROOT: nested });
+      expect([r.status, r.stdout]).toEqual([2, '']);
+      expect(r.stderr).toContain('not a searchable directory');
+    } finally {
+      fs.chmodSync(path.join(tmpHome, 'ancestor'), 0o700);
+    }
+    const absentUnder = path.join(tmpHome, 'no', 'such', 'root');
+    expect(memo(A, { GSTACK_TEST_LEGACY_ROOT: absentUnder }).stdout).toBe('unset\toff');
   });
 
   test('review hardening: the lookup never writes: a schema-less store is not migrated or rewritten', () => {

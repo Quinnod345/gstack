@@ -395,25 +395,28 @@ async function policyVeto(cwd: string, timeoutMs: number, remaining: () => numbe
   if (git.status === GIT_FATAL && NOT_A_REPO_RE.test(git.stderrTail.trim())) return 'ok';
   if (git.status !== 0) return 'error';
   if (!git.stdout.toString('utf8').trim()) return 'ok';
-  // The store is keyed by the configured URL (what `gstack-gbrain-repo-policy
+  // The store is keyed by the configured URLs (what `gstack-gbrain-repo-policy
   // get` and /sync-gbrain read), not the url.*.insteadOf rewrite that
-  // `remote get-url` applies: a rewrite to another host must not dodge a deny.
-  const raw = await runExternal('git', ['config', '--get', 'remote.origin.url'], {
+  // `remote get-url` applies, and every configured origin URL is checked:
+  // neither a rewrite nor an added URL may dodge a deny.
+  const raw = await runExternal('git', ['config', '--get-all', 'remote.origin.url'], {
     cwd, timeoutMs: Math.max(1, Math.min(timeoutMs, remaining())), maxBuffer: GIT_MAX_BUFFER, env: gitEnv(process.env),
     onSpawn: (kill) => { killInflight = kill; },
   });
   killInflight = null;
   if (raw.timedOut || raw.error || raw.status !== 0) return 'error';
-  const url = raw.stdout.toString('utf8').trim();
-  if (!url) return 'error';
-  const res = memorableRecallPolicy(url, process.env, Math.max(1, Math.min(STAGE_CAP_MS, remaining())));
-  if (res.error) return 'error';
-  // `deny` and `read-only` are the tiers a user picks so a repo's content
-  // never lands in a shared store; a third-party memory service is one.
-  // Only an explicit per-remote opt-in (`gstack-gbrain-repo-policy memorable
-  // set <url> allow`) lifts the read-only veto; nothing lifts deny.
-  if (res.tier === 'deny') return 'skip';
-  if (res.tier === 'read-only') return res.memorableOptIn ? 'ok' : 'skip';
+  const urls = raw.stdout.toString('utf8').split('\n').map((u) => u.trim()).filter(Boolean);
+  if (urls.length === 0) return 'error';
+  for (const url of urls) {
+    const res = memorableRecallPolicy(url, process.env, Math.max(1, Math.min(STAGE_CAP_MS, remaining())));
+    if (res.error) return 'error';
+    // `deny` and `read-only` are the tiers a user picks so a repo's content
+    // never lands in a shared store; a third-party memory service is one.
+    // Only an explicit per-remote opt-in (`gstack-gbrain-repo-policy memorable
+    // set <url> allow`) lifts the read-only veto; nothing lifts deny.
+    if (res.tier === 'deny') return 'skip';
+    if (res.tier === 'read-only' && !res.memorableOptIn) return 'skip';
+  }
   return 'ok';
 }
 
