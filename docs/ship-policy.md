@@ -471,6 +471,20 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 The PR body's first section is the ship receipt (`gstack-ship-receipt write … --body`),
 written by the pr-body section of `/ship` after the body is composed.
 
+## What `/land-and-deploy` reads from it
+
+Step 3.4 runs `show-effective --base <base>` before the merge and prints one
+`VERSION_CHECK:` verdict for the PR head:
+
+| Policy | Stops when | Passes |
+|---|---|---|
+| `queue_mode: stamp-at-merge` | the head's VERSION is not the base's version plus one bump, or the changelog's top two headings at the head are not that version and then the base's top entry (`STOP stamp stale`: run `gstack-restamp --next` on the branch, push the stamp, rerun) | an exact stamp; other open PRs' tentative stamps are ignored |
+| `queue_mode: claim-at-open` (and no policy file) | another open PR holds the same VERSION, or the base is already at or above it (`VERSION drift detected`: rerun `/ship`) | any unique VERSION above the base, including a MICRO bump or one below a sibling's claim |
+
+An invalid policy, an unreadable claim list or a missing VERSION is `unavailable`:
+the skill reports it and CI's version gate is the backstop. A base at or above the
+branch VERSION still stops.
+
 <a id="stamp-at-merge"></a>
 ## `queue_mode: stamp-at-merge`
 
