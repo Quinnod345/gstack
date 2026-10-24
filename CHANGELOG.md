@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**/autoplan works when Claude Code's project directory is a subfolder of the repository (#3296).** When the git root sits above the project (for example the root is `$HOME` and the session starts in `$HOME/projects/app`), a worktree session's journal lives in `.claude/worktrees/<name>` under that subfolder. The publication guard only looked for `<project dir>/.git/worktrees`, found nothing, and denied every phase Read with `foreign_cwd`, so the reporter had to restart the session from the repository root.
+
+### Fixed
+- **`autoplan/bin/phase-publication-hook.ts`**: `linkedWorktrees` walks up from the project directory to the first `.git` and reads that repository's worktree registry. A `.git` file (the project is itself a linked worktree or a submodule) stops the walk with no owners, as before. Git's two-way link is still required: the registry entry must name the worktree's `.git` file and that file must name the same entry back. No `git` process is started inside the hook.
+
+### Tests
+- `test/autoplan-publication-hook.test.ts` builds the reporter's layout with real `git worktree add`: a subfolder project directory (and a deeper one) owns the worktree under it, and the root still does. It fails on main. Controls that still get no owners: a nested independent repository (its own `.git` stops the walk), a project directory inside a linked worktree, a registry entry whose worktree names another repository, and a directory with no `.git` above it.
+
+### Gate integrity
+- One accepted-input change to review: from a project directory below the repository root, the guard now accepts the journal of a linked worktree of that same repository, which it already accepted when the project directory was the root. The seven existing `foreign_cwd` refusals in `test/autoplan-publication-guard.test.ts` (no link, one-sided links, another repository, a submodule gitdir, a project that is itself a worktree, a bare repository) still deny. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
