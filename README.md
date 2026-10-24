@@ -66,6 +66,8 @@ No vendored files in your repo, no version drift, no manual upgrades. Every Clau
 
 Swap `required` for `optional` if you'd rather nudge teammates than block them.
 
+`required` blocks skills with a hook that runs on [Node.js](https://nodejs.org/), so every teammate needs Node.js on PATH, on every OS. With Claude Code 2.1.295 or later the hook also blocks when it can't run (no Node.js, or a missing `.claude/hooks/check-gstack.cjs`); older Claude Code lets skills through in that case.
+
 ### OpenClaw
 
 OpenClaw spawns Claude Code sessions via ACP, so every gstack skill just works
