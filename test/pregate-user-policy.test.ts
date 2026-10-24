@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { loadConfigFromUser, validateConfig } from '../lib/pregate/config';
 import { buildContext, sha256, userConfigRejection } from '../lib/pregate/context';
-import { runPregate } from '../lib/pregate/index';
+import { runPregate, verifyPregate } from '../lib/pregate/index';
 import { BASE_PREGATE, BIN, cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 import { runScriptSync } from '../lib/script-invocation';
 
@@ -315,6 +315,24 @@ describe('gstack-pregate with a user-owned policy', () => {
       fs.symlinkSync(permissive, path.join(outside, 'direct.json'));
       expect(userConfigRejection(repo.work, path.join(outside, 'direct.json'))).toBeNull();
     } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+  });
+
+  // Value: protects=a defaults pass stops verifying once a link on the way to the absent user path dangles, the state a fresh
+  //   run refuses; fails_when=verify checks only the leaf and reads the broken parent as continued absence; why_new=security
+  //   review of #3286; seam=verifyPregate with the recorded tree passed in, so only the policy check differs; no_claim=the
+  //   bin's verify wiring (the stale-policy test covers it)
+  test('verify goes stale when a parent of the absent user path becomes a dangling link', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pregate-dangle-'));
+    try {
+      const userPolicy = path.join(dir, 'projects', 's', 'pregate.json');
+      const record = { schema_version: 1, tree: 'T', checks: [], policy: 'defaults', policy_user_path: userPolicy, verdict: 'pass' } as any;
+      expect(verifyPregate(dir, record, { tree: 'T' }).ok).toBe(true);
+      fs.symlinkSync(path.join(dir, 'not-yet-cloned'), path.join(dir, 'projects'));
+      expect((loadConfigFromUser(userPolicy) as { errors: { code: string }[] } | null)?.errors.map(e => e.code)).toEqual(['PREGATE_CONFIG_INVALID']);
+      const v = verifyPregate(dir, record, { tree: 'T' });
+      expect([v.ok, v.code]).toEqual([false, 'PREGATE_STALE']);
+      expect(v.message).toContain(`cannot confirm ${userPolicy} is still absent`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   // Value: protects=--explain says when the user file was looked for and absent, and names a `local` id that matches no workflow lane;

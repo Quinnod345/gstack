@@ -240,11 +240,16 @@ function danglingLink(file: string): boolean {
   return false;
 }
 
+/** Nothing at `file` and no dangling link on the way to it: the only state that means "no user policy", for the loader and verify alike. */
+export function userPolicyAbsent(file: string): boolean {
+  try { fs.statSync(file); return false; } catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' && !danglingLink(file); }
+}
+
 /** The user-owned copy for a repo that keeps `.gstack/` out of git; the caller consults it only when the base has none. */
 export function loadConfigFromUser(file: string, knownChecks: readonly string[] = []): ConfigLoad | null {
   let text: string;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT' && !danglingLink(file)) return null;
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT' && userPolicyAbsent(file)) return null;
     // An unreadable policy must refuse, never fall back to defaults (its guards would silently vanish).
     return { ...parseConfig('{}', knownChecks), errors: [{ code: 'PREGATE_CONFIG_INVALID', path: file, message: `cannot read the user-owned policy: ${(e as Error).message}` }], present: true, label: `user ${file}`, kind: 'user' };
   }

@@ -22,7 +22,7 @@ import { regenCheck } from './checks/regen';
 import { secretsCheck } from './checks/secrets';
 import { straysCheck } from './checks/strays';
 import { timingCheck } from './checks/timing';
-import { NON_DOWNGRADABLE } from './config';
+import { NON_DOWNGRADABLE, userPolicyAbsent } from './config';
 import { sha256, withFingerprint } from './context';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
@@ -155,7 +155,10 @@ function userPolicyChange(file: PregateFile): string | null {
   }
   const absent = file.policy_user_path;
   if (!absent) return null;
-  try { if (!fs.lstatSync(absent, { throwIfNoEntry: false })) return null; } catch (e) { return `cannot confirm ${absent} is still absent (${(e as Error).message}); rerun gstack-pregate`; }
+  if (userPolicyAbsent(absent)) return null;
+  let leaf: fs.Stats | undefined;
+  try { leaf = fs.lstatSync(absent, { throwIfNoEntry: false }); } catch { leaf = undefined; }
+  if (!leaf) return `cannot confirm ${absent} is still absent (a link on the way to it is dangling or unreadable); rerun gstack-pregate`;
   return `${absent} now holds a user-owned policy, and pregate.json was recorded under the defaults; rerun gstack-pregate`;
 }
 
