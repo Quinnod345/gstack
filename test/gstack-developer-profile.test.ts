@@ -47,7 +47,9 @@ function runDev(...args: string[]): { stdout: string; stderr: string; status: nu
 
 function logQuestion(payload: Record<string, unknown>): number {
   const res = spawnSync(BIN_LOG, [JSON.stringify(payload)], {
-    env: { ...process.env, GSTACK_HOME: tmpHome },
+    // gstack-question-log fires `--derive` in the background after every
+    // append, which races the explicit runDev('--derive') a test then makes.
+    env: { ...process.env, GSTACK_HOME: tmpHome, GSTACK_QUESTION_LOG_NO_DERIVE: '1' },
     encoding: 'utf-8',
     cwd: ROOT,
     timeout: 30_000,
@@ -307,6 +309,31 @@ describe('gstack-developer-profile --derive', () => {
     // Sample size counts the log entry, but no signal delta applied
     expect(p.inferred.sample_size).toBe(1);
     expect(p.inferred.values.scope_appetite).toBeCloseTo(0.5, 2);
+  });
+
+  test('contributing_events counts unique rows per dimension (#2625)', () => {
+    // plan-eng-review-arch-finding → fix-now writes architecture_care AND
+    // risk_tolerance from one row; an ad-hoc row writes nothing.
+    for (let i = 0; i < 2; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: `s${i}` });
+    }
+    logQuestion({ skill: 'plan-eng-review', question_id: 'adhoc-unregistered-question', question_summary: 'x', user_choice: 'fix-now', session_id: 's9' });
+    runDev('--derive');
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number } };
+    expect(p.inferred.contributing_events).toEqual({
+      scope_appetite: 0,
+      risk_tolerance: 2,
+      detail_preference: 0,
+      autonomy: 0,
+      architecture_care: 2,
+    });
+    expect(p.inferred.signal_events).toBe(2);
+  });
+
+  test('contributing_events is all zero when no answer matches a signal', () => {
+    runDev('--derive');
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number> } };
+    expect(Object.values(p.inferred.contributing_events)).toEqual([0, 0, 0, 0, 0]);
   });
 });
 
