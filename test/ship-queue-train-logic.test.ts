@@ -80,10 +80,10 @@ describe('repo identity (GSTA-67, #3331 on 2026-10-21)', () => {
   test("every URL form of one GitHub repository gives one key, the github.com key gstack's records already use", () => {
     const canonical = 'https://github.com/garrytan/gstack';
     for (const url of ['https://github.com/garrytan/gstack', 'https://github.com/garrytan/gstack.git', 'https://git.capy.ai/garrytan/gstack', 'https://git.capy.ai/garrytan/gstack.git/',
-      'git@github.com:garrytan/gstack.git', 'ssh://git@github.com/garrytan/gstack.git', 'ssh://git@ssh.github.com:443/garrytan/gstack.git', 'https://x-access-token:REDACTED@github.com/garrytan/gstack.git',
+      'git@github.com:garrytan/gstack.git', 'ssh://git@github.com/garrytan/gstack.git', 'ssh://git@ssh.github.com:443/garrytan/gstack.git', 'https://x-access-token:PASSWORD@github.com/garrytan/gstack.git',
       'http://www.github.com/GarryTan/GStack']) expect(normalizeRemoteUrl(url)).toBe(canonical);
     expect(normalizeRemoteUrl('https://gitlab.com/acme/widget.git')).toBe('https://gitlab.com/acme/widget');
-    expect(normalizeRemoteUrl('https://user:secret@gitlab.com/acme/widget.git')).toBe('https://gitlab.com/acme/widget');
+    expect(normalizeRemoteUrl('https://user:PASSWORD@gitlab.com/acme/widget.git')).toBe('https://gitlab.com/acme/widget');
     expect(normalizeRemoteUrl('/tmp/fixture/origin.git')).toBe('/tmp/fixture/origin');
   });
 
