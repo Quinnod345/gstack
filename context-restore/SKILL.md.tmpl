@@ -205,13 +205,15 @@ checkpoint(s) from another project; only this project's are listed." If it print
 
 **Check whether the branch moved since the save.** The stamp records the commit
 the save was made at in `head:`. Before presenting, compare it with this
-checkout:
+checkout. FILE is the checkpoint path chosen in Step 2, one of the paths Step 1
+printed:
 
 ```bash
-FILE="<the chosen file>"
-SAVED_HEAD=$(grep -m1 '^head:' "$FILE" 2>/dev/null | sed 's/^head:[[:space:]]*//' | tr -d '\r')
+FILE="<the FILE path printed above>"
+SAVED_HEAD=$(tr -d '\r' < "$FILE" 2>/dev/null | sed -n '1{/^---$/!q;d;}; /^---$/q; /^head:/{s/^head:[[:space:]]*//p;q;}')
 REPO_DIR=.
-git rev-parse --git-dir >/dev/null 2>&1 || REPO_DIR=$(grep -m1 '^project_root:' "$FILE" 2>/dev/null | sed 's/^project_root:[[:space:]]*//' | tr -d '\r')
+git rev-parse --git-dir >/dev/null 2>&1 || REPO_DIR=$(tr -d '\r' < "$FILE" 2>/dev/null | sed -n '1{/^---$/!q;d;}; /^---$/q; /^worktree:/{s/^worktree:[[:space:]]*//p;q;}')
+[ -n "$REPO_DIR" ] || REPO_DIR=$(tr -d '\r' < "$FILE" 2>/dev/null | sed -n '1{/^---$/!q;d;}; /^---$/q; /^project_root:/{s/^project_root:[[:space:]]*//p;q;}')
 CURRENT_HEAD=$(git -C "${REPO_DIR:-.}" rev-parse --verify -q HEAD 2>/dev/null)
 if [ -z "$SAVED_HEAD" ]; then
   echo "HEAD_UNTRACKED"
@@ -242,7 +244,9 @@ fi
   and sort as usual.
 
 **Sort Remaining Work by provenance.** Keep every item's original text and saved
-order, and drop nothing. Put an item under **Verify first** when it:
+order, and drop nothing. When the head check printed `HEAD_MOVED`, `HEAD_DIVERGED`
+or `HEAD_UNKNOWN`, skip the rules below: every item goes under Verify first,
+whatever its marker. Put an item under **Verify first** when it:
 - ends in `(path assumed)` or `(code read)`;
 - ends in `(path run)` but its text reports a failure;
 - ends in a parenthesised trailing marker that is **not** one of the five English

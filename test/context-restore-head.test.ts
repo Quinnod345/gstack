@@ -93,7 +93,7 @@ function save(cwd: string): string {
 }
 
 function headCheck(cwd: string, file: string) {
-  const r = sh(HEAD_BLOCK.replace('FILE="<the chosen file>"', `FILE=${JSON.stringify(file)}`), cwd);
+  const r = sh(HEAD_BLOCK.replace('FILE="<the FILE path printed above>"', `FILE=${JSON.stringify(file)}`), cwd);
   expect(r.status).toBe(0);
   return r.stdout;
 }
@@ -113,8 +113,10 @@ describe('context-save records the commit a checkpoint describes', () => {
     const file = save(app);
     const fm = fs.readFileSync(file, 'utf-8').split('---')[1];
     expect(fm).toContain(`\nhead: ${git(app, 'rev-parse', 'HEAD')}\n`);
-    spawnSync('bash', [path.join(ROOT, 'bin', 'gstack-slug'), '--stamp-checkpoint', file], { cwd: app, env: env(), timeout: 30_000 });
-    expect(fs.readFileSync(file, 'utf-8').split('---')[1].match(/^head:/gm)?.length).toBe(1);
+    commit(app, 'later work');
+    const restamp = spawnSync('bash', [path.join(ROOT, 'bin', 'gstack-slug'), '--stamp-checkpoint', file], { cwd: app, env: env(), timeout: 30_000 });
+    expect(restamp.status).toBe(0);
+    expect(fs.readFileSync(file, 'utf-8').split('---')[1].match(/^head:.*$/gm)).toEqual([`head: ${git(app, 'rev-parse', 'HEAD')}`]);
   });
 });
 
@@ -165,6 +167,24 @@ describe('context-restore compares the checkpoint with HEAD', () => {
     fs.writeFileSync(bogus, '---\nbranch: main\nhead: $(touch pwned)\n---\n');
     expect(headCheck(app, bogus)).toStartWith('HEAD_UNKNOWN ');
     expect(fs.existsSync(path.join(app, 'pwned'))).toBe(false);
+    const bodyOnly = path.join(tmp, 'body-only.md');
+    fs.writeFileSync(bodyOnly, `---\nstatus: in-progress\nbranch: main\n---\n\nhead: ${git(app, 'rev-parse', 'HEAD~0')}\n`);
+    expect(headCheck(app, bodyOnly).trim()).toBe('HEAD_UNTRACKED');
+  });
+
+  test('outside git, a save from a nested linked worktree is compared with that worktree, not the main checkout', () => {
+    const app = repo();
+    const wt = path.join(app, '.worktrees', 'side');
+    git(app, 'worktree', 'add', '-q', '-b', 'side', wt);
+    const file = save(wt);
+    expect(fs.readFileSync(file, 'utf-8')).toContain(`\nworktree: ${wt}\n`);
+    commit(app, 'main moves on');
+    commit(app, 'and again');
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside);
+    expect(headCheck(outside, file).trim()).toBe('HEAD_UNCHANGED');
+    commit(wt, 'worktree work');
+    expect(headCheck(outside, file)).toStartWith('HEAD_MOVED 1\n');
   });
 
   test('the prompt maps every status to what the user sees', () => {
@@ -175,6 +195,7 @@ describe('context-restore compares the checkpoint with HEAD', () => {
     expect(restore).toContain('`<n> commit(s) landed since this save:`');
     expect(restore).toContain('under **Verify first**');
     expect(restore).toContain('{commit-tracking lines, if any}');
+    expect(restore).toContain('When the head check printed `HEAD_MOVED`, `HEAD_DIVERGED`\nor `HEAD_UNKNOWN`, skip the rules below: every item goes under Verify first,\nwhatever its marker.');
     const save = fs.readFileSync(path.join(ROOT, 'context-save/SKILL.md'), 'utf-8');
     expect(save).toContain('`project_root:`, `worktree:` or `head:` yourself');
   });

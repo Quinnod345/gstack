@@ -6,10 +6,10 @@
 
 ### Fixed
 - **`bin/gstack-slug --stamp-checkpoint`** also writes `head:`, the commit the save describes, next to `remote:`, `project_root:` and `worktree:`. A re-stamp replaces it rather than adding a second line.
-- **`/context-restore`** compares `head:` with `HEAD` before presenting. When commits landed after the save it prints how many and lists up to ten, and puts every Remaining Work item under Verify first. A saved commit that is not in this checkout's history (saved on another branch, rebased, reset, or not fetched) is reported the same way. A malformed `head:` is checked as 40 or 64 hex digits before any git command sees it. Checkpoints saved before this keep their usual sorting with a one-line note.
+- **`/context-restore`** compares `head:` with `HEAD` before presenting. When commits landed after the save it prints how many and lists up to ten, and puts every Remaining Work item under Verify first. A saved commit that is not in this checkout's history (saved on another branch, rebased, reset, or not fetched) is reported the same way. A malformed `head:` is checked as 40 or 64 hex digits before any git command sees it, `head:` is read from the frontmatter only, and outside git the comparison uses the saved `worktree:` before `project_root:`. Checkpoints saved before this keep their usual sorting with a one-line note.
 
 ### Tests
-- `test/context-restore-head.test.ts` runs the real save-path, stamp and head-check blocks from the generated SKILL.md files in fixture repos: unchanged, two commits landed, diverged after a reset, resumed from another branch, pre-tracking, and a `head: $(touch pwned)` that must never execute.
+- `test/context-restore-head.test.ts` runs the real save-path, stamp and head-check blocks from the generated SKILL.md files in fixture repos: unchanged, two commits landed, diverged after a reset, resumed from another branch, a nested linked worktree restored from outside git, a re-stamp after a new commit, pre-tracking, a `head:` that appears only in the body, and a `head: $(touch pwned)` that must never execute.
 
 ## [1.91.186.0] - 2026-10-24
 
