@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**When /sync-gbrain refuses because a gbrain autopilot is running, it now says which process it found and what to do.** The guard against syncing while `gbrain autopilot` runs is machine-wide on purpose: two syncs sharing one brain or working tree can race and delete files (#1734). But the refusal only said `(process:gbrain autopilot)`, so someone whose autopilot served a different brain could not tell what was blocking them (#3360, part 1). Garry decided on 2026-10-24 to keep the check machine-wide and improve the message.
+
+### Changed
+- **`lib/gbrain-guards.ts`**: the live-process probe still runs `pgrep -f "gbrain autopilot"` across the whole machine, then reads each match's command line with `ps`. The refusal names every match as `pid <n> \`<command>\``, says the check counts any process on the machine whose command line contains "gbrain autopilot" (an autopilot serving another brain or repo included), and says to stop that autopilot or its `gbrain autopilot --install` service, or end a process that only mentions it. Commands are cut at 200 characters and the user and password part of a URL is masked. A pid that `ps` cannot describe still refuses, as `command unavailable`. The header comment now gives the machine-wide reason in place of the stale gbrain #1226 note.
+
+### Tests
+- `test/gbrain-guards.test.ts` pins the full refusal for one matched process, lists two matches, keeps an empty match inactive, and runs the real probe against a live process whose command line carries "gbrain autopilot" and a database URL with a password: the refusal names its pid and masks the password. All four fail on main. The existing probe, lock and stale-lock tests are unchanged.
+
+### Gate integrity
+- No gate edit: the guard refuses in exactly the cases it did before, and only its message changed. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
