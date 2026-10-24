@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**/plan-tune's inferred profile finally moves: a clicked answer is logged as the question's registered option key, not its label.** #2623 showed every inferred dimension stuck at 0.5 on a 1,286-event log: the AskUserQuestion hook recorded labels like "A) Fix it now (recommended)", while the signal map that turns answers into dimension nudges is keyed by registered option keys like `fix-now`, so 0 of 1,286 answers matched. Now five hook-captured label answers to the registered architecture-finding question move `architecture_care` from 0.5 to 0.632, and `--trace` lists all five.
+
+### Fixed
+- **`bin/gstack-question-log`**: on a hook-captured event (`source: hook`) for a registered `question_id`, the clicked label is mapped to that question's registered option key before it is written, and the label is kept in a new `choice_label` field. A label in `recommended` is mapped the same way, so `followed_recommendation` compares keys. Ad-hoc and `hook-<hash>` ids and unmatched or ambiguous labels are written as given. Rows from other writers (the agent's own log call, auto-decide, Codex import, typed free text) are unchanged, because readers such as the plan-ceo-review auto-decide check match the full mode names those rows carry. Existing logs are not rewritten.
+- **`scripts/psychographic-signals.ts`**: new `resolveOptionKey(question_id, label)`. It strips the `A)` selector and `(recommended)` suffix, then matches the label's leading words against the question's own options only: each key's own words (`fix-now` → "fix now") plus a short cue list ("Add to TODOs" → `defer`, "Ship as-is" → `skip`, "HOLD SCOPE" → `hold`). The longest cue wins and a tie stays unmapped.
+
+### Tests
+- `test/plan-tune.test.ts`: every registered option resolves from its own words, bare and as an `A) … (recommended)` label; 20 common phrasings, including the four plan-ceo-review mode names, map to their keys; negative controls (unregistered ids, a question with no options, a label naming no option, a mid-sentence cue, another question's key, a number that looks like a selector) stay unmapped. Two capture tests run the real bin: hook labels become keys with `choice_label` kept, while agent rows (including a `HOLD SCOPE` auto-decide row), ad-hoc ids, unmatched labels and free text are untouched, and a picked label follows a key recommendation. Both capture tests fail against the old bin.
+
+### Gate integrity
+- No test expectation, threshold, budget, timeout, trial count or case kind changed. Existing tests that pin label rows from the agent, auto-decide and Codex import paths pass unchanged.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
