@@ -434,6 +434,26 @@ describe('check-careful.sh', () => {
       expect(fs.existsSync(path.join(path.dirname(CAREFUL_SCRIPT), 'mask-commit-message.awk'))).toBe(true);
     });
 
+    // Newlines separate commands, and quote state carries across them. The
+    // per-line scanner joined lines (`-m xtruncate`) and restarted quote
+    // state on every line, so a quoted line break could hide a real command.
+    test.each([
+      ['git commit -m x\ntruncate -s 0 f', 'SQL TRUNCATE'],
+      ['git commit -m wip\nrm -rf build', 'recursive delete'],
+      ["git commit -m \"a\n-m 'x\" && rm -rf build && echo '", 'recursive delete'],
+    ])('a command on the next line still asks: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
+    test('a multi-line quoted message is masked as one message', () => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput('git commit -m "fix: guard migrations\n\nNo more drop table in the seed script."'));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
     test('a partial install without the masking program still asks on the message text', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
       try {

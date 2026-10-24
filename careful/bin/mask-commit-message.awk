@@ -1,6 +1,8 @@
 # mask-commit-message.awk — read by careful/bin/check-careful.sh (#1060).
 # Prints the command with the quoted message argument of git commit
-# (-m, -am, --message) replaced by an empty quoted string.
+# (-m, -am, --message) replaced by an empty quoted string. The command is
+# scanned as one string: newlines are kept, since bash runs each line as its
+# own command, and quote state carries across lines.
 function handle_msg(s, n, i,    j, safe) {
   if (i > n) return i
   if (substr(s, i, 1) == "'") {
@@ -24,34 +26,36 @@ function handle_msg(s, n, i,    j, safe) {
   }
   return i
 }
-{
-  n = length($0); sq = 0; dq = 0; bs = 0; i = 1
+{ cmd = (NR > 1) ? cmd "\n" $0 : $0 }
+END {
+  s = cmd
+  n = length(s); sq = 0; dq = 0; bs = 0; i = 1
   while (i <= n) {
-    c = substr($0, i, 1)
+    c = substr(s, i, 1)
     if (bs) { result = result c; bs = 0; i++; continue }
     if (!sq && dq && c == "\\") { result = result c; bs = 1; i++; continue }
     if (!dq && c == "'") { sq = !sq; result = result c; i++; continue }
     if (!sq && c == "\"") { dq = !dq; result = result c; i++; continue }
     if (sq || dq) { result = result c; i++; continue }
-    rest = substr($0, i)
+    rest = substr(s, i)
     if (rest ~ /^--message=/) {
       result = result "--message="; i += 10
-      i = handle_msg($0, n, i); continue
+      i = handle_msg(s, n, i); continue
     }
     if (rest ~ /^--message([ \t]|$)/) {
       result = result "--message"; i += 9
-      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
-      i = handle_msg($0, n, i); continue
+      while (i <= n && substr(s,i,1) ~ /[ \t]/) { result = result substr(s,i,1); i++ }
+      i = handle_msg(s, n, i); continue
     }
     if (rest ~ /^-am([ \t]|$)/) {
       result = result "-am"; i += 3
-      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
-      i = handle_msg($0, n, i); continue
+      while (i <= n && substr(s,i,1) ~ /[ \t]/) { result = result substr(s,i,1); i++ }
+      i = handle_msg(s, n, i); continue
     }
     if (rest ~ /^-m([ \t]|$)/) {
       result = result "-m"; i += 2
-      while (i <= n && substr($0,i,1) ~ /[ \t]/) { result = result substr($0,i,1); i++ }
-      i = handle_msg($0, n, i); continue
+      while (i <= n && substr(s,i,1) ~ /[ \t]/) { result = result substr(s,i,1); i++ }
+      i = handle_msg(s, n, i); continue
     }
     result = result c; i++
   }
