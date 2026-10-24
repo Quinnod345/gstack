@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+**Pregate gives touched Rust files a test lane, and runs a nested pnpm or vitest package with its own runner (#3344).** In a mixed Cargo and JavaScript repo, every touched `.rs` file failed `lanes` with "has no test lane", so /ship could not get a receipt, and a nested package's vitest tests ran under `bun test` from the repo root (about 98 false failures in the reporter's repo). Ported from #3346 by vilano93, whose two commits carry the feature; our commits on top quote the crate name and make the new fixtures hermetic.
+
+### Fixed
+- **`lib/pregate/rust.ts`** (new, vilano93): a crate is the nearest Cargo.toml with `[package]`. Its `.rs` files under `tests/` or holding a `#[cfg(test)]` are tests, and every `.rs` file of a crate and its Cargo.toml select that crate's tests and those of every crate depending on it. Manifests are parsed as TOML, so renamed, inherited, dotted, table-form and target-specific dependencies all count, and a crate runs from the workspace it is a member of under Cargo's rules (members, exclude, `package.workspace`). Nothing runs cargo to build the graph.
+- **`lib/pregate/checks/lanes.ts`** (vilano93): selected Rust tests run per crate as `cargo test -p <name>` from the workspace root and are judged on the summed `test result:` lines; zero tests is ZERO-RUN and a missing cargo is incomplete. A JS/TS test owned by a nested package.json that declares vitest or jest runs from that package through the package manager its `packageManager` field or nearest lockfile names (`pnpm exec`, `yarn`, `bun x`, else `npx`).
+- **`lib/pregate/checks/lanes.ts`**: the crate name comes from the repo's Cargo.toml and reaches the lane's shell, so it is now quoted like every file and cwd. Before, a crate named `evil;touch pwned` ran `touch pwned` in the workspace (the lane only runs with `--allow-repo-commands`, under which the repo's tests run anyway, but no other input reached the shell unquoted).
+- **`lib/pregate/init-draft.ts`** (vilano93): `init` notes that Rust tests run per crate.
+
+### Tests
+- `test/pregate-rust.test.ts` (new, vilano93) covers the crate model, the dependency forms, workspace membership, the cargo summary parser and three end-to-end lane runs. A new case runs a crate named `evil;touch pwned-by-crate-name` and checks that nothing is created and cargo receives the name as one argument; it fails before the quoting fix.
+- The cargo stand-in now wins PATH lookup everywhere. On windows-free-shard (5) two end-to-end cases failed deterministically because the shim PATH was joined with `:` (Git Bash never saw it) and the runner's real cargo ran against the fixture. On hosts where Bun and cargo share a directory, the lane puts Bun's directory first and the real cargo won the same way. The shim PATH now uses the platform delimiter, adds `cargo.cmd` for Windows lookup, and on POSIX the lane's bash puts the shim first again through `BASH_ENV`.
+- `test/pregate-selection.test.ts` (vilano93) covers nested pnpm/yarn/vitest/jest packages. Its `pnpm` stand-in gets the same `BASH_ENV` fix: on a host with a real pnpm beside Bun, the end-to-end case installed vitest from the network and came back incomplete.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count or case kind changed. Pregate's lanes now map and run tests for `.rs` files that previously failed closed with "no test lane", and nested vitest/jest packages run under their own runner instead of `bun test`. A `.rs` file outside any crate, a crate with no tests, and a missing cargo or package manager still fail closed or stay incomplete; the tests above cover each.
+- No new dependency (Cargo.toml is parsed with Bun's built-in TOML parser), no network access, no workflow change.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
