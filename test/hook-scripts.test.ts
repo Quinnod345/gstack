@@ -480,6 +480,36 @@ describe('check-careful.sh', () => {
       expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
     });
 
+    // The form agents use most: a quoted-delimiter heredoc inside "$( )". Its
+    // body is never expanded, so it is masked whole. Any other substitution,
+    // backtick, $'...' or heredoc leaves the command unmasked.
+    const heredocMessage = (body: string, delimiter = "'EOF'", end = 'EOF') =>
+      `git commit -m "$(cat <<${delimiter}\n${body}\n${end}\n)"`;
+    test.each([
+      heredocMessage('fix: guard the migration that could drop table users\n\nCo-Authored-By: A <a@example.com>'),
+      heredocMessage('docs: why we never truncate "audit" rows (see #12)'),
+      heredocMessage('chore: git reset --hard is documented', '"MSG"', 'MSG'),
+      heredocMessage('chore: rm -rf build in the clean script', "-'EOF'", '\tEOF'),
+    ])('a quoted-delimiter heredoc message is masked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    test.each([
+      [heredocMessage('docs: drop table notes') + ' && git push --force', 'force-push'],
+      [heredocMessage('drop table $(rm -rf build)', 'EOF'), 'recursive delete'],
+      [`git commit -m "$(echo " -m 'x" ; rm -rf build ; echo ')"`, 'recursive delete'],
+      ['git commit -m "\`rm -rf build\`"', 'recursive delete'],
+      ["git commit -F - <<'EOF'\ndocs: drop table notes\nEOF", 'SQL DROP'],
+      ["git commit -m $'drop table notes\\n'", 'SQL DROP'],
+    ])('other substitutions and heredocs stay unmasked: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
     test('a partial install without the masking program still asks on the message text', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
       try {

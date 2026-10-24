@@ -11,6 +11,39 @@
 # the message on stdout. Quotes and backslashes follow bash: a backslash
 # escapes the next character outside single quotes, and nothing inside single
 # quotes. An unterminated quote or escape prints the command unchanged.
+#
+# A message written as "$(cat <<'EOF' ... EOF )" (a quoted delimiter, so the
+# body is never expanded) is masked whole. Any other command substitution,
+# backtick, $'...' string or heredoc changes how bash reads the quotes after
+# it, so the command is printed unchanged.
+# heredoc_msg S N I — S[I] opens a double-quoted "$(cat <<'DELIM' ... DELIM )"
+# message: the index after its closing quote, else 0.
+function heredoc_msg(s, n, i,    p, rest, strip, delim, e, line) {
+  rest = substr(s, i + 1)
+  if (!match(rest, /^\$\(cat[ \t]+<<-?[ \t]*/)) return 0
+  strip = substr(rest, 1, RLENGTH) ~ /<<-/
+  p = i + 1 + RLENGTH
+  rest = substr(s, p)
+  if (match(rest, /^'[A-Za-z_][A-Za-z0-9_]*'/) || match(rest, /^"[A-Za-z_][A-Za-z0-9_]*"/)) delim = substr(rest, 2, RLENGTH - 2)
+  else if (match(rest, /^\\[A-Za-z_][A-Za-z0-9_]*/)) delim = substr(rest, 2, RLENGTH - 1)
+  else return 0
+  p += RLENGTH
+  while (p <= n && substr(s, p, 1) ~ /[ \t]/) p++
+  if (substr(s, p, 1) != "\n") return 0
+  p++
+  for (;;) {
+    if (p > n) return 0
+    e = index(substr(s, p), "\n")
+    if (!e) return 0
+    line = substr(s, p, e - 1)
+    if (strip) sub(/^\t+/, "", line)
+    p += e
+    if (line == delim) break
+  }
+  while (p <= n && substr(s, p, 1) ~ /[ \t\n]/) p++
+  if (substr(s, p, 2) != ")\"") return 0
+  return p + 2
+}
 function handle_msg(s, n, i,    j, c, safe) {
   if (i > n) return i
   if (substr(s, i, 1) == "'") {
@@ -21,6 +54,7 @@ function handle_msg(s, n, i,    j, c, safe) {
     return j + 1
   }
   if (substr(s, i, 1) == "\"") {
+    if ((j = heredoc_msg(s, n, i)) > 0) { result = result "\"\""; return j }
     j = i + 1; safe = 1
     while (j <= n && (c = substr(s, j, 1)) != "\"") {
       if (c == "$" || c == "`" || c == "\\") safe = 0
@@ -43,16 +77,18 @@ function flag(s, i,    rest, m) {
 END {
   s = cmd
   n = length(s); sq = 0; dq = 0; bs = 0; i = 1
-  atword = 1; words = 0; git = 0; commit = 0; piped = 0
+  atword = 1; words = 0; git = 0; commit = 0; piped = 0; unsure = 0
   while (i <= n) {
     c = substr(s, i, 1)
     if (bs) { result = result c; bs = 0; i++; continue }
     if (sq) { if (c == "'") sq = 0; result = result c; i++; continue }
+    if (c == "`" || substr(s, i, 2) == "$(") unsure = 1
     if (dq) {
       if (c == "\\") bs = 1
       else if (c == "\"") dq = 0
       result = result c; i++; continue
     }
+    if (substr(s, i, 2) == "<<" || substr(s, i, 2) == "$'") unsure = 1
     if (c ~ /[;&|()\n]/) {
       if (c == "|" && commit && substr(s, i + 1, 1) != "|") piped = 1
       atword = 1; words = 0; git = 0; commit = 0
@@ -76,5 +112,5 @@ END {
     else if (c == "\"") dq = 1
     result = result c; i++
   }
-  printf "%s", (sq || dq || bs || piped) ? s : result
+  printf "%s", (sq || dq || bs || piped || unsure) ? s : result
 }
