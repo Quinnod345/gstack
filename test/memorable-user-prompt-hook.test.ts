@@ -335,6 +335,26 @@ describe('gate on: the mediated hand-off', () => {
     }
   });
 
+  test('#3359 review: an origin URL containing a newline (a valid local path) is looked up whole, so its deny holds', () => {
+    gateOn();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-memo-nl-'));
+    try {
+      const remote = path.join(parent, 'remote\nname.git');
+      fs.mkdirSync(remote);
+      expect(spawnSync('git', ['init', '-q', '--bare', remote], { timeout: 10_000 }).status).toBe(0);
+      const repo = path.join(parent, 'work');
+      fs.mkdirSync(repo);
+      spawnSync('git', ['init', '-q'], { cwd: repo, timeout: 10_000 });
+      spawnSync('git', ['remote', 'add', 'origin', remote], { cwd: repo, timeout: 10_000 });
+      expect(spawnSync('bash', [POLICY, 'set', remote, 'deny'], { env, encoding: 'utf8', timeout: 20_000 }).status).toBe(0);
+      expect(spawnSync('bash', [POLICY, 'memorable', 'get', remote], { env, encoding: 'utf8', timeout: 20_000 }).stdout).toBe('deny\toff\n');
+      expect(runHook(JSON.stringify({ prompt: 'hello', cwd: repo }), {}, repo).stdout).toBe('');
+      expect(calls()).toBe('');
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   test('gate flipped off between two runs: the second run spawns nothing (the mid-flight re-check itself cannot be interleaved from outside)', () => {
     // The pre-spawn re-check reads the same store; a deterministic mid-flight flip would need a
     // seam inside main(). This pins the observable contract only: once off, no spawn.

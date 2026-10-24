@@ -17,8 +17,8 @@
  */
 
 import { spawnSync } from "child_process";
-import { lstatSync } from "fs";
-import { join } from "path";
+import { lstatSync, statSync } from "fs";
+import { dirname, join } from "path";
 import { mergedStateRoots, resolveStateRoot } from "./state-root";
 
 export type RepoPolicyTierValue = "deny" | "read-only" | "read-write" | "none";
@@ -46,19 +46,35 @@ export function repoPolicyStorePath(env: NodeJS.ProcessEnv = process.env): strin
 /**
  * No store on disk = no policy was ever set (the fast path — no subprocess).
  * The ~/.gstack store counts too: its deny tiers merge into every state root.
- * Only confirmed absence (ENOENT/ENOTDIR) is "no store": a dangling symlink,
- * or a path that cannot be checked (an unsearchable directory), counts as a
- * store, so the caller spawns the script and its own fail-closed rules apply.
+ * Only confirmed absence is "no store": ENOENT whose nearest existing
+ * ancestor resolves (so no dangling symlink cut the walk short). A dangling
+ * symlink at the store or above it, a non-directory component, or a path that
+ * cannot be checked (an unsearchable directory) counts as a store, so the
+ * caller spawns the script and its own fail-closed rules apply.
  */
 export function hasRepoPolicyStore(env: NodeJS.ProcessEnv = process.env): boolean {
   return mergedStateRoots(env).some((root) => {
+    let path = join(root, "gbrain-repo-policy.json");
     try {
-      lstatSync(join(root, "gbrain-repo-policy.json"));
+      lstatSync(path);
       return true;
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      return code !== "ENOENT" && code !== "ENOTDIR";
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return true;
     }
+    for (let up = dirname(path); up !== path; path = up, up = dirname(up)) {
+      try {
+        lstatSync(up);
+      } catch {
+        continue;
+      }
+      try {
+        statSync(up);
+        return false;
+      } catch {
+        return true;
+      }
+    }
+    return false;
   });
 }
 

@@ -399,13 +399,13 @@ async function policyVeto(cwd: string, timeoutMs: number, remaining: () => numbe
   // get` and /sync-gbrain read), not the url.*.insteadOf rewrite that
   // `remote get-url` applies, and every configured origin URL is checked:
   // neither a rewrite nor an added URL may dodge a deny.
-  const raw = await runExternal('git', ['config', '--get-all', 'remote.origin.url'], {
+  const raw = await runExternal('git', ['config', '--null', '--get-all', 'remote.origin.url'], {
     cwd, timeoutMs: Math.max(1, Math.min(timeoutMs, remaining())), maxBuffer: GIT_MAX_BUFFER, env: gitEnv(process.env),
     onSpawn: (kill) => { killInflight = kill; },
   });
   killInflight = null;
   if (raw.timedOut || raw.error || raw.status !== 0) return 'error';
-  const urls = raw.stdout.toString('utf8').split('\n').map((u) => u.trim()).filter(Boolean);
+  const urls = raw.stdout.toString('utf8').split('\0').map((u) => u.trim()).filter(Boolean);
   if (urls.length === 0) return 'error';
   for (const url of urls) {
     const res = memorableRecallPolicy(url, process.env, Math.max(1, Math.min(STAGE_CAP_MS, remaining())));
