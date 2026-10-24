@@ -9,7 +9,9 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
+import { bunIsolationArgs } from '../lib/bun-isolation';
 import { EXIT } from '../lib/headless-artifacts';
 import { parseSummary, planRuns } from '../lib/pregate/checks/lanes';
 import { DEFAULT_CONFIG } from '../lib/pregate/config';
@@ -223,14 +225,15 @@ describe('Cargo membership and test detection (port review)', () => {
   //   why_new=port review found classes escaped; seam=none; no_claim=cargo's own glob crate
   test('a members glob with a character class or ** admits the crate, so an inherited dependency links its dependent', () => {
     const files = {
-      'Cargo.toml': '[workspace]\nmembers = ["crates/[ab]", "nested/**/leaf"]\n\n[workspace.dependencies]\nbase = { package = "alpha", path = "crates/a" }\n',
+      'Cargo.toml': '[workspace]\nmembers = ["crates/[ab]", "nested/**/leaf", "unicode/?"]\n\n[workspace.dependencies]\nbase = { package = "alpha", path = "crates/a" }\n',
       'crates/a/Cargo.toml': pkg('alpha'), 'crates/a/tests/a.rs': '#[test]\nfn a() {}\n',
       'crates/b/Cargo.toml': pkg('beta', '\n[dependencies]\nbase = { workspace = true }\n'), 'crates/b/tests/b.rs': '#[test]\nfn b() {}\n',
       'crates/c/Cargo.toml': pkg('gamma'),
       'nested/x/y/leaf/Cargo.toml': pkg('leaf'),
+      'unicode/📦/Cargo.toml': pkg('boxed'),
     };
     const { crates } = cargoModel(...inMemory(files));
-    expect(['crates/a', 'crates/b', 'crates/c', 'nested/x/y/leaf'].map(r => crates.get(r)!.workspace)).toEqual(['', '', 'crates/c', '']);
+    expect(['crates/a', 'crates/b', 'crates/c', 'nested/x/y/leaf', 'unicode/📦'].map(r => crates.get(r)!.workspace)).toEqual(['', '', 'crates/c', '', '']);
     expect(dependentsOf(files, 'crates/a/Cargo.toml')).toEqual(['crates/a/tests/a.rs', 'crates/b/tests/b.rs']);
   });
 
@@ -248,13 +251,22 @@ describe('Cargo membership and test detection (port review)', () => {
   });
 
   // Value: protects=a hostile members glob or a file of unclosed cfg attributes cannot stall lane selection, which runs before
-  //   any runner deadline; fails_when=member globs go through a backtracking regex again (seconds per crate) or the cfg scan is
-  //   unbounded (quadratic); why_new=port review measured both over 5 s; seam=none; no_claim=a wall-clock budget (the test timeout bounds it)
-  test('a hostile members glob and a run of unclosed cfg attributes are matched in linear time', () => {
-    const files = { 'Cargo.toml': `[workspace]\nmembers = ["${'*a'.repeat(20)}b"]\n`, [`${'a'.repeat(40)}/Cargo.toml`]: pkg('k') };
-    expect(cargoModel(...inMemory(files)).crates.get('a'.repeat(40))!.workspace).toBe('a'.repeat(40));
-    expect(hasCfgTest('#[cfg('.repeat(20_000))).toBe(false);
-  });
+  //   any runner deadline; each probe runs in its own supervised Bun so a regression is killed and fails instead of hanging the
+  //   file; fails_when=member globs backtrack again (an exponential '*a*a…b', or a rescan per unmatched '[') or the cfg scan
+  //   rescans from every start (quadratic: about 80 s on 600 KB, against tens of ms now); why_new=port review; seam=none;
+  //   no_claim=a wall-clock budget for selection (the 30 s kill only separates linear from super-linear)
+  const supervised = (code: string) => spawnSync(process.execPath, [...bunIsolationArgs(), '-e', `import { cargoModel, hasCfgTest } from ${JSON.stringify(path.join(import.meta.dir, '..', 'lib', 'pregate', 'rust.ts'))};\n${code}`], { encoding: 'utf8', timeout: 30_000 });
+  test('a hostile members glob is matched without backtracking', () => {
+    const r = supervised(`
+      const pkg = n => '[package]\\nname = "' + n + '"\\nversion = "0.1.0"\\n';
+      const run = (members, dirs) => { const files = { 'Cargo.toml': '[workspace]\\nmembers = ' + JSON.stringify(members) + '\\n' }; dirs.forEach((d, i) => { files[d + '/Cargo.toml'] = pkg('k' + i); }); return cargoModel(Object.keys(files), f => files[f] ?? null); };
+      const exp = run(['*a'.repeat(20) + 'b'], ['a'.repeat(40)]).crates.get('a'.repeat(40)).workspace;
+      const brackets = run(['['.repeat(1000000)], Array.from({ length: 10 }, (_, i) => 'c' + i)).crates.get('c0').workspace;
+      console.log(JSON.stringify([exp, brackets]));`);
+    expect(r.error).toBeUndefined();
+    expect(r.stdout.trim()).toBe(JSON.stringify(['a'.repeat(40), '']));
+  }, 60_000);
+
 });
 
 describe('gstack-pregate on a Rust workspace', () => {

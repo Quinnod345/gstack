@@ -50,36 +50,41 @@ function joinRel(dir: string, rel: string): string | null {
   if (joined === '..' || joined.startsWith('../') || path.posix.isAbsolute(joined)) return null;
   return joined === '.' ? '' : joined;
 }
-/** One glob component (`*`, `?`, `[...]` with `!`/`^` negation and ranges, else literal) against one path component, by dynamic programming: O(pattern × name), no regex backtracking. */
+/** One glob component (`*`, `?`, `[...]` with `!`/`^` negation and ranges, else literal) against one path component, by Unicode code point and dynamic programming: O(pattern × name), no regex backtracking. */
 function componentMatch(glob: string, name: string): boolean {
+  const g = Array.from(glob);
+  const s = Array.from(name);
+  const nextClose = new Array<number>(g.length + 1).fill(-1);
+  for (let i = g.length - 1; i >= 0; i--) nextClose[i] = g[i] === ']' ? i : nextClose[i + 1]!;
   const tokens: Array<'*' | ((c: string) => boolean)> = [];
-  for (let i = 0; i < glob.length; i++) {
-    const ch = glob[i]!;
-    const negate = ch === '[' && /[!^]/.test(glob[i + 1] ?? '');
-    const close = ch === '[' ? glob.indexOf(']', i + (negate ? 3 : 2)) : -1;
+  for (let i = 0; i < g.length; i++) {
+    const ch = g[i]!;
+    const negate = ch === '[' && /[!^]/.test(g[i + 1] ?? '');
+    const close = ch === '[' ? nextClose[i + (negate ? 3 : 2)] ?? -1 : -1;
     if (ch === '*') tokens.push('*');
     else if (ch === '?') tokens.push(() => true);
     else if (close > 0) {
-      const body = glob.slice(i + (negate ? 2 : 1), close);
+      const body = g.slice(i + (negate ? 2 : 1), close).map(c => c.codePointAt(0)!);
       tokens.push(c => {
+        const p = c.codePointAt(0)!;
         let hit = false;
         for (let j = 0; j < body.length; j++) {
-          if (body[j + 1] === '-' && j + 2 < body.length) { hit ||= c >= body[j]! && c <= body[j + 2]!; j += 2; } else hit ||= c === body[j];
+          if (body[j + 1] === 0x2d && j + 2 < body.length) { hit ||= p >= body[j]! && p <= body[j + 2]!; j += 2; } else hit ||= p === body[j];
         }
         return hit !== negate;
       });
       i = close;
     } else tokens.push(c => c === ch);
   }
-  let row = name.split('').map(() => false).concat(false);
+  let row = s.map(() => false).concat(false);
   row[0] = true;
   for (const t of tokens) {
     const next = row.map(() => false);
     next[0] = t === '*' && row[0]!;
-    for (let j = 1; j <= name.length; j++) next[j] = t === '*' ? row[j]! || next[j - 1]! : row[j - 1]! && t(name[j - 1]!);
+    for (let j = 1; j <= s.length; j++) next[j] = t === '*' ? row[j]! || next[j - 1]! : row[j - 1]! && t(s[j - 1]!);
     row = next;
   }
-  return row[name.length]!;
+  return row[s.length]!;
 }
 /** A Cargo `members` glob against a workspace-relative crate directory, component by component; `**` spans any number of components. */
 function memberMatch(glob: string, rel: string): boolean {
@@ -94,6 +99,8 @@ function memberMatch(glob: string, rel: string): boolean {
   }
   return row[p.length]!;
 }
+/** Past this many characters of `members` globs a workspace admits every crate under it: a wrong member fails loudly in cargo, a dropped one is a silent false green. */
+const MAX_MEMBER_GLOB_CHARS = 4096;
 const inside = (dir: string, root: string) => root === '' || dir === root || dir.startsWith(`${root}/`);
 const relTo = (dir: string, root: string) => (root === '' ? dir : dir === root ? '' : dir.slice(root.length + 1));
 
@@ -150,7 +157,7 @@ export function cargoModel(files: readonly string[], read: ReadFile): CargoModel
     // Cargo's rules: the root package and a literally listed member always belong; a glob match or a path dependency of a
     // member inside the workspace belongs unless `exclude` names it or a directory above it.
     const literal = (r: string) => globs.some(g => !/[*?[]/.test(g) && relTo(r, ws.dir) === g);
-    const members = new Set([...own].filter(r => r === ws.dir || literal(r) || (globs.some(g => memberMatch(g, relTo(r, ws.dir))) && !excluded(r))));
+    const members = new Set([...own].filter(r => r === ws.dir || literal(r) || ((globs.join('').length > MAX_MEMBER_GLOB_CHARS || globs.some(g => memberMatch(g, relTo(r, ws.dir)))) && !excluded(r))));
     memberCache.set(ws.dir, members);
     const queue = [...members];
     while (queue.length) {
