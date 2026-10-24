@@ -236,8 +236,8 @@ fi
   under **Verify first**: the saving session could not know about those commits,
   so any step may already be done.
 - `HEAD_DIVERGED` or `HEAD_UNKNOWN`: print `This checkpoint was saved at {first 7
-  characters of head}, which is not in this checkout's history (rebased, reset, or
-  not fetched).` and list every item under Verify first.
+  characters of head}, which is not in this checkout's history (saved on another
+  branch, rebased, reset, or not fetched).` and list every item under Verify first.
 - `HEAD_UNTRACKED`: print `This checkpoint predates commit tracking; restore cannot tell whether work landed after it.`
   and sort as usual.
 

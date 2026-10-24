@@ -144,6 +144,18 @@ describe('context-restore compares the checkpoint with HEAD', () => {
     expect(headCheck(app, file)).toStartWith('HEAD_DIVERGED ');
   });
 
+  test('a checkpoint resumed from another branch is reported, and the prompt names that cause', () => {
+    const app = repo();
+    git(app, 'checkout', '-q', '-b', 'feature');
+    commit(app, 'feature work');
+    const file = save(app);
+    git(app, 'checkout', '-q', 'main');
+    commit(app, 'unrelated main work');
+    expect(headCheck(app, file)).toStartWith('HEAD_DIVERGED ');
+    const restore = fs.readFileSync(path.join(ROOT, 'context-restore/SKILL.md'), 'utf-8');
+    expect(restore).toContain('(saved on another\n  branch, rebased, reset, or not fetched)');
+  });
+
   test('checkpoints saved before head tracking, or with a malformed head, are never treated as current', () => {
     const app = repo();
     const legacy = path.join(tmp, 'legacy.md');
