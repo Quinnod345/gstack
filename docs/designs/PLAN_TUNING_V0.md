@@ -87,6 +87,8 @@ After weighing Codex's argument, we chose to roll back CEO EXPANSION and ship an
   "inferred": {
     "values": {"scope_appetite": 0.72, "risk_tolerance": 0.58, "...": "..."},
     "sample_size": 47,
+    "signal_events": 19,
+    "contributing_events": {"scope_appetite": 9, "risk_tolerance": 6, "...": "..."},
     "diversity": {
       "skills_covered": 5,
       "question_ids_covered": 14,
@@ -102,6 +104,8 @@ After weighing Codex's argument, we chose to roll back CEO EXPANSION and ship an
   }
 }
 ```
+
+`signal_events` counts the logged answers that moved any dimension, and `contributing_events` counts, per dimension, the unique answers that moved it, so a dimension with no evidence (0) is visible beside one whose evidence balances out; both print 0.5 (#2623). Each value is the sigmoid of its accumulated deltas, and each session's sum per dimension is clamped to the largest single delta in the signal map (currently ±0.06), so one long review can't pin a dimension; `--trace <dim>` lists every contributing answer, each clamped session and the total.
 
 **Diversity check** (Codex #13): `inferred` is considered "enough data" only when `sample_size >= 20 AND skills_covered >= 3 AND question_ids_covered >= 8 AND days_span >= 7`. Below this, `/plan-tune profile` shows "not enough observed data yet" instead of a potentially-misleading inferred value.
 

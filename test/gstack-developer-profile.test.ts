@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { SIGNAL_MAP, normalizeToDimensionValue } from '../scripts/psychographic-signals';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN_DEV = path.join(ROOT, 'bin', 'gstack-developer-profile');
@@ -334,6 +335,59 @@ describe('gstack-developer-profile --derive', () => {
     runDev('--derive');
     const p = readProfile() as { inferred: { contributing_events: Record<string, number> } };
     expect(Object.values(p.inferred.contributing_events)).toEqual([0, 0, 0, 0, 0]);
+  });
+});
+
+// -----------------------------------------------------------------------
+// Per-session bound (#2623): one session moves a dimension at most as far
+// as the largest single delta in SIGNAL_MAP.
+// -----------------------------------------------------------------------
+
+describe('gstack-developer-profile per-session bound', () => {
+  const CAP = Math.max(...Object.values(SIGNAL_MAP).flatMap((byChoice) => Object.values(byChoice).flat().map((d) => Math.abs(d.delta))));
+  const arch = (session_id: string | undefined, user_choice = 'fix-now', i = 0) =>
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice, ts: `2026-04-0${i + 1}T10:00:00Z`, ...(session_id ? { session_id } : {}) });
+  const inferred = () => (readProfile() as { inferred: { values: Record<string, number>; contributing_events: Record<string, number> } }).inferred;
+
+  test('the bound is the largest single delta in the signal map', () => {
+    expect(CAP).toBe(0.06);
+  });
+
+  test('five answers in one session move a dimension by the bound, not by their sum', () => {
+    for (let i = 0; i < 5; i++) arch('one-review', 'fix-now', i);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(CAP).toFixed(3));
+    expect(inferred().contributing_events.architecture_care).toBe(5);
+  });
+
+  test('the same five answers across five sessions are not bounded (negative control)', () => {
+    for (let i = 0; i < 5; i++) arch(`s${i}`, 'fix-now', i);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(5 * 0.05).toFixed(3));
+  });
+
+  test('rows without a session_id each count as their own session', () => {
+    for (let i = 0; i < 3; i++) arch(undefined, 'fix-now', i);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+  });
+
+  test('answers in one session net out before the bound applies', () => {
+    arch('mixed', 'fix-now', 0);
+    arch('mixed', 'accept-risk', 1);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(0.05 - 0.04).toFixed(3));
+  });
+
+  test('--trace shows the capped session and a total that matches --derive', () => {
+    for (let i = 0; i < 5; i++) arch('one-review', 'fix-now', i);
+    arch('later', 'defer', 6);
+    runDev('--derive');
+    const r = runDev('--trace', 'architecture_care');
+    expect(r.stdout).toContain('6 events for architecture_care');
+    expect(r.stdout).toContain('session one-review: +0.250 capped to +0.060');
+    expect(r.stdout).not.toContain('session later');
+    expect(r.stdout).toContain(`TOTAL: +0.040 (each session capped at ±${CAP}) → ${inferred().values.architecture_care.toFixed(3)}`);
   });
 });
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+**/plan-tune's inferred profile no longer pins at 1.0 after a few reviews, and it now shows how many answers moved each dimension.** This closes the last two parts of #2623. One /plan-eng-review produces about five answers, and every answer added its full delta, so eight sessions of "fix now" took `architecture_care` to 0.998, as uninformative as the 0.5 it replaced. Now each session moves a dimension at most as far as one strong answer, and the same eight sessions read 0.808. The profile also records `contributing_events` per dimension, so a dimension with no evidence reads 0 instead of a bare 0.5.
+
+### Fixed
+- **`bin/gstack-developer-profile`**: `--derive` sums each session's deltas per dimension and clamps the sum to the largest single delta in the signal map (±0.06 today). Answers within a session net out before the clamp, and a row without a `session_id` is its own session. `--trace` uses the same accumulation, so it lists every contributing answer, each clamped session ("session review-1: +0.250 capped to +0.060") and a `TOTAL` line whose value matches `--derive`.
+
+### Added
+- **`inferred.contributing_events`**: per dimension, the number of unique logged answers that moved it. Ported from #2625 by @v639dragoon, with co-author credit. #2625's autonomy signal from `followed_recommendation` stays parked, as decided in its Oct 8 review.
+
+### Docs
+- `docs/designs/PLAN_TUNING_V0.md` documents `signal_events`, `contributing_events` and the per-session bound in the profile schema.
+
+### Tests
+- `test/gstack-developer-profile.test.ts`: `contributing_events` counts unique rows when one answer writes two dimensions, and is all zero with no signal. The bound equals the signal map's largest delta. Five answers in one session move a dimension by exactly the bound. `--trace` prints the clamped session and a total that matches `--derive`. Negative controls: the same five answers in five sessions, rows without a `session_id`, and an answer pair that nets out are not clamped. The four new positive tests fail against the old bin.
+- The test helper `logQuestion` sets `GSTACK_QUESTION_LOG_NO_DERIVE=1`, so the background derive can't race a test's own `--derive` (from #2625).
+
+### Gate integrity
+- No test expectation, threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.

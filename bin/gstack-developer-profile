@@ -11,7 +11,8 @@
 #                       write updated ~/.gstack/developer-profile.json.
 #   --profile           emit the full profile as JSON (all fields).
 #   --gap               emit declared-vs-inferred gap as JSON.
-#   --trace <dim>       show events that contributed to a dimension.
+#   --trace <dim>       show events that contributed to a dimension, each
+#                       session clamped by the per-session bound, and the total.
 #   --narrative         (v2 stub) output a coach bio paragraph.
 #   --vibe              (v2 stub) output the one-word archetype.
 #   --check-mismatch    detect meaningful gaps between declared and observed.
@@ -404,6 +405,67 @@ do_gap() {
 }
 
 # -----------------------------------------------------------------------
+# Signal accumulation shared by --derive and --trace, so the trace always
+# explains exactly the value derive wrote. Each row's SIGNAL_MAP deltas are
+# summed per (session, dimension) and each session's sum is clamped to
+# ±cap, where cap is the largest single delta in SIGNAL_MAP: one session
+# moves a dimension at most as far as one strong answer. Without the bound
+# a single /plan-eng-review (about five answers) moved a dimension by 0.25
+# and about eight sessions pinned it at 1.0 (#2623). A row without a
+# session_id is its own session.
+# -----------------------------------------------------------------------
+ACCUMULATE_SIGNALS_JS=$(cat <<'JS'
+function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
+  let cap = 0;
+  for (const byChoice of Object.values(SIGNAL_MAP)) {
+    for (const deltas of Object.values(byChoice)) {
+      for (const d of deltas) cap = Math.max(cap, Math.abs(d.delta));
+    }
+  }
+  const contributing = Object.fromEntries(dims.map((d) => [d, 0]));
+  const sessions = new Map();
+  const rows = [];
+  const skills = new Set();
+  const qids = new Set();
+  const days = new Set();
+  let count = 0;
+  let signalEvents = 0;
+  for (const line of lines) {
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (!e.question_id || !e.user_choice) continue;
+    count++;
+    skills.add(e.skill);
+    qids.add(e.question_id);
+    if (e.ts) days.add(String(e.ts).slice(0, 10));
+    const def = QUESTIONS[e.question_id];
+    const deltas = (def && def.signal_key && SIGNAL_MAP[def.signal_key]?.[e.user_choice]) || [];
+    if (deltas.length === 0) continue;
+    signalEvents++;
+    const session = typeof e.session_id === 'string' && e.session_id ? e.session_id : 'row-' + count;
+    const sums = sessions.get(session) || {};
+    sessions.set(session, sums);
+    for (const d of deltas) {
+      sums[d.dim] = (sums[d.dim] || 0) + d.delta;
+      rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, session, dim: d.dim, delta: d.delta });
+    }
+    for (const dim of new Set(deltas.map((d) => d.dim))) contributing[dim]++;
+  }
+  const totals = Object.fromEntries(dims.map((d) => [d, 0]));
+  const capped = [];
+  for (const [session, sums] of sessions) {
+    for (const [dim, sum] of Object.entries(sums)) {
+      const bounded = Math.max(-cap, Math.min(cap, sum));
+      if (Math.abs(sum - bounded) > 1e-9) capped.push({ session, dim, sum, bounded });
+      totals[dim] += bounded;
+    }
+  }
+  return { cap, totals, contributing, rows, capped, count, signalEvents, skills, qids, days };
+}
+JS
+)
+
+# -----------------------------------------------------------------------
 # Derive: recompute inferred dimensions from question-events.jsonl
 # -----------------------------------------------------------------------
 do_derive() {
@@ -422,7 +484,8 @@ do_derive() {
       const sigmod = await import('./scripts/psychographic-signals.ts');
       const fs = require('fs');
       const { QUESTIONS } = regmod;
-      const { SIGNAL_MAP, applySignal, newDimensionTotals, normalizeToDimensionValue } = sigmod;
+      const { SIGNAL_MAP, ALL_DIMENSIONS, normalizeToDimensionValue } = sigmod;
+      $ACCUMULATE_SIGNALS_JS
 
       const profilePath = process.env.PROFILE_FILE_PATH;
       const eventsPath = process.env.EVENTS_PATH;
@@ -433,32 +496,8 @@ do_derive() {
         lines = fs.readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean);
       }
 
-      const totals = newDimensionTotals();
-      const skills = new Set();
-      const qids = new Set();
-      const days = new Set();
-      // Provenance: UNIQUE ROWS contributing to each dimension, not signal
-      // applications. One row can apply several deltas, and conflating them
-      // would overstate the evidence (#2625).
-      const contributors = {};
-      for (const d of Object.keys(totals)) contributors[d] = new Set();
-      let count = 0;
-      let signalEvents = 0;
-      for (const line of lines) {
-        let e;
-        try { e = JSON.parse(line); } catch { continue; }
-        if (!e.question_id || !e.user_choice) continue;
-        count++;
-        skills.add(e.skill);
-        qids.add(e.question_id);
-        if (e.ts) days.add(String(e.ts).slice(0,10));
-        const def = QUESTIONS[e.question_id];
-        const applied = def && def.signal_key ? applySignal(totals, def.signal_key, e.user_choice) : [];
-        if (applied.length > 0) signalEvents++;
-        for (const d of applied) contributors[d.dim]?.add(count);
-      }
-      const contributingEvents = {};
-      for (const d of Object.keys(totals)) contributingEvents[d] = contributors[d].size;
+      const { totals, contributing, count, signalEvents, skills, qids, days } =
+        accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, ALL_DIMENSIONS);
 
       const values = {};
       for (const [dim, total] of Object.entries(totals)) {
@@ -471,9 +510,10 @@ do_derive() {
         // Events that actually moved a dimension (B10): sample_size counts every
         // logged answer, most of which match no signal and leave the 0.5 seed.
         signal_events: signalEvents,
-        // Distinguishes 'no evidence' from 'balanced evidence': both print
-        // 0.5, which is how five 0.5s sat beside sample_size 1286 (#2623).
-        contributing_events: contributingEvents,
+        // Unique rows that moved each dimension (#2625). Distinguishes 'no
+        // evidence' from 'balanced evidence': both print 0.5, which is how
+        // five 0.5s sat beside sample_size 1286 (#2623).
+        contributing_events: contributing,
         diversity: {
           skills_covered: skills.size,
           question_ids_covered: qids.size,
@@ -519,29 +559,25 @@ do_trace() {
       const sigmod = await import('./scripts/psychographic-signals.ts');
       const fs = require('fs');
       const { QUESTIONS } = regmod;
-      const { SIGNAL_MAP } = sigmod;
+      const { SIGNAL_MAP, ALL_DIMENSIONS, normalizeToDimensionValue } = sigmod;
+      $ACCUMULATE_SIGNALS_JS
       const target = process.env.TRACE_DIM;
       const lines = fs.readFileSync(process.env.EVENTS_PATH, 'utf-8').trim().split('\n').filter(Boolean);
-      const rows = [];
-      for (const line of lines) {
-        let e;
-        try { e = JSON.parse(line); } catch { continue; }
-        const def = QUESTIONS[e.question_id];
-        if (!def || !def.signal_key) continue;
-        const deltas = SIGNAL_MAP[def.signal_key]?.[e.user_choice] || [];
-        for (const d of deltas) {
-          if (d.dim === target) {
-            rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, delta: d.delta });
-          }
-        }
-      }
+      const acc = accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, ALL_DIMENSIONS);
+      const rows = acc.rows.filter((r) => r.dim === target);
+      const signed = (n, digits) => (n > 0 ? '+' : '') + (digits === undefined ? String(n) : n.toFixed(digits));
       if (rows.length === 0) {
         console.log('TRACE: no events contribute to ' + target);
       } else {
         console.log('TRACE: ' + rows.length + ' events for ' + target);
         for (const r of rows) {
-          console.log('  ' + (r.ts || '').slice(0,19) + '  ' + r.question_id + '  → ' + r.choice + '  (' + (r.delta > 0 ? '+' : '') + r.delta + ')');
+          console.log('  ' + (r.ts || '').slice(0,19) + '  ' + r.question_id + '  → ' + r.choice + '  (' + signed(r.delta) + ')');
         }
+        for (const c of acc.capped.filter((c) => c.dim === target)) {
+          console.log('  session ' + c.session + ': ' + signed(c.sum, 3) + ' capped to ' + signed(c.bounded, 3));
+        }
+        const total = acc.totals[target] ?? 0;
+        console.log('TOTAL: ' + signed(total, 3) + ' (each session capped at ±' + acc.cap + ') → ' + normalizeToDimensionValue(total).toFixed(3));
       }
     });
   "
