@@ -301,6 +301,7 @@ describe('gstack-pregate on a Rust workspace', () => {
   // Value: protects=the reported case end to end: a touched src file of a workspace crate is not PREGATE_NO_LANE, its crate and the
   //   dependent crates run with `cargo test -p` from the workspace root, and the summed count is reported; fails_when=any link of
   //   graph, plan or summary regresses; why_new=no Rust run existed; seam=none; no_claim=a real cargo (PATH shim reports cwd and argv)
+  // TODO(#3380): Windows gap. This case is skipped on win32 until the cargo stand-in runs under the lane's Git Bash there; https://github.com/garrytan/gstack/pull/3380
   posixShim('a touched src file runs its crate and the crates depending on it from the workspace root', () => {
     const repo = rustRepo();
     commit(repo, { 'engine/crates/alpha/src/util.rs': 'pub fn two() -> u32 { 1 + 1 }\n' });
@@ -315,6 +316,7 @@ describe('gstack-pregate on a Rust workspace', () => {
   // Value: protects=a crate whose test binaries all report 0 tests is ZERO-RUN (exit 0 is not a pass), and a failing cargo run is
   //   PREGATE_LANE_FAILED with its counts; fails_when=cargo's summary is unparsed (count unavailable passes) or the exit is ignored;
   //   why_new=the pure parser test does not run the lane; seam=none; no_claim=a real cargo (PATH shim)
+  // TODO(#3380): Windows gap. This case is skipped on win32 until the cargo stand-in runs under the lane's Git Bash there; https://github.com/garrytan/gstack/pull/3380
   posixShim('zero tests is ZERO-RUN; a failing cargo run is PREGATE_LANE_FAILED', () => {
     const repo = rustRepo();
     commit(repo, { 'engine/crates/gamma/src/lib.rs': 'pub fn g() { }\n' });
