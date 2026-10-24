@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+**Merge trains stop refusing correct heads and stop passing damaged CHANGELOGs.** This week's trains hit five defects in the ship-queue tooling. #3331's READY was invisible to the coordinator because its lane's origin was `https://git.capy.ai/...`. #3345's pin replaced the released `## [1.91.179.0]` heading, and three things then failed. The Version Gate passed the pin. `mergeChangelogs` copied 179's body into `[Unreleased]`. `verify --train` refused the correct hand-resolved head at 593e61c. Separately, the train slotted the /cso docs PR (#3337) ahead of the catalog PR it describes (#3343). Each defect now has a regression test built from the real case.
+
+### Fixed
+- **`lib/version-gate-train.ts`**: the unstamped-head check read CHANGELOG.md through `spawnSync`'s default 1 MiB buffer. gstack's CHANGELOG is 1.67 MB, so both reads failed and the check compared two empty strings and passed. That is how #3345's 1eb7092 got through: `classifyTrainHead(base a59b5e4, head 1eb7092)` returned `unstamped`. The buffer is now 64 MiB, a CHANGELOG that can't be read is refused, and a dropped released heading is named in the error ("CHANGELOG.md drops released heading 1.91.179.0"). `gstack-ship-queue ready` runs the same check and refuses with `QUEUE_NOT_READY`.
+- **`lib/changelog-check.ts`**: `mergeChangelogs(ours, theirs, base?)` returns null, meaning resolve by hand, when either side damaged released history. Damage means one of two things: a released heading the merge base carries is missing from that side (dropped or renamed), or a section only that side carries holds a paragraph of a released entry the other side has. The train merge, the gate-ahead recompute and `gstack-restamp --after` all pass the merge base. A damaged PR is now `QUEUE_TRAIN_CONFLICT` on CHANGELOG.md with the reason. Before, the damage went into T<i>.
+- **`lib/ship-queue-train-verify.ts`**: `verify --train` refused #3345's correct stamped head because T1's CHANGELOG was the damaged mechanical merge. The refusal printed the diff against the pin (main's files), not the diff against T1. A merged-in head is now accepted when it contains main and equals T<i> modulo stamps, with its CHANGELOG judged against main: main's header and sections must be unchanged, with only lines from the pin's own CHANGELOG diff above them. The refusal now names the real difference.
+- **`lib/ship-queue-train-record.ts`**: READY receipts, train records and freezes are keyed on origin normalized to `https://github.com/<owner>/<repo>`, whatever URL form the lane uses (github.com, git.capy.ai, scp, ssh, a token URL, with or without `.git`). The canonical key equals the github.com key existing records already use. Readers also accept the keys older versions wrote for the common URL forms, so #3331's `1fb5dd69740a8cf8` receipt is found. The stored `repo` URL never carries credentials.
+- **`lib/restamp.ts`**: its git reads use a 64 MiB buffer too. Before, `gstack-restamp --after` read each CHANGELOG conflict stage through the 1 MiB default.
+
+### Added
+- **`gstack-ship-queue train build --order <pr>,...`**: an explicit slot order naming every pinned PR once. The default order (screened first, then READY order) is unchanged, and the train's later `NEXT:` rebuild lines keep the explicit order.
+
+### Tests
+- `test/changelog-merge-damage.test.ts`: the GSTA-64 repro, plus #3345's real CHANGELOGs (pin 1eb7092, base a59b5e4, main 4a98e40, train T1 6755ab8, stamped de23f5d, under `test/fixtures/merge-train-3345/`). Negative controls: a correct hand resolve, a shared tentative stamp, and two `[Unreleased]` blocks are not damage. An invented line, an edited main section, a changed header and a duplicate heading are still refused.
+- `test/compare-pr-version.test.ts`: on a CHANGELOG over 1 MiB, #3345's edit is refused naming 1.91.179.0, an additive entry passes, and a corrupt CHANGELOG object is refused. All three failed before the fix.
+- `test/ship-queue-train.test.ts`: a git.capy.ai lane writes the owner/repo key, and a legacy-key receipt is admitted. A damaged PR is a CHANGELOG conflict, and ready refuses it. `--order` sets and records the order. A hand-resolved merged-in head verifies, while an invented CHANGELOG line, a head without main and a stray file are refused. `test/ship-queue-train-logic.test.ts`: URL normalization, #3331's real keys, `orderSlots` and `parseOrder`.
+
+### Gate integrity
+- Version Gate unstamped check: **stronger**. It refuses a head it can't read and names dropped headings. Additive heads still pass at full size.
+- `mergeChangelogs` and the train CHANGELOG merge: **stronger**. Damage is now a conflict.
+- `verify --train` merged-in path: **narrower in one place, stronger elsewhere**. The head must now contain main. A CHANGELOG that differs from T<i> is accepted only as main's CHANGELOG plus lines the pin itself added. Every other file must still equal T<i> modulo stamps, and the paid gate never reads CHANGELOG text.
+- READY receipt lookup: **unchanged strength**. The head and CI binding are the same; only the repository key is normalized.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
