@@ -251,6 +251,22 @@ describe('Cargo membership and test detection (port review)', () => {
     expect(dependentsOf(files, 'a/Cargo.toml')).toEqual(['a/src/lib.rs', 'b/src/lib.rs']);
   });
 
+  // Value: protects=past the members-glob size cap, where a crate's tests run is undecided, so its files are unclaimed (the
+  //   lane incomplete) instead of running `cargo test -p <name>` from a root where a same-named member answers; fails_when=an
+  //   oversized workspace admits every crate as runnable and the orphan's failing test is replaced by the member's passing
+  //   ones (a false green); why_new=third port review round; seam=none; no_claim=a real cargo (plan only)
+  test('past the members size cap a same-named non-member is unclaimed, not run as the member', () => {
+    const repo = makeFixtureRepo({ pregate: null });
+    repos.push(repo);
+    commit(repo, {
+      'Cargo.toml': `[workspace]\nmembers = ["[${'m'.repeat(4100)}]ember"]\n`,
+      'member/Cargo.toml': pkg('same'), 'member/tests/m.rs': '#[test]\nfn m() {}\n',
+      'orphan/Cargo.toml': pkg('same'), 'orphan/tests/t.rs': '#[test]\nfn t() { panic!() }\n',
+    }, 'oversized members');
+    const ctx = { repoRoot: repo.work, config: DEFAULT_CONFIG, env: cargoShim(repo) } as unknown as PregateContext;
+    expect(planRuns(ctx, ['orphan/tests/t.rs'])).toEqual({ groups: [], unclaimed: ['orphan/tests/t.rs'], missing: [], noPubspec: [] });
+  });
+
   // Value: protects=a hostile members glob or a file of unclosed cfg attributes cannot stall lane selection, which runs before
   //   any runner deadline; each probe runs in its own supervised Bun so a regression is killed and fails instead of hanging the
   //   file; fails_when=member globs backtrack again (an exponential '*a*a…b', or a rescan per unmatched '[') or the cfg scan
@@ -265,7 +281,7 @@ describe('Cargo membership and test detection (port review)', () => {
       const brackets = run(['['.repeat(1000000)], Array.from({ length: 10 }, (_, i) => 'c' + i)).crates.get('c0').workspace;
       console.log(JSON.stringify([exp, brackets]));`);
     expect(r.error).toBeUndefined();
-    expect(r.stdout.trim()).toBe(JSON.stringify(['a'.repeat(40), '']));
+    expect(r.stdout.trim()).toBe(JSON.stringify(['a'.repeat(40), null]));
   }, 60_000);
 
   test('a run of unclosed cfg attributes is scanned once and counts as a test', () => {

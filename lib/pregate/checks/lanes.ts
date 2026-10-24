@@ -177,8 +177,8 @@ export function planRuns(ctx: PregateContext, files: readonly string[]): RunPlan
     if (f.endsWith('.rs')) {
       model ??= cargoModel(listRepoFiles(ctx.repoRoot), rel => readRepoFile(ctx.repoRoot, rel));
       const crate = model.crateOf(f);
-      if (!crate) { unclaimed.push(f); continue; }
-      const cwd = crate.workspace;
+      const cwd = crate?.workspace ?? null;
+      if (!crate || cwd === null) { unclaimed.push(f); continue; }
       const key = `${cwd}\0${crate.name}`;
       if (!cargo.has(key)) cargo.set(key, { name: crate.name, cwd, files: [] });
       cargo.get(key)!.files.push(under(cwd, f));

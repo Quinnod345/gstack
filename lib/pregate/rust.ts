@@ -33,8 +33,8 @@ interface DepSpec { path: string | null; name: string }
 export interface Crate {
   root: string;
   name: string;
-  /** Where `cargo test -p <name>` runs: the root of the workspace it is a member of, else the crate directory. */
-  workspace: string;
+  /** Where `cargo test -p <name>` runs: the root of the workspace it is a member of, else the crate directory; null when membership is undecided. */
+  workspace: string | null;
   /** Roots of the tracked crates it depends on. */
   deps: string[];
 }
@@ -99,7 +99,11 @@ function memberMatch(glob: string, rel: string): boolean {
   }
   return row[p.length]!;
 }
-/** Past this many characters of `members` globs a workspace admits every crate under it: a wrong member fails loudly in cargo, a dropped one is a silent false green. */
+/**
+ * Past this many characters of `members` globs a workspace's membership is undecided: every crate under it counts as a
+ * member for dependency edges (more tests, never fewer), but where its tests run is unknown, so they are unclaimed and the
+ * lane is incomplete (running from the wrong root can test a same-named member instead).
+ */
 const MAX_MEMBER_GLOB_CHARS = 4096;
 const inside = (dir: string, root: string) => root === '' || dir === root || dir.startsWith(`${root}/`);
 const relTo = (dir: string, root: string) => (root === '' ? dir : dir === root ? '' : dir.slice(root.length + 1));
@@ -145,6 +149,7 @@ export function cargoModel(files: readonly string[], read: ReadFile): CargoModel
     return workspaces.filter(w => inside(root, w.dir)).sort((a, b) => b.dir.length - a.dir.length)[0] ?? null;
   };
   const memberCache = new Map<string, Set<string>>();
+  const undecided = new Set<string>();
   const membersOf = (ws: Manifest): Set<string> => {
     const cached = memberCache.get(ws.dir);
     if (cached) return cached;
@@ -157,7 +162,9 @@ export function cargoModel(files: readonly string[], read: ReadFile): CargoModel
     // Cargo's rules: the root package and a literally listed member always belong; a glob match or a path dependency of a
     // member inside the workspace belongs unless `exclude` names it or a directory above it.
     const literal = (r: string) => globs.some(g => !/[*?[]/.test(g) && relTo(r, ws.dir) === g);
-    const members = new Set([...own].filter(r => r === ws.dir || literal(r) || ((globs.join('').length > MAX_MEMBER_GLOB_CHARS || globs.some(g => memberMatch(g, relTo(r, ws.dir)))) && !excluded(r))));
+    const oversized = globs.join('').length > MAX_MEMBER_GLOB_CHARS;
+    const members = new Set([...own].filter(r => r === ws.dir || literal(r) || ((oversized || globs.some(g => memberMatch(g, relTo(r, ws.dir)))) && !excluded(r))));
+    if (oversized) for (const r of members) if (r !== ws.dir && !literal(r)) undecided.add(r);
     memberCache.set(ws.dir, members);
     const queue = [...members];
     while (queue.length) {
@@ -176,7 +183,7 @@ export function cargoModel(files: readonly string[], read: ReadFile): CargoModel
   for (const root of roots) {
     const ws = candidate(root);
     const member = ws !== null && membersOf(ws).has(root) ? ws : null;
-    crates.set(root, { root, name: nameOf(root)!, workspace: member?.dir ?? root, deps: resolve(depSpecs(manifests.get(root)!, member)).filter(d => d !== root) });
+    crates.set(root, { root, name: nameOf(root)!, workspace: undecided.has(root) ? null : member?.dir ?? root, deps: resolve(depSpecs(manifests.get(root)!, member)).filter(d => d !== root) });
   }
   const crateOf = (file: string): Crate | null => {
     for (let d = path.posix.dirname(file); ; d = path.posix.dirname(d)) {
