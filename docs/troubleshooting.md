@@ -1590,7 +1590,7 @@ next `--check` passes.
 ### `gstack-capy-install: GSTACK_BUN_INSTALL_VERSION=<v> is not a verified Bun at or above gstack's supported minimum ...; fix: ... (BUN_INSTALL_VERSION_INVALID)`
 
 **Meaning.** `GSTACK_BUN_INSTALL_VERSION` overrides the Bun the installer
-downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.3). It
+downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.4). It
 must be listed in `GSTACK_BUN_VERIFIED` (a SHA-256-verified archive) and sit at
 or above the supported minimum (`GSTACK_BUN_TESTED`). Nothing was installed.
 
