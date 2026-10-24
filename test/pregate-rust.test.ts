@@ -15,7 +15,7 @@ import { parseSummary, planRuns } from '../lib/pregate/checks/lanes';
 import { DEFAULT_CONFIG } from '../lib/pregate/config';
 import { buildGraph, testsFor } from '../lib/pregate/import-graph';
 import { draftConfig } from '../lib/pregate/init-draft';
-import { cargoModel, rustEdges } from '../lib/pregate/rust';
+import { cargoModel, hasCfgTest, rustEdges } from '../lib/pregate/rust';
 import type { PregateContext } from '../lib/pregate/types';
 import { cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
@@ -234,6 +234,27 @@ describe('Cargo membership and test detection (port review)', () => {
     expect(dependentsOf(files, 'crates/a/Cargo.toml')).toEqual(['crates/a/tests/a.rs', 'crates/b/tests/b.rs']);
   });
 
+  // Value: protects=a plain #[test] function or a #[tokio::test] in src is a Rust test, so a dependent crate tested that way
+  //   runs when its dependency changes; fails_when=only cfg(test) modules and tests/ count and the dependent's failing test
+  //   never runs (a false green); why_new=port review; seam=none; no_claim=custom [[test]] targets outside tests/
+  test('a plain #[test] or #[tokio::test] in src is a test; cfg(feature = "test") and #[testing] are not', () => {
+    expect(['#[test]\nfn a() {}', '#[tokio::test(flavor = "multi_thread")]\nasync fn a() {}', '#[ test ]\nfn a() {}'].map(hasCfgTest)).toEqual([true, true, true]);
+    expect(['#[cfg(feature = "test")]\nfn a() {}', '#[testing]\nfn a() {}', '// attests'].map(hasCfgTest)).toEqual([false, false, false]);
+    const files = {
+      'a/Cargo.toml': pkg('a'), 'a/src/lib.rs': 'pub fn one() -> u32 { 1 }\n#[cfg(test)]\nmod t { #[test] fn one() {} }\n',
+      'b/Cargo.toml': pkg('b', '\n[dependencies]\na = { path = "../a" }\n'), 'b/src/lib.rs': 'pub fn two() -> u32 { a::one() + 1 }\n#[test]\nfn two() { assert_eq!(super::two(), 2); }\n',
+    };
+    expect(dependentsOf(files, 'a/Cargo.toml')).toEqual(['a/src/lib.rs', 'b/src/lib.rs']);
+  });
+
+  // Value: protects=a hostile members glob or a file of unclosed cfg attributes cannot stall lane selection, which runs before
+  //   any runner deadline; fails_when=member globs go through a backtracking regex again (seconds per crate) or the cfg scan is
+  //   unbounded (quadratic); why_new=port review measured both over 5 s; seam=none; no_claim=a wall-clock budget (the test timeout bounds it)
+  test('a hostile members glob and a run of unclosed cfg attributes are matched in linear time', () => {
+    const files = { 'Cargo.toml': `[workspace]\nmembers = ["${'*a'.repeat(20)}b"]\n`, [`${'a'.repeat(40)}/Cargo.toml`]: pkg('k') };
+    expect(cargoModel(...inMemory(files)).crates.get('a'.repeat(40))!.workspace).toBe('a'.repeat(40));
+    expect(hasCfgTest('#[cfg('.repeat(20_000))).toBe(false);
+  });
 });
 
 describe('gstack-pregate on a Rust workspace', () => {
