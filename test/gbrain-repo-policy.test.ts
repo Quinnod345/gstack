@@ -526,9 +526,12 @@ describe('memorable recall opt-in (#3359)', () => {
     expect(r.stderr).toContain('not a readable file');
   });
 
-  test('reserved keys are never stored as remotes', () => {
+  test('the two metadata keys are never stored as remotes; the _unattributed sentinel still is', () => {
     const r = run(['set', '_memorable_recall', 'read-write']);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('reserved key');
+    expect(run(['set', '_schema_version', 'deny']).status).toBe(2);
+    expect(run(['set', '_unattributed', 'deny']).status).toBe(0);
+    expect(run(['list']).stdout).toBe('_unattributed\tdeny');
   });
 });

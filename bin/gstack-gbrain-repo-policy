@@ -48,7 +48,8 @@
 #     "github.com/baz/qux": "deny",
 #     "_memorable_recall": { "github.com/foo/bar": "allow" }
 #   }
-#   Keys starting with "_" are reserved and never name a remote.
+#   The keys _schema_version and _memorable_recall are reserved; other keys
+#   name remotes (including the _unattributed sentinel memory-ingest uses).
 #
 # Tier semantics:
 #   read-write — agent may search AND write new pages from this repo.
@@ -216,11 +217,11 @@ memorable_optin() {
 # jq filter that removes $key's opt-in (and an emptied map).
 DROP_MEMORABLE_OPTIN='if (._memorable_recall | type) == "object" then (._memorable_recall |= del(.[$key])) | (if ._memorable_recall == {} then del(._memorable_recall) else . end) else . end'
 
-# Keys starting with "_" hold store metadata (_schema_version,
-# _memorable_recall); a remote that normalizes to one cannot be stored.
+# _schema_version and _memorable_recall hold store metadata; a remote that
+# normalizes to one of them cannot be stored.
 reject_reserved_key() {
   case "$1" in
-    _*) die "'$1' is a reserved key in the policy store, not a remote" ;;
+    _schema_version|_memorable_recall) die "'$1' is a reserved key in the policy store, not a remote" ;;
   esac
 }
 
@@ -456,7 +457,7 @@ cmd_list() {
   fi
   ensure_file
   jq -r '(._memorable_recall | if type == "object" then . else {} end) as $m
-    | to_entries[] | select(.key | startswith("_") | not)
+    | to_entries[] | select(.key != "_schema_version" and .key != "_memorable_recall")
     | "\(.key)\t\(.value)" + (if $m[.key] == "allow" then "\tmemorable=allow" else "" end)' "$POLICY_FILE" | sort
 }
 
