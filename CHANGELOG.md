@@ -15,6 +15,8 @@
 
 ### Gate integrity
 - No threshold, budget, timeout, trial count or existing case kind changed. The ship skill's parity size stays under its cap (313,277 of 313,281 bytes). The new eval's negative controls are the two /investigate cases, and on the base router the triage cases go red.
+- One pin rises with a stated reason: `test/eng-finding-retry-budget.test.ts` counts 110 paid test files (was 109) for the new eval file.
+- Each train gate now runs the four new cases, one trial each, for about $0.37 (measured at this head: $0.06, $0.06, $0.11 and $0.14; about 67 s wall when they run in parallel).
 
 ## [1.91.186.0] - 2026-10-24
 
