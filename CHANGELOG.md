@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+**A read-only repo can now opt in to Memorable recall, one remote at a time, and a corrupt policy store no longer turns the recall veto off.** #3359 (exGeni) asked for a way to keep a repo out of the brain while still letting its prompts reach Memorable: today the recall hook skips every `deny` and `read-only` repo, and `read-only` is also the tier people pick just to stop code ingest. Garry approved a per-remote flag on 2026-10-24: off by default, and a `deny` always wins. While building the negative controls we found that the hook's policy lookup went through `get`, which quarantines a corrupt store and answers "unset", so a truncated `gbrain-repo-policy.json` let recall run in every repo, read-only and deny included, and reset the store on the way.
+
+### Added
+- **`bin/gstack-gbrain-repo-policy memorable set <remote-url> <allow|off>`** stores the opt-in under a reserved `_memorable_recall` map in the policy store. It is refused unless the remote is read-only (deny vetoes recall; read-write never needed it). `memorable get [<remote-url>]` prints `<tier>\t<allow|off>`, and `list` adds a `memorable=allow` column. Changing a remote's tier clears its opt-in, and keys starting with `_` are refused as remotes.
+- **`lib/gbrain-repo-policy-client.ts`**: `memorableRecallPolicy(url)` returns the tier and the opt-in in one spawn. Anything but exactly `<tier>\t<allow|off>` reads as `unreadable`.
+
+### Changed
+- **`hosts/claude/hooks/memorable-user-prompt-hook.ts`**: a `read-only` remote is recalled only when it is opted in; `deny` is always skipped. The skip line in `hook-errors.log` names the opt-in command.
+
+### Fixed
+- The recall hook's policy lookup fails closed on a corrupt or non-file policy store, in either state root, and never quarantines it. The opt-in counts only when it is exactly `"allow"` and every store that makes the remote read-only (including `~/.gstack` under a custom state root) opts it in.
+
+### Docs
+- `docs/memorable-workflow-memory.md` has a short "Recall in a read-only repo" section and updated refusal and troubleshooting lines.
+
+### Tests
+- `test/memorable-user-prompt-hook.test.ts` drives the real hook: read-only stays blocked by default, the opt-in recalls on that remote and not on a second read-only remote, `deny` with a hand-written opt-in is skipped, and a corrupt store skips recall and is left in place.
+- `test/gbrain-repo-policy.test.ts` covers the CLI: per-remote keying (a different remote, a prefix-sharing remote and an unset remote stay off; the SSH spelling of the same remote matches), refusal on deny, read-write and unset, clearing on a tier change, malformed opt-ins reading off, corrupt and non-file stores in both roots failing with exit 2, and the second-store rule.
+- `test/gbrain-repo-policy-client.test.ts` covers `memorableRecallPolicy`: fast path, per-remote opt-in, deny, corrupt store, an unknown tier and a timeout.
+
+### Gate integrity
+- One deliberate widening of a privacy veto, approved by Garry: a read-only remote with an explicit opt-in is recalled. Nothing else is loosened, and the corrupt-store path is tightened. Eight mutations of the new gate (the hook ignoring the opt-in, the hook dropping deny, the CLI reporting the opt-in on any tier, an unkeyed opt-in, a quarantining lookup, the client reading unknown output as no policy, the second store ignored, an opt-in accepted on deny) each turn at least one of the new tests red. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.

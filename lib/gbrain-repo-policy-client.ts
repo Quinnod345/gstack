@@ -94,6 +94,50 @@ export function repoPolicyTier(
   return { tier: "none", error: "unreadable" }; // unexpected output — a read failure, not a tier
 }
 
+export interface MemorableRecallPolicy extends RepoPolicyResult {
+  /**
+   * True only when the tier is `read-only` and the store opts this remote in
+   * to Memorable recall. Never true alongside `error` or any other tier.
+   */
+  memorableOptIn: boolean;
+}
+
+/**
+ * Tier plus the per-remote Memorable recall opt-in, via
+ * `gstack-gbrain-repo-policy memorable get <url>` (one spawn). Unlike
+ * repoPolicyTier, the script never quarantines a corrupt store on this path,
+ * so a corrupt store reads as `unreadable` instead of as "no policy".
+ * Fast paths and failure classification match repoPolicyTier; anything but
+ * exactly "<tier>\t<allow|off>" is `unreadable`. POLARITY IS THE CALLER'S.
+ */
+export function memorableRecallPolicy(
+  url: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = 10_000,
+): MemorableRecallPolicy {
+  if (!hasRepoPolicyStore(env)) return { tier: "none", memorableOptIn: false };
+  if (!url) return { tier: "none", memorableOptIn: false };
+  const [cmd, args]: [string, string[]] =
+    process.platform === "win32"
+      ? ["bash", [POLICY_SCRIPT, "memorable", "get", url]]
+      : [POLICY_SCRIPT, ["memorable", "get", url]];
+  const res = spawnSync(cmd, args, {
+    encoding: "utf-8",
+    timeout: Math.max(1, timeoutMs),
+    env: { ...env } as NodeJS.ProcessEnv,
+  });
+  if (res.error) {
+    const code = (res.error as NodeJS.ErrnoException).code;
+    return { tier: "none", memorableOptIn: false, error: code === "ENOENT" ? "spawn-failed" : "unreadable" };
+  }
+  const unreadable: MemorableRecallPolicy = { tier: "none", memorableOptIn: false, error: "unreadable" };
+  if (res.status !== 0) return unreadable;
+  const match = /^(deny|read-only|read-write|unset)\t(allow|off)\n?$/.exec(res.stdout || "");
+  if (!match) return unreadable;
+  const tier = match[1] === "unset" ? "none" : (match[1] as RepoPolicyTierValue);
+  return { tier, memorableOptIn: tier === "read-only" && match[2] === "allow" };
+}
+
 /**
  * Bulk trust-tier lookup via `gstack-gbrain-repo-policy get --batch` — ONE
  * spawn total for the whole url list (memory-ingest checks every distinct
