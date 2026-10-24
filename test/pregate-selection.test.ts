@@ -524,12 +524,17 @@ describe('nested JS packages run their own runner from their own directory', () 
     'app/src/sum.ts': 'export const sum = (a: number, b: number) => a + b;\n',
     'app/src/sum.test.ts': "import { expect, test } from 'vitest';\nimport { sum } from './sum';\ntest('sum', () => expect(sum(1, 2)).toBe(3));\n",
   };
-  /** A `pnpm` (and `yarn`) on PATH that reports its cwd and argv and prints a vitest summary for the files it is given. */
-  const pmShim = (repo: FixtureRepo): { PATH: string } => {
+  /**
+   * A `pnpm` (and `yarn`) on PATH that reports its cwd and argv and prints a vitest summary for the files it is given.
+   * The lane puts its Bun's directory first on PATH, and that directory can hold a real pnpm (/usr/local/bin), which
+   * would install from the network; the lane's bash puts the shim first again through BASH_ENV.
+   */
+  const pmShim = (repo: FixtureRepo): { PATH: string; BASH_ENV: string } => {
     const dir = path.join(repo.root, 'shim');
     fs.mkdirSync(dir, { recursive: true });
     for (const tool of ['pnpm', 'yarn']) fs.writeFileSync(path.join(dir, tool), '#!/usr/bin/env bash\necho "ran in $(basename "$PWD"): $*"\necho " Test Files  1 passed (1)"\necho "      Tests  3 passed (3)"\n', { mode: 0o755 });
-    return { PATH: `${dir}:${process.env.PATH ?? ''}` };
+    fs.writeFileSync(path.join(dir, 'path.sh'), `PATH='${dir}':"$PATH"\n`);
+    return { PATH: `${dir}:${process.env.PATH ?? ''}`, BASH_ENV: path.join(dir, 'path.sh') };
   };
   const ctxFor = (repo: FixtureRepo, env: Record<string, string>) => ({ repoRoot: repo.work, config: DEFAULT_CONFIG, env }) as unknown as PregateContext;
 
