@@ -510,6 +510,31 @@ describe('check-careful.sh', () => {
       expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
     });
 
+    // git prints the message on stdout, so any pipe after a masked message,
+    // a process substitution or a parameter expansion leaves it unmasked; a
+    // redirection's & is not a separator, and a comment's quote is not a quote.
+    test.each([
+      "git commit -m 'rm -rf build' 2>&1 | sh",
+      "(git commit -m 'rm -rf build') | sh",
+      "git commit -m 'rm -rf build' > >(sh)",
+      'git commit -m "${MSG:-rm -rf build}"',
+    ])('a message that can reach a shell stays unmasked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    test.each([
+      "git commit -m 'drop table notes' 2>&1 && git log -1 --oneline",
+      "git commit -m 'drop table notes' || echo failed",
+      "git commit -m 'drop table notes' # it's the docs commit",
+    ])('redirections, || and comments keep the message masked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
     test('a partial install without the masking program still asks on the message text', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
       try {
