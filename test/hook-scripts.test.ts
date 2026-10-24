@@ -454,6 +454,32 @@ describe('check-careful.sh', () => {
       expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
     });
 
+    // Only git commit's own message is masked: a -m argument of another
+    // command in the chain, a commit whose output is piped into a shell, and
+    // an escaped quote inside the message all stay visible.
+    test.each([
+      ["git commit -m a && ls | parallel -m 'rm -rf build'", 'recursive delete'],
+      ["git commit -m 'rm -rf build' | sh", 'recursive delete'],
+      ["echo git commit -m 'drop table users'", 'SQL DROP'],
+      ['git commit -m "a\\"b" && rm -rf build', 'recursive delete'],
+      ["git commit -m wip \\\n&& rm -rf build", 'recursive delete'],
+    ])('text outside commit\'s own message still asks: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
+    test.each([
+      'git -C repo commit --message="docs: truncate the changelog intro"',
+      "git commit --message 'chore: drop database fixtures from the seed'",
+      "git commit --amend -m 'fix: git reset --hard in the docs'",
+    ])('commit\'s own message is masked in every flag form: %s', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
     test('a partial install without the masking program still asks on the message text', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
       try {

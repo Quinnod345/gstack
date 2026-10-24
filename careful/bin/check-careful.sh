@@ -233,7 +233,8 @@ PATTERN=""
 CMD_MEDIUM="$CMD"
 CMD_MEDIUM_LOWER="$CMD_LOWER"
 _MASK_AWK="$_HOOK_DIR/mask-commit-message.awk"
-if [ -f "$_MASK_AWK" ] && printf '%s' "$CMD" | grep -qE '(^|[;&|][[:space:]]*)git[[:space:]]+commit[[:space:]]' 2>/dev/null; then
+case "$CMD" in *git*commit*) _MAYBE_COMMIT=1 ;; *) _MAYBE_COMMIT=0 ;; esac
+if [ "$_MAYBE_COMMIT" -eq 1 ] && [ -f "$_MASK_AWK" ]; then
   if _cmd_masked=$(printf '%s' "$CMD" | awk -f "$_MASK_AWK" 2>/dev/null); then
     CMD_MEDIUM="$_cmd_masked"
     CMD_MEDIUM_LOWER=$(printf '%s' "$CMD_MEDIUM" | tr '[:upper:]' '[:lower:]')
