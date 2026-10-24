@@ -94,9 +94,9 @@ export function dartRunner(repoRoot: string, root: string, env: NodeJS.ProcessEn
   return { runner: `${fvm ? 'fvm ' : ''}${tool} test {files}` };
 }
 
-/** `cargo test -p <name>` for a crate (cargo runs a crate's tests, never a file list), or the missing tool when cargo is not on PATH. */
+/** `cargo test -p <name>` for a crate (cargo runs a crate's tests, never a file list), or the missing tool when cargo is not on PATH. The name comes from the repo's Cargo.toml and reaches a shell, so it is quoted like every file and cwd. */
 function cargoRunner(name: string, env: NodeJS.ProcessEnv): { runner: string } | { missing: string } {
-  return onPath('cargo', env) ? { runner: `cargo test -p ${name}` } : { missing: 'cargo' };
+  return onPath('cargo', env) ? { runner: `cargo test -p ${quote(name)}` } : { missing: 'cargo' };
 }
 
 type PackageJson = { packageManager?: string; devDependencies?: Record<string, string>; dependencies?: Record<string, string>; scripts?: Record<string, string> };

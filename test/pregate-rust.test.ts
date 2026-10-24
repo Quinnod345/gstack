@@ -145,9 +145,9 @@ describe('Rust runner and summary (pure)', () => {
     const ctx = { repoRoot: repo.work, config: DEFAULT_CONFIG, env: cargoShim(repo) } as unknown as PregateContext;
     const files = [...ALPHA_TESTS, 'engine/crates/beta/src/lib.rs', 'standalone/src/main.rs', 'tools/tests/loose.rs'];
     expect(planRuns(ctx, files)).toEqual({ groups: [
-      { runner: 'cargo test -p alpha', cwd: 'engine', files: ['crates/alpha/src/lib.rs', 'crates/alpha/tests/it.rs'] },
-      { runner: 'cargo test -p beta-core', cwd: 'engine', files: ['crates/beta/src/lib.rs'] },
-      { runner: 'cargo test -p standalone', cwd: 'standalone', files: ['src/main.rs'] },
+      { runner: "cargo test -p 'alpha'", cwd: 'engine', files: ['crates/alpha/src/lib.rs', 'crates/alpha/tests/it.rs'] },
+      { runner: "cargo test -p 'beta-core'", cwd: 'engine', files: ['crates/beta/src/lib.rs'] },
+      { runner: "cargo test -p 'standalone'", cwd: 'standalone', files: ['src/main.rs'] },
     ], unclaimed: ['tools/tests/loose.rs'], missing: [], noPubspec: [] });
     const noCargo = { ...ctx, env: { PATH: path.join(repo.root, 'empty-path') } } as PregateContext;
     expect(planRuns(noCargo, ALPHA_TESTS)).toEqual({ groups: [], unclaimed: ALPHA_TESTS, missing: ['cargo'], noPubspec: [] });
@@ -205,8 +205,8 @@ describe('Cargo manifests are parsed as TOML', () => {
     const repo = manifestRepo();
     const ctx = { repoRoot: repo.work, config: DEFAULT_CONFIG, env: cargoShim(repo) } as unknown as PregateContext;
     expect(planRuns(ctx, ['crates/beta/tests/b.rs', 'crates/helper/src/lib.rs']).groups).toEqual([
-      { runner: 'cargo test -p beta', cwd: '', files: ['crates/beta/tests/b.rs'] },
-      { runner: 'cargo test -p helper', cwd: 'crates/helper', files: ['src/lib.rs'] },
+      { runner: "cargo test -p 'beta'", cwd: '', files: ['crates/beta/tests/b.rs'] },
+      { runner: "cargo test -p 'helper'", cwd: 'crates/helper', files: ['src/lib.rs'] },
     ]);
   });
 });
@@ -224,7 +224,7 @@ describe('gstack-pregate on a Rust workspace', () => {
     const r = run(repo, cargoShim(repo));
     expect(r.out).not.toContain('has no test lane');
     expect(r.out).toMatch(/^tests {6}lanes {5}pass .*6 tests ran in 4 file\(s\), exit 0/m);
-    expect(r.out).toContain("ran: (cd 'engine' && cargo test -p alpha) && (cd 'engine' && cargo test -p beta-core) && (cd 'engine' && cargo test -p gamma)");
+    expect(r.out).toContain("ran: (cd 'engine' && cargo test -p 'alpha') && (cd 'engine' && cargo test -p 'beta-core') && (cd 'engine' && cargo test -p 'gamma')");
     expect(log(r.out)).toContain('ran in engine: test -p alpha');
     expect(r.status).toBe(EXIT.ok);
   }, 60_000);
@@ -237,10 +237,29 @@ describe('gstack-pregate on a Rust workspace', () => {
     commit(repo, { 'engine/crates/gamma/src/lib.rs': 'pub fn g() { }\n' });
     const zero = run(repo, cargoShim(repo, 'echo "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"'));
     expect(zero.status).not.toBe(EXIT.ok);
-    expect(zero.out).toMatch(/^tests {6}lanes {5}fail .*ZERO-RUN: the runner reported 0 tests in \(cd 'engine' && cargo test -p gamma\)/m);
+    expect(zero.out).toMatch(/^tests {6}lanes {5}fail .*ZERO-RUN: the runner reported 0 tests in \(cd 'engine' && cargo test -p 'gamma'\)/m);
     const red = run(repo, cargoShim(repo, 'echo "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"\nexit 101'));
     expect(red.status).not.toBe(EXIT.ok);
     expect(red.out).toMatch(/^tests {6}lanes {5}fail .*local lane exited 101 \(1 failed of 2 ran; 1 files; pipefail\)/m);
+  }, 60_000);
+
+  // Value: protects=a crate name is data from the repo's Cargo.toml and reaches the lane's shell, so it is quoted like every
+  //   file and cwd; fails_when=`cargo test -p <name>` is built unquoted and a name with shell syntax runs a command;
+  //   why_new=the crate runner was new; seam=none; no_claim=a real cargo (PATH shim echoes its argv)
+  test('a crate name with shell syntax reaches cargo as one argument and runs nothing', () => {
+    const repo = rustRepo();
+    commit(repo, {
+      'engine/crates/evil/Cargo.toml': '[package]\nname = "evil;touch pwned-by-crate-name"\nversion = "0.1.0"\n',
+      'engine/crates/evil/src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n',
+    }, 'hostile crate');
+    repo.git('push', '-q', 'origin', 'HEAD:main');
+    repo.git('fetch', '-q', 'origin');
+    commit(repo, { 'engine/crates/evil/src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { }\n}\n' });
+    const r = run(repo, cargoShim(repo));
+    expect(fs.existsSync(path.join(repo.work, 'engine', 'pwned-by-crate-name'))).toBe(false);
+    expect(r.out).toContain("ran: (cd 'engine' && cargo test -p 'evil;touch pwned-by-crate-name')");
+    expect(log(r.out)).toContain('ran in engine: test -p evil;touch pwned-by-crate-name');
+    expect(r.status).toBe(EXIT.ok);
   }, 60_000);
 
   // Value: protects=a crate with no tests still fails closed (no lane), so the crate mapping never invents coverage;
