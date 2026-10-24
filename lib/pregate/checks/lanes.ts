@@ -94,8 +94,13 @@ export function dartRunner(repoRoot: string, root: string, env: NodeJS.ProcessEn
   return { runner: `${fvm ? 'fvm ' : ''}${tool} test {files}` };
 }
 
-/** `cargo test -p <name>` for a crate (cargo runs a crate's tests, never a file list), or the missing tool when cargo is not on PATH. The name comes from the repo's Cargo.toml and reaches a shell, so it is quoted like every file and cwd. */
-function cargoRunner(name: string, env: NodeJS.ProcessEnv): { runner: string } | { missing: string } {
+/**
+ * `cargo test -p <name>` for a crate (cargo runs a crate's tests, never a file list), or the missing tool when cargo is
+ * not on PATH. The name comes from the repo's Cargo.toml and reaches a shell and the `{files}` expansion: a name outside
+ * Cargo's grammar (letters, digits, `_`, `-`) gets no runner (null), and a valid one is still quoted like every file and cwd.
+ */
+function cargoRunner(name: string, env: NodeJS.ProcessEnv): { runner: string } | { missing: string } | null {
+  if (!/^[\p{ID_Continue}-]+$/u.test(name)) return null;
   return onPath('cargo', env) ? { runner: `cargo test -p ${quote(name)}` } : { missing: 'cargo' };
 }
 
@@ -149,8 +154,8 @@ export interface RunPlan { groups: RunGroup[]; unclaimed: string[]; missing: str
  * from the crate's workspace root; JS/TS tests owned by a nested package that
  * declares vitest or jest run from that package; the rest go to the detected
  * runner from the repo root. Files no runner claims (a tool missing from PATH,
- * a `.dart` file outside any package, a `.rs` file outside any crate, no
- * detected runner) are `unclaimed`: the lane is `incomplete`, never a pass.
+ * a `.dart` file outside any package, a `.rs` file outside any crate or in a
+ * crate whose name Cargo would reject, no detected runner) are `unclaimed`: the lane is `incomplete`, never a pass.
  */
 export function planRuns(ctx: PregateContext, files: readonly string[]): RunPlan {
   if (ctx.config.runner) return { groups: [{ runner: ctx.config.runner, cwd: '', files: [...files] }], unclaimed: [], missing: [], noPubspec: [] };
@@ -197,7 +202,9 @@ export function planRuns(ctx: PregateContext, files: readonly string[]): RunPlan
   }
   for (const [, c] of [...cargo].sort(([a], [b]) => a.localeCompare(b))) {
     const r = cargoRunner(c.name, ctx.env);
-    if ('missing' in r) { missing.add(r.missing); unclaimed.push(...c.files.map(f => (c.cwd ? `${c.cwd}/${f}` : f))); } else groups.push({ runner: r.runner, cwd: c.cwd, files: c.files });
+    if (r && 'runner' in r) { groups.push({ runner: r.runner, cwd: c.cwd, files: c.files }); continue; }
+    if (r) missing.add(r.missing);
+    unclaimed.push(...c.files.map(f => (c.cwd ? `${c.cwd}/${f}` : f)));
   }
   if (rest.length) {
     const runner = detectRunner(ctx, rest);

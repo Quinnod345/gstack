@@ -243,23 +243,35 @@ describe('gstack-pregate on a Rust workspace', () => {
     expect(red.out).toMatch(/^tests {6}lanes {5}fail .*local lane exited 101 \(1 failed of 2 ran; 1 files; pipefail\)/m);
   }, 60_000);
 
-  // Value: protects=a crate name is data from the repo's Cargo.toml and reaches the lane's shell, so it is quoted like every
-  //   file and cwd; fails_when=`cargo test -p <name>` is built unquoted and a name with shell syntax runs a command;
-  //   why_new=the crate runner was new; seam=none; no_claim=a real cargo (PATH shim echoes its argv)
-  test('a crate name with shell syntax reaches cargo as one argument and runs nothing', () => {
+  // Value: protects=a crate name is data from the repo's Cargo.toml that reaches the lane's shell and the {files} expansion,
+  //   so a name Cargo would reject never runs (its files are unclaimed, the lane incomplete) and a valid one, Unicode
+  //   included, still runs quoted; fails_when=the name is interpolated unchecked (`;touch` runs a command, `{files}` splices
+  //   the quoted file list into the name); why_new=the crate runner was new; seam=none; no_claim=a real cargo (PATH shim)
+  test('a crate name with shell syntax or {files} never reaches the shell; a valid Unicode name still runs', () => {
     const repo = rustRepo();
+    const lib = '#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n';
     commit(repo, {
       'engine/crates/evil/Cargo.toml': '[package]\nname = "evil;touch pwned-by-crate-name"\nversion = "0.1.0"\n',
-      'engine/crates/evil/src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n',
-    }, 'hostile crate');
+      'engine/crates/evil/src/lib.rs': lib,
+      'engine/crates/splice/Cargo.toml': '[package]\nname = "evil{files}"\nversion = "0.1.0"\n',
+      'engine/crates/splice/src/lib.rs': lib,
+      'engine/crates/uni/Cargo.toml': '[package]\nname = "naïve_crate-2"\nversion = "0.1.0"\n',
+      'engine/crates/uni/src/lib.rs': lib,
+    }, 'odd crate names');
     repo.git('push', '-q', 'origin', 'HEAD:main');
     repo.git('fetch', '-q', 'origin');
-    commit(repo, { 'engine/crates/evil/src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { }\n}\n' });
-    const r = run(repo, cargoShim(repo));
+    const env = cargoShim(repo);
+    const ctx = { repoRoot: repo.work, config: DEFAULT_CONFIG, env } as unknown as PregateContext;
+    expect(planRuns(ctx, ['engine/crates/evil/src/lib.rs', 'engine/crates/splice/src/lib.rs', 'engine/crates/uni/src/lib.rs'])).toEqual({
+      groups: [{ runner: "cargo test -p 'naïve_crate-2'", cwd: 'engine', files: ['crates/uni/src/lib.rs'] }],
+      unclaimed: ['engine/crates/evil/src/lib.rs', 'engine/crates/splice/src/lib.rs'], missing: [], noPubspec: [],
+    });
+    commit(repo, { 'engine/crates/evil/src/lib.rs': lib.replace('fn t() {}', 'fn t() { }') });
+    const r = run(repo, env);
     expect(fs.existsSync(path.join(repo.work, 'engine', 'pwned-by-crate-name'))).toBe(false);
-    expect(r.out).toContain("ran: (cd 'engine' && cargo test -p 'evil;touch pwned-by-crate-name')");
-    expect(log(r.out)).toContain('ran in engine: test -p evil;touch pwned-by-crate-name');
-    expect(r.status).toBe(EXIT.ok);
+    expect(r.out).not.toContain('cargo test -p');
+    expect(r.out).toContain('engine/crates/evil/src/lib.rs');
+    expect(r.status).not.toBe(EXIT.ok);
   }, 60_000);
 
   // Value: protects=a crate with no tests still fails closed (no lane), so the crate mapping never invents coverage;
