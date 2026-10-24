@@ -292,7 +292,9 @@ describe('Cargo membership and test detection (port review)', () => {
 });
 
 describe('gstack-pregate on a Rust workspace', () => {
-  const run = (repo: FixtureRepo, env: Record<string, string>) => runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--only', 'lanes'], env);
+  /** Windows names it `Path`: a second `PATH` key beside it leaves the child's lookup to whichever the OS reads first. */
+  const pathKey = Object.keys(process.env).find(key => key.toLowerCase() === 'path') ?? 'PATH';
+  const run = (repo: FixtureRepo, { PATH, ...env }: Record<string, string>) => runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--only', 'lanes'], { ...env, [pathKey]: PATH! });
   const log = (out: string) => fs.readFileSync(/log: (\S+)/.exec(out)![1]!, 'utf8');
 
   // Value: protects=the reported case end to end: a touched src file of a workspace crate is not PREGATE_NO_LANE, its crate and the
