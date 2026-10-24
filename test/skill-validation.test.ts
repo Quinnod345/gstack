@@ -2071,7 +2071,7 @@ describe('Failure routing: verified cause → fix, unknown cause → bounded tri
   test('/ship fixes a pre-existing failure through the same bounded triage', () => {
     const tests = fs.readFileSync(path.join(ROOT, 'ship', 'sections', 'tests.md'), 'utf-8');
     const fixNow = tests.slice(tests.indexOf('**If "Investigate and fix now":**'), tests.indexOf('**If "Add as P0 TODO":**'));
-    expect(fixNow).toContain('- One read-only pass for the root cause; if unclear, invoke `/investigate` first.');
+    expect(fixNow).toContain('- One read-only root-cause pass, then `/investigate` if unclear.');
     expect(fixNow).not.toContain('/investigate mindset');
   });
 });

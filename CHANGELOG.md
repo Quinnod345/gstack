@@ -7,14 +7,14 @@
 ### Changed
 - **`SKILL.md.tmpl`** (root router): the bug-report rule points to a new **Failures** block that carries the two paths. Its text comes from `generateFailureRouting()` in `scripts/resolvers/preamble/generate-test-failure-triage.ts`.
 - **`bin/gstack-skill-start`** and `CLAUDE.md`: the routing section gstack offers for a project's CLAUDE.md now reads "Bugs/errors → invoke /investigate, unless one read-only check confirms the cause and a narrow fix (then fix it and run the focused test)", so it agrees with the router.
-- **`/ship` Test Failure Ownership Triage**, "Investigate and fix now": "Switch to /investigate mindset" becomes one read-only pass for the root cause, then `/investigate` if it is still unclear.
+- **`/ship` Test Failure Ownership Triage**, "Investigate and fix now": "Switch to /investigate mindset" becomes "One read-only root-cause pass, then `/investigate` if unclear."
 
 ### Tests
 - New paid eval `test/skill-e2e-failure-routing.test.ts` (gate, `rule`): four fixture repos, two per issue. `router-failure-verified-cause` and `router-failure-triage-resolves` must fix the bug without /investigate and leave the suite green. `router-failure-contradicted-cause` (a user-supplied cause the code contradicts) and `router-failure-triage-unclear` (an intermittent CI-only failure) must invoke /investigate, and an edit before it is a contract violation. Every case needs one to four read-only calls before it routes. `GSTACK_ROUTER_ARM=before` runs the same cases against the base branch's router.
 - `test/skill-validation.test.ts` checks that the rendered router carries the rule and no longer sends bug reports straight to /investigate, that both paths keep the /investigate fallback, that the shipped CLAUDE.md routing line matches this repo's own, and that /ship's fix-now step uses the bounded pass.
 
 ### Gate integrity
-- No threshold, budget, timeout, trial count or existing case kind changed. The ship skill's parity size stays under its cap (313,277 of 313,281 bytes). The new eval's negative controls are the two /investigate cases, and on the base router the triage cases go red.
+- No threshold, budget, timeout, trial count or existing case kind changed. The ship skill's parity size stays under its cap (313,260 of 313,281 bytes; 313,276 with #3372 merged). The new eval's negative controls are the two /investigate cases, and on the base router the triage cases go red.
 - Registries and pins the new gate-tier file needs, each with a stated reason: `test/eng-finding-retry-budget.test.ts` counts 110 paid test files (was 109). `test/helpers/e2e-hosts.ts` lists the four cases as `skill-tool` Claude-only, because they assert on the Claude Skill tool call. `test/codex-host.test.ts` counts 33 Claude-specific gate cases (was 29).
 - Each train gate now runs the four new cases, one trial each, for about $0.37 (measured at this head: $0.06, $0.06, $0.11 and $0.14; about 67 s wall when they run in parallel).
 
