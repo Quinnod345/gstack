@@ -191,11 +191,27 @@ export function cargoModel(files: readonly string[], read: ReadFile): CargoModel
 /**
  * Whether Rust source declares tests: a `#[test]` or `#[<path>::test]` attribute (a plain test function, `#[tokio::test]`),
  * or a `#[cfg(...)]` whose predicate names `test` outside a string (`cfg(test)`, `cfg(all(test, unix))`; never
- * `cfg(feature = "test")`). The predicate and its strings are length-bounded, so a scan stays linear in the source.
+ * `cfg(feature = "test")`). One forward scan: each attribute is read once to its `]`, and one this scan cannot close
+ * (an unterminated string, no `]` before the end) counts as a test, which selects more, never fewer.
  */
 export function hasCfgTest(source: string): boolean {
   if (/#\s*\[\s*(?:[A-Za-z_]\w*\s*::\s*)*test\s*[\]()]/.test(source)) return true;
-  for (const m of source.matchAll(/#\s*\[\s*cfg\s*\(((?:[^\]"]|"[^"]{0,256}"){0,1024})\)\s*\]/g)) if (/\btest\b/.test(m[1]!.replace(/"[^"]*"/g, '""'))) return true;
+  const open = /#\s*\[\s*cfg\s*\(/g;
+  for (let m = open.exec(source); m; m = open.exec(source)) {
+    let predicate = '';
+    let i = open.lastIndex;
+    for (; i < source.length && source[i] !== ']'; i++) {
+      if (source[i] !== '"') { predicate += source[i]; continue; }
+      const close = source.indexOf('"', i + 1);
+      if (close < 0) return true;
+      predicate += '""';
+      i = close;
+    }
+    if (i >= source.length) return true;
+    const body = predicate.trimEnd();
+    if (body.endsWith(')') && /\btest\b/.test(body.slice(0, -1))) return true;
+    open.lastIndex = i + 1;
+  }
   return false;
 }
 

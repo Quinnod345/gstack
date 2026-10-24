@@ -242,7 +242,8 @@ describe('Cargo membership and test detection (port review)', () => {
   //   never runs (a false green); why_new=port review; seam=none; no_claim=custom [[test]] targets outside tests/
   test('a plain #[test] or #[tokio::test] in src is a test; cfg(feature = "test") and #[testing] are not', () => {
     expect(['#[test]\nfn a() {}', '#[tokio::test(flavor = "multi_thread")]\nasync fn a() {}', '#[ test ]\nfn a() {}'].map(hasCfgTest)).toEqual([true, true, true]);
-    expect(['#[cfg(feature = "test")]\nfn a() {}', '#[testing]\nfn a() {}', '// attests'].map(hasCfgTest)).toEqual([false, false, false]);
+    expect(['#[cfg(feature = "test")]\nfn a() {}', '#[testing]\nfn a() {}', '// attests', '#[cfg(feature = "a]b")]\nfn a() {}'].map(hasCfgTest)).toEqual([false, false, false, false]);
+    expect(hasCfgTest(`#[cfg(any(test, feature = "${'f'.repeat(300)}"))]\nmod t {}`)).toBe(true);
     const files = {
       'a/Cargo.toml': pkg('a'), 'a/src/lib.rs': 'pub fn one() -> u32 { 1 }\n#[cfg(test)]\nmod t { #[test] fn one() {} }\n',
       'b/Cargo.toml': pkg('b', '\n[dependencies]\na = { path = "../a" }\n'), 'b/src/lib.rs': 'pub fn two() -> u32 { a::one() + 1 }\n#[test]\nfn two() { assert_eq!(super::two(), 2); }\n',
@@ -267,6 +268,11 @@ describe('Cargo membership and test detection (port review)', () => {
     expect(r.stdout.trim()).toBe(JSON.stringify(['a'.repeat(40), '']));
   }, 60_000);
 
+  test('a run of unclosed cfg attributes is scanned once and counts as a test', () => {
+    const r = supervised(`console.log(JSON.stringify([hasCfgTest('#[cfg('.repeat(100000)), hasCfgTest('#[cfg(unix)] fn a() {}\\n'.repeat(50000))]));`);
+    expect(r.error).toBeUndefined();
+    expect(r.stdout.trim()).toBe('[true,false]');
+  }, 60_000);
 });
 
 describe('gstack-pregate on a Rust workspace', () => {
