@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { findWindowsBunExe } from '../src/bun-child-config';
 import { resolveBunExecutable } from '../src/terminal-agent-control';
 
 const files = (...paths: string[]) => (p: string) => paths.some(f => f.toLowerCase() === p.toLowerCase());
@@ -60,5 +61,25 @@ describe('resolveBunExecutable', () => {
     const spawnSite = source.slice(source.indexOf('export function spawnTerminalAgent'));
     expect(spawnSite).toContain('spawn([resolveBunExecutable(), \'run\'');
     expect(spawnSite).not.toMatch(/spawn\(\[\s*'bun'/);
+  });
+});
+
+describe('findWindowsBunExe is the one bun.exe lookup', () => {
+  test('returns null, not a bare bun, when no bun.exe is installed', () => {
+    expect(findWindowsBunExe({ isBun: false, execPath: 'node.exe', env: { PATH: 'C:\\x;relative' }, isFile: () => false })).toBeNull();
+  });
+
+  test('the native cookie-import worker finds an npm-global bun.exe through the same lookup', () => {
+    const npm = 'C:\\Users\\u\\AppData\\Roaming\\npm';
+    expect(findWindowsBunExe({
+      isBun: false, execPath: 'C:\\Program Files\\nodejs\\node.exe', env: { PATH: npm },
+      isFile: files(`${npm}\\bun.cmd`, `${npm}\\node_modules\\bun\\bin\\bun.exe`),
+    })).toBe(`${npm}\\node_modules\\bun\\bin\\bun.exe`);
+  });
+
+  test('cookie-import-native has no bun.exe candidate list of its own', () => {
+    const source = fs.readFileSync(path.resolve(import.meta.dir, '../src/cookie-import-native.ts'), 'utf8');
+    expect(source).toContain('const bunExecutable = findWindowsBunExe();');
+    expect(source).not.toContain("'bun.exe'");
   });
 });

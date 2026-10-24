@@ -22,7 +22,7 @@ import { safeUnlink, isProcessAlive } from './error-handling';
 import { restrictFilePermissions, mkdirSecure } from './file-permissions';
 import { atomicWriteSync } from '../../lib/fs-atomic';
 import { readPidCmdline, readPidStartTime } from './xvfb';
-import { emptyBunConfig } from './bun-child-config';
+import { emptyBunConfig, findWindowsBunExe, type BunExeLookup } from './bun-child-config';
 
 function agentProcessInfo(pid: number): { startTime: string; commandLine: string } {
   if (!Number.isSafeInteger(pid) || pid <= 0) return { startTime: '', commandLine: '' };
@@ -160,34 +160,9 @@ export function bunChildFlags(): string[] {
  * Spawning bun.exe directly fixes both. Falls back to 'bun' when no .exe is
  * found, which is the old behavior.
  */
-export function resolveBunExecutable(opts: {
-  platform?: string;
-  env?: NodeJS.ProcessEnv;
-  execPath?: string;
-  isBun?: boolean;
-  isFile?: (p: string) => boolean;
-} = {}): string {
-  const platform = opts.platform ?? process.platform;
-  if (platform !== 'win32') return 'bun';
-  const win = path.win32;
-  const env = opts.env ?? process.env;
-  const execPath = opts.execPath ?? process.execPath;
-  const isBun = opts.isBun ?? !!process.versions.bun;
-  const isFile = opts.isFile ?? ((p: string) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
-  // A compiled browse.exe also reports versions.bun, so check the name too.
-  if (isBun && /^bun\.exe$/i.test(win.basename(execPath))) return execPath;
-  const dirs = (env.PATH || env.Path || '').split(';').filter(d => d && win.isAbsolute(d));
-  const candidates = [
-    ...(env.BUN_INSTALL ? [win.join(env.BUN_INSTALL, 'bin', 'bun.exe')] : []),
-    ...dirs.flatMap(d => [
-      win.join(d, 'bun.exe'),
-      // npm global install: PATH holds only the bun.cmd shim; the real
-      // binary it forwards to lives under node_modules.
-      ...(isFile(win.join(d, 'bun.cmd')) ? [win.join(d, 'node_modules', 'bun', 'bin', 'bun.exe')] : []),
-    ]),
-    ...(env.USERPROFILE ? [win.join(env.USERPROFILE, '.bun', 'bin', 'bun.exe')] : []),
-  ];
-  return candidates.find(isFile) ?? 'bun';
+export function resolveBunExecutable(opts: BunExeLookup & { platform?: string } = {}): string {
+  if ((opts.platform ?? process.platform) !== 'win32') return 'bun';
+  return findWindowsBunExe(opts) ?? 'bun';
 }
 
 export function resolveTerminalAgentScript(searchHints: { metaDir?: string; execPath?: string } = {}): string | null {
