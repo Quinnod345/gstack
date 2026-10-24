@@ -65,14 +65,13 @@ const CARGO_OK = [
 
 /**
  * A `cargo` on PATH running `body` (default: reports its cwd and argv, then two passed tests and an empty doc-test binary).
- * `cargo.cmd` is what Bun.which finds on Windows. The lane puts its Bun's directory first on PATH, and that directory can
- * hold a real cargo (/usr/local/bin, /opt/homebrew/bin), so on POSIX the lane's bash puts the shim first again through BASH_ENV.
+ * The lane puts its Bun's directory first on PATH, and that directory can hold a real cargo (/usr/local/bin,
+ * /opt/homebrew/bin), so on POSIX the lane's bash puts the shim first again through BASH_ENV.
  */
 function cargoShim(repo: FixtureRepo, body = CARGO_OK): Record<string, string> {
   const dir = path.join(repo.root, 'shim');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'cargo'), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
-  fs.writeFileSync(path.join(dir, 'cargo.cmd'), `@echo off\r\nbash "%~dp0cargo" %*\r\n`);
   fs.writeFileSync(path.join(dir, 'path.sh'), `PATH='${dir}':"$PATH"\n`);
   const PATH = [dir, process.env.PATH ?? ''].join(path.delimiter);
   return process.platform === 'win32' ? { PATH } : { PATH, BASH_ENV: path.join(dir, 'path.sh') };
@@ -292,15 +291,17 @@ describe('Cargo membership and test detection (port review)', () => {
 });
 
 describe('gstack-pregate on a Rust workspace', () => {
-  /** Windows names it `Path`: a second `PATH` key beside it leaves the child's lookup to whichever the OS reads first. */
-  const pathKey = Object.keys(process.env).find(key => key.toLowerCase() === 'path') ?? 'PATH';
-  const run = (repo: FixtureRepo, { PATH, ...env }: Record<string, string>) => runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--only', 'lanes'], { ...env, [pathKey]: PATH! });
+  const run = (repo: FixtureRepo, env: Record<string, string>) => runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--only', 'lanes'], env);
+  // The cargo stand-in is a bash script the lane's Git Bash must find before the runner's real cargo; on windows-latest it
+  // never did (three PATH repairs, the lane still exited 1 with an empty log), so the two cases that run it are POSIX-only,
+  // like test/pregate-dart.test.ts's stand-ins. Selection, planning and the hostile-name case still run on Windows.
+  const posixShim = test.skipIf(process.platform === 'win32');
   const log = (out: string) => fs.readFileSync(/log: (\S+)/.exec(out)![1]!, 'utf8');
 
   // Value: protects=the reported case end to end: a touched src file of a workspace crate is not PREGATE_NO_LANE, its crate and the
   //   dependent crates run with `cargo test -p` from the workspace root, and the summed count is reported; fails_when=any link of
   //   graph, plan or summary regresses; why_new=no Rust run existed; seam=none; no_claim=a real cargo (PATH shim reports cwd and argv)
-  test('a touched src file runs its crate and the crates depending on it from the workspace root', () => {
+  posixShim('a touched src file runs its crate and the crates depending on it from the workspace root', () => {
     const repo = rustRepo();
     commit(repo, { 'engine/crates/alpha/src/util.rs': 'pub fn two() -> u32 { 1 + 1 }\n' });
     const r = run(repo, cargoShim(repo));
@@ -314,7 +315,7 @@ describe('gstack-pregate on a Rust workspace', () => {
   // Value: protects=a crate whose test binaries all report 0 tests is ZERO-RUN (exit 0 is not a pass), and a failing cargo run is
   //   PREGATE_LANE_FAILED with its counts; fails_when=cargo's summary is unparsed (count unavailable passes) or the exit is ignored;
   //   why_new=the pure parser test does not run the lane; seam=none; no_claim=a real cargo (PATH shim)
-  test('zero tests is ZERO-RUN; a failing cargo run is PREGATE_LANE_FAILED', () => {
+  posixShim('zero tests is ZERO-RUN; a failing cargo run is PREGATE_LANE_FAILED', () => {
     const repo = rustRepo();
     commit(repo, { 'engine/crates/gamma/src/lib.rs': 'pub fn g() { }\n' });
     const zero = run(repo, cargoShim(repo, 'echo "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"'));
