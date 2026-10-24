@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**Team-mode session auto-update waits for live gstack sessions instead of moving the checkout under them (#3363).** `bin/gstack-upgrade` already refuses with `UPGRADE_BUSY` while another live session holds a workflow lease on the installation (`bin/gstack-lease`), but the SessionStart hook `bin/gstack-session-update` never read the leases. A shared `./setup --team` install could fast-forward and re-run `./setup` while another session was mid-workflow. Reproduced on main: with a live lease held, the hook logged `UPDATING` and moved the install's HEAD.
+
+### Fixed
+- **`bin/gstack-session-update`**: after taking its setup lock and before fetching, the background updater asks `gstack-lease live --root <install> --exclude-ancestry-of <hook pid>`. Any live lease from another session logs `SKIP leased pid=<pid>/<age>` and exits without fetching, fast-forwarding, retrying a pending setup stage or writing the hourly throttle stamp, so the next session start tries again. `GSTACK_UPGRADE_FORCE=1` overrides, as it does for `gstack-upgrade`. A dead or stale lease never blocks.
+
+### Tests
+- `test/session-update-stages.test.ts` holds a lease from a live process: the install's HEAD, setup runs and the throttle stamp are unchanged, and the first session start after the holder exits updates. A second case shows a lease also holds a pending setup retry. Both fail on main. Controls: `GSTACK_UPGRADE_FORCE=1` updates under a live lease, and a lease whose process is dead does not block.
+
 ## [1.91.186.0] - 2026-10-24
 
 **Approving an autoplan run no longer fails one time in ten because its run id looks like a card number.** Today's daily flaky-fix pass found `test/capy-captain-flow.test.ts` failing once and passing on the serial retry in 7 of the 57 Free Tests runs from 2026-10-21 to 2026-10-23, one of them a push to main (39878113535). Every failure had the same assertion: `gstack-approvals import` refused the approval row with "field ask: pii.cc". The default autoplan run id is `run-YYYYMMDDHHMMSS`, the import writes it into the row's ask and source, and the credit-card rule saw those 14 digits as a card number whenever they passed the Luhn check, which a timestamp does about one time in ten. A real user's approval import failed the same way.
