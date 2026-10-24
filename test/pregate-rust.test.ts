@@ -15,6 +15,7 @@ import { parseSummary, planRuns } from '../lib/pregate/checks/lanes';
 import { DEFAULT_CONFIG } from '../lib/pregate/config';
 import { buildGraph, testsFor } from '../lib/pregate/import-graph';
 import { draftConfig } from '../lib/pregate/init-draft';
+import { cargoModel, rustEdges } from '../lib/pregate/rust';
 import type { PregateContext } from '../lib/pregate/types';
 import { cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
@@ -209,6 +210,30 @@ describe('Cargo manifests are parsed as TOML', () => {
       { runner: "cargo test -p 'helper'", cwd: 'crates/helper', files: ['src/lib.rs'] },
     ]);
   });
+});
+
+describe('Cargo membership and test detection (port review)', () => {
+  const inMemory = (files: Record<string, string>) => [Object.keys(files), (f: string) => files[f] ?? null] as const;
+  const pkg = (name: string, deps = '') => `[package]\nname = "${name}"\nversion = "0.1.0"\n${deps}`;
+  const dependentsOf = (files: Record<string, string>, manifest: string) => rustEdges(...inMemory(files)).edges.filter(e => e.dependency === manifest).map(e => e.dependent).sort();
+
+  // Value: protects=Cargo's member globs ([ab] classes, ** spans) admit the crates Cargo admits, so a member inherits
+  //   [workspace.dependencies] and its tests are selected; fails_when=a character class is matched literally, the crate is
+  //   no member, the inherited path dependency is dropped and alpha's change misses beta's tests (a false green);
+  //   why_new=port review found classes escaped; seam=none; no_claim=cargo's own glob crate
+  test('a members glob with a character class or ** admits the crate, so an inherited dependency links its dependent', () => {
+    const files = {
+      'Cargo.toml': '[workspace]\nmembers = ["crates/[ab]", "nested/**/leaf"]\n\n[workspace.dependencies]\nbase = { package = "alpha", path = "crates/a" }\n',
+      'crates/a/Cargo.toml': pkg('alpha'), 'crates/a/tests/a.rs': '#[test]\nfn a() {}\n',
+      'crates/b/Cargo.toml': pkg('beta', '\n[dependencies]\nbase = { workspace = true }\n'), 'crates/b/tests/b.rs': '#[test]\nfn b() {}\n',
+      'crates/c/Cargo.toml': pkg('gamma'),
+      'nested/x/y/leaf/Cargo.toml': pkg('leaf'),
+    };
+    const { crates } = cargoModel(...inMemory(files));
+    expect(['crates/a', 'crates/b', 'crates/c', 'nested/x/y/leaf'].map(r => crates.get(r)!.workspace)).toEqual(['', '', 'crates/c', '']);
+    expect(dependentsOf(files, 'crates/a/Cargo.toml')).toEqual(['crates/a/tests/a.rs', 'crates/b/tests/b.rs']);
+  });
+
 });
 
 describe('gstack-pregate on a Rust workspace', () => {
