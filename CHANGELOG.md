@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+**A repo that keeps `.gstack/` out of git can give pregate a policy, and name the CI lanes a local run satisfies (#3286).** On a shared repo where gstack is one contributor's tool, pregate fell back to defaults, so every platform lane the machine could not run (an `ubuntu-latest` suite on a Mac, say) became a `requires-remote` obligation that never cleared, even when that suite runs the same here. Ported from #3286 by arlophoenix, whose 13 commits carry the feature (merged with their history kept); our commits on top close two findings from a security-focused review of the port.
+
+### Added
+- **`lib/pregate/context.ts`, `lib/pregate/config.ts`** (arlophoenix): when the base branch carries no `.gstack/pregate.json`, `gstack-pregate run` reads `<state root>/projects/<slug>/pregate.json`. Never under `--policy-from head`, never a relative path or one inside the checkout, and never chosen by a checkout's `.env` (the bin ignores it, and a bare `bun gstack-pregate` beside one refuses). An unreadable file, a dangling link on its path, `sealed` or `price_file` refuses with `PREGATE_CONFIG_INVALID`; a base copy git cannot read refuses with `POLICY_SOURCE_UNAVAILABLE` unless `git ls-tree` confirms it is absent.
+- **`local`** (arlophoenix): `<workflow.yml>/<job>` lanes a local run satisfies run here instead of becoming `requires-remote`. Under 8 cores with a `remote_gate` or remote `test_backend`, the small-machine obligation still stands.
+- **`lib/pregate/index.ts`** (arlophoenix): the record names the user file and its digest, and `verify` goes `PREGATE_STALE` when it is edited, deleted, or appears after a run under the defaults. Fix texts for missing lanes, strays, stalls and `remote_gate` name the active policy file.
+
+### Fixed
+- **`lib/pregate/context.ts`**: a user policy whose path reaches the checkout through any symlink is ignored. Before, only the lexical path and the final target were checked, so a state root linked into the checkout, holding a link back out to another existing policy, let a branch choose a more permissive file without changing its bytes.
+- **`lib/pregate/index.ts`**: `verify` goes `PREGATE_STALE` when a link on the way to the absent user path starts pointing nowhere. A fresh run refuses that state, but verify looked only at the leaf, so an old defaults pass stayed publishable. The loader and verify now share one absence check.
+
+### Tests
+- `test/pregate-user-policy.test.ts` (new, arlophoenix) covers the user file, `local`, the refusals, `.env` isolation and stale receipts. New cases: a link chain through the checkout is refused for both a linked state root and a single in-repo hop, while a direct outside link is still read; and verify goes stale on a dangling parent, with the plain-absent path as the control.
+- `test/pregate-rust.test.ts`: the two cargo-lane cases skipped on Windows carry a `TODO(#3380)` naming the gap.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or skip changed. The user file can relax lanes only where the base has no policy at all, and only from outside the repository; the two fixes make that containment stricter.
+- No new dependency, no network call, no workflow change.
+
+## [1.91.197.0] - 2026-10-25
+
 **Pregate gives touched Rust files a test lane, and runs a nested pnpm or vitest package with its own runner (#3344).** In a mixed Cargo and JavaScript repo, every touched `.rs` file failed `lanes` with "has no test lane", so /ship could not get a receipt, and a nested package's vitest tests ran under `bun test` from the repo root (about 98 false failures in the reporter's repo). Ported from #3346 by vilano93, whose two commits carry the feature; our commits on top close four findings from a security-focused review of the port and make the new fixtures hermetic.
 
 ### Fixed
@@ -22,24 +43,171 @@
 - No threshold, budget, timeout, trial count or case kind changed. Pregate's lanes now map and run tests for `.rs` files that previously failed closed with "no test lane", and nested vitest/jest packages run under their own runner instead of `bun test`. A `.rs` file outside any crate, a crate with no tests, and a missing cargo or package manager still fail closed or stay incomplete; the tests above cover each.
 - No new dependency (Cargo.toml is parsed with Bun's built-in TOML parser), no network call in pregate itself, no workflow change. As with the root runner detection on main (`npx vitest run`), a nested package's detected runner (`npx`, `bun x`) may fetch a missing tool when it runs under `--allow-repo-commands`.
 
-**A repo that keeps `.gstack/` out of git can give pregate a policy, and name the CI lanes a local run satisfies (#3286).** On a shared repo where gstack is one contributor's tool, pregate fell back to defaults, so every platform lane the machine could not run (an `ubuntu-latest` suite on a Mac, say) became a `requires-remote` obligation that never cleared, even when that suite runs the same here. Ported from #3286 by arlophoenix, whose 13 commits carry the feature (merged with their history kept); our commits on top close two findings from a security-focused review of the port.
+## [1.91.196.0] - 2026-10-25
 
-### Added
-- **`lib/pregate/context.ts`, `lib/pregate/config.ts`** (arlophoenix): when the base branch carries no `.gstack/pregate.json`, `gstack-pregate run` reads `<state root>/projects/<slug>/pregate.json`. Never under `--policy-from head`, never a relative path or one inside the checkout, and never chosen by a checkout's `.env` (the bin ignores it, and a bare `bun gstack-pregate` beside one refuses). An unreadable file, a dangling link on its path, `sealed` or `price_file` refuses with `PREGATE_CONFIG_INVALID`; a base copy git cannot read refuses with `POLICY_SOURCE_UNAVAILABLE` unless `git ls-tree` confirms it is absent.
-- **`local`** (arlophoenix): `<workflow.yml>/<job>` lanes a local run satisfies run here instead of becoming `requires-remote`. Under 8 cores with a `remote_gate` or remote `test_backend`, the small-machine obligation still stands.
-- **`lib/pregate/index.ts`** (arlophoenix): the record names the user file and its digest, and `verify` goes `PREGATE_STALE` when it is edited, deleted, or appears after a run under the defaults. Fix texts for missing lanes, strays, stalls and `remote_gate` name the active policy file.
+**`/land-and-deploy` no longer stops parallel PRs with a false "VERSION drift detected".** Step 3.4 compared the branch VERSION with the next free patch slot (`gstack-next-version --bump patch --exclude-pr`) under every ship policy. So it stopped a stamp-at-merge PR whenever a sibling shared its tentative stamp, a claim-at-open PR whenever a sibling had claimed a higher slot, and every MICRO bump even with no other PR open. Reported with a full reproduction by Evgenii Lopatin (@exGeni) in #3318.
 
 ### Fixed
-- **`lib/pregate/context.ts`**: a user policy whose path reaches the checkout through any symlink is ignored. Before, only the lexical path and the final target were checked, so a state root linked into the checkout, holding a link back out to another existing policy, let a branch choose a more permissive file without changing its bytes.
-- **`lib/pregate/index.ts`**: `verify` goes `PREGATE_STALE` when a link on the way to the absent user path starts pointing nowhere. A fresh run refuses that state, but verify looked only at the leaf, so an old defaults pass stayed publishable. The loader and verify now share one absence check.
+- **`land-and-deploy/SKILL.md.tmpl` Step 3.4**: reads `gstack-ship-policy show-effective` and prints one `VERSION_CHECK:` verdict. Under `stamp-at-merge` it ignores claims and checks the exact head stamp: VERSION is the base's version plus one bump, and the changelog's top two headings are that version and then the base's top entry. Otherwise it stops with `STOP stamp stale` and names the `gstack-restamp --next` command. Under `claim-at-open`, and with no policy file, it stops only on a real collision: another open PR holds the same VERSION, or the base is already at or above it. MICRO bumps and versions below a sibling's claim pass.
+
+### Documentation
+- `docs/ship-policy.md` gains "What `/land-and-deploy` reads from it", which gives Step 3.4's stop and pass conditions for each `queue_mode`.
 
 ### Tests
-- `test/pregate-user-policy.test.ts` (new, arlophoenix) covers the user file, `local`, the refusals, `.env` isolation and stale receipts. New cases: a link chain through the checkout is refused for both a linked state root and a single in-repo hop, while a direct outside link is still read; and verify goes stale on a dangling parent, with the plain-absent path as the control.
-- `test/pregate-rust.test.ts`: the two cargo-lane cases skipped on Windows carry a `TODO(#3380)` naming the gap.
+- `test/land-and-deploy-version-check.test.ts` runs the template's own Step 3.4 block against real git fixtures with the real `gstack-ship-policy` and a stubbed claim list, under bash and, when installed, zsh. It covers the three false stops from #3318 (all pass now) and the real stops: a same-VERSION claim, a base at or above the branch, a stale stamp after a sibling landed, a base that moved by MICRO under a stamp, an `[Unreleased]` entry, and a two-bump stamp. A missing VERSION, an invalid policy and unread claims are `unavailable`.
 
 ### Gate integrity
-- No threshold, budget, timeout, trial count, case kind or skip changed. The user file can relax lanes only where the base has no policy at all, and only from outside the repository; the two fixes make that containment stricter.
-- No new dependency, no network call, no workflow change.
+- Step 3.4 now stops on fewer inputs: a unique VERSION below a sibling's claim, a MICRO bump, and a stamp-at-merge stamp that siblings share no longer stop. Every real collision still stops, and six mutation controls of the block (drop the collision check, the base check, the changelog binding, the one-bump rule, the policy read, or the unread-claims rule) each turn the new tests red. One new `unavailable` path: an invalid ship policy. It mirrors the existing offline path, and a base at or above the branch still stops there.
+- Owner-approved budget raise (Garry, 2026-10-24: "do it"): land-and-deploy's exact size pins in `test/fixtures/skill-md-size-allowlist.json` move up by 1,084 to 1,111 characters on 11 hosts, and its parity `maxSizeRatio` in `test/helpers/carve-guards.ts` goes from 1.112 to 1.125 (measured 1.1201). No threshold, timeout, trial count or case kind changed.
+
+## [1.91.195.0] - 2026-10-25
+
+**Four skill prompts stop contradicting themselves or their code.** dgrant's issues #3347, #3350, #3351 and #3352 each found a skill telling the model something wrong or ambiguous: /office-hours read a master-based repo as "no changes", /plan-design-review named a vision model the design binary no longer uses, /health gave two different GBrain scores for the same readings, and /ios-qa's demo mode claimed to override every other rule in the skill.
+
+### Fixed
+- **`office-hours/SKILL.md.tmpl`** (#3347): Phase 1 runs `git diff origin/HEAD --stat`, the remote's default branch, instead of `git diff origin/main --stat 2>/dev/null`. On a clone whose default branch is `master`, the old command exited 128 with its error hidden, so the model read the empty output as "no changes"; the new one shows the diff, and a repo without `origin/HEAD` now shows its error instead of passing for "no diff". The line is the same length, so office-hours stays at its pinned size on every host (the shared `{{BASE_BRANCH_DETECT}}` block would have added 1,727 chars, past the size-guard pins and the parity skeleton cap).
+- **`plan-design-review/SKILL.md.tmpl`** (#3350): the design binary's `check` command is described as "OpenAI vision" instead of "GPT-4o vision", so the prose no longer pins a model. The binary defaults to gpt-5.5 (`design/src/models.ts`), `GSTACK_DESIGN_MODEL` overrides it, and gpt-4o cannot drive gpt-image-2 at all. The swap is the same length, so the pinned host sizes don't move.
+- **`health/SKILL.md.tmpl`** (#3351): the GBrain score is computed by a `bun -e` snippet from the doctor component (10 for `ok`, 7 for `warnings`, else 0), the queue length and the hours since the last push, like the composite already was. The snippet takes only numeric `<N|null>` inputs, the placeholder form the generated-bash lint already allows. The rubric row's 10/7/4 bands, which disagreed with the weighted formula (doctor ok, queue 50, pushed 2h: 7 by the rubric, 9.1 by the formula) and overlapped (a queue of 3 matched both 10 and 7), now point at that computation. The bands are half-open (<10, <100 lines; <24, <72 hours), and with sync off the doctor component carries the whole score. History records `gbrain` with one decimal.
+- **`ios-qa/SKILL.md.tmpl`** (#3352): "DEMO MODE OVERRIDES ALL OTHER RULES" becomes the narrow rule it meant: in demo mode drive every action through visible UI rather than `POST /state/*` writes, and every other rule in the skill (the device lock, no replay of a lost tap, never hand-editing DebugBridge) still applies.
+
+### Tests
+- `test/qa-health-rubric.test.ts` checks that the GBrain rubric row defers to the computation, then runs the template's own snippet: the issue's two inputs score 9.1 and 8.5, the band edges (9/10/99/100 lines, 23.9/24/71.9/72 hours) land on the right side, a missing doctor reading counts as 0, and sync off gives 10, 7 and 0. All four new tests fail on the old template.
+
+- `test/helpers/safety-rules.ts`: the `ios-qa-demo-override` row's anchor moves from `/demo mode overrides/i` to `/drive every action through visible UI/i`, and its hash to the reworded paragraph, in the #3352 commit as the registry requires. `test/safety-rule-registry.test.ts` passes, including its unique-anchor and rule-removed-arm checks.
+
+### Gate integrity
+- One gate edit to review: the safety-rule registry row for `safety-ios-demo-ui-only` now anchors on the reworded paragraph. Verdict: not weaker. The paragraph still requires visible UI (`/tap`, `/swipe`, `/type`) over `POST /state/*` writes, and the only text removed is the "overrides all other rules" claim. The case's rule-removed arm deletes the same paragraph as before. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.194.0] - 2026-10-25
+
+**A read-only repo can now opt in to Memorable recall, one remote at a time, and a corrupt policy store no longer turns the recall veto off.** #3359 (exGeni) asked for a way to keep a repo out of the brain while still letting its prompts reach Memorable: today the recall hook skips every `deny` and `read-only` repo, and `read-only` is also the tier people pick just to stop code ingest. Garry approved a per-remote flag on 2026-10-24: off by default, and a `deny` always wins. While building the negative controls we found that the hook's policy lookup went through `get`, which quarantines a corrupt store and answers "unset", so a truncated `gbrain-repo-policy.json` let recall run in every repo, read-only and deny included, and reset the store on the way.
+
+### Added
+- **`bin/gstack-gbrain-repo-policy memorable set <remote-url> <allow|off>`** stores the opt-in under a reserved `_memorable_recall` map in the policy store. It is refused unless the remote is read-only (deny vetoes recall; read-write never needed it). `memorable get [<remote-url>]` prints `<tier>\t<allow|off>`, and `list` adds a `memorable=allow` column. Changing a remote's tier clears its opt-in, and the two metadata keys (`_schema_version`, `_memorable_recall`) are refused as remotes.
+- **`lib/gbrain-repo-policy-client.ts`**: `memorableRecallPolicy(url)` returns the tier and the opt-in in one spawn. Anything but exactly `<tier>\t<allow|off>` reads as `unreadable`.
+
+### Changed
+- **`hosts/claude/hooks/memorable-user-prompt-hook.ts`**: a `read-only` remote is recalled only when it is opted in; `deny` is always skipped. The skip line in `hook-errors.log` names the opt-in command.
+
+### Fixed
+- The recall hook's policy lookup is now a pure read that fails closed in either state root: a corrupt, empty or non-object store, a present key with an unknown tier, a path that is not a readable file (a dangling symlink included) and a path whose existence an unsearchable ancestor directory hides are all errors, never "no policy", and nothing is migrated, quarantined or rewritten. The opt-in counts only when it is exactly `"allow"` and every store that makes the remote read-only (including `~/.gstack` under a custom state root) opts it in.
+- The hook looks policy up by every configured `remote.origin.url`, as `get` and `/sync-gbrain` read it, instead of the first URL after `url.*.insteadOf` rewriting. A rewrite to another host, or a second origin URL, no longer dodges a deny: any denied or not-opted-in read-only URL skips recall. `hasRepoPolicyStore()` treats only confirmed absence as "no store", so a dangling symlink at or above the store, a file in its path, or an unreadable directory reaches the script's fail-closed checks instead of the no-policy fast path. Origin URLs are read NUL-delimited and used verbatim, so a valid local path containing a newline or edge whitespace is looked up whole.
+
+### Docs
+- `docs/memorable-workflow-memory.md` has a short "Recall in a read-only repo" section and updated refusal and troubleshooting lines.
+
+### Tests
+- `test/memorable-user-prompt-hook.test.ts` drives the real hook: read-only stays blocked by default, the opt-in recalls on that remote and not on a second read-only remote, `deny` with a hand-written opt-in is skipped, and a corrupt store skips recall and is left in place.
+- `test/gbrain-repo-policy.test.ts` covers the CLI: per-remote keying (a different remote, a prefix-sharing remote and an unset remote stay off; the SSH spelling of the same remote matches), refusal on deny, read-write and unset, clearing on a tier change, malformed opt-ins reading off, corrupt and non-file stores in both roots failing with exit 2, and the second-store rule.
+- `test/gbrain-repo-policy-client.test.ts` covers `memorableRecallPolicy`: fast path, per-remote opt-in, deny, corrupt store, an unknown tier, a dangling-symlink store and a timeout.
+- Review hardening, each test red at the pre-review head: empty, whitespace, `null`, array, number and two-document stores and `false`/`null`/unknown tier values fail with exit 2 in either root; dangling symlinks and an unsearchable directory or ancestor fail closed; the lookup leaves a schema-less store byte-for-byte unchanged; and the hook refuses a deny remote whose origin is rewritten to another host or carries a second, unlisted URL in either order, or whose local-path URL contains a newline or edge whitespace; and a dangling symlink above the store or a file in its path skips the no-store fast path.
+
+### Gate integrity
+- One deliberate widening of a privacy veto, approved by Garry: a read-only remote with an explicit opt-in is recalled. Nothing else is loosened, and the corrupt-store path is tightened. Seventeen mutations of the new gate were run against the focused tests. Sixteen turn at least one test red: the hook ignoring the opt-in, the hook dropping deny, the CLI reporting the opt-in on any tier, an unkeyed opt-in, a corrupt store read as no policy, the second store ignored, an opt-in accepted on deny, the hook using the rewritten URL, an existsSync fast path, any JSON document accepted, a non-file path read as absent, the hook checking only the last origin URL, a missing path trusted without checking its ancestors, origin URLs split on newlines or trimmed, and the client fast path ignoring a dangling ancestor symlink. The seventeenth, the client reading unknown script output as no policy, stays green because the script can no longer produce such output. That check is a second layer and is left in place. No threshold, budget, timeout, trial count or case kind changed.
+- Known limit, unchanged by this PR: remotes that the store already treats as one key (`host:8443/x` and `host/8443/x`, or paths that differ only in case) share the opt-in exactly as they already share a tier.
+
+## [1.91.193.0] - 2026-10-25
+
+**Windows: the browse terminal agent stops respawning every 60 seconds and stops flashing a console when Bun came from npm (#2295; ported from #3357 by @adammartin0087).** The agent was spawned as a bare `bun`. With Bun installed through `npm install -g bun`, that name resolves to npm's `bun.cmd` shim and runs as `cmd.exe /c bun …`, so `windowsHide` hid only `cmd.exe` while `bun.exe` opened its own visible console, and the recorded pid was `cmd.exe`'s. The agent's startup check never matched its record, it exited after 2 seconds, and the watchdog respawned it.
+
+### Fixed
+- **`browse/src/terminal-agent-control.ts`**: `spawnTerminalAgent` spawns `resolveBunExecutable()`, which on Windows is the real `bun.exe`: the running `bun.exe` itself, then `BUN_INSTALL\bin`, each absolute `PATH` entry (and, next to an npm `bun.cmd` shim, the `node_modules\bun\bin\bun.exe` it forwards to), then `USERPROFILE\.bun\bin`. With none found it falls back to `bun`, as before. macOS and Linux are unchanged.
+- **`browse/src/bun-child-config.ts`**, **`browse/src/cookie-import-native.ts`**: that lookup is `findWindowsBunExe()`, and the Windows native cookie-import worker now uses it instead of its own copy, so it also finds an npm-global Bun. It lives in `bun-child-config.ts` because that file is already in the native import's source-bound qualification set (`NATIVE_CODE_INPUTS`). The edit changes the hash of `cookie-import-native.ts` and `bun-child-config.ts`; the qualification list is empty today, so no receipt is invalidated.
+
+### Tests
+- `browse/test/terminal-agent-bun-exe.test.ts` (from the PR) covers POSIX, the running `bun.exe`, a compiled `browse.exe`, the npm shim, lookup order and the fallback, plus a source check that the spawn site never passes a bare `'bun'`. New: the shared lookup returns null when nothing is installed, finds the npm-global `bun.exe` for the cookie worker, and `cookie-import-native.ts` has no candidate list of its own.
+- Not verified here: real Windows behaviour. The PR author tested on Windows 11; the `windows-free-tests` lane runs the new unit tests.
+
+## [1.91.192.0] - 2026-10-25
+
+**Merge trains stop refusing correct heads and stop passing damaged CHANGELOGs.** This week's trains hit five defects in the ship-queue tooling. #3331's READY was invisible to the coordinator because its lane's origin was `https://git.capy.ai/...`. #3345's pin replaced the released `## [1.91.179.0]` heading, and three things then failed. The Version Gate passed the pin. `mergeChangelogs` copied 179's body into `[Unreleased]`. `verify --train` refused the correct hand-resolved head at 593e61c. Separately, the train slotted the /cso docs PR (#3337) ahead of the catalog PR it describes (#3343). Each defect now has a regression test built from the real case.
+
+### Fixed
+- **`lib/version-gate-train.ts`**: the unstamped-head check read CHANGELOG.md through `spawnSync`'s default 1 MiB buffer. gstack's CHANGELOG is 1.67 MB, so both reads failed and the check compared two empty strings and passed. That is how #3345's 1eb7092 got through: `classifyTrainHead(base a59b5e4, head 1eb7092)` returned `unstamped`. The buffer is now 64 MiB, a CHANGELOG that can't be read is refused, and a dropped released heading is named in the error ("CHANGELOG.md drops released heading 1.91.179.0"). `gstack-ship-queue ready` runs the same check and refuses with `QUEUE_NOT_READY`.
+- **`lib/changelog-check.ts`**: `mergeChangelogs(ours, theirs, base?)` returns null, meaning resolve by hand, when either side damaged released history. Damage means one of two things: a released heading the merge base carries is missing from that side (dropped or renamed), or a section only that side carries holds a paragraph of a released entry the other side has. The train merge, the gate-ahead recompute and `gstack-restamp --after` all pass the merge base. A damaged PR is now `QUEUE_TRAIN_CONFLICT` on CHANGELOG.md with the reason. Before, the damage went into T<i>.
+- **`lib/ship-queue-train-verify.ts`**: `verify --train` refused #3345's correct stamped head because T1's CHANGELOG was the damaged mechanical merge. The refusal printed the diff against the pin (main's files), not the diff against T1. A merged-in head is now accepted when it contains main and equals T<i> modulo stamps, with its CHANGELOG judged against main: main's header and sections must be unchanged, with only lines from the pin's own CHANGELOG diff above them. The refusal now names the real difference.
+- **`lib/ship-queue-train-record.ts`**: READY receipts, train records and freezes are keyed on origin normalized to `https://github.com/<owner>/<repo>`, whatever URL form the lane uses (github.com, git.capy.ai, scp, ssh, a token URL, with or without `.git`). The canonical key equals the github.com key existing records already use. Readers also accept the keys older versions wrote for the common URL forms, so #3331's `1fb5dd69740a8cf8` receipt is found. The stored `repo` URL never carries credentials.
+- **`lib/restamp.ts`**: its git reads use a 64 MiB buffer too. Before, `gstack-restamp --after` read each CHANGELOG conflict stage through the 1 MiB default.
+
+### Added
+- **`gstack-ship-queue train build --order <pr>,...`**: an explicit slot order naming every pinned PR once. The default order (screened first, then READY order) is unchanged, and the train's later `NEXT:` rebuild lines keep the explicit order.
+
+### Tests
+- `test/changelog-merge-damage.test.ts`: the GSTA-64 repro, plus #3345's real CHANGELOGs (pin 1eb7092, base a59b5e4, main 4a98e40, train T1 6755ab8, stamped de23f5d, under `test/fixtures/merge-train-3345/`). Negative controls: a correct hand resolve, a shared tentative stamp, and two `[Unreleased]` blocks are not damage. An invented line, an edited main section, a changed header and a duplicate heading are still refused.
+- `test/compare-pr-version.test.ts`: on a CHANGELOG over 1 MiB, #3345's edit is refused naming 1.91.179.0, an additive entry passes, and a corrupt CHANGELOG object is refused. All three failed before the fix.
+- `test/ship-queue-train.test.ts`: a git.capy.ai lane writes the owner/repo key, and a legacy-key receipt is admitted. A damaged PR is a CHANGELOG conflict, and ready refuses it. `--order` sets and records the order. A hand-resolved merged-in head verifies, while an invented CHANGELOG line, a head without main and a stray file are refused. `test/ship-queue-train-logic.test.ts`: URL normalization, #3331's real keys, `orderSlots` and `parseOrder`.
+
+### Gate integrity
+- Version Gate unstamped check: **stronger**. It refuses a head it can't read and names dropped headings. Additive heads still pass at full size.
+- `mergeChangelogs` and the train CHANGELOG merge: **stronger**. Damage is now a conflict.
+- `verify --train` merged-in path: **narrower in one place, stronger elsewhere**. The head must now contain main. A CHANGELOG that differs from T<i> is accepted only as main's CHANGELOG plus lines the pin itself added. Every other file must still equal T<i> modulo stamps, and the paid gate never reads CHANGELOG text.
+- READY receipt lookup: **unchanged strength**. The head and CI binding are the same; only the repository key is normalized.
+
+## [1.91.191.0] - 2026-10-25
+
+**`gstack-version-bump write --changelog` moves the branch's `[Unreleased]` entry under the new version, and /ship Step 12 stops treating a provisional queue pick as a verified slot.** Stamping by hand meant writing VERSION with `gstack-version-bump write` and then renaming the `## [Unreleased]` heading yourself, because only `gstack-restamp` re-headed the CHANGELOG. Separately, when `gstack-next-version` could not read some open PRs' VERSION it returned `complete:false` and a provisional pick, and Step 12 printed the warning and then wrote that version as if the queue had been checked (left over from #3258, noted in GSTA-45).
+
+### Fixed
+- **`bin/gstack-version-bump`**: `write` takes an opt-in `--changelog <path>`. It re-heads an existing `## [Unreleased]` section as `## [<version>] - <UTC date>` at the top, using the same `reheadChangelog` that `gstack-restamp` uses, so the result is byte-for-byte what a restamp produces. Only the heading changes; every entry is kept. A file with no `[Unreleased]` section, or no file, is left alone, so a released heading is never renamed. A move that would duplicate a version heading exits 2 before anything is written. The output gains a `changelog` field only when the flag is passed. `gstack-restamp` doesn't pass the flag, so under stamp-at-merge it still owns the re-heading, and a later restamp moves an entry this command headed as the branch's own stamp.
+- **`ship/SKILL.md.tmpl` Step 12**: an incomplete queue (`complete:false`) reruns the queue check once, then asks whether to use the provisional candidate (recommended, because Version Gate CI rereads the queue on every push) or stop, naming the PRs in `unknown_claims`. The write in item 4 passes `--changelog CHANGELOG.md`, so an `[Unreleased]` entry written early sits under the new version before Step 13 extends it.
+
+### Tests
+- `test/gstack-version-bump.test.ts`: eight cases for `--changelog`. They cover the re-heading (checked with `normalizeChangelog` and `checkChangelog`), an entry below the predecessor after a main merge, reruns, a file with no `[Unreleased]`, a missing file, the duplicate-heading refusal, bad paths, and a real `gstack-restamp` run after the write (`already headed`, then `1.2.4.0 -> 1.2.5.0`). Seven of them failed before the fix.
+- `test/ship-version-sync.test.ts`: the rendered Step 12 has to handle `complete:false`, using the field names `gstack-next-version` emits. Its write command, run verbatim, has to re-head `[Unreleased]` and leave a released heading alone. Both tests failed before the fix.
+
+## [1.91.190.0] - 2026-10-25
+
+**The weekly model-policy freshness check reads OpenAI's deprecations page again (#3155).** It has been red since the 2026-10-19 run: OpenAI's page now writes some deprecated models as a display name followed by the backticked ids, for example ``GPT-4o (`gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`)``, and the parser refused any model cell that did not start with a backtick, so every run stopped with `openai-lifecycle:unrecognized-deprecated-model-cell`. Left alone, the stored pinned-model evidence would have gone stale around 2026-11-11.
+
+### Fixed
+- **`lib/model-policy-freshness-sources.ts`**: an OpenAI deprecated-model cell is accepted when it contains backticked model ids, wherever they sit in the cell, and each id becomes its own lifecycle row. A cell with no backticked id still fails with `unrecognized-deprecated-model-cell`. The live page (42,211 bytes, fetched 2026-10-24) now parses to 177 rows, including the five ids from its four display-name rows.
+
+### Tests
+- `test/fixtures/model-policy-freshness/openai-lifecycle.md` gains a display-name row, and `test/model-policy-freshness.test.ts` checks that both of its ids come out with the row's shutdown date. With the old parser, 16 of the file's 21 tests fail on the new fixture.
+- Negative controls: the existing cell with its backticks removed, and the new display-name row with unticked ids, both still fail with `unrecognized-deprecated-model-cell`.
+
+### Gate integrity
+- One accepted-input change to review: the OpenAI lifecycle parser accepts a model cell with text before its backticked ids. It is a weekly advisory check, not a required check. The negative controls above still fail closed, and no threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.189.0] - 2026-10-25
+
+**A stalled apt mirror can no longer hold a Free Tests shard for 20 minutes, PR runs now see main's branch layout, and gstack's install default moves to Bun 1.4.4.** On 2026-10-21, free-suite (12) in run 39641712129 sat in "Install Playwright Chromium" until the job timeout cancelled it. The browser had already come from cache: `--with-deps` was waiting on apt's fetch of noble-security from archive.ubuntu.com. No tests ran, and a whole merge train had to be rebuilt. Separately, a push to main checks out a local `main` while PR runs check out a detached merge ref, so a fixture that created its own `main` passed its PR and then failed every main push until #3237 (run 38999168852). And Capy images and gbrain now run Bun 1.4.4, which no CI lane tested, while the installer still downloaded 1.4.3.
+
+### Fixed
+- **`.github/workflows/free-tests.yml`**: in free-suite and quick-bun-default, the Playwright install gets its own 5-minute timeout (a warm install takes about 15 s), and that install step alone gets one bounded retry, also 5 minutes. This retries infrastructure, never a test: a second failure fails the job. The browser cache is keyed on the Playwright version instead of `bun.lock`, with no prefix fallback, so a lockfile bump keeps the browser and a Playwright bump never restores a stale revision. quick-bun-default, which had no browser cache, now has one.
+- **`.github/workflows/free-tests.yml`**: free-suite and quick-bun-default run `git checkout -q -B main` right after checkout on every run whose ref is not main (PRs and train dispatches). Their clone then has the same local `main` a push run gets, so a PR run catches what the main push would.
+- **`bin/gstack-bun-version.sh`**: `GSTACK_BUN_DEFAULT` is 1.4.4, the Bun that Capy images ship, that gbrain pins, and that carries the CVE-2026-111497 fix. quick-bun-default runs the quick tier on it. The 1.4.2 minimum, engines.bun, Dockerfile.ci, every other CI lane and the verified archives (1.4.2, 1.4.3, 1.4.4) are unchanged. `docs/capy-install.md` and `docs/troubleshooting.md` name the new default.
+
+### Tests
+- `test/free-tests-workflow-wiring.test.ts` requires the version-keyed cache, the 5-minute install, its single retry as the only `continue-on-error` step in each job, and the local-main step. Both new cases fail against the previous workflow.
+- `test/gstack-capy-install.test.ts` reads the install default from `GSTACK_BUN_DEFAULT` wherever it meant "the install default", so the next bump doesn't need a literal sweep, and so does the `test/runtime-pins.test.ts` case that reads gstack's own CI pins. `test/bun-resolve.test.ts` moves its gbrain-like project pin from 1.4.3 to 1.4.4, gbrain's real pin.
+
+### Gate integrity
+- One gate edit to review: the Playwright install step in the required Free Tests lane is `continue-on-error`, and a retry step that is not marked that way repeats it. Verdict: not weakening. A shard still fails unless one of the two installs succeeds, and every test, threshold, timeout and trial count stays the same. The local-main step strengthens PR runs. No test assertion was removed.
+
+## [1.91.188.0] - 2026-10-24
+
+**Pregate maps extensionless .jsx imports to their tests (#3340).** On a Next.js or webpack JSX repo, `gstack-pregate` failed `lanes` with "has no test lane" for every component imported without an extension, so /ship's receipt refused and the only way out was shipping without one. The import resolver tried `.ts`, `.tsx`, `.js`, `.mjs` and `.cjs` but never `.jsx`, and a directory import found `index.ts` or `index.js` but not `index.jsx`, `index.tsx` or `index.mjs` (it fell back to selecting on the whole directory). Reported by adam-balazs.
+
+### Fixed
+- **`lib/pregate/import-graph.ts`**: `RESOLVE_EXT` adds `.jsx`, `.mts`, `.cts`, `/index.tsx`, `/index.jsx` and `/index.mjs`. The existing entries keep their order, so a `.js` file still wins over a `.jsx` sibling. Relative, `paths` alias and `baseUrl` imports share the list, so all three resolve the new forms.
+
+### Tests
+- `test/pregate-selection.test.ts` has three new cases: an extensionless import of a `.jsx`, `.mts` and `.cts` file; a directory import that reaches `index.jsx`, `index.tsx` and `index.mjs` and leaves the directory's other files unselected; and a jsconfig `paths` alias to a `.jsx` file, with a `.js` sibling that still wins. All three failed before the change.
+
+### Docs
+- `docs/pregate.md` lists the extensions and index forms an extensionless import tries, in order.
+
+## [1.91.187.0] - 2026-10-24
+
+**Four docs now say what the code does: the unattended run contract, the gate reply grammar, the session-kind override and voice triggers.** All four were reported by readers who checked the docs against the code. `docs/unattended.md` promised that every workflow skill ends an unattended run with a run directory and a `GSTACK_RESULT` line, but only `/autoplan` has the steps and helpers that write one (#3281, thanks @exGeni). `gstack-gate --help` still taught the reply grammar from before 1.91.107.0, without `rec` or `as-is`, while the render it relays leads with `rec` (#3282, thanks @exGeni). `docs/OPENCLAW.md` said only `spawned` is honored as a `GSTACK_SESSION_KIND` override, but `unattended` is honored too (#3287, thanks @exGeni). The README said natural phrases activate the right skill, without saying that only `voice-triggers:` aliases reach a host and that the plain `triggers:` list does not (#2118, thanks @jinzheio).
+
+### Fixed
+- **`docs/unattended.md`**: the terminal-line section lists who writes the line today: `/autoplan` (the only skill that writes a run directory), the workflow commands `gstack-pregate`, `gstack-regen`, `gstack-restamp` and `gstack-ship-queue` (each naming its own record), and a refused launch (`status=refused run=-`). For `/ship`, `/review`, `/qa` and the other workflow skills it says not to wait for a run directory and names each skill's own record to read instead. It also says `/eval-plan` has no `gate.json` writer yet and that `/cso` skips the shared unattended rules.
+- **`bin/gstack-gate --help`** and the `/autoplan` owner brief's answer hint (`lib/owner-brief.ts`) show the current grammar: `rec` (alias `all`), `rec except <tokens>`, `<id><option>` tokens and `as-is`. Display text only; the parser is unchanged and `all` still parses the same as `rec`.
+- **`docs/troubleshooting.md#gate-reply-unparsed`** gives the same grammar in its fix line.
+- **`docs/OPENCLAW.md`**: the `GSTACK_SESSION_KIND` section says `spawned` and `unattended` are honored, and links to `unattended.md`.
+- **`README.md`**: the voice input section says which phrases a host sees (`voice-triggers:` aliases, as router lines on Claude Code and in each description elsewhere) and that `triggers:` is metadata that does not make a skill activate.
 
 ## [1.91.186.0] - 2026-10-24
 

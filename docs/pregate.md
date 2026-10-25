@@ -175,6 +175,10 @@ Two stages with separate clocks, both printed:
   no lane, and a workspace-only Cargo.toml or Cargo.lock needs a `dependencies` entry),
   transitively through
   non-test files; deleted and renamed files select the tests that named them.
+  An extensionless JS/TS import (relative, a tsconfig/jsconfig `paths` alias or
+  `baseUrl`) tries the exact path, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
+  `.cjs`, `.mts`, `.cts`, then `index.ts`, `index.tsx`, `index.js`, `index.jsx`
+  and `index.mjs` inside the directory; the first file that exists wins.
   A touched source file with no lane is `FAIL lanes — <file> has no test lane`,
   never a pass. Markdown that no test depends on is a docs/no-tests empty lane
   instead (`docs/no-tests: N documentation file(s)`), including when the base
