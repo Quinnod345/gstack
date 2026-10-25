@@ -19,6 +19,7 @@
 ### Tests
 - `test/design-craft.test.ts`: every tell with its count; a finished page, inlined Pretext, a `100vh` line with its `100dvh` fallback, discount copy and in-page anchors stay clean; look-alike attributes, encoded markers, `!important` and reversed fallbacks; skip links judged by position and target in any language; the craft section's banned words and names all flagged; CLI exit codes.
 - `design-html-slop-gate` also requires the craft check to run once or twice; the design-html carve guard requires the craft section read.
+- `design-html-slop-gate` is now selected by changes to `lib/design-craft.ts` and `bin/gstack-design-craft` (`test/helpers/touchfiles-data.ts`), which it already exercised but did not list.
 - `test/design-craft.test.ts` also covers accepted exceptions: count coverage and overflow, the finalized.json block in design-html/SKILL.md parsed by the same reader the CLI uses, rejected malformed lists, CLI exit codes with `--accepted`, and the archetype handoff contract (the same four ids in /design-shotgun and the craft section, the approved.json step, Case A and the craft section's no-re-ask rule).
 
 ## [1.91.218.0] - 2026-10-25
