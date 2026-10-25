@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.197.0] - 2026-10-25
 
 **Pregate gives touched Rust files a test lane, and runs a nested pnpm or vitest package with its own runner (#3344).** In a mixed Cargo and JavaScript repo, every touched `.rs` file failed `lanes` with "has no test lane", so /ship could not get a receipt, and a nested package's vitest tests ran under `bun test` from the repo root (about 98 false failures in the reporter's repo). Ported from #3346 by vilano93, whose two commits carry the feature; our commits on top close four findings from a security-focused review of the port and make the new fixtures hermetic.
 
