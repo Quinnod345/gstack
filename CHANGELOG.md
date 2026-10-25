@@ -15,7 +15,7 @@
 - **`bin/gstack-update-check`**: reads `<channel>/VERSION`, resolves the SHA with `ls-remote refs/heads/<channel>` and compares against it; the cache identity carries `#stable` so a channel switch never replays the other channel's outcome.
 - **`bin/gstack-upgrade`**: fetches and fast-forwards to `stable` on that channel (`gstack-upgrade: channel stable ...` on stderr), follows the default branch with a note when origin has no `stable` yet, and treats a release whose VERSION is not higher than the installed one as current instead of diverged in a shallow clone. `--check` output lines are unchanged.
 - **`gstack-upgrade/SKILL.md.tmpl`**: Step 4 resolves `UPSTREAM_REF` through the helper and uses it for the Bun-floor check, the fast-forward, the unpushed-commit gate and the reset fallback instead of a literal `origin/main`.
-- **`setup --team`** prints the channel it enabled and the one-line opt-out; README's team-mode step says team mode follows `stable`.
+- **README** Step 2 (team mode) says team mode follows `stable` and how to follow every merge instead.
 
 ### Tests
 - `test/release-cut.test.ts`: on a real bare origin with a fake `gh`, the newest green first-parent commit wins and every skip is named (pending backstop, red check run, missing or running `free-tests`, no backstop run); an active freeze refuses and a cleared one does not; a cut creates the annotated tag, `stable` and the release with `--verify-tag` and the headline in the notes; re-running is `NOTHING_NEW`; a hotfix `--ref` promotes a later main commit with a compare link; stable never moves backwards; a side-branch ref and a clashing tag are refused; a thousand-version span stays under the notes cap.
