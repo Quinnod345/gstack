@@ -57,17 +57,40 @@ An unknown `GSTACK_SESSION_KIND` value coerces to `interactive` and says so:
 
 ## The terminal line
 
-Every workflow skill ends an unattended run with one line the parent greps:
+A run that writes a record ends with one line the parent greps:
 
 ```
 GSTACK_RESULT: skill=<name> status=<status> run=<dir>
 ```
 
 `status` is one of `complete`, `gate_pending`, `incomplete`, `interrupted` or
-`refused`; `run` is the directory that holds the artifacts below. `/autoplan`
+`refused`; `run` is where the run's record is. `/autoplan`
 always ends `gate_pending` when it reaches the final gate, because the gate is
 written and never approved. Pure queries (`gstack-artifact schema`,
 `gstack-gate render`) print no result line.
+
+Not every workflow writes this line or a run directory today:
+
+- **`/autoplan`** writes the full run directory below through `gstack-autoplan`,
+  and `gstack-artifact validate` checks it. It is the only skill with steps
+  and helpers that write `run.json`, `decisions.jsonl` and `gate.json`.
+- **Workflow commands** `gstack-pregate`, `gstack-regen`, `gstack-restamp` and
+  `gstack-ship-queue` print their own line, with `run=` naming their own record
+  (the pregate receipt, the regen worktree, the restamp journal, the queue
+  record), not a run directory.
+- **A refused launch.** Any skill whose install check refuses it at startup
+  prints `GSTACK_RESULT: skill=<name> status=refused run=-` and stops.
+- **Every other workflow skill** (`/ship`, `/review`, `/qa`, `/design-review`,
+  `/spec`, `/land-and-deploy` and the rest) gets the session rules above (no
+  prompts, approvals stay pending, nothing published), but has no step that
+  writes a run directory or prints the line, so a parent should not wait for
+  either. `/eval-plan` asks for a `gate_pending` line at its spend gate, but no
+  helper writes its `gate.json` yet (`gstack-gate` renders and parses a gate
+  list; it does not create one). `/cso` skips the shared startup, so these
+  session rules do not reach it at all. Read each skill's own record instead:
+  the ship receipt in the PR body (`gstack-ship-receipt read --pr <n> --json`)
+  for `/ship`, the review-log rows (`gstack-review-read`) for `/review`, and the
+  `qa-report-*.md` file for `/qa`.
 
 Every workflow command shares one exit table: `0` ok, `1` fail, `2` usage,
 `3` refused or needs a flag. Error lines end with a result code in parentheses,
@@ -76,6 +99,8 @@ in [troubleshooting.md](troubleshooting.md#unattended-runs-and-artifacts) with
 a `fix:` clause. Grep the code, not the prose.
 
 ## The run directory
+
+`/autoplan` writes these files; the next section shows how a parent reads them.
 
 | File | Schema | Contents |
 |------|--------|----------|
