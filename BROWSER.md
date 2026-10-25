@@ -267,7 +267,7 @@ flow, and a layered prompt-injection defense — all behind a compiled CLI that
 prints plain text to stdout. ~100-200ms per call. Zero context-token overhead.
 It runs whenever the probe above does not print `READY`, and `$B` is a
 legitimate tool in that context; on a Mac with Aside open the skills never
-reach for it.
+reach for it. Its HTTPS trust has a known gap: see [TLS trust](#tls-trust-the-bundled-chromiums-root-store).
 
 ---
 
@@ -562,7 +562,7 @@ from `snapshot`, or `@c` refs from `snapshot -C`. Full table:
 |---------|-------------|
 | `cookie <name>=<value>` | Set cookie on current page domain |
 | `cookie-import <json>` | Import cookies from JSON file |
-| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion |
+| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion. The imported session rides on the bundled Chromium's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
 | `header <name>:<value>` | Set custom request header (sensitive values auto-redacted) |
 | `useragent <string>` | Set user agent (triggers context recreation, invalidates refs) |
 
@@ -673,7 +673,7 @@ pass `--force-restart` to replace it explicitly (see "Daemon lifecycle" above).
 
 | Command | Description |
 |---------|-------------|
-| `handoff [reason]` | Open visible Chrome at current page for user takeover (CAPTCHA, MFA, complex auth) |
+| `handoff [reason]` | Open visible Chrome at current page for user takeover (CAPTCHA, MFA, complex auth). What you type there trusts the bundled Chromium's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
 | `resume` | Re-snapshot after user takeover, return control to AI |
 
 ### Meta + chains
@@ -1295,6 +1295,33 @@ field on `/health` (#2557): the session-state file that fed them lost its
 only writer when the chat-path agent was removed, so they reported stale or
 empty data. The live defenses report through their own call sites. See
 ARCHITECTURE.md § "Prompt injection defense" for the full threat model.
+
+### TLS trust: the bundled Chromium's root store
+
+The fallback engine checks HTTPS certificates against the root store compiled
+into its bundled Playwright Chromium. The default headless browser never gets
+the CRLSet revocation updates Chrome pushes to running browsers. Headed mode and
+`handoff` do fetch them, but only about a minute after each launch, so the
+first pages they open, including the page `handoff` reopens, are checked
+against the compiled root store alone. The bundled build does not enforce
+Certificate Transparency. That matters most for the flows that put real
+sessions and credentials into the browser: `cookie-import-browser`,
+`fill`/`type`, and `handoff`. Aside uses your own browser's trust store and
+updates.
+
+**Known gap: the compromised eMudhra intermediates
+([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked them
+by CRLSet on 2026-10-17 and removes their root, emSign ECC Root CA - G3, from
+the Chrome Root Store on 2026-10-27. gstack's pinned Playwright 1.62.1
+(Chromium 151), every release through 1.64.1 (Chromium 156) and the 1.65
+alphas (Chromium 157) still trust them, so
+`$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
+"That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
+fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
+the first Playwright release whose Chromium carries the removal. Until then,
+don't import cookies or type credentials in this engine on a network you do not
+trust, and prefer Aside for signed-in work where you have it. The same `goto`
+tells you when your build is fixed.
 
 ---
 

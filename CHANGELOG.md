@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+**BROWSER.md now says that gstack's own browser still trusts the compromised eMudhra intermediates, and how to check (#3338).** Chrome blocks the eight eMudhra intermediate CAs whose keys leaked on 2026-10-17 with a CRLSet push, and removes their root, emSign ECC Root CA - G3, from the Chrome Root Store on 2026-10-27. gstack's fallback browser gets neither in time: its default headless browser never receives CRLSet updates, headed mode and `handoff` receive them only about a minute after each launch, and the root store compiled into the bundled Chromium still trusts the root. On 2026-10-24, `$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` returned 200 and "That's bad!" on gstack's pinned Playwright 1.62.1 (Chromium 151.0.7922.34). The same check against Playwright 1.64.1 (Chromium 156.0.8078.4) and the 1.65.0 alpha of 2026-10-24 (Chromium 157.0.8103.15) also loaded the page. Chrome for Testing builds from 158.0.8115.0 fail it with `ERR_CERT_AUTHORITY_INVALID`, so a Playwright bump has to wait for a release that bundles one of those builds.
+
+### Changed
+- **`BROWSER.md`**: a new "TLS trust: the bundled Chromium's root store" section, at the end of the security stack, says the fallback engine checks certificates against that compiled root store, that the headless browser never gets CRLSet updates while headed mode and `handoff` get them about a minute after launch, and that the bundled build does not enforce Certificate Transparency. It names the flows that put real sessions and credentials into the browser (`cookie-import-browser`, `fill`/`type`, `handoff`) and gives the one-line `$B goto` check. The fallback-engine introduction and the `cookie-import-browser` and `handoff` command rows link to it. Aside is unaffected, because it is your own browser with its own updates.
+- The edits above the cookie workflow excerpt change no line count, so the `setup-browser-cookies/SKILL.md workflow` judge input is byte-identical (prompt SHA-256 `c851e635…`, 12,805 bytes, before and after).
+
 ## [1.91.191.0] - 2026-10-25
 
 **`gstack-version-bump write --changelog` moves the branch's `[Unreleased]` entry under the new version, and /ship Step 12 stops treating a provisional queue pick as a verified slot.** Stamping by hand meant writing VERSION with `gstack-version-bump write` and then renaming the `## [Unreleased]` heading yourself, because only `gstack-restamp` re-headed the CHANGELOG. Separately, when `gstack-next-version` could not read some open PRs' VERSION it returned `complete:false` and a provisional pick, and Step 12 printed the warning and then wrote that version as if the queue had been checked (left over from #3258, noted in GSTA-45).
