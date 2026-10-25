@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { release } from 'node:os';
 import path from 'node:path';
 import { CookieImportError, normalizeCookieDomain, type PlaywrightCookie } from './cookie-import-browser';
-import { emptyBunConfig } from './bun-child-config';
+import { emptyBunConfig, findWindowsBunExe } from './bun-child-config';
 import { hashNativeFile, nativeCodeHashes, nativeCodeMatches, readNativeQualifications, type NativeQualifiedBuild } from './cookie-import-native-integrity';
 
 type BrowserName = 'Chrome' | 'Chromium' | 'Brave' | 'Edge';
@@ -107,14 +107,7 @@ export async function importNativeCookies(options: {
   } catch (error) {
     throw new CookieImportError('The native browser build could not be checked safely. Sign in manually in the gstack browser.', error instanceof Error && error.message === 'native_timeout' ? 'native_timeout' : 'native_unqualified');
   }
-  const bunCandidates = [
-    ...(process.env.BUN_INSTALL ? [path.join(process.env.BUN_INSTALL, 'bin', 'bun.exe')] : []),
-    ...(process.env.PATH || process.env.Path || '').split(path.delimiter).filter(directory => path.isAbsolute(directory)).map(directory => path.join(directory, 'bun.exe')),
-    ...(process.env.USERPROFILE ? [path.join(process.env.USERPROFILE, '.bun', 'bin', 'bun.exe')] : []),
-  ];
-  const bunExecutable = bunCandidates.find(candidate => {
-    try { return statSync(candidate).isFile(); } catch { return false; }
-  });
+  const bunExecutable = findWindowsBunExe();
   if (!bunExecutable || !qualified.some(build => build.executableSha256 === executableSha256 && build.playwrightVersion === playwrightVersion)) {
     throw new CookieImportError('This browser build or supervisor runtime has not passed native qualification. Sign in manually in the gstack browser.', 'native_unqualified');
   }
