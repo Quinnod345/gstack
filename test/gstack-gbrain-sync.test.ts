@@ -1183,7 +1183,8 @@ esac
     for (const d of [repo, bindir, home]) rmSync(d, { recursive: true, force: true });
     expect(r.status).toBe(1);
     expect(code.ok).toBe(false);
-    expect(code.summary).toContain("refused: gbrain autopilot active (process:gbrain autopilot)");
+    expect(code.summary).toContain("refused: gbrain autopilot active (process:gbrain autopilot pid 4242 ");
+    expect(code.summary).toContain("Stop autopilot, then re-run /sync-gbrain.");
     expect(commands).not.toMatch(/^sources (add|rename|remove) /m);
     expect(commands).not.toMatch(/^sync /m);
   });
