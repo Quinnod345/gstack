@@ -82,6 +82,55 @@ describe('import graph (static imports ∪ repo-path literals ∪ bin convention
     expect(testsFor(g, 'notes/scratch.md')).toMatchObject({ tests: [], declaredNone: false });
   });
 
+  test('#3340: an extensionless import of a .jsx, .mts or .cts file maps to that file', () => {
+    const repo = fixture();
+    commit(repo, {
+      'src/components/Foo.jsx': 'export default function Foo() { return null; }\n',
+      'src/lib/m.mts': 'export const m = 1;\n',
+      'src/lib/c.cts': 'export const c = 1;\n',
+      'test/foo.test.jsx': "import Foo from '../src/components/Foo';\nimport { m } from '../src/lib/m';\nimport { c } from '../src/lib/c';\n",
+    });
+    const g = buildGraph(repo.work);
+    for (const f of ['src/components/Foo.jsx', 'src/lib/m.mts', 'src/lib/c.cts']) {
+      expect(testsFor(g, f).tests).toEqual(['test/foo.test.jsx']);
+      expect(testsFor(g, f).provenance[0]).toContain('(import)');
+    }
+  });
+
+  test('#3340: a directory import resolves to its index.jsx, index.tsx or index.mjs, not only the dir/** fallback', () => {
+    const repo = fixture();
+    commit(repo, {
+      'src/Bar/index.jsx': 'export default 1;\n',
+      'src/Bar/other.js': 'export default 2;\n',
+      'src/Baz/index.tsx': 'export default 1;\n',
+      'src/Baz/other.js': 'export default 2;\n',
+      'src/Qux/index.mjs': 'export default 1;\n',
+      'src/Qux/other.js': 'export default 2;\n',
+      'test/dirs.test.js': "import Bar from '../src/Bar';\nimport Baz from '../src/Baz';\nimport Qux from '../src/Qux';\n",
+    });
+    const g = buildGraph(repo.work);
+    for (const f of ['src/Bar/index.jsx', 'src/Baz/index.tsx', 'src/Qux/index.mjs']) {
+      expect(testsFor(g, f).tests).toEqual(['test/dirs.test.js']);
+      expect(testsFor(g, f).provenance[0]).not.toContain('/**');
+    }
+    for (const f of ['src/Bar/other.js', 'src/Baz/other.js', 'src/Qux/other.js']) expect(testsFor(g, f).tests).toEqual([]);
+  });
+
+  test('#3340: an import through a jsconfig paths alias reaches a .jsx file; an existing .js sibling still wins', () => {
+    const repo = fixture();
+    commit(repo, {
+      'jsconfig.json': '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      'src/ui/Button.jsx': 'export default function Button() { return null; }\n',
+      'src/ui/Card.js': 'export default 1;\n',
+      'src/ui/Card.jsx': 'export default 2;\n',
+      'test/ui.test.jsx': "import Button from '@/ui/Button';\nimport Card from '@/ui/Card';\n",
+    });
+    const g = buildGraph(repo.work);
+    expect(testsFor(g, 'src/ui/Button.jsx').tests).toEqual(['test/ui.test.jsx']);
+    expect(testsFor(g, 'src/ui/Card.js').tests).toEqual(['test/ui.test.jsx']);
+    expect(testsFor(g, 'src/ui/Card.jsx').tests).toEqual([]);
+  });
+
   test('python: absolute, from-import submodule, relative and parenthesised imports and mock.patch targets map; stdlib, comments and docstrings do not', () => {
     const repo = fixture();
     commit(repo, {
