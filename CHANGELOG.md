@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+**Four flaky tests now fail only for real defects, and a judge reply that isn't valid JSON says so in its failure line (daily flaky-fix pass, GSTA-91).** `context-restore-fragment-match` failed 0/3 on main cb99df4, although every run restored the right checkpoint: to find the checkpoint whose title matches, the agent often prints all three, and the case failed whenever another checkpoint's body appeared anywhere in the transcript. `test/gstack-ff-update.test.ts` counted every `sleep 300` on the machine, so heartbeats from parallel test files changed its count (remote pregate at #3412's head: expected "1", received "3"). The `GSTACK_CAPY=1` install-admission case in `test/gstack-skill-start.test.ts` makes ten `gstack-skill-start` spawns under bun's 5 s default timeout and took 3.6–5.7 s on a 4-core machine. The setup-browser-cookies workflow judge in train-4 gate 40173759210 returned JSON with an unescaped quote in its reasoning, and the flake record read only "JSON Parse error: Expected '}'".
+
+### Fixed
+- **`test/helpers/context-restore-fragment.ts`** (new): `fragmentRestoreVerdict` reads only the agent's report (top-level assistant text and the final result), never tool output. The report must carry the payments checkpoint's body and no other checkpoint's body. `test/skill-e2e-context-skills.test.ts` uses it for the fragment-match case.
+- **`test/helpers/llm-judge.ts`**: when a judge response is not valid JSON, `callJudge` throws a `SyntaxError` that names the judge output, its stop reason and length, and the retained `llm-judge-response-parse-error` event. It still fails closed and parses no score; the request is unchanged.
+
+### Tests
+- `test/context-restore-fragment-verdict.test.ts` replays the three captured false reds from main (`test/fixtures/context-restore-fragment-match-captures.json`) as passes. Controls that must fail: captures rewritten to resume alpha or omega, synthetic runs that read and resume only alpha or omega, resume summaries that mix two checkpoints, and a payments body that appears only in tool output. Restoring the old any-byte surface fails all four positive controls. Focused paid runs of the case: 0/3 on main, 3/3 after (about $0.11 a trial).
+- `test/llm-judge-frontier.test.ts` replays the exact captured cookie-judge reply: it fails closed with no score, one request and the new diagnosis. It fails on the previous helper.
+- `test/gstack-ff-update.test.ts`: the reap case runs `gstack-ff-update` with a heartbeat interval unique to the test process and counts only sleepers of that interval, starting from zero. The old count failed with a loop starting unrelated `sleep 300` processes beside it (expected "5", received "14"); the new one passes, and still fails when the bin stops reaping its sleeper.
+- `test/gstack-skill-start.test.ts`: the `GSTACK_CAPY=1` install-admission case gets an explicit 20 s timeout. Measured on a 4-core Capy machine with a temporary 60 s cap: 3.6–5.7 s through Capy's git shim (9 of 10 over 5 s), 2.6–4.9 s with the real git binary. Four of its ten spawns are full admissions at about 800 ms each.
+
+### Gate integrity
+- One test budget changed, approved by GStack Minder on 2026-10-25: the install-admission case's timeout goes from bun's 5 s default to 20 s, about 3.5 times the 5.7 s worst case measured above. No assertion changed.
+- `context-restore-fragment-match`: the failure surface moves from the whole transcript to the agent's report. Alpha or omega bytes in tool output no longer fail the case; the payments body in tool output no longer counts as loaded, so the report must show it. A run that resumes another checkpoint, or mixes two, still fails. `test/test-of-test-ratchet.test.ts` gains one BASELINE entry, the replay test, with its reason, and the new helper joins the touchfiles of the nine context-skills cases, as the derived-closure rule requires.
+- No threshold, trial count, case kind, rubric, judge request or prompt changed.
+
 ## [1.91.211.0] - 2026-10-25
 
 **`gstack-diff-scope` sees Python tests and nested test directories (#3335).** A branch that changed `components/orch/services/shared/tests/test_native_store_custody.py` reported `SCOPE_TESTS=false`, because the Tests rule only knew `*.test.*`-style suffixes and `test/`, `tests/`, `spec/` and `__tests__/` at the repository root. /ship and /review use that flag to route the testing specialist, so a backend change whose tests follow pytest's `test_*.py` convention skipped it. The test-bootstrap resolver already counted these files, so the two detectors disagreed.
