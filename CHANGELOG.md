@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.219.0] - 2026-10-25
 
 **Local paid runs from `eval:bg` now set `EVALS_RUN_ID`, so the native-capture cases start instead of failing in 0 seconds.** CI sets `EVALS_RUN_ID` per slice, but `bun run eval:bg:pr --local` launched without it, and the qa-callers, ship-docsync and qa-functional cases refuse to start without it. In GSTA-70's local /ship run, 17 of the 26 selected behaviors failed that way for $0. A failure like that is a launch failure, not a verdict, so the local run told you nothing about those cases.
 
