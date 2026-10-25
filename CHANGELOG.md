@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**A design doc edited in host plan mode no longer goes stale for the plan reviews (#542).** When /office-hours ran inside Claude Code's plan mode, the design doc lived twice: gstack's copy under `~/.gstack/projects/<slug>/` and the host's plan file under `.claude/plans/`. Later edits went only to the plan file, so /plan-ceo-review and /plan-eng-review read the older gstack copy and called it the source of truth. The gstack design doc stays the single source (Garry, Oct 17: "designdoc"). Edits made in the plan copy are now written through to it, and every plan review is warned when the copy is newer.
+
+### Fixed
+- **`office-hours/SKILL.md.tmpl`**: the closing design-doc check takes the host plan file that holds the doc. When that file is newer and differs, it is copied over the gstack doc (`PLAN_COPY: written through`), and the pairing is recorded beside the doc in `<doc>.plan-copy`. A repo copy under `docs/designs/` is rewritten from the doc under Phase 5's scan rule. An older plan file never overwrites the doc, and outside plan mode nothing is recorded.
+- **`bin/gstack-design-doc-find`**: when the newest state-root doc has a recorded plan copy, the helper prints `DESIGN_PLAN_COPY` with the write-through command on stderr. When the copy is newer than the chosen doc and differs from it, it also prints `STALE_DESIGN_DOC` with the `cp` to run before reading. Stdout still prints only the doc path, so every caller of `{{DESIGN_DOC_DISCOVERY}}` (plan reviews, /autoplan, the spec-review prerequisite check) gets the lines with no change in rendered size. The write-through always targets the state-root doc, even when a newer repo copy won discovery.
+- **`plan-ceo-review/SKILL.md.tmpl`, `plan-eng-review/SKILL.md.tmpl`**: the design-doc check runs a `STALE_DESIGN_DOC` write-through before reading and says so in one line. After a review edits the plan copy, it runs the `DESIGN_PLAN_COPY` write-through after the exit gate, before telemetry.
+- To stay within the SKILL.md size pins, plan-eng-review drops its 15th cognitive pattern ("Error budgets", already named in pattern 7), and office-hours drops three explanatory sentences (cross-team discovery, the profile binary's mktemp details, the `sessions[]` array) and shortens one.
+
+### Tests
+- `test/design-doc-plan-copy.test.ts` runs the real helper and the generated office-hours block against temp state roots: no recorded copy (silent), a copy in sync (named, no warning), a newer edited copy (warning; running its printed `cp` updates the doc and clears it), a doc edited after the copy (no warning), relative, non-markdown and missing recorded paths (ignored), and a repo copy that wins discovery (the write-through still targets the state-root doc). The office-hours block writes newer plan edits through, never lets an older plan file overwrite the doc, and records nothing outside plan mode. Both plan reviews carry the helper's two line names.
+
+### Gate integrity
+- Size pins in `test/fixtures/skill-md-size-allowlist.json` only go down: plan-eng-review by 44 characters on 11 hosts, office-hours by 31 on 4 hosts. No pin was raised. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.201.0] - 2026-10-25
 
 **/ship's review army and /plan-eng-review now ask for one severity scale, CRITICAL or INFORMATIONAL, the same scale /review, the specialist JSON and the review checklist already use (#3349).** The shared confidence rubric those two skills render told the model to label findings `[P1]` and `[P2]` and to report a 1-2 confidence finding "only if severity would be P0", while the rest of /ship's Step 9 (Pass 1 CRITICAL, Pass 2 INFORMATIONAL, `"severity":"CRITICAL|INFORMATIONAL"`) used the other scale. A finding from one skill couldn't be compared, deduplicated or gated against a finding from another. Garry picked CRITICAL/INFORMATIONAL for plan-eng-review on 2026-10-24.
