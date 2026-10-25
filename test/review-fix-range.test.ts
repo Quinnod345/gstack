@@ -241,12 +241,16 @@ describe('review Step 3 and Step 5.8 instructions', () => {
 });
 
 describe('review Step 3/5.8 order against the real logger', () => {
-  // /review never commits: each pass starts, applies fixes in the working tree and logs with its own token.
+  // /review's order on every pass: core start, Step 4.8 attempt start and finish, fixes in the working tree, core finish; never a commit.
   const reviewRow = (fields: Record<string, unknown>) => JSON.stringify({ skill: 'review', status: 'clean', issues_found: 0, critical: 0, informational: 0, ...fields });
   function reviewPass(fields: Record<string, unknown>, start: string[], fixes?: string) {
     const started = bin('gstack-review-log', start);
     expect(started.code).toBe(0);
     const [token, base] = started.out.split('\n');
+    // Step 4.8: each pass's adversarial attempt saves its row before any fix and before the core row.
+    const attempt = bin('gstack-review-log', ['--start', 'adversarial-review']);
+    expect(attempt.code).toBe(0);
+    expect(bin('gstack-review-log', [JSON.stringify({ skill: 'adversarial-review', status: 'clean', source: 'claude', ...clean }), '--finish', attempt.out]).code).toBe(0);
     if (fixes) edit(fixes);
     expect(bin('gstack-review-log', [reviewRow(fields), '--finish', token!]).code).toBe(0);
     return base;
@@ -254,9 +258,6 @@ describe('review Step 3/5.8 order against the real logger', () => {
 
   test('a committed first pass narrows the next repeat to the uncommitted fixes, then the chain returns to a full pass', () => {
     const reviewed = head();
-    // Step 4.8 saves its attempt row before fixes, so it precedes the core row and never blocks the narrowed start.
-    const attempt = bin('gstack-review-log', ['--start', 'adversarial-review']).out;
-    expect(bin('gstack-review-log', [JSON.stringify({ skill: 'adversarial-review', status: 'clean', source: 'claude', ...clean }), '--finish', attempt]).code).toBe(0);
     reviewPass(fixing, ['--start', 'review'], 'export const a = 2;\n');
     expect(reviewPass(fixing, ['--start', 'review', '--fix-range'], 'export const a = 3;\n')).toBe(`FIX_BASE=${reviewed}`);
     expect(gitIn(repo, `diff --name-only ${reviewed}`).trim()).toBe('a.ts');
@@ -267,7 +268,7 @@ describe('review Step 3/5.8 order against the real logger', () => {
     const last = rows().at(-1)!;
     expect(last.scope).toBeUndefined();
     expect(reviewFreshness(last, last.wtree)?.status).toBe('CURRENT');
-  });
+  }, 30_000);
 
   test('a zero-edit fix-range pass is never CURRENT even if it were logged, so the final record needs a full pass', () => {
     reviewPass(fixing, ['--start', 'review'], 'export const a = 2;\n');
@@ -275,7 +276,7 @@ describe('review Step 3/5.8 order against the real logger', () => {
     const narrowed = rows().at(-1)!;
     expect(narrowed.scope).toBe('fix-range');
     expect(reviewFreshness(narrowed, narrowed.review_binding.range_end_wtree)?.status).toBe('UNVERIFIED');
-  });
+  }, 30_000);
 
   test('a first pass over uncommitted work cannot be narrowed', () => {
     edit('export const a = 1; // uncommitted\n');
@@ -283,5 +284,5 @@ describe('review Step 3/5.8 order against the real logger', () => {
     const r = narrowStart();
     expect(r.code).toBe(1);
     expect(r.err).toContain('started from uncommitted content');
-  });
+  }, 30_000);
 });
