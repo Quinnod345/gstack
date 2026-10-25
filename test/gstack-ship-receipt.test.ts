@@ -119,6 +119,32 @@ describe('gstack-ship-receipt read', () => {
     expect(runBin(repo, 'gstack-ship-receipt', ['read', '--pr', '9'], env).status).toBe(EXIT.fail);
     expect(runBin(repo, 'gstack-ship-receipt', ['read']).status).toBe(EXIT.usage);
   });
+
+  test('the unattended handoff write lands in the file docs/unattended.md tells the parent to read --body, at HEAD and with no pr (GSTA-88)', () => {
+    const root = path.resolve(import.meta.dir, '..');
+    const tmpl = fs.readFileSync(path.join(root, 'ship/sections/handoff.md.tmpl'), 'utf8');
+    const write = tmpl.match(/gstack-ship-receipt (write [^\n`]*)/)![1].trim();
+    const out = write.match(/--out (\S+)/)?.[1];
+    expect(out).toBe('.gstack/tmp/ship-receipt.md');
+    expect(fs.readFileSync(path.join(root, 'ship/sections/handoff.md'), 'utf8')).toContain(write);
+    const docs = fs.readFileSync(path.join(root, 'docs/unattended.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(docs).toContain(`gstack-ship-receipt read --body ${out} --json`);
+    expect(docs).toMatch(/read --pr <n> --json` only once a PR exists/);
+
+    const repo = fixture();
+    const env = { GSTACK_SESSION_KIND: 'unattended' };
+    fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, '.gstack/tmp/ship-gate.json'), '{"free":{"pass":1,"fail":0,"skip":0}}');
+    expect(runBin(repo, 'gstack-issue-links', ['--base', 'main', '--out', '.gstack/tmp/issues.json'], env).status).toBe(EXIT.ok);
+    const w = runBin(repo, 'gstack-ship-receipt', write.replace('<base>', 'main').split(' '), env);
+    expect(w.status).toBe(EXIT.ok);
+    expect(fs.readFileSync(path.join(repo.work, out!), 'utf8')).toBe(w.out);
+    const r = runBin(repo, 'gstack-ship-receipt', ['read', '--body', out!, '--json'], env);
+    expect(r.status).toBe(EXIT.ok);
+    const receipt = JSON.parse(r.out);
+    expect(receipt).toMatchObject({ head: repo.git('rev-parse', 'HEAD'), base: 'main', session_kind: 'unattended' });
+    expect(receipt).not.toHaveProperty('pr');
+  });
 });
 
 describe('gstack-ship-receipt census (P7)', () => {

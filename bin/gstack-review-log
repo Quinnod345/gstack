@@ -3,6 +3,10 @@
 # Usage: gstack-review-log '{"skill":"...","timestamp":"...","status":"..."}'
 #
 # Before reading a diff: gstack-review-log --start review
+# Fix-range repeat (#3339): gstack-review-log --start review --fix-range
+#   prints the token, then FIX_BASE=<sha>; refuses (exit 1) unless the latest
+#   pass completed with fixes on unchanged content and its commit is an
+#   ancestor of HEAD. Its row is never CURRENT; a later full pass must follow.
 # After that pass: gstack-review-log '{...,"completed":true,"converged":true}' --finish TOKEN
 # With a findings file: gstack-review-log '{...}' --findings findings.jsonl
 #   status/unresolved/issues_found/critical_gaps are DERIVED from the file (B7);
@@ -72,9 +76,11 @@ fi
 SESSION_KIND=$("$SCRIPT_DIR/gstack-session-kind" 2>/dev/null || echo interactive)
 export GSTACK_STAMP_COMMIT_FULL="$COMMIT_FULL" GSTACK_STAMP_TREE="$TREE" GSTACK_STAMP_WTREE="$WTREE" GSTACK_STAMP_DIRTY="$DIRTY" GSTACK_STAMP_SESSION_KIND="$SESSION_KIND"
 if [ "$INPUT" = --start ]; then
-  GSTACK_REVIEW_SKILL="${2:-}" bun --no-env-file --config=/dev/null -e '
+  case "${3:-}" in ''|--fix-range) ;; *) echo 'Usage: gstack-review-log --start SKILL [--fix-range]' >&2; exit 2 ;; esac
+  GSTACK_REVIEW_SKILL="${2:-}" GSTACK_REVIEW_FIX_RANGE="${3:-}" bun --no-env-file --config=/dev/null -e '
     const { captureReviewStart } = await import(process.env.GSTACK_REVIEW_LIB);
-    console.log(captureReviewStart(process.env.GSTACK_REVIEW_SKILL));
+    try { console.log(captureReviewStart(process.env.GSTACK_REVIEW_SKILL, process.env, process.env.GSTACK_REVIEW_FIX_RANGE === "--fix-range")); }
+    catch (e) { console.error(e.message); process.exit(1); }
   '
   exit $?
 fi
@@ -86,7 +92,7 @@ if [ "$INPUT" = --check-shared-libs ] && [ "$#" -eq 2 ]; then
   exit $?
 fi
 usage() {
-  echo 'Usage: gstack-review-log JSON [--finish TOKEN] [--findings FILE] | --start SKILL | --check-shared-libs TOKEN < finding.json' >&2
+  echo 'Usage: gstack-review-log JSON [--finish TOKEN] [--findings FILE] | --start SKILL [--fix-range] | --check-shared-libs TOKEN < finding.json' >&2
   echo 'Exit codes: 0 written · 1 rejected · 2 usage' >&2
   exit 2
 }

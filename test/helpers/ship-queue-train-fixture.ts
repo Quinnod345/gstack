@@ -9,6 +9,7 @@
  * artifact downloads and check-run reads. Every call is logged, so tests can
  * prove what was (and was not) dispatched.
  */
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -58,7 +59,7 @@ export function repoKey(fx: TrainFixture): string {
 }
 
 /** A same-repo PR: a branch from origin/main touching `file`, published as refs/pull/<n>/head (and /merge), known to the gh shim. */
-export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text?: string; changelog?: boolean; cross?: boolean; from?: string } = {}): string {
+export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text?: string; changelog?: boolean | ((text: string) => string); cross?: boolean; from?: string } = {}): string {
   const { repo } = fx;
   repo.git('checkout', '-q', opts.from ?? 'origin/main', '-B', `pr-${pr}`);
   const file = opts.file ?? `pr-${pr}.txt`;
@@ -66,7 +67,7 @@ export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text
   fs.writeFileSync(path.join(repo.work, file), opts.text ?? `change from #${pr}\n`);
   if (opts.changelog !== false) {
     const cl = fs.readFileSync(path.join(repo.work, 'CHANGELOG.md'), 'utf8');
-    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), cl.replace('# Changelog\n', `# Changelog\n\n## [Unreleased]\n\n- #${pr} change\n`));
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), typeof opts.changelog === 'function' ? opts.changelog(cl) : cl.replace('# Changelog\n', `# Changelog\n\n## [Unreleased]\n\n- #${pr} change\n`));
   }
   repo.git('add', '-A');
   repo.git('commit', '-q', '-m', `feat #${pr}`);
@@ -76,9 +77,19 @@ export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text
   return head;
 }
 
+/** The repo key of a GitHub-form origin URL: sha256 of the URL with .git and trailing slashes dropped. */
+export const urlKey = (url: string) => createHash('sha256').update(url.replace(/\.git$/, '').replace(/\/+$/, '')).digest('hex').slice(0, 16);
+
+/** Point the fixture clone's origin at a GitHub-form URL that git rewrites to the local bare origin (url.insteadOf). */
+export function githubOrigin(fx: TrainFixture, url: string, cwd = fx.repo.work): void {
+  const git = (...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30_000, env: { ...process.env, ...fx.repo.env } });
+  git('config', `url.${fx.repo.origin}.insteadOf`, url);
+  git('remote', 'set-url', 'origin', url);
+}
+
 /** A READY receipt as `ready --screen|--no-screen` writes it (the lane side is tested separately). */
-export function readyReceipt(fx: TrainFixture, pr: string, head: string, opts: { screen?: boolean; at?: string } = {}): void {
-  const key = repoKey(fx);
+export function readyReceipt(fx: TrainFixture, pr: string, head: string, opts: { screen?: boolean; at?: string; key?: string } = {}): void {
+  const key = opts.key ?? repoKey(fx);
   const file = path.join(fx.state, 'ship-queue', 'ready', key, `${pr}-${head}.json`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const at = opts.at ?? '2026-10-18T08:00:00.000Z';

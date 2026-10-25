@@ -14,6 +14,7 @@ import { randomBytes } from 'node:crypto';
 import { DISPATCH_INPUTS, awaitNonceRun, dedupeKey, dispatchWorkflow, findDuplicateRun, listDispatchRuns, makeNonce, type WorkflowDispatch } from '../scripts/eval-bg';
 import { EXIT } from './headless-artifacts';
 import { ready, type QueueContext } from './ship-queue';
+import { classifyTrainHead } from './version-gate-train';
 import { git } from './ship-queue-gate';
 import { execFor, repoSlug } from './ship-queue-train-github';
 import { loadReady, nowIso, persist, readyPath, type ReadyReceipt, type ScreenChoice } from './ship-queue-train-record';
@@ -100,6 +101,8 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
   }
   const head = git(ctx.repoRoot, ['rev-parse', 'HEAD']).out;
   const baseSha = git(ctx.repoRoot, ['rev-parse', `${env.remote}/${ctx.base}`]).out;
+  const kind = classifyTrainHead({ repoRoot: ctx.repoRoot, baseRef: ctx.base, head });
+  if (kind.kind === 'invalid') return outRefused({ code: 'QUEUE_NOT_READY', message: `the Version Gate refuses ${head.slice(0, 12)}: ${kind.reason}` }, base.lines, `fix the head, push, then ${Q} ready --pr ${o.pr} --screen|--no-screen`, 'none');
   const sel = await screenSelection(env, head, baseSha);
   const lines = [...base.lines, ...sel.lines];
   const rec = sel.recommend ?? 'no-screen';
@@ -119,7 +122,7 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
   }
   lines.splice(1, 0, `screen: ${choice.choice}${choice.policy ? ` policy=${choice.policy} nonce=${choice.nonce} run=${choice.run ?? '-'}` : ''}`);
   const now = nowIso();
-  const readyAt = loadReady(env.repo.key, o.pr, head)?.ready_at ?? now;
+  const readyAt = loadReady(env.repo.keys, o.pr, head)?.ready_at ?? now;
   const receipt: ReadyReceipt = { schema: 1, kind: 'ready', repo_key: env.repo.key, pr: o.pr, head, base_sha: baseSha, ready_at: readyAt, screen: choice, updated_at: now };
   if (o.dryRun) return outOk([...lines, 'DRY-RUN: no READY receipt written, nothing dispatched'], `${Q} ready --pr ${o.pr} --${o.screen}${o.broad ? ' --broad' : ''}`, 'none');
   const p = persist(ctx.repoRoot, [receipt], { remote: env.remote });

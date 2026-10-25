@@ -329,7 +329,7 @@ describe('gstack-team-init', () => {
 
     const pre = JSON.parse(fs.readFileSync(path.join(tmpDir, '.claude', 'settings.json'), 'utf-8')).hooks.PreToolUse;
     expect(pre).toEqual([
-      { matcher: 'Skill|skill', hooks: [{ type: 'command', command: 'team-audit' }, { type: 'command', command: registeredCommand() }] },
+      { matcher: 'Skill|skill', hooks: [{ type: 'command', command: 'team-audit' }, { type: 'command', command: registeredCommand(), onFailure: 'block' }] },
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'my-own-hook' }] },
     ]);
     expect(registeredCommand()).not.toContain('$');
