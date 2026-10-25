@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.206.0] - 2026-10-25
 
 **A repo that keeps `.gstack/` out of git can give pregate a policy, and name the CI lanes a local run satisfies (#3286).** On a shared repo where gstack is one contributor's tool, pregate fell back to defaults, so every platform lane the machine could not run (an `ubuntu-latest` suite on a Mac, say) became a `requires-remote` obligation that never cleared, even when that suite runs the same here. Ported from #3286 by arlophoenix, whose 13 commits carry the feature (merged with their history kept); our commits on top close two findings from a security-focused review of the port.
 
