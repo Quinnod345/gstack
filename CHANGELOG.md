@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+**Proactive skill suggestions default to the four core skills.** `proactive` now takes `core` (the default: only /office-hours, /review, /qa and /ship auto-invoke when a request matches), `all` (any matching skill, the old behavior) or `off`. `true` and `false` keep working as `all` and `off`. The sentiment research (GSTA-93) found auto-invocation of every skill is what makes gstack collide with other skill packs; the four core skills are where the praise is, so they keep the nudge. Garry, 2026-10-25: "do it".
+
+### Changed
+- **`bin/gstack-config`**: `proactive` defaults to `core`; `set proactive` accepts `core`, `all`, `off`, `true` and `false` and warns on anything else, storing `core`. The config header documents the three values.
+- **`SKILL.md.tmpl`** (the router): three branches, `off`, `core` and `all`; under `core` only the four core routing rules auto-invoke and a skill the user names is always invoked. The opt-out line writes `off`, and `all` and `core` have their own lines.
+- **Every skill's preamble** (`scripts/resolvers/preamble/generate-upgrade-check.ts`): the steady-state rule names `core` as the default with the four skills. The rule is two characters shorter than before, so the 89 size pins in `test/fixtures/skill-md-size-allowlist.json` move down by 2; none goes up.
+- **`bin/gstack-skill-start`**: the one-time prompt offers "Keep the core four (recommended)", "Suggest every matching skill" and "Turn it off", writing `core`, `all` or `off`. `scripts/question-registry.ts` lists the same three options.
+
+### Added
+- **`docs/proactive.md`**: the three values, who each is for, the legacy spellings, the commands, and the approved fallback (`off` if collisions continue). Linked from docs/skills.md.
+
+### Tests
+- `test/proactive-config.test.ts`: the default in get, list and defaults; the five accepted values stored verbatim; the warning and `core` fallback on an unknown value (negative control: `on`); the header names the four skills.
+- `test/proactive-core-set.test.ts`: the router template and its render name `core` as the default and exactly the four core skills (negative control: no non-core skill in the core block, `true` is no longer "the default", no `set proactive false` left); the preamble rule carries the same four and did not grow past the old line; the prompt and registry agree on `core`, `all`, `off`.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count or case kind changed. Size pins only went down (89 pins, each by 2).
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).

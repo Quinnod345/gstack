@@ -549,10 +549,10 @@ if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_TEL_PROMPTED" = "yes" ]; then
   _emit_block proactive-prompt <<EOI
 Ask once:
 
-> Let gstack proactively suggest skills, like /qa for "does this work?" or /investigate for bugs?
+> Let gstack proactively suggest skills? By default it suggests only the four core ones: /office-hours for a new idea, /review for a diff, /qa for "does this work?", /ship to land it.
 
-Options: A) Keep it on (recommended)  B) Turn it off — I'll type /commands myself
-If A: \`$_BIN/gstack-config set proactive true\`. If B: \`$_BIN/gstack-config set proactive false\`.
+Options: A) Keep the core four (recommended)  B) Suggest every matching skill  C) Turn it off — I'll type /commands myself
+If A: \`$_BIN/gstack-config set proactive core\`. If B: \`$_BIN/gstack-config set proactive all\`. If C: \`$_BIN/gstack-config set proactive off\`.
 Always run: \`touch "$_GH/.proactive-prompted"\`.
 EOI
 fi

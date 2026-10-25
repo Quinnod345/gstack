@@ -1,0 +1,71 @@
+/**
+ * gstack-config proactive (GSTA-93 fix 12, Garry 2026-10-25 "do it"): core | all | off,
+ * default core. core auto-invokes only /office-hours, /review, /qa and /ship; all
+ * auto-invokes any matching skill; off suggests nothing. true and false, which
+ * every pre-core config and the old one-time prompt wrote, still work as all and
+ * off. An unknown value warns and stores core.
+ */
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+import { runBin } from './helpers/run-bin';
+
+const ROOT = path.resolve(import.meta.dir, '..');
+const BIN_CONFIG = path.join(ROOT, 'bin', 'gstack-config');
+
+let tmpHome: string;
+
+beforeEach(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-proactive-cfg-'));
+});
+
+afterEach(() => {
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+function run(args: string[]) {
+  return runBin(BIN_CONFIG, args, { gstackHome: tmpHome, cwd: ROOT, trim: true });
+}
+
+describe('gstack-config proactive', () => {
+  test('defaults to core, in get, list and defaults', () => {
+    expect(run(['get', 'proactive']).stdout).toBe('core');
+    expect(run(['defaults']).stdout).toMatch(/proactive:\s+core$/m);
+    expect(run(['list']).stdout).toMatch(/proactive:\s+core \(default\)$/m);
+  });
+
+  test('accepts core, all and off, and stores each verbatim', () => {
+    for (const value of ['all', 'off', 'core']) {
+      expect(run(['set', 'proactive', value]).status).toBe(0);
+      expect(run(['get', 'proactive']).stdout).toBe(value);
+      expect(run(['list']).stdout).toMatch(new RegExp(`proactive:\\s+${value} \\(set\\)$`, 'm'));
+    }
+  });
+
+  test('true and false keep working as the pre-core spellings of all and off', () => {
+    expect(run(['set', 'proactive', 'true']).status).toBe(0);
+    expect(run(['get', 'proactive']).stdout).toBe('true');
+    expect(run(['set', 'proactive', 'false']).status).toBe(0);
+    expect(run(['get', 'proactive']).stdout).toBe('false');
+  });
+
+  test('an unknown value warns and stores core (negative control: on is not a value)', () => {
+    run(['set', 'proactive', 'off']);
+    const junk = run(['set', 'proactive', 'on']);
+    expect(junk.status).toBe(0);
+    expect(junk.stderr).toContain("proactive 'on' not recognized");
+    expect(junk.stderr).toContain('core, all, off');
+    expect(run(['get', 'proactive']).stdout).toBe('core');
+  });
+
+  test('the config header documents the three values and names the core four', () => {
+    const src = fs.readFileSync(BIN_CONFIG, 'utf-8');
+    const header = src.slice(src.indexOf('# proactive:'), src.indexOf('# routing_declined:'));
+    expect(header).toMatch(/^# proactive: core/m);
+    for (const skill of ['/office-hours', '/review', '/qa', '/ship']) expect(header).toContain(skill);
+    expect(header).toContain('all = ');
+    expect(header).toContain('off = ');
+  });
+});
