@@ -18,7 +18,7 @@
 # at or above the minimum, and one CI job runs the quick tier on it.
 GSTACK_BUN_FLOOR="1.3.3"
 GSTACK_BUN_TESTED="1.4.2"
-GSTACK_BUN_DEFAULT="1.4.3"
+GSTACK_BUN_DEFAULT="1.4.4"
 
 # gstack_bun_archive_sha256 TARGET [VERSION] — the SHA-256 of
 # https://github.com/oven-sh/bun/releases/download/bun-v$VERSION/bun-TARGET.zip
