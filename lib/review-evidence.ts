@@ -7,6 +7,7 @@ import { resultLine, type ResultCodeName } from './result-codes';
 
 const DIFF_REVIEWS = new Set(['review', 'adversarial-review', 'codex-review', 'design-review-lite', 'ship']);
 const SHARED_LIBS_COVERAGE_VERSION = 1;
+const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 function record(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -165,10 +166,11 @@ export function checkSharedLibsReuse(finding: unknown, token: string, env = proc
 
 /**
  * #3339: a fix-range repeat reviews only what changed since the latest pass of
- * the same skill, and only when that pass completed, made fixes, reviewed
- * unchanged content on this branch, and no Step 11 review followed it. The
- * base is that pass's commit, held in the review log rather than the working
- * tree, and it must still be an ancestor of HEAD. Anything else needs a full pass.
+ * the same skill, and only when that pass completed and made fixes on this
+ * branch, no Step 11 review followed it, and the content it started from is
+ * exactly its commit's tree. That commit, held in the review log rather than
+ * the working tree, is the base; it must still be an ancestor of HEAD, so
+ * `git diff <base>` holds every fix. Anything else needs a full pass.
  */
 function fixRangeBase(skill: string, env: NodeJS.ProcessEnv): string {
   const refuse = (reason: string): never => {
@@ -186,14 +188,13 @@ function fixRangeBase(skill: string, env: NodeJS.ProcessEnv): string {
   const prior = rows[at]!, binding = prior.review_binding;
   if (prior.completed !== true) refuse('the latest pass did not complete');
   if (prior.converged !== false) refuse('the latest pass made no fixes');
-  const reviewed = binding?.state === 'incomplete' ? [binding.start_wtree, binding.end_wtree]
-    : binding?.state === 'fix-range' ? [binding.range_start_wtree, binding.range_end_wtree] : [];
-  if (!reviewed[0] || reviewed[0] !== reviewed[1]) refuse('the latest pass has no unchanged captured content');
+  if (!record(binding) || (binding.state !== 'changed' && binding.state !== 'incomplete') || typeof binding.start_wtree !== 'string') refuse('the latest pass has no captured start');
   if (binding.branch_id !== sha256(env.GSTACK_REVIEW_BRANCH ?? '')) refuse('the latest pass is from another branch');
   const base = prior.commit_full;
-  const git = (...args: string[]) => spawnSync('git', args, { cwd: env.GSTACK_REVIEW_REPO, timeout: 10_000 }).status === 0;
-  if (typeof base !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(base) || !git('cat-file', '-e', `${base}^{commit}`)) refuse('the latest pass has no resolvable commit');
-  if (!git('merge-base', '--is-ancestor', base, 'HEAD')) refuse(`${base} is not an ancestor of HEAD`);
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: env.GSTACK_REVIEW_REPO, encoding: 'utf8', timeout: 10_000 });
+  if (typeof base !== 'string' || !HASH.test(base) || git('cat-file', '-e', `${base}^{commit}`).status !== 0) refuse('the latest pass has no resolvable commit');
+  if (git('rev-parse', `${base}^{tree}`).stdout.trim() !== binding.start_wtree) refuse('the latest pass started from uncommitted content, so no commit marks what it read');
+  if (git('merge-base', '--is-ancestor', base, 'HEAD').status !== 0) refuse(`${base} is not an ancestor of HEAD`);
   return base;
 }
 
@@ -293,15 +294,15 @@ export function bindReview(rec: Record<string, any>, token: string, env = proces
     : start.wtree !== end ? 'changed'
     : rec.completed !== true || rec.converged !== true ? 'incomplete' : 'verified';
   const branchId = typeof start?.branch === 'string' && start.branch.length > 0 ? { branch_id: sha256(start.branch) } : {};
-  const narrowed = start?.scope === 'fix-range';
+  const narrowed = start?.scope === 'fix-range' || start?.fix_base !== undefined;
   if (narrowed) {
     rec.scope = 'fix-range';
-    rec.fix_base = start.fix_base;
+    if (typeof start.fix_base === 'string' && HASH.test(start.fix_base)) rec.fix_base = start.fix_base;
   }
   // A narrowed pass on unchanged content never carries start_wtree/end_wtree,
   // so Step 11.5 cannot bind it and it never becomes CURRENT; only a later full pass can.
   rec.review_binding = narrowed && (state === 'incomplete' || state === 'verified')
-    ? { state: 'fix-range', fix_base: start.fix_base, range_start_wtree: start.wtree, range_end_wtree: end, started_at: start.started_at, ...branchId }
+    ? { state: 'fix-range', fix_base: rec.fix_base, range_start_wtree: start.wtree, range_end_wtree: end, started_at: start.started_at, ...branchId }
     : { state, start_wtree: start?.wtree, end_wtree: end, started_at: start?.started_at, ...branchId };
   const verified = rec.review_binding.state === 'verified';
   if (verified) rec.wtree = end;

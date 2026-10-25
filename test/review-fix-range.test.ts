@@ -1,16 +1,17 @@
 /**
  * #3339: /ship Step 9 may re-review only the fix range, but a fix-range pass
  * can never be the last review. The fix base comes from the review log (never
- * the working tree or the caller), a narrowed row is never CURRENT and carries
- * no start_wtree/end_wtree for Step 11.5 to bind, and narrowed dispatches stay
- * out of specialist hit rates.
+ * the working tree or the caller) and is the commit whose tree the fixing pass
+ * started from, a narrowed row is never CURRENT and carries no
+ * start_wtree/end_wtree for Step 11.5 to bind, and narrowed dispatches stay out
+ * of specialist hit rates.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { canReuseSharedLibsAdvisory, reviewFreshness } from '../lib/review-evidence';
+import { canReuseSharedLibsAdvisory, reviewFreshness, sharedLibsFingerprint } from '../lib/review-evidence';
 import { gitIn } from './helpers/scratch-repo';
 
 const ROOT = path.resolve(import.meta.dir, '..');
@@ -36,61 +37,80 @@ function bin(name: string, args: string[]) {
   return { code: r.status, out: r.stdout.trim(), err: r.stderr };
 }
 const head = () => gitIn(repo, 'rev-parse HEAD').trim();
-function fix(text: string) {
-  fs.writeFileSync(path.join(repo, 'a.ts'), text);
-  gitIn(repo, 'commit -q -am fix');
-}
-function pass(row: Record<string, unknown>, start: string[] = ['--start', 'review']) {
+const edit = (text: string) => fs.writeFileSync(path.join(repo, 'a.ts'), text);
+const commit = () => gitIn(repo, 'commit -q -am fix');
+const row = (fields: Record<string, unknown>) => JSON.stringify({ skill: 'review', via: 'ship', status: 'clean', issues_found: 0, critical: 0, informational: 0, ...fields });
+const fixing = { status: 'issues_found', issues_found: 1, completed: true, converged: false };
+const clean = { completed: true, converged: true };
+
+// Step 9.4's order: start, review, apply fixes, log with the original token, then commit the fixes.
+function pass(fields: Record<string, unknown>, start: string[] = ['--start', 'review'], fixes?: string, commitFixes = true) {
   const started = bin('gstack-review-log', start);
   expect(started.code).toBe(0);
   const [token, base] = started.out.split('\n');
-  const logged = bin('gstack-review-log', [JSON.stringify({ skill: 'review', via: 'ship', status: 'clean', issues_found: 0, critical: 0, informational: 0, ...row }), '--finish', token!]);
-  expect(logged.code).toBe(0);
+  if (fixes) edit(fixes);
+  expect(bin('gstack-review-log', [row(fields), '--finish', token!]).code).toBe(0);
+  if (fixes && commitFixes) commit();
   return base;
 }
-const fixing = { status: 'issues_found', completed: true, converged: false };
-const clean = { completed: true, converged: true };
 function rows(): any[] {
   return bin('gstack-review-read', []).out.split('\n---CONFIG---')[0]!.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
 }
-const refused = () => bin('gstack-review-log', ['--start', 'review', '--fix-range']);
+const narrowStart = () => bin('gstack-review-log', ['--start', 'review', '--fix-range']);
 
 describe('fix-range start', () => {
-  test('after a completed fixing pass it prints the token and that pass commit as FIX_BASE', () => {
+  test('after a completed fixing pass it prints the token and the reviewed commit as FIX_BASE', () => {
     const reviewed = head();
-    pass(fixing);
-    fix('export const a = 2;\n');
+    pass(fixing, undefined, 'export const a = 2;\n');
     expect(pass(clean, ['--start', 'review', '--fix-range'])).toBe(`FIX_BASE=${reviewed}`);
+    expect(gitIn(repo, `diff --name-only ${reviewed}`).trim()).toBe('a.ts');
+  });
+
+  test('fixes still uncommitted at the repeat are inside the range', () => {
+    const reviewed = head();
+    pass(fixing, undefined, 'export const a = 2;\n', false);
+    expect(pass(clean, ['--start', 'review', '--fix-range'])).toBe(`FIX_BASE=${reviewed}`);
+    expect(gitIn(repo, `diff --name-only ${reviewed}`).trim()).toBe('a.ts');
   });
 
   test('chained fix-range passes take the latest fixing pass as base', () => {
-    pass(fixing);
-    fix('export const a = 2;\n');
+    pass(fixing, undefined, 'export const a = 2;\n');
     const second = head();
-    pass(fixing, ['--start', 'review', '--fix-range']);
-    fix('export const a = 3;\n');
+    pass(fixing, ['--start', 'review', '--fix-range'], 'export const a = 3;\n');
     expect(pass(clean, ['--start', 'review', '--fix-range'])).toBe(`FIX_BASE=${second}`);
   });
 
   test.each([
     ['no earlier pass', () => {}, 'no earlier pass on this branch'],
     ['a clean latest pass', () => pass(clean), 'the latest pass made no fixes'],
-    ['an incomplete latest pass (coverage restoration stays full)', () => pass({ ...fixing, status: 'unavailable', completed: false }), 'the latest pass did not complete'],
-    ['a Step 11 review after the latest pass', () => { pass(fixing); pass({ skill: 'adversarial-review', ...clean }, ['--start', 'adversarial-review']); }, 'a Step 11 review followed the latest pass'],
-    ['content that changed during the latest pass', () => {
-      const token = bin('gstack-review-log', ['--start', 'review']).out;
-      fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 9;\n');
-      bin('gstack-review-log', [JSON.stringify({ skill: 'review', ...fixing }), '--finish', token]);
-    }, 'the latest pass has no unchanged captured content'],
+    ['an incomplete latest pass (coverage restoration stays full)', () => pass({ ...fixing, status: 'unavailable', completed: false }, undefined, 'export const a = 2;\n'), 'the latest pass did not complete'],
+    ['a Step 11 review after the latest pass', () => {
+      pass(fixing, undefined, 'export const a = 2;\n');
+      pass({ skill: 'adversarial-review', ...clean }, ['--start', 'adversarial-review']);
+    }, 'a Step 11 review followed the latest pass'],
+    ['a latest pass logged without a start capture', () => {
+      edit('export const a = 2;\n');
+      expect(bin('gstack-review-log', [row(fixing)]).code).toBe(0);
+    }, 'the latest pass has no captured start'],
+    ['a pass that started from uncommitted content (a reverted dirty hunk would fall outside the range)', () => {
+      edit('export const a = 1; // dirty\n');
+      pass(fixing, undefined, 'export const a = 1;\n', false);
+    }, 'started from uncommitted content'],
+    ['a pass that started with an untracked file', () => {
+      fs.writeFileSync(path.join(repo, 'b.ts'), 'export const b = 1;\n');
+      pass(fixing, undefined, 'export const a = 2;\n');
+    }, 'started from uncommitted content'],
     ['a base that is no longer an ancestor of HEAD', () => {
-      fix('export const a = 2;\n');
-      pass(fixing);
-      gitIn(repo, 'reset -q --hard HEAD~1');
-      fix('export const a = 3;\n');
+      edit('export const a = 2;\n');
+      commit();
+      pass(fixing, undefined, 'export const a = 3;\n');
+      gitIn(repo, 'reset -q --hard HEAD~2');
+      edit('export const a = 4;\n');
+      commit();
     }, 'is not an ancestor of HEAD'],
   ])('refuses %s', (_, setup, reason) => {
     setup();
-    const r = refused();
+    const r = narrowStart();
     expect(r.code).toBe(1);
     expect(r.out).toBe('');
     expect(r.err).toContain('fix-range refused: ');
@@ -106,30 +126,50 @@ describe('fix-range start', () => {
 describe('a fix-range pass is never the last review', () => {
   test('its row is fix-range scoped whatever the caller claims, unbindable at Step 11.5 and never CURRENT', () => {
     const reviewed = head();
-    pass(fixing);
-    fix('export const a = 2;\n');
+    pass(fixing, undefined, 'export const a = 2;\n');
     pass({ ...clean, scope: 'full', fix_base: 'f'.repeat(40), review_binding: { state: 'verified', start_wtree: W, end_wtree: W }, wtree: W },
       ['--start', 'review', '--fix-range']);
-    const row = rows().at(-1);
-    expect(row.scope).toBe('fix-range');
-    expect(row.fix_base).toBe(reviewed);
-    expect(row.review_binding.state).toBe('fix-range');
-    expect(row.review_binding.range_start_wtree).toBe(row.review_binding.range_end_wtree);
-    expect(row.review_binding).not.toHaveProperty('start_wtree');
-    expect(row.review_binding).not.toHaveProperty('end_wtree');
-    expect(row).not.toHaveProperty('wtree');
-    expect(row.review_freshness).toEqual({ status: 'UNVERIFIED', reason: 'fix-range pass; only a later full pass can clear review' });
-    expect(refused().err).toContain('the latest pass made no fixes');
+    const last = rows().at(-1);
+    expect(last.scope).toBe('fix-range');
+    expect(last.fix_base).toBe(reviewed);
+    expect(last.review_binding.state).toBe('fix-range');
+    expect(last.review_binding.range_start_wtree).toBe(last.review_binding.range_end_wtree);
+    expect(last.review_binding).not.toHaveProperty('start_wtree');
+    expect(last.review_binding).not.toHaveProperty('end_wtree');
+    expect(last).not.toHaveProperty('wtree');
+    expect(last.review_freshness).toEqual({ status: 'UNVERIFIED', reason: 'fix-range pass; only a later full pass can clear review' });
+    expect(narrowStart().err).toContain('the latest pass made no fixes');
     pass(clean);
     expect(rows().at(-1).review_freshness.status).toBe('CURRENT');
   });
 
+  test('a fixing fix-range pass is not CURRENT either', () => {
+    pass(fixing, undefined, 'export const a = 2;\n');
+    pass(fixing, ['--start', 'review', '--fix-range'], 'export const a = 3;\n');
+    const last = rows().at(-1);
+    expect(last.scope).toBe('fix-range');
+    expect(last.review_freshness.status).not.toBe('CURRENT');
+  });
+
   test('a caller cannot narrow a full pass by claiming fix-range', () => {
     pass({ ...clean, scope: 'fix-range', fix_base: W });
-    const row = rows().at(-1);
-    expect(row).not.toHaveProperty('scope');
-    expect(row).not.toHaveProperty('fix_base');
-    expect(row.review_freshness.status).toBe('CURRENT');
+    const last = rows().at(-1);
+    expect(last).not.toHaveProperty('scope');
+    expect(last).not.toHaveProperty('fix_base');
+    expect(last.review_freshness.status).toBe('CURRENT');
+  });
+
+  test('a start token that still names a fix base stays narrowed even if its scope is rewritten', () => {
+    pass(fixing, undefined, 'export const a = 2;\n');
+    const [token] = narrowStart().out.split('\n');
+    const slug = bin('gstack-slug', []).out.match(/^SLUG=(.+)$/m)![1]!;
+    const file = path.join(root, 'state', 'projects', slug, '.review-starts', `${token}.json`);
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), scope: 'full', fix_base: 'not-a-commit' }));
+    expect(bin('gstack-review-log', [row(clean), '--finish', token!]).code).toBe(0);
+    const last = rows().at(-1);
+    expect(last.scope).toBe('fix-range');
+    expect(last).not.toHaveProperty('fix_base');
+    expect(last.review_freshness.status).toBe('UNVERIFIED');
   });
 
   test('freshness rejects a fix-range row even with a verified-looking binding', () => {
@@ -141,11 +181,12 @@ describe('a fix-range pass is never the last review', () => {
 
   test('shared-libs advisory reuse never trusts a fix-range row', () => {
     const finding = { severity: 'INFORMATIONAL', advisory: true, action: 'skipped', evidence_paths: ['a.ts'], helper_target: { path: 'b.ts', symbol: 'b' } };
-    const fp = 'shared-libs:' + 'c'.repeat(64);
-    const prior = { skill: 'review', completed: true, converged: true, wtree: W, scope: 'fix-range',
-      review_binding: { state: 'fix-range', range_start_wtree: W, range_end_wtree: W, branch_id: 'd'.repeat(64) } };
-    expect(canReuseSharedLibsAdvisory({ ...finding, fingerprint: fp, snapshot_covered_paths: ['a.ts'] }, finding, prior,
-      { wtree: W, branch_id: 'd'.repeat(64), covered_paths: ['a.ts'] })).toBe(false);
+    const prior = { ...finding, fingerprint: sharedLibsFingerprint(finding), snapshot_covered_paths: ['a.ts'] };
+    const snapshot = { wtree: W, branch_id: 'd'.repeat(64), covered_paths: ['a.ts'] };
+    const full = { skill: 'review', completed: true, converged: true, wtree: W, review_binding: { state: 'verified', start_wtree: W, end_wtree: W, branch_id: 'd'.repeat(64) } };
+    expect(canReuseSharedLibsAdvisory(prior, finding, full, snapshot)).toBe(true);
+    const narrowed = { ...full, scope: 'fix-range', review_binding: { state: 'fix-range', range_start_wtree: W, range_end_wtree: W, branch_id: 'd'.repeat(64) } };
+    expect(canReuseSharedLibsAdvisory(prior, finding, narrowed, snapshot)).toBe(false);
   });
 });
 
