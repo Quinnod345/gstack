@@ -49,6 +49,19 @@ signature components are not carried over):
 - `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
   ship-floor tells, turned into a free check.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
+- `design-motion/SKILL.md.tmpl` and `design-motion/sections/fidelity.md.tmpl`,
+  `motion.md.tmpl` and `figma.md.tmpl` (and the generated `design-motion/SKILL.md`
+  and `sections/*.md`): design-to-motion's fidelity rules, Figma layer-export
+  table (now an optional source path), loading choreography, story loops,
+  loop cycle, easing, checks and export formats, reconciled with gstack's one
+  authored motion moment, content visible without script, and the slop
+  catalog's motion tells.
+- `lib/motion-capture.ts` and `bin/gstack-motion-capture.ts`: design-to-motion's
+  deterministic capture (fake clock, whole-millisecond steps averaging 1000/60,
+  the `__start`/`__tick`/`__lt` page contract, PRE frames).
+- `lib/motion-encode.ts` and `bin/gstack-motion-encode`: design-to-motion's
+  ffmpeg recipes for the MP4, loop GIF and 800x500 GIF, and its seam,
+  empty-beat, rest and overflow checks as ffmpeg PSNR comparisons.
 
 ## DESIGN.md specification — Copyright Google LLC — Apache License 2.0
 

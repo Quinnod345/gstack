@@ -1,0 +1,145 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+// gstack-motion-encode — checks and exports for a /design-motion capture.
+//
+//   gstack-motion-encode check <capture-dir> [--dissolve-at <s>] [--empty-from <s>] [--intro-end <s>]
+//                              [--layout app|cards] [--mask-grow <px>] [--min-db <dB>]
+//   gstack-motion-encode export <capture-dir> --name <name> [--formats mp4,loop,800]
+//                              [--crop w:h:x:y] [--pad <#hex>] [--gif-fps <n>] [--small-fps <n>]
+//   gstack-motion-encode compare <a.png> <b.png> [--blur <sigma>] [--crop w:h:x:y]
+//
+// <capture-dir> is what gstack-motion-capture.ts wrote (capture.json, frames/,
+// still.png, mask.png). check runs the seam, empty-beat and rest checks, and
+// the overflow check when the capture has a mask, through ffmpeg's psnr
+// filter; it prints one "MOTION_CHECK: <id> pass|fail ..." line each, writes
+// contact-sheet.png, and ends with "MOTION_RESULT: clean" (exit 0) or
+// "MOTION_RESULT: <n> failed" (exit 1). Defaults follow the 12 s cycle:
+// dissolve at cycle - 1.0, empty beat from cycle - 0.4, intro landed at 2.4.
+// export writes <name>-x.mp4, <name>-loop.gif and <name>-800x500.gif into the
+// capture dir and prints "EXPORT_OK <file> <bytes>" per file. compare prints
+// "PSNR <dB|inf> dB (...)" for two same-size images (the still-fidelity check).
+// Exit 2: usage or an unreadable capture. Exit 3: FFMPEG_MISSING (ffmpeg is an
+// optional dependency; the line says how to install it).
+//
+// Adapted from Elaya's design-to-motion (MIT, (c) 2026 Elaya). See NOTICE.md.
+
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, mp4Args, parsePsnrStats, planChecks, resolveFfmpeg, smallGifArgs,
+  FFMPEG_MISSING, type CaptureManifest,
+} from '../lib/motion-encode';
+
+const USAGE = 'Usage: gstack-motion-encode check <capture-dir> [options] | export <capture-dir> --name <name> [options] | compare <a.png> <b.png> [--blur <sigma>] [--crop w:h:x:y]';
+
+function die(code: number, line: string): never {
+  console.error(line);
+  process.exit(code);
+}
+
+const [cmd, ...args] = process.argv.slice(2);
+const firstFlag = args.findIndex(a => a.startsWith('--'));
+const positional = firstFlag === -1 ? args : args.slice(0, firstFlag);
+const rest = firstFlag === -1 ? [] : args.slice(firstFlag);
+const wanted = cmd === 'compare' ? 2 : 1;
+if (!['check', 'export', 'compare'].includes(cmd ?? '') || positional.length !== wanted) die(2, USAGE);
+const flags = new Map<string, string>();
+for (let i = 0; i < rest.length; i += 2) {
+  const value = rest[i + 1];
+  if (!rest[i]!.startsWith('--') || value === undefined) die(2, `gstack-motion-encode: bad option '${rest[i]}'\n${USAGE}`);
+  flags.set(rest[i]!, value);
+}
+
+const ffmpeg = resolveFfmpeg(process.env, bin => Bun.which(bin), p => fs.existsSync(p));
+if (!ffmpeg) {
+  console.log(FFMPEG_MISSING);
+  process.exit(3);
+}
+
+function run(args: string[]) {
+  return spawnSync(ffmpeg!, args, { encoding: 'utf-8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024 });
+}
+
+function num(flag: string, fallback: number): number {
+  const raw = flags.get(flag);
+  if (raw === undefined) return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < 0) die(2, `gstack-motion-encode: ${flag} must be a non-negative number, got '${raw}'`);
+  return v;
+}
+
+if (cmd === 'compare') {
+  const [a, b] = positional as [string, string];
+  const r = run(compareArgs(a, b, { blur: num('--blur', 0) || undefined, crop: flags.get('--crop') }));
+  const frame = parsePsnrStats(String(r.stdout))[0];
+  if (r.status !== 0 || !frame) die(1, `COMPARE_FAILED ${String(r.stderr).trim().split('\n').pop() ?? 'no PSNR line'} (same pixel size required)`);
+  console.log(`PSNR ${frame.psnr === Infinity ? 'inf' : frame.psnr.toFixed(2)} dB (${a} vs ${b}${flags.has('--crop') ? `, crop ${flags.get('--crop')}` : ''}${flags.has('--blur') ? `, blur ${flags.get('--blur')}` : ''})`);
+  process.exit(0);
+}
+
+const dir = path.resolve(positional[0]!);
+let manifest: CaptureManifest;
+try {
+  manifest = JSON.parse(fs.readFileSync(path.join(dir, 'capture.json'), 'utf-8'));
+} catch (err) {
+  die(2, `gstack-motion-encode: cannot read ${path.join(dir, 'capture.json')}: ${(err as Error).message}; capture first with gstack-motion-capture.ts`);
+}
+
+if (cmd === 'check') {
+  const layout = flags.get('--layout') ?? 'cards';
+  if (layout !== 'app' && layout !== 'cards') die(2, '--layout must be app or cards');
+  const jobs = planChecks(manifest, dir, {
+    dissolveAt: num('--dissolve-at', manifest.cycle - 1.0),
+    emptyFrom: num('--empty-from', manifest.cycle - 0.4),
+    introEnd: num('--intro-end', 2.4),
+    layout,
+    maskGrow: num('--mask-grow', 2),
+  });
+  if ('error' in jobs) die(2, `gstack-motion-encode: ${jobs.error}`);
+  const minDb = flags.has('--min-db') ? num('--min-db', 0) : Infinity;
+  let failed = 0;
+  for (const job of jobs) {
+    const r = run(job.args);
+    if (r.status !== 0) {
+      failed++;
+      console.log(`MOTION_CHECK: ${job.id} fail ffmpeg exited ${r.status ?? r.signal}: ${String(r.stderr).trim().split('\n').pop()}`);
+      continue;
+    }
+    const verdict = judgeCheck(job, parsePsnrStats(String(r.stdout)), minDb);
+    if (!verdict.pass) failed++;
+    console.log(verdict.line);
+  }
+  if (manifest.mask === undefined) console.log('MOTION_CHECK: overflow skipped (no mask; recapture with --mask "<container selector>")');
+  const sheet = path.join(dir, 'contact-sheet.png');
+  const s = run(contactSheetArgs(manifest, dir, sheet));
+  console.log(s.status === 0 ? `CONTACT_SHEET ${sheet}` : `CONTACT_SHEET unavailable: ${String(s.stderr).trim().split('\n').pop()}`);
+  console.log(failed === 0 ? 'MOTION_RESULT: clean' : `MOTION_RESULT: ${failed} failed`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+const name = flags.get('--name');
+if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) die(2, '--name <kebab-case-name> is required for export');
+const crop = flags.get('--crop');
+if (crop) {
+  const err = cropError(crop);
+  if (err) die(2, `gstack-motion-encode: ${err}`);
+}
+const formats = (flags.get('--formats') ?? 'mp4,loop,800').split(',');
+const jobs: Array<[string, string[]]> = [];
+if (formats.includes('mp4')) jobs.push([`${name}-x.mp4`, mp4Args(manifest, dir, path.join(dir, `${name}-x.mp4`))]);
+if (formats.includes('loop')) jobs.push([`${name}-loop.gif`, loopGifArgs(manifest, dir, path.join(dir, `${name}-loop.gif`), { fps: num('--gif-fps', 20) })]);
+if (formats.includes('800')) {
+  jobs.push([`${name}-800x500.gif`, smallGifArgs(manifest, dir, path.join(dir, `${name}-800x500.gif`), { fps: num('--small-fps', 20), crop, pad: flags.get('--pad') })]);
+}
+if (jobs.length === 0) die(2, '--formats takes mp4, loop and 800, comma separated');
+let failed = 0;
+for (const [file, args] of jobs) {
+  const r = run(args);
+  if (r.status !== 0) {
+    failed++;
+    console.log(`EXPORT_FAILED ${file}: ${String(r.stderr).trim().split('\n').pop()}`);
+    continue;
+  }
+  console.log(`EXPORT_OK ${path.join(dir, file)} ${fs.statSync(path.join(dir, file)).size}`);
+}
+process.exit(failed === 0 ? 0 : 1);

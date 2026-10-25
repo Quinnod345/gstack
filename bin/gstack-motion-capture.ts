@@ -1,0 +1,122 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+// gstack-motion-capture — deterministic frame capture for /design-motion.
+//
+//   gstack-motion-capture.ts <page.html|url> --size <W>x<H> --cycle <s> --out <dir> [--pre 15] [--tail 10] [--mask <css>]
+//   gstack-motion-capture.ts <page.html|url> --size <W>x<H> --still <out.png> [--scale <n>]
+//
+// A capture never records in real time. It installs Playwright's fake clock,
+// loads <page>?capture, and for each frame advances the clock by whole
+// milliseconds averaging 1000/60, calls window.__start() on frame PRE and
+// window.__tick(dt) from then on inside the same evaluate, seeks every CSS
+// animation to the fake clock, and screenshots. Output in <dir>: frames/%05d.png,
+// still.png (<page>?still at the capture scale), mask.png with --mask, and
+// capture.json (sizes, window, per-frame clock and loop time) for
+// gstack-motion-encode. --still renders <page>?still alone (--scale 2 for the
+// fidelity reference).
+//
+// Chromium is gstack's own Playwright Chromium (bin/gstack-browser-ensure
+// installs it); GSTACK_CHROMIUM_PATH overrides it and GSTACK_CHROMIUM_NO_SANDBOX=1
+// adds --no-sandbox, as for the browse daemon. Last line: CAPTURE_OK ... (exit 0),
+// or an error naming its code (exit 1 browser or page, exit 2 usage).
+//
+// Adapted from Elaya's design-to-motion (MIT, (c) 2026 Elaya). See NOTICE.md.
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { pathToFileURL } from 'url';
+import {
+  CAPTURE_USAGE, captureScale, clockMs, maskCss, parseCaptureArgs, planCapture, stepMs, withMode, FPS,
+} from '../lib/motion-capture';
+
+function die(code: number, line: string): never {
+  console.error(line);
+  process.exit(code);
+}
+
+const parsed = parseCaptureArgs(process.argv.slice(2));
+if ('error' in parsed) die(2, `gstack-motion-capture: ${parsed.error}\n${CAPTURE_USAGE}`);
+const opts = parsed;
+if (process.platform === 'win32') {
+  die(1, 'MOTION_CAPTURE_UNSUPPORTED: Bun cannot launch Chromium on native Windows; run the capture from WSL, macOS or Linux');
+}
+
+let url = opts.target;
+if (!/^https?:\/\//i.test(url)) {
+  const file = path.resolve(url);
+  if (!fs.existsSync(file)) die(2, `gstack-motion-capture: ${url} does not exist`);
+  url = pathToFileURL(file).href;
+}
+
+const { chromium } = await import('playwright');
+const executablePath = process.env.GSTACK_CHROMIUM_PATH || undefined;
+const browser = await chromium.launch({
+  ...(executablePath ? { executablePath } : {}),
+  args: process.env.GSTACK_CHROMIUM_NO_SANDBOX === '1' ? ['--no-sandbox'] : [],
+}).catch((err: Error) => die(1, `BROWSER_UNAVAILABLE ${String(err.message).split('\n')[0]}\nfix: run ${path.join(import.meta.dir, 'gstack-browser-ensure')}, or point GSTACK_CHROMIUM_PATH at a working Chromium`));
+
+async function openPage(mode: 'capture' | 'still', scale: number) {
+  const context = await browser.newContext({ viewport: { width: opts.width, height: opts.height }, deviceScaleFactor: scale, reducedMotion: 'no-preference' });
+  const page = await context.newPage();
+  await page.clock.install({ time: 0 });
+  await page.goto(withMode(url, mode), { waitUntil: 'load' });
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all([...document.images].map(img => img.decode().catch(() => undefined)));
+  });
+  await page.clock.pauseAt(10_000);
+  return page;
+}
+
+try {
+  if (opts.still) {
+    const page = await openPage('still', opts.scale ?? captureScale(opts.width, opts.height));
+    fs.mkdirSync(path.dirname(path.resolve(opts.still)), { recursive: true });
+    await page.screenshot({ path: opts.still });
+    console.log(`STILL_OK ${opts.still}`);
+  } else {
+    const out = path.resolve(opts.out!);
+    const scale = captureScale(opts.width, opts.height);
+    const plan = planCapture({ cycleSeconds: opts.cycle!, pre: opts.pre, tail: opts.tail });
+    fs.rmSync(path.join(out, 'frames'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(out, 'frames'), { recursive: true });
+    const page = await openPage('capture', scale);
+    const contract = await page.evaluate(() => typeof (window as any).__start === 'function' && typeof (window as any).__tick === 'function');
+    if (!contract) die(1, `MOTION_CONTRACT_MISSING: ${opts.target}?capture does not expose window.__start() and window.__tick(dt); add the capture mode before recording`);
+    const loopTime: number[] = [];
+    for (let i = 0; i < plan.frames; i++) {
+      const dt = stepMs(i);
+      await page.clock.runFor(dt);
+      loopTime.push(await page.evaluate(([i, pre, dt]) => {
+        const w = window as any;
+        if (i === pre) w.__start();
+        if (i >= pre) w.__tick(dt / 1000);
+        const now = performance.now();
+        for (const a of document.getAnimations() as any[]) {
+          a.__m ??= w.__mark ?? 0;
+          a.pause();
+          a.currentTime = Math.max(0, now - a.__m);
+        }
+        return i >= pre ? Number(w.__lt) || 0 : 0;
+      }, [i, plan.pre, dt] as const));
+      await page.screenshot({ path: path.join(out, 'frames', `${String(i).padStart(5, '0')}.png`) });
+    }
+    const still = await openPage('still', scale);
+    await still.screenshot({ path: path.join(out, 'still.png') });
+    if (opts.mask) {
+      await still.addStyleTag({ content: maskCss(opts.mask) });
+      await still.screenshot({ path: path.join(out, 'mask.png') });
+    }
+    const manifest = {
+      schema: 1, target: opts.target, width: opts.width, height: opts.height, scale, fps: FPS, cycle: opts.cycle!,
+      pre: plan.pre, windowStart: plan.windowStart, windowFrames: plan.windowFrames, frames: plan.frames,
+      clockMs: Array.from({ length: plan.frames }, (_, i) => clockMs(i, plan.pre)), loopTime,
+      still: 'still.png', ...(opts.mask ? { mask: 'mask.png' } : {}),
+    };
+    fs.writeFileSync(path.join(out, 'capture.json'), JSON.stringify(manifest, null, 2) + '\n');
+    console.log(`CAPTURE_OK frames=${plan.frames} window=${plan.windowStart}+${plan.windowFrames} scale=${scale.toFixed(4)} dir=${out}`);
+  }
+} catch (err) {
+  die(1, `MOTION_CAPTURE_FAILED: ${String((err as Error).message).split('\n')[0]}`);
+} finally {
+  await browser.close();
+}

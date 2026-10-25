@@ -73,6 +73,13 @@ export const IDENTIFIER_PLACEHOLDERS: Record<string, IdentifierGrammar> = {
   '<slug>': { grammar: ID, what: 'slug' },
   '<dimension>': { grammar: ID, what: 'design dimension slug' },
   '<dim>': { grammar: ID, what: 'profile dimension name' },
+  // /design-motion (GSTA-92 plan item 15): capture and export arguments the skill's plan fixes.
+  '<frame-size>': { grammar: /^[0-9]+x[0-9]+$/, what: 'design frame size in CSS pixels, WxH' },
+  '<cycle-seconds>': { grammar: NUMBER, what: 'loop cycle length in seconds' },
+  '<app|cards>': { grammar: oneOf('app', 'cards'), what: 'motion layout: joined app surfaces or separate cards' },
+  '<hex-color>': { grammar: /^#[0-9A-Fa-f]{3,8}$/, what: 'page background colour as hex', quoted: true },
+  '<figma-file-key>': { grammar: ID, what: 'Figma file key from the link' },
+  '<figma-node-id>': { grammar: /^[0-9]+[:-][0-9]+$/, what: 'Figma node id from the link' },
   '<new_value>': { grammar: NUMBER, what: 'profile dimension value' },
   '<Q1_VALUE>': { grammar: NUMBER, what: 'profile answer value' },
   '<Q2_VALUE>': { grammar: NUMBER, what: 'profile answer value' },

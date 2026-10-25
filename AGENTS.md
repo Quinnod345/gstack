@@ -36,6 +36,7 @@ Invoke them by name (e.g., `/office-hours`).
 | `/design-review` | Live-site visual audit + fix loop with atomic commits. |
 | `/design-shotgun` | Generate multiple AI design variants, comparison board, iterate. |
 | `/design-html` | Generate production-quality Pretext-native HTML/CSS. |
+| `/design-motion` | Turn an approved design into a showcase loop: MP4 for X, website GIF, 800×500 GIF, with seam, rest and overflow checks. |
 | `/devex-review` | Live developer experience audit (TTHW measured against the real flow). |
 | `/qa` | Test browser, API, CLI, job, worker and webhook behavior; reproduce bugs, fix them and re-verify. |
 | `/qa-only` | The same surface-aware QA, reporting findings and proposed tests without changing product code or tests. |
