@@ -53,6 +53,17 @@ describe('required team hook: shell-neutral registration', () => {
     expect(command).not.toContain('%');
   });
 
+  // #3319: without node the shell's own error is all the runner gets, which is
+  // neither exit 0 nor 2, so the registration must carry onFailure: block.
+  test('without node on PATH the default shell exits neither 0 nor 2, so the handler is registered with onFailure: block', () => {
+    expect(TEAM_INIT).toContain("const handler = { type: 'command', command: process.env.GSTACK_HOOK_COMMAND, onFailure: 'block' };");
+    const noNode = path.join(base, 'no-node-bin');
+    fs.mkdirSync(noNode, { recursive: true });
+    const failed = viaDefaultShell({ ...hookEnv({ HOME: elsewhere, USERPROFILE: elsewhere }), PATH: noNode, Path: noNode });
+    expect(failed.stdout.trim()).toBe('');
+    expect([0, 2]).not.toContain(failed.status);
+  });
+
   // `powershell -Command` reports a failing native command as exit 1, so only
   // the default shell sees the hook's own exit 2; the deny JSON is the same.
   for (const [name, runner, enabled, denyStatus] of [

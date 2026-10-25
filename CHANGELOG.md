@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.222.0] - 2026-10-25
 
 **Five flaky tests now fail only for real defects, and a judge reply that isn't valid JSON says so in its failure line (daily flaky-fix pass, GSTA-91).** `context-restore-fragment-match` failed 0/3 on main cb99df4, although every run restored the right checkpoint: to find the checkpoint whose title matches, the agent often prints all three, and the case failed whenever another checkpoint's body appeared anywhere in the transcript. `test/gstack-ff-update.test.ts` counted every `sleep 300` on the machine, so heartbeats from parallel test files changed its count (remote pregate at #3412's head: expected "1", received "3"). The `GSTACK_CAPY=1` install-admission case in `test/gstack-skill-start.test.ts` makes ten `gstack-skill-start` spawns under bun's 5 s default timeout and took 3.6–5.7 s on a 4-core machine. The QA-only fixture's late scenarios mocked a 1000 ms capture budget but ran each attempt's real setup inside it. The setup-browser-cookies workflow judge in train-4 gate 40173759210 returned JSON with an unescaped quote in its reasoning, and the flake record read only "JSON Parse error: Expected '}'".
 
@@ -21,6 +21,86 @@
 - `context-restore-fragment-match`: the failure surface moves from the whole transcript to the agent's report. Alpha or omega bytes in tool output no longer fail the case; the payments body in tool output no longer counts as loaded, so the report must show it. A run that resumes another checkpoint, or mixes two, still fails. `test/test-of-test-ratchet.test.ts` gains one BASELINE entry, the replay test, with its reason, and the new helper joins the touchfiles of the nine context-skills cases, as the derived-closure rule requires.
 - `scripts/harness-version.json` records `test/helpers/llm-judge.ts` as non-behavioral at HARNESS_VERSION 6: only a parse failure's message changes, before any score is parsed, so no case's verdict or pass-rate series changes.
 - No threshold, trial count, case kind, rubric, judge request or prompt changed.
+
+## [1.91.221.0] - 2026-10-25
+
+**The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
+
+### Fixed
+- **`bin/gstack-session-update`**: before it forks, the hook resolves its caller's harness pid with `gstack_harness_pid "$PPID"` (`bin/gstack-harness-pid.sh`), the same derivation `bin/gstack-skill-start` uses for the pid it leases, and the background lease check excludes that pid's ancestry. Leases held by other live sessions still skip the update. `bin/gstack-upgrade` runs its check in the foreground, so its `$$` is alive and it is unchanged.
+
+### Tests
+- `test/session-update-autostash.test.ts`: every fixture now runs the updater with its own `GSTACK_STATE_ROOT` (the top of the state-root chain, instead of `GSTACK_STATE_DIR`, which an inherited `GSTACK_HOME` outranks) and its own `GSTACK_LEASE_DIR`. A negative control holds a live lease in the shared preload lease directory, confirms the ambient environment sees it, and shows the fixture still updates; it fails with "SKIP leased" without the fixture change. A positive case shows the fixture's own live lease still skips the update.
+- `test/session-update-stages.test.ts`: the starting session's own lease (the test process, behind a `/bin/sh -c` wrapper as a hook runner would use) no longer blocks the update. It fails on main with `SKIP leased`. The other session-update test files already pass an explicit environment, so their leases resolve to the fixture install's own git dir.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or assertion changed. The lease rule is narrower in one respect only: the starting session's own harness and its ancestors no longer count as holders, which is what `--exclude-ancestry-of` promised.
+
+## [1.91.220.0] - 2026-10-25
+
+**A design doc edited in host plan mode no longer goes stale for the plan reviews (#542).** When /office-hours ran inside Claude Code's plan mode, the design doc lived twice: gstack's copy under `~/.gstack/projects/<slug>/` and the host's plan file under `.claude/plans/`. Later edits went only to the plan file, so /plan-ceo-review and /plan-eng-review read the older gstack copy and called it the source of truth. The gstack design doc stays the single source (Garry, Oct 17: "designdoc"). Edits made in the plan copy are now written through to it, and every plan review is warned when the copy is newer.
+
+### Fixed
+- **`office-hours/SKILL.md.tmpl`**: the closing design-doc check takes the host plan file that holds the doc. When that file is newer and differs, it is copied over the gstack doc (`PLAN_COPY: written through`), and the pairing is recorded beside the doc in `<doc>.plan-copy`. A repo copy under `docs/designs/` is rewritten from the doc under Phase 5's scan rule. An older plan file never overwrites the doc, and outside plan mode nothing is recorded.
+- **`bin/gstack-design-doc-find`**: when the newest state-root doc has a recorded plan copy, the helper prints `DESIGN_PLAN_COPY` with the write-through command on stderr. When the copy is newer than the chosen doc and differs from it, it also prints `STALE_DESIGN_DOC` with the `cp` to run before reading. Stdout still prints only the doc path, so every caller of `{{DESIGN_DOC_DISCOVERY}}` (plan reviews, /autoplan, the spec-review prerequisite check) gets the lines with no change in rendered size. The write-through always targets the state-root doc, even when a newer repo copy won discovery.
+- **`plan-ceo-review/SKILL.md.tmpl`, `plan-eng-review/SKILL.md.tmpl`**: the design-doc check runs a `STALE_DESIGN_DOC` write-through before reading and says so in one line. After a review edits the plan copy, it runs the `DESIGN_PLAN_COPY` write-through after the exit gate, before telemetry.
+- To stay within the SKILL.md size pins, plan-eng-review drops its 15th cognitive pattern ("Error budgets", already named in pattern 7), and office-hours drops three explanatory sentences (cross-team discovery, the profile binary's mktemp details, the `sessions[]` array) and shortens one.
+
+### Tests
+- `test/design-doc-plan-copy.test.ts` runs the real helper and the generated office-hours block against temp state roots: no recorded copy (silent), a copy in sync (named, no warning), a newer edited copy (warning; running its printed `cp` updates the doc and clears it), a doc edited after the copy (no warning), relative, non-markdown and missing recorded paths (ignored), and a repo copy that wins discovery (the write-through still targets the state-root doc). The office-hours block writes newer plan edits through, never lets an older plan file overwrite the doc, and records nothing outside plan mode. Both plan reviews carry the helper's two line names.
+
+### Gate integrity
+- Size pins in `test/fixtures/skill-md-size-allowlist.json` only go down: plan-eng-review by 44 characters on 11 hosts, office-hours by 31 on 4 hosts. No pin was raised. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.219.0] - 2026-10-25
+
+**Local paid runs from `eval:bg` now set `EVALS_RUN_ID`, so the native-capture cases start instead of failing in 0 seconds.** CI sets `EVALS_RUN_ID` per slice, but `bun run eval:bg:pr --local` launched without it, and the qa-callers, ship-docsync and qa-functional cases refuse to start without it. In GSTA-70's local /ship run, 17 of the 26 selected behaviors failed that way for $0. A failure like that is a launch failure, not a verdict, so the local run told you nothing about those cases.
+
+### Fixed
+- **`scripts/eval-bg.ts`**: the local backend launches through a new `launchLocal`. It exports `EVALS_RUN_ID` as the run-scoped log's name, reduced to `[A-Za-z0-9_.-]`, and keeps a value you exported yourself. The id is written on the log's second line, so you can find the run's native captures. `--help` says so. Dispatched CI runs are unchanged.
+
+### Tests
+- `test/eval-detach-timeout-floor.test.ts`: a detached child launched by `launchLocal` sees a safe `EVALS_RUN_ID` named after its log, and an exported id is kept. A source check confirms that the local backend launches through `launchLocal`.
+
+## [1.91.218.0] - 2026-10-25
+
+**`gstack-team-init required` now blocks skills when its gate can't run, instead of letting them through.** Issue #3319 (exGeni): the required-mode Skill hook is a `node -e` launcher. On a teammate's Mac or Linux machine without Node.js, the shell exits 127 with nothing on stdout. If `.claude/hooks/check-gstack.cjs` is missing, node exits 1. Claude Code treats any exit other than 0 or 2 as a non-blocking error, so in both cases the Skill call went ahead on exactly the machine the gate is for. A live Claude Code 2.1.310 session with node off PATH and no gstack install ran the skill.
+
+### Fixed
+- **`bin/gstack-team-init`**: the check-gstack handler is registered with `"onFailure": "block"`, Claude Code's documented fail-closed switch (2.1.295+). A launcher that can't start, or exits with any code other than 0 or 2, now blocks the Skill call. The reason shown is `blocking because onFailure is "block"` plus the shell's `node: not found` (or node's `Cannot find module …check-gstack.cjs`). Exit 2 (deny) and exit 0 (allow) are unchanged. Re-running `required` upgrades an existing registration in place, and the manual-registration fallback names the field.
+- The required CLAUDE.md section tells the agent what those two block reasons mean (install Node.js; the hook file is missing) and not to work around them. `required` prints that every developer needs node on PATH and Claude Code 2.1.295+, and the README says the same.
+
+### Compatibility
+- Measured with a live `claude -p` Skill call per version. 2.1.295 and 2.1.310 block when node is missing or the hook file is gone, still deny with exit 2 when gstack is absent, and still run the skill when gstack is installed. 2.1.294 ignores the unknown field without rejecting the settings file: the hook still loads and denies as before, and a machine without node is still let through there, as it was before this change.
+- Copilot CLI documents command `preToolUse` hooks as already failing closed on a crash or non-zero exit, so this change does not alter its outcome. Its handling of the extra field was not measured (no Copilot login on the test machine).
+
+### Tests
+- `test/gstack-team-init-hook-schema.test.ts`: the handler is `{ type, command, onFailure: 'block' }`. The registered command exits 127 with no stdout when node is off PATH and 1 when check-gstack.cjs is missing, the failures only `onFailure` turns into a block. Re-running upgrades a handler registered without the field to exactly one handler with it.
+- `test/team-init-hook-shell-neutral.test.ts`: through the platform's default shell, the command without node exits neither 0 nor 2 with empty stdout, and the bin registers the handler with `onFailure: 'block'`. The PowerShell case and its retries are unchanged.
+- `test/team-mode.test.ts`: the legacy-upgrade assertion pins the new field.
+
+### Gate integrity
+- One gate edit, and it tightens the gate: the required-mode Skill hook goes from fail-open to fail-closed when its launcher fails. Nothing that used to block now allows. Negative controls: with `onFailure` removed from the bin, 4 tests fail (the three new registration and upgrade tests plus the team-mode pin); with it dropped only from the in-place upgrade path, 2 fail. The live runs with gstack installed (2.1.294, 2.1.310) still run the skill, so the allow path is not broken. No threshold, budget, timeout, retry or trial count changed.
+
+## [1.91.217.0] - 2026-10-25
+
+**Windows free tests now also run on every push to main.** `windows-free-tests.yml` ran on pull requests and dispatch only: 194 PR runs, 6 dispatches and 0 pushes in its last 200 runs. Merge trains dispatch only `free-tests.yml` on the train branch. So no Windows run ever saw a train's combined tree or main after a merge, and a Windows break caused by two individually green PRs only surfaced on the next unrelated PR. Found while working on GSTA-68.
+
+### Fixed
+- **`.github/workflows/windows-free-tests.yml`**: adds `push: branches: [main]`, the same trigger free-tests.yml already has. The run uses the existing per-run concurrency group, and `record_durations` stays dispatch-only (on a push, `inputs.record_durations` is empty, so the lane runs and the recorder skips). Cost: about 40 job-minutes on GitHub's free `windows-latest` runners per merge.
+
+### Tests
+- `test/windows-native-workflows.test.ts` pins the new trigger set and requires the push trigger to be limited to main.
+
+## [1.91.216.0] - 2026-10-25
+
+**/sync-gbrain refuses an active autopilot before it touches the brain's source list (#3360, part 2; ported from #3362 by @exGeni).** The code stage checked for a running `gbrain autopilot` only right before its destructive walk. By then it had already cleaned up legacy sources, renamed a source and run `gbrain sources add`, so a refused run still registered a source it never synced.
+
+### Fixed
+- **`bin/gstack-gbrain-sync.ts`**: the code stage runs the autopilot check before Step 0a, so a refusal leaves the source list untouched. The check before the walk stays, because autopilot can start while the steps in between run. Dry-run, read-only and deny policies and the local-engine skip still return earlier and are unchanged. Which processes count as an autopilot (the machine-wide probe, #3360 part 1) is unchanged.
+
+### Tests
+- `test/gstack-gbrain-sync.test.ts` runs the real script against a fake `gbrain` and a `pgrep` that reports an autopilot: the stage is refused and the fake saw no `sources add`, `rename`, `remove` or `sync`. On main the same run issues `sources add`.
 
 ## [1.91.215.0] - 2026-10-25
 
