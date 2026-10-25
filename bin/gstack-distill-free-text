@@ -20,7 +20,7 @@
 # auditability via --status when you want it.
 # Per D6: Anthropic SDK direct call, fail-loud on missing ANTHROPIC_API_KEY.
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 # Heredoc delivery guard. bash 5.2+ writes a heredoc body <=64KiB through a
 # pipe in the forked child before exec, with no reader on the other end. On

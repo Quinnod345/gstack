@@ -6,8 +6,8 @@
  * code under review. Every Bun gstack starts passes --no-env-file and an empty
  * --config: shebangs and skill prose spell it
  * `bun --no-env-file --config=/dev/null`, shipped shell files spell
- * `--config="${GSTACK_BUN_CONFIG:-/dev/null}"` (NUL under MINGW, MSYS and
- * Cygwin, #3415), TypeScript spawns use bunIsolationArgs().
+ * `--config="${GSTACK_BUN_CONFIG:-/dev/null}"` (NUL when OSTYPE is msys or
+ * cygwin, #3415), TypeScript spawns use bunIsolationArgs().
  * test/bun-entry-isolation.test.ts holds every entry point to that form.
  *
  * POSIX passes /dev/null. Native Windows has no /dev/null and `--config=NUL`

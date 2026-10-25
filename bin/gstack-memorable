@@ -32,7 +32,7 @@
 # Heredoc delivery guard (see bin/gstack-settings-hook for the rationale).
 BASH_COMPAT=50
 set -uo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

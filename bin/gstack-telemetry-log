@@ -21,7 +21,7 @@
 #
 # NOTE: Uses set -uo pipefail (no -e) — telemetry must never exit non-zero
 set -uo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 GSTACK_DIR="${GSTACK_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 SCRIPT_DIR="$GSTACK_DIR/bin"

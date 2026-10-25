@@ -19,7 +19,7 @@
 # remote's capy/support.env, `unknown` when its fetch failed, or ""), LIVE.
 # GSTACK_CAPY_WRAPPER_PATH (optional) names the wrapper a below-minimum fix runs.
 
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 . "$BIN/gstack-doctor-components.sh" || { echo "gstack-doctor: $BIN/gstack-doctor-components.sh is missing; reinstall with cd $SRC && ./setup" >&2; exit 1; }
 . "$BIN/gstack-install-registry.sh" 2>/dev/null || { echo "gstack-doctor: $BIN/gstack-install-registry.sh is missing; reinstall with cd $SRC && ./setup" >&2; exit 1; }
 . "$BIN/gstack-bun-version.sh" 2>/dev/null || { echo "gstack-doctor: $BIN/gstack-bun-version.sh is missing; reinstall with cd $SRC && ./setup" >&2; exit 1; }

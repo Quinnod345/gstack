@@ -30,7 +30,7 @@ const ROOT = path.resolve(import.meta.dir, '..');
 const FLAGS = '--no-env-file --config=/dev/null';
 const ISOLATED_SHEBANG = `#!/usr/bin/env -S bun ${FLAGS}`;
 const SHELL_FLAGS = '--no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}"';
-const CONFIG_DEF = 'GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac';
+const CONFIG_DEF = 'GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac';
 
 const TRACKED = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', timeout: 30_000 }).stdout.split('\0').filter(Boolean)
   .filter(f => !/(^|\/)test\//.test(f) && fs.existsSync(path.join(ROOT, f)) && fs.statSync(path.join(ROOT, f)).isFile());

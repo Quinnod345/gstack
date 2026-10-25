@@ -37,7 +37,7 @@
 # (needed when a hook runs TypeScript) is not found. Set GSTACK_HOOK_CHECK_BUN to
 # the bun to run (setup passes its own).
 set -u
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 LIST_ONLY=0 SETUP_FILE=""
 while [ $# -gt 1 ]; do

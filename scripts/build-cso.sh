@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eu
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 CSO_BUILD_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$CSO_BUILD_ROOT"

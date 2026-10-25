@@ -36,7 +36,7 @@
 #   2 — prerequisite missing or invalid argument
 #   3 — post-install validation failed (PATH shadow, broken binary, etc.)
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 # --- defaults ---
 # No version pin by default — install the latest default-branch HEAD (#1744).

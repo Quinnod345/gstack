@@ -40,7 +40,7 @@
 BASH_COMPAT=50
 
 set -u
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 usage() {
   sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'

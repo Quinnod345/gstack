@@ -1,7 +1,8 @@
 /**
  * #3415: gstack's shell bins start Bun with
  * --config="${GSTACK_BUN_CONFIG:-/dev/null}", and each defines
- * GSTACK_BUN_CONFIG as NUL under MINGW, MSYS and Cygwin. Native bun.exe cannot
+ * GSTACK_BUN_CONFIG as NUL when OSTYPE is msys or cygwin (Git Bash, MSYS2,
+ * Cygwin). Native bun.exe cannot
  * open /dev/null (EINVAL), so a Windows bash with MSYS path conversion off
  * (MSYS_NO_PATHCONV=1, MSYS2_ARG_CONV_EXCL=*) made the literal spelling fail:
  * the record bins wrote nothing, and gstack-timeline-log still exited 0.
@@ -9,10 +10,10 @@
  * On every platform the free lanes run, windows-latest included, the record
  * bins run through lib/script-invocation.ts with conversion off in a hostile
  * repository: each writes its record, and the repository's bunfig.toml preload
- * and .env never load. On POSIX a simulated Windows bash (uname reporting
- * MINGW64, a bun that rejects /dev/null the way bun.exe does) reproduces the
- * bug; its controls, with uname reporting Linux, show each bin fails loudly
- * with nothing written instead of exiting 0.
+ * and .env never load. On POSIX a simulated Windows bash (OSTYPE=msys, a bun
+ * that rejects /dev/null the way bun.exe does) reproduces the bug; its
+ * controls, without OSTYPE=msys, show each bin fails loudly with nothing
+ * written instead of exiting 0.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -29,8 +30,7 @@ let repo = '';
 let stateRoot = '';
 let evilRoot = '';
 let preloadMarker = '';
-let fakeWindows = '';
-let fakeBunOnly = '';
+let fakeBun = '';
 
 const BINS: Array<{ bin: string; input: string; log: string }> = [
   { bin: 'gstack-review-log', log: 'main-reviews.jsonl', input: JSON.stringify({ skill: 'plan-eng-review', timestamp: '2026-10-25T00:00:00Z', status: 'clean', unresolved: 0, critical_gaps: 0, issues_found: 0, mode: 'FULL_REVIEW', commit: 'abc1234' }) },
@@ -39,16 +39,16 @@ const BINS: Array<{ bin: string; input: string; log: string }> = [
   { bin: 'gstack-timeline-log', log: 'timeline.jsonl', input: JSON.stringify({ skill: 'review', event: 'started', branch: 'main' }) },
 ];
 
-function env(pathPrefix?: string): NodeJS.ProcessEnv {
+function env(pathPrefix?: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (!/^(GSTACK_|MSYS)/.test(k)) out[k] = v;
+  for (const [k, v] of Object.entries(process.env)) if (!/^(GSTACK_|MSYS|OSTYPE$)/.test(k)) out[k] = v;
   const PATH = Object.keys(out).find(k => k.toUpperCase() === 'PATH') ?? 'PATH';
   if (pathPrefix) out[PATH] = pathPrefix + path.delimiter + (out[PATH] ?? '');
-  return { ...out, HOME: path.join(tmp, 'home'), GSTACK_STATE_ROOT: stateRoot, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' };
+  return { ...out, HOME: path.join(tmp, 'home'), GSTACK_STATE_ROOT: stateRoot, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*', ...extra };
 }
 
-function run(bin: string, input: string, pathPrefix?: string) {
-  return runScriptSync(path.join(ROOT, 'bin', bin), [input], { cwd: repo, env: env(pathPrefix), encoding: 'utf8', timeout: 60_000 });
+function run(bin: string, input: string, pathPrefix?: string, extra: Record<string, string> = {}) {
+  return runScriptSync(path.join(ROOT, 'bin', bin), [input], { cwd: repo, env: env(pathPrefix, extra), encoding: 'utf8', timeout: 60_000 });
 }
 
 function records(log: string): string[] {
@@ -84,26 +84,21 @@ beforeAll(() => {
   fs.writeFileSync(path.join(repo, 'preload.ts'), `require('fs').writeFileSync(${JSON.stringify(preloadMarker)}, 'ran');\n`);
   fs.writeFileSync(path.join(repo, 'bunfig.toml'), 'preload = ["./preload.ts"]\n');
   if (IS_WINDOWS) return;
-  fakeWindows = path.join(tmp, 'fake-windows');
-  fakeBunOnly = path.join(tmp, 'fake-bun-only');
-  for (const dir of [fakeWindows, fakeBunOnly]) {
-    fs.mkdirSync(dir);
-    writeExec(path.join(dir, 'bun'), [
-      '#!/usr/bin/env bash',
-      'a=()',
-      'for x in "$@"; do',
-      '  case "$x" in',
-      '    --config=/dev/null) echo "EINVAL: Invalid argument (open())" >&2; echo "while reading config \\"/dev/null\\"" >&2; exit 1 ;;',
-      '    --config=NUL) a+=(--config=/dev/null) ;;',
-      '    *) a+=("$x") ;;',
-      '  esac',
-      'done',
-      `exec ${JSON.stringify(process.execPath)} "\${a[@]}"`,
-      '',
-    ].join('\n'));
-  }
-  writeExec(path.join(fakeWindows, 'uname'), '#!/usr/bin/env bash\n[ "$1" = -s ] && { echo MINGW64_NT-10.0-26100; exit 0; }\nexec /usr/bin/uname "$@"\n');
-  writeExec(path.join(fakeWindows, 'cygpath'), '#!/usr/bin/env bash\nprintf "%s\\n" "$2"\n');
+  fakeBun = path.join(tmp, 'fake-bun');
+  fs.mkdirSync(fakeBun);
+  writeExec(path.join(fakeBun, 'bun'), [
+    '#!/usr/bin/env bash',
+    'a=()',
+    'for x in "$@"; do',
+    '  case "$x" in',
+    '    --config=/dev/null) echo "EINVAL: Invalid argument (open())" >&2; echo "while reading config \\"/dev/null\\"" >&2; exit 1 ;;',
+    '    --config=NUL) a+=(--config=/dev/null) ;;',
+    '    *) a+=("$x") ;;',
+    '  esac',
+    'done',
+    `exec ${JSON.stringify(process.execPath)} "\${a[@]}"`,
+    '',
+  ].join('\n'));
 });
 
 afterAll(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -143,7 +138,7 @@ describe.skipIf(IS_WINDOWS)('#3415: simulated Windows bash (POSIX hosts)', () =>
   for (const { bin, input, log } of BINS) {
     test(`${bin} passes NUL and writes its record`, () => {
       resetState();
-      const r = run(bin, input, fakeWindows);
+      const r = run(bin, input, fakeBun, { OSTYPE: 'msys' });
       expect(r.stderr).not.toContain('EINVAL');
       expect(r.status).toBe(0);
       expect(records(log).length).toBe(1);
@@ -152,7 +147,7 @@ describe.skipIf(IS_WINDOWS)('#3415: simulated Windows bash (POSIX hosts)', () =>
 
     test(`control: when Bun rejects the config, ${bin} fails loudly and writes nothing`, () => {
       resetState();
-      const r = run(bin, input, fakeBunOnly);
+      const r = run(bin, input, fakeBun);
       expect(r.stderr).toContain('EINVAL');
       expect(r.status).not.toBe(0);
       expect(records(log)).toEqual([]);

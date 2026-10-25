@@ -17,7 +17,7 @@
 # a model read the code. Caller-supplied binding fields are always discarded.
 # Plan-tier rows retain their legacy binding behavior.
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 export GIT_OPTIONAL_LOCKS=0
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'core.fsmonitor=false' 'core.untrackedCache=false'"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -5,7 +5,7 @@
 # shared old renders are retired. This post-setup pass repairs missed upgrades.
 # Idempotent and non-fatal: foreign entries and failed replacements stay intact.
 set -u
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 INSTALL_DIR="${GSTACK_INSTALL_DIR:-$HOME/.claude/skills/gstack}"
 if [ -f "$INSTALL_DIR/bin/gstack-migrate-claude-code" ] && command -v bun >/dev/null 2>&1; then
   bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$INSTALL_DIR/bin/gstack-migrate-claude-code" --install-dir "$INSTALL_DIR" || true

@@ -31,7 +31,7 @@
 # spawned sessions (ambient OpenClaw) only warn. GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1
 # admits anyway and says so.
 
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 
 # gstack_source_root BIN_DIR — the source checkout behind an install: an
 # installed runtime root's recorded .source-path (setup _link_runtime_dists),

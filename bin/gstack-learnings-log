@@ -6,7 +6,7 @@
 # Append-only storage. Duplicates (same key+type) are resolved at read time
 # by gstack-learnings-search ("latest winner" per key+type).
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Windows git-bash (#1950): pwd yields a POSIX path (/c/Users/...), which Bun
 # on Windows cannot resolve as an ES module specifier in the import below.
