@@ -22,7 +22,7 @@ import { safeUnlink, isProcessAlive } from './error-handling';
 import { restrictFilePermissions, mkdirSecure } from './file-permissions';
 import { atomicWriteSync } from '../../lib/fs-atomic';
 import { readPidCmdline, readPidStartTime } from './xvfb';
-import { emptyBunConfig } from './bun-child-config';
+import { emptyBunConfig, findWindowsBunExe, type BunExeLookup } from './bun-child-config';
 
 function agentProcessInfo(pid: number): { startTime: string; commandLine: string } {
   if (!Number.isSafeInteger(pid) || pid <= 0) return { startTime: '', commandLine: '' };
@@ -149,6 +149,22 @@ export function bunChildFlags(): string[] {
   return ['--no-env-file', `--config=${emptyBunConfig()}`];
 }
 
+/**
+ * The bun executable to spawn the agent with. On Windows a bare 'bun' under
+ * the Node polyfill resolves (via cross-spawn) to npm's bun.cmd shim, run as
+ * `cmd.exe /c bun ...`. That breaks two ways: windowsHide only hides cmd.exe,
+ * and the detached cmd.exe has no console, so bun.exe allocates a fresh
+ * visible one (a window that steals focus on every spawn); and proc.pid is
+ * cmd.exe's, so the agent's startup check (record.pid === process.pid) never
+ * matches and it exits after 2s, which the 60s watchdog then respawns.
+ * Spawning bun.exe directly fixes both. Falls back to 'bun' when no .exe is
+ * found, which is the old behavior.
+ */
+export function resolveBunExecutable(opts: BunExeLookup & { platform?: string } = {}): string {
+  if ((opts.platform ?? process.platform) !== 'win32') return 'bun';
+  return findWindowsBunExe(opts) ?? 'bun';
+}
+
 export function resolveTerminalAgentScript(searchHints: { metaDir?: string; execPath?: string } = {}): string | null {
   const meta = searchHints.metaDir || __dirname;
   const exec = searchHints.execPath || process.execPath;
@@ -208,7 +224,7 @@ export function spawnTerminalAgent(opts: {
     writeAgentRecord(stateDir, reservation);
     let proc: any;
     try {
-      proc = (Bun as any).spawn(['bun', 'run', ...bunChildFlags(), script, `--agent-gen=${gen}`], {
+      proc = (Bun as any).spawn([resolveBunExecutable(), 'run', ...bunChildFlags(), script, `--agent-gen=${gen}`], {
         cwd: opts.cwd || process.cwd(),
         env: {
           ...process.env,

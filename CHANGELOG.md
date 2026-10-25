@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.218.0] - 2026-10-25
 
 **`gstack-team-init required` now blocks skills when its gate can't run, instead of letting them through.** Issue #3319 (exGeni): the required-mode Skill hook is a `node -e` launcher. On a teammate's Mac or Linux machine without Node.js, the shell exits 127 with nothing on stdout. If `.claude/hooks/check-gstack.cjs` is missing, node exits 1. Claude Code treats any exit other than 0 or 2 as a non-blocking error, so in both cases the Skill call went ahead on exactly the machine the gate is for. A live Claude Code 2.1.310 session with node off PATH and no gstack install ran the skill.
 
@@ -19,6 +19,456 @@
 
 ### Gate integrity
 - One gate edit, and it tightens the gate: the required-mode Skill hook goes from fail-open to fail-closed when its launcher fails. Nothing that used to block now allows. Negative controls: with `onFailure` removed from the bin, 4 tests fail (the three new registration and upgrade tests plus the team-mode pin); with it dropped only from the in-place upgrade path, 2 fail. The live runs with gstack installed (2.1.294, 2.1.310) still run the skill, so the allow path is not broken. No threshold, budget, timeout, retry or trial count changed.
+
+## [1.91.217.0] - 2026-10-25
+
+**Windows free tests now also run on every push to main.** `windows-free-tests.yml` ran on pull requests and dispatch only: 194 PR runs, 6 dispatches and 0 pushes in its last 200 runs. Merge trains dispatch only `free-tests.yml` on the train branch. So no Windows run ever saw a train's combined tree or main after a merge, and a Windows break caused by two individually green PRs only surfaced on the next unrelated PR. Found while working on GSTA-68.
+
+### Fixed
+- **`.github/workflows/windows-free-tests.yml`**: adds `push: branches: [main]`, the same trigger free-tests.yml already has. The run uses the existing per-run concurrency group, and `record_durations` stays dispatch-only (on a push, `inputs.record_durations` is empty, so the lane runs and the recorder skips). Cost: about 40 job-minutes on GitHub's free `windows-latest` runners per merge.
+
+### Tests
+- `test/windows-native-workflows.test.ts` pins the new trigger set and requires the push trigger to be limited to main.
+
+## [1.91.216.0] - 2026-10-25
+
+**/sync-gbrain refuses an active autopilot before it touches the brain's source list (#3360, part 2; ported from #3362 by @exGeni).** The code stage checked for a running `gbrain autopilot` only right before its destructive walk. By then it had already cleaned up legacy sources, renamed a source and run `gbrain sources add`, so a refused run still registered a source it never synced.
+
+### Fixed
+- **`bin/gstack-gbrain-sync.ts`**: the code stage runs the autopilot check before Step 0a, so a refusal leaves the source list untouched. The check before the walk stays, because autopilot can start while the steps in between run. Dry-run, read-only and deny policies and the local-engine skip still return earlier and are unchanged. Which processes count as an autopilot (the machine-wide probe, #3360 part 1) is unchanged.
+
+### Tests
+- `test/gstack-gbrain-sync.test.ts` runs the real script against a fake `gbrain` and a `pgrep` that reports an autopilot: the stage is refused and the fake saw no `sources add`, `rename`, `remove` or `sync`. On main the same run issues `sources add`.
+
+## [1.91.215.0] - 2026-10-25
+
+**An unattended `/ship` leaves its receipt in a file the parent can read, and the parent is told to read that file (GSTA-88).** Before, Step 18's handoff section wrote the ship receipt only to stdout, and `docs/unattended.md` told the parent to read it from the PR body with `gstack-ship-receipt read --pr <n> --json`. An unattended run must not push, so there is no PR: the parent got a usage error or `RECEIPT_MISSING`, or, if an older PR existed, read that PR's receipt with exit 0 and a stale `head`. Now the handoff writes `.gstack/tmp/ship-receipt.md`, the parent reads it with `read --body` in the child's checkout, and it compares the receipt's `head` to the branch SHA either way.
+
+### Fixed
+- **`ship/sections/handoff.md.tmpl`**: the receipt write carries `--out .gstack/tmp/ship-receipt.md`. The completion-message step drops `(\`pr: none\`)`, which was wrong (the block omits `pr`; only the `SHIP_RECEIPT:` line shows `pr=-`), and the "nothing precedes the identifiers" clause, which repeated "identifiers first". Ship's skeleton plus sections is 313,151 bytes, 13 below main and under its 313,281 cap; no cap or pin moved.
+- **`bin/gstack-skill-start`**: an unattended `/ship` prints one status line, `UNATTENDED_SHIP: no push, no PR; Step 18 takes the handoff section; receipt at .gstack/tmp/ship-receipt.md`. No other skill or session kind prints it, and no instruction block was added. The unattended block's `/ship` record sentence names the file for a run that did not push and the PR body only once a PR exists.
+- **`docs/unattended.md`**: for `/ship`, read `gstack-ship-receipt read --body .gstack/tmp/ship-receipt.md --json` in the child's checkout when the run did not push, use `read --pr <n> --json` only once a PR exists, and in both cases compare the receipt's `head` to the branch SHA, because `read` does not check that the receipt is current.
+
+### Tests
+- `test/gstack-ship-receipt.test.ts` runs the handoff template's write command as written in a fixture repository, then reads the file back with `read --body`: `head` is HEAD, `session_kind` is `unattended` and there is no `pr`. It also checks that the template and the generated section carry `--out` and that `docs/unattended.md` names the same file with `read --body`.
+- `test/gstack-skill-start.test.ts` checks that the `UNATTENDED_SHIP` line appears exactly once for an unattended `/ship`, alongside only the `unattended-session` block, and never for `/review`, `/qa`, `/autoplan` or for `/ship` in an interactive, spawned or headless session.
+
+## [1.91.214.0] - 2026-10-25
+
+**`gstack-brain-sync --publish-removals --yes` no longer prints `list: unbound variable` when it finishes, and it now removes its temp list and releases the sync lock.** The command's EXIT trap named the function's local `$list`. When a publish succeeded, the function returned before the script exited, so the trap ran after `list` had gone out of scope. Under `set -u` it stopped at the unbound variable and never reached the cleanup, which left `brain-sync-removals.*` in `$TMPDIR` and `.brain-sync.lock.d` in `~/.gstack` until a later run cleared the lock as stale (found by GSTA-44).
+
+### Fixed
+- **`bin/gstack-brain-sync`**: `--publish-removals` writes the temp file paths into its EXIT/INT/TERM trap when it installs the trap (quoted with `printf %q`), so the cleanup and lock release work however the function ends. The drain's trap in `--once` also names locals, but every path in that function ends with `exit` while they are still in scope, so it's unchanged. The other trap sites (the drain's lock-only trap and `gstack-brain-restore`'s, which uses a global) don't have the bug.
+
+### Tests
+- `test/brain-sync-removals.test.ts`: a new case runs `--publish-removals`, then `--publish-removals --yes` twice (publishing, then nothing to publish) with a private `TMPDIR`. After each run, stderr has no `unbound variable`, the exit status is 0, `TMPDIR` is empty and the lock directory is gone. It failed before the fix.
+
+## [1.91.213.0] - 2026-10-25
+
+**The CI image and the Ubicloud free-suite VMs move off Node.js 22.20.0 to 22.23.4, and both now check the Node archive's SHA-256 before unpacking it (#3354, port of #3355 by @michael-sumner).** 22.20.0 is affected by the October 21, 2026 Node.js security releases, including the Brotli decoder out-of-bounds write (CVE-2026-111497, high) and the TLS hostname bypass for leading-zero IPv4 hosts (CVE-2026-106069, high). 22.23.4 is the patched 22.x release. #3355 bumped `.github/docker/Dockerfile.ci`, but `scripts/ubicloud/setup-free-suite.sh` pins Node separately and would have kept installing 22.20.0 on every remote free-suite run.
+
+### Fixed
+- **`.github/docker/Dockerfile.ci`**: `NODE_VERSION` is 22.23.4 (Michael Sumner's commit). The archive is checked against `NODE_SHA256`, the linux-x64 hash from the release's SHASUMS256.txt, whose signature verifies against the Node.js release keyring, before it is unpacked.
+- **`scripts/ubicloud/setup-free-suite.sh`**: pins the same 22.23.4 and hash, and downloads the archive to a temporary file and verifies it instead of piping `curl` straight into `sudo tar`.
+
+### Tests
+- `test/ci-image-cli-pin.test.ts` gains four cases: Dockerfile.ci pins an exact Node version and a SHA-256, both files verify before they unpack, and `setup-free-suite.sh` pins the same version and hash as the image. On #3355's head alone, all four fail; on main, three fail.
+- The Bun ordering check in `setup-free-suite.sh` now looks for `sha256sum -c` after the Bun download instead of anywhere in the file, because the Node check now comes first.
+- The test names `Dockerfile.ci` as `join(__dirname, '..', '.github', …)`, the form pregate's literal scan resolves, so a change to the image now selects it (before, pregate refused a Dockerfile.ci-only change with `PREGATE_NO_LANE`).
+
+### Gate integrity
+- One accepted-input change to review: the Bun ordering check searches for its `sha256sum -c` from the Bun download onward. It now accepts one input it used to reject: a file with some other `sha256sum -c` before the Bun download and the Bun check after it, which is this file. The property it guards, Bun verified after download and before unpack, is unchanged. A file whose only `sha256sum -c` sits before the download still fails, and so does removing the Bun hash or moving it after `unzip` (negative controls run). No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.212.0] - 2026-10-25
+
+**/careful no longer asks about words inside a commit message (#1060; ported from #3221 by @Bhumika-1432006).** The careful hook matched its MEDIUM patterns against the whole command, so `git commit -m "fix: prevent drop table in migration"` asked for approval as an SQL DROP. The hook now masks git commit's own literal message before those checks, including the `-m "$(cat <<'EOF' … EOF
+)"` form agents use most. Our commits on top of the contributor's scanner fix four problems found in review: the inline awk program made the whole hook a bash syntax error on bash 3.2 (macOS `/bin/bash`), so every Bash call failed the hook there; a newline after the message was dropped, so `-m x⏎truncate …` stopped asking; any `-m '…'` after a commit was masked, including another command's argument; and the heredoc form was never masked.
+
+### Fixed
+- **`careful/bin/mask-commit-message.awk`** (new, from the contributor's scanner): reads the command as one string and keeps its newlines. It splits at unquoted `;` `&` `|` `(` `)` and newlines (a redirection's `&` does not split) and masks `-m`, `-am`, `--message` and `--message=` only in a segment whose first word is `git` with a `commit` word after it. Single-quoted messages, double-quoted messages without `$`, backtick or backslash, and a double-quoted `$(cat <<'DELIM' … DELIM )` with a quoted delimiter are masked. Quotes, backslashes and comments are parsed as bash does. The command is left unmasked when it contains any other command, parameter or process substitution, a backtick, `$'…'`, a heredoc, an unterminated quote, or a pipe after a masked message (git prints the message on stdout).
+- **`careful/bin/check-careful.sh`**: runs the program with `awk -f` from the hook's own directory, so bash 3.2 parses the hook again. A missing program or an awk error leaves the command unmasked. The HIGH deny tier, the PowerShell table and the obfuscation tripwire still read the unmasked command.
+
+### Tests
+- `test/hook-scripts.test.ts` keeps the contributor's 10 cases and adds 31. Masked (no prompt): every flag form, `git -C repo commit`, `--amend`, multi-line messages and four heredoc spellings (`'EOF'`, `"MSG"`, `<<-` with a tab, a quoted word in the body). Still asking: a command on the next line, a quote that spans a line break, another command's `-m`, `echo git commit -m '…'`, an escaped quote, a backslash-newline, a heredoc with an unquoted delimiter, a substitution that closes the message early, a backtick, `git commit -F - <<'EOF'`, `$'…'`, a pipe after the commit (direct, after `2>&1`, or from a subshell), a process substitution and a parameter expansion. A partial install without the awk file still asks.
+- The same cases pass with mawk and the one-true-awk (`original-awk`, the awk macOS ships). In a `bash:3.2` container the hook as submitted in #3221 exits 2 with `unexpected EOF while looking for matching '"'` on every command; with this change it answers normally.
+
+### Gate integrity
+- One accepted-input change to review, in a safety hook: MEDIUM checks (and custom `careful-patterns.txt` rules) no longer see the masked text of git commit's own literal message. That is a weakening by design, limited to text that bash passes to git as a literal argument. The negative controls listed under Tests still ask. Commands that combine a commit with anything that could execute the message, or that the scanner cannot read with certainty, are checked unmasked, exactly as on main. No threshold, budget, timeout, trial count or case kind changed.
+- Known limit, still a false positive as on main: `git commit -F - <<'EOF'` messages and commits after an environment assignment or `sudo` are not masked.
+
+## [1.91.211.0] - 2026-10-25
+
+**`gstack-diff-scope` sees Python tests and nested test directories (#3335).** A branch that changed `components/orch/services/shared/tests/test_native_store_custody.py` reported `SCOPE_TESTS=false`, because the Tests rule only knew `*.test.*`-style suffixes and `test/`, `tests/`, `spec/` and `__tests__/` at the repository root. /ship and /review use that flag to route the testing specialist, so a backend change whose tests follow pytest's `test_*.py` convention skipped it. The test-bootstrap resolver already counted these files, so the two detectors disagreed.
+
+### Fixed
+- **`bin/gstack-diff-scope`**: a changed path is a test when it matches `TEST_PATH_RE`, the same regex the test-bootstrap resolver uses for its TESTFILES count (`scripts/resolvers/testing.ts`): test dirs at any depth, `test_*.py`, `tests.py`, `_test.<ext>`, `.test.`/`.spec.` JS and TS, `_spec.rb` and `*Test.java`/`.kt`. `conftest.py` counts too. The existing globs stay.
+
+### Tests
+- `test/diff-scope.test.ts` adds the issue's three paths, `pkg/test_store.py`, Django's `tests.py`, `conftest.py`, and nested `__tests__/` and `spec/` dirs; all eight fail on main. Controls that stay `SCOPE_TESTS=false`: `latest.py`, `contest_rules.py`, `attest_signer.py` and a `testing/` dir. A new test checks that `TEST_PATH_RE` is byte-identical to the resolver's regex, so the two can't drift again.
+
+## [1.91.210.0] - 2026-10-25
+
+**/autoplan works when Claude Code's project directory is a subfolder of the repository (#3296).** When the git root sits above the project (for example the root is `$HOME` and the session starts in `$HOME/projects/app`), a worktree session's journal lives in `.claude/worktrees/<name>` under that subfolder. The publication guard only looked for `<project dir>/.git/worktrees`, found nothing, and denied every phase Read with `foreign_cwd`, so the reporter had to restart the session from the repository root.
+
+### Fixed
+- **`autoplan/bin/phase-publication-hook.ts`**: `linkedWorktrees` walks up from the project directory to the first `.git` and reads that repository's worktree registry. A `.git` file (the project is itself a linked worktree or a submodule) stops the walk with no owners, as before. Git's two-way link is still required: the registry entry must name the worktree's `.git` file and that file must name the same entry back. No `git` process is started inside the hook.
+
+### Tests
+- `test/autoplan-publication-hook.test.ts` builds the reporter's layout with real `git worktree add`: a subfolder project directory (and a deeper one) owns the worktree under it, and the root still does. It fails on main. Controls that still get no owners: a nested independent repository (its own `.git` stops the walk), a project directory inside a linked worktree, a registry entry whose worktree names another repository, and a directory with no `.git` above it.
+
+### Gate integrity
+- One accepted-input change to review: from a project directory below the repository root, the guard now accepts the journal of a linked worktree of that same repository, which it already accepted when the project directory was the root. The seven existing `foreign_cwd` refusals in `test/autoplan-publication-guard.test.ts` (no link, one-sided links, another repository, a submodule gitdir, a project that is itself a worktree, a bare repository) still deny. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.209.0] - 2026-10-25
+
+**The free test suite no longer rewrites a contributor's global git pre-push hook (#3353).** On a machine with a global `core.hooksPath`, `test/redact-prepush-target.test.ts` and `test/fs-utils.test.ts` ran `gstack-redact install-prepush-hook` with the parent environment. Git resolved the hooks directory to the global one, so the install moved the developer's own `pre-push` to `pre-push.local` and left a managed wrapper pointing into the test checkout, which breaks every later push once that checkout is gone. The same config also failed 4 tests in the target file, 5 in `test/redact-prepush-hook.test.ts` and 1 in `fs-utils`. CI has no global hooks path, so it stayed green.
+
+### Fixed
+- **`test/helpers/git-env.ts`** (new): `gitEnv()` is the one fixture environment for git and hook installs: `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_COUNT=0` and no `GIT_CONFIG_PARAMETERS`. Config written inside the fixture repo still applies.
+- `test/redact-prepush-target.test.ts`, `test/redact-prepush-hook.test.ts` and `test/fs-utils.test.ts` pass it to every fixture git, install and hook spawn. `test/redact-prepush-scan-range.test.ts` and `test/redact-prepush-rebase-force-push.test.ts` drop their private copies (#2967) and import it.
+
+### Tests
+- A new case in `test/redact-prepush-target.test.ts` sets a global, system and environment `core.hooksPath` to a hook that fails, builds the fixture, and checks the developer's hooks directory is untouched, the managed hook landed in the fixture repo, and a push never runs the developer's hook. It fails without the shared environment.
+- Rerun of the issue's repro with `HOME` pointing at a gitconfig with a global hooks dir: on main, two files rewrote it and three files had failures; with this change all six `redact-prepush-*` and `fs-utils` files pass and the directory is unchanged.
+
+## [1.91.208.0] - 2026-10-25
+
+**The Capy install guide says that the team-mode session-start updater also waits for live workflow leases.** With #3385 (#3363), `bin/gstack-session-update` skips its background fast-forward while another session holds a live workflow lease, the same leases `bin/gstack-upgrade` already honors. `docs/capy-install.md` described only the upgrade side.
+
+### Documentation
+- **`docs/capy-install.md`**: the workflow-lease paragraph now says the team-mode SessionStart hook (`bin/gstack-session-update`) honors the same leases. It logs `SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at the next session start, without writing its hourly throttle stamp.
+
+## [1.91.207.0] - 2026-10-25
+
+**Per-repository session counts include sessions from removed Claude Code worktrees (ported from #3334 by @Shweta-Mishra-ai).** Claude Code creates worktrees at `<repo>/.claude/worktrees/<name>` and removes them once their branch merges, but their session history stays. `gstack-global-discover` resolved each session's recorded directory with git, so a removed worktree resolved to nothing: its sessions counted in the tool total and in no repository. Reproduced on main: 2 sessions in a repo plus 3 in a removed worktree gave `total_sessions 5` but 2 for the repo.
+
+### Fixed
+- **`bin/gstack-global-discover.ts`**: when a session's directory no longer exists and sits inside `<repo>/.claude/worktrees/<name>` (or a subdirectory of it), the session counts with `<repo>`. Any other missing directory, and a worktree whose repository is gone too, still count in no repository. A live worktree keeps its own path, as before.
+
+### Tests
+- `test/global-discover.test.ts` gains six end-to-end cases built with real `git worktree add` and `remove` (removed worktree, a subdirectory of one, a repo with no remote, plus the live-worktree, gone-repo and plain-missing-directory controls) and table tests for the path matcher. The three positive cases and the matcher tests fail on main.
+
+## [1.91.206.0] - 2026-10-25
+
+**A repo that keeps `.gstack/` out of git can give pregate a policy, and name the CI lanes a local run satisfies (#3286).** On a shared repo where gstack is one contributor's tool, pregate fell back to defaults, so every platform lane the machine could not run (an `ubuntu-latest` suite on a Mac, say) became a `requires-remote` obligation that never cleared, even when that suite runs the same here. Ported from #3286 by arlophoenix, whose 13 commits carry the feature (merged with their history kept); our commits on top close two findings from a security-focused review of the port.
+
+### Added
+- **`lib/pregate/context.ts`, `lib/pregate/config.ts`** (arlophoenix): when the base branch carries no `.gstack/pregate.json`, `gstack-pregate run` reads `<state root>/projects/<slug>/pregate.json`. Never under `--policy-from head`, never a relative path or one inside the checkout, and never chosen by a checkout's `.env` (the bin ignores it, and a bare `bun gstack-pregate` beside one refuses). An unreadable file, a dangling link on its path, `sealed` or `price_file` refuses with `PREGATE_CONFIG_INVALID`; a base copy git cannot read refuses with `POLICY_SOURCE_UNAVAILABLE` unless `git ls-tree` confirms it is absent.
+- **`local`** (arlophoenix): `<workflow.yml>/<job>` lanes a local run satisfies run here instead of becoming `requires-remote`. Under 8 cores with a `remote_gate` or remote `test_backend`, the small-machine obligation still stands.
+- **`lib/pregate/index.ts`** (arlophoenix): the record names the user file and its digest, and `verify` goes `PREGATE_STALE` when it is edited, deleted, or appears after a run under the defaults. Fix texts for missing lanes, strays, stalls and `remote_gate` name the active policy file.
+
+### Fixed
+- **`lib/pregate/context.ts`**: a user policy whose path reaches the checkout through any symlink is ignored. Before, only the lexical path and the final target were checked, so a state root linked into the checkout, holding a link back out to another existing policy, let a branch choose a more permissive file without changing its bytes.
+- **`lib/pregate/index.ts`**: `verify` goes `PREGATE_STALE` when a link on the way to the absent user path starts pointing nowhere. A fresh run refuses that state, but verify looked only at the leaf, so an old defaults pass stayed publishable. The loader and verify now share one absence check.
+
+### Tests
+- `test/pregate-user-policy.test.ts` (new, arlophoenix) covers the user file, `local`, the refusals, `.env` isolation and stale receipts. New cases: a link chain through the checkout is refused for both a linked state root and a single in-repo hop, while a direct outside link is still read; and verify goes stale on a dangling parent, with the plain-absent path as the control.
+- `test/pregate-rust.test.ts`: the two cargo-lane cases skipped on Windows carry a `TODO(#3380)` naming the gap.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or skip changed. The user file can relax lanes only where the base has no policy at all, and only from outside the repository; the two fixes make that containment stricter.
+- No new dependency, no network call, no workflow change.
+
+## [1.91.205.0] - 2026-10-25
+
+**/ship's Step 9 can re-review just the fixes after a fixing pass, and a narrowed pass can never be the review that ships (#3339).** Before, every fix cycle reran every specialist and the Red Team over the whole branch. On a large branch each full pass tends to find something new in code earlier passes already read, so the loop often ran to the three-cycle stop without converging. Now the pass after a fixing pass can review only what changed since that pass. One full pass still has to come last: a fix-range record is never CURRENT, and Step 11.5 can't bind it. Garry approved this on 2026-10-24 ("only with a mandatory final full pass").
+
+### Added
+- **`bin/gstack-review-log --start review --fix-range`** prints the start token, then `FIX_BASE=<sha>`. The base comes from the review log, never from the caller or the working tree, so `gstack-wtree`'s fingerprint is untouched. It is the commit of the latest pass of the same skill, and that commit's tree must be exactly the content the pass started from, so `git diff <FIX_BASE>` holds every fix, committed or not. The start refuses (exit 1, "run a full pass") in each of these cases: there is no earlier pass, that pass didn't complete (restoring coverage always takes a full pass), it made no fixes, it has no captured start, it ran on another branch, a Step 11 review followed it, it started from uncommitted or untracked content, or its commit no longer resolves or is no longer an ancestor of HEAD (after a rebase). On the start-work-then-ship flow, where Step 9 first reviews uncommitted work, the first repeat therefore stays full.
+- **`lib/review-evidence.ts`**: the start token carries `scope: "fix-range"` and `fix_base`. The logged row takes `scope` and `fix_base` only from the token (a caller's values are dropped either way), and a token that names any fix base stays narrowed even if its scope is rewritten. On unchanged content its `review_binding` is `{state: "fix-range", range_start_wtree, range_end_wtree, …}`, with no `start_wtree`/`end_wtree` and no root `wtree`. `reviewFreshness` returns UNVERIFIED for any fix-range row ("fix-range pass; only a later full pass can clear review"), even one with a verified-looking binding.
+- **`bin/gstack-specialist-stats`** skips fix-range rows, so narrowed dispatches don't push specialists toward `[GATE_CANDIDATE]`.
+
+### Changed
+- **`ship/sections/review-army.md.tmpl`**: the core checklist explains the fix-range start, and that `FIX_BASE` stands in for `origin/<base>` and `<base>` for that pass. Decision 3 allows the repeat to be a fix-range pass. Decision 4 continues to Step 10 only from a full pass. Nearby prose was tightened to pay for the growth, so ship's skeleton plus sections is 313,246 bytes against its 313,281 cap (35 bytes below main).
+
+### Tests
+- `test/review-fix-range.test.ts` (20 cases) follows Step 9.4's real order (fixes applied before the row is logged). It covers the base with committed and uncommitted fixes, chained fix-range passes, the eight refusals, a rewritten start token, a caller claiming `scope: "full"` on a fix-range token (it is still recorded as fix-range) or `"fix-range"` on a full one (it is dropped), Step 11.5's missing binding fields, UNVERIFIED freshness followed by CURRENT after a full pass, shared-libs reuse refusing a fix-range row, the stats exclusion, and the rendered Step 9 rules.
+
+### Gate integrity
+- One gate change to review: Step 9 may narrow a repeat pass. Verdict: not a weakening of what ships, because the narrowed pass can't be the final review. Three things enforce that: its row is never CURRENT, Step 11.5 has no `start_wtree`/`end_wtree` to bind, and decision 4 requires a full pass before Step 10. Mutation checks, each caught by the suite: dropping the freshness check, giving a narrowed row the normal binding, allowing a fix-range start after a clean, an incomplete or a Step 11-followed pass, accepting a non-ancestor base, accepting a start from uncommitted content, trusting the token's scope alone, and counting fix-range rows in stats. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.204.0] - 2026-10-25
+
+**An unattended run is told to end with `GSTACK_RESULT` only when its skill can write that line.** The unattended block `gstack-skill-start` prints told every unattended skill to log choices in `decisions.jsonl`, write a gate list and end with `GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>`. Only `/autoplan` has helpers that write a run directory, so `/ship`, `/review`, `/qa` and the rest were asked to produce files and a result line nothing writes, and a parent that trusted the block would wait for them. `docs/unattended.md` already names which skills write the line and what a parent reads for the others (#3281); the runtime text now says the same thing.
+
+### Fixed
+- **`bin/gstack-skill-start`**: the decision rules in the unattended block are the same for every skill: take the recommended option, leave unrecommended questions, consents, destructive options and the final gate pending, and never approve, publish or push. Only the sentence about the run's record changes by skill. `/autoplan` keeps its run directory, its `decisions.jsonl` rows, the gate list and `GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>`. `/eval-plan` ends at its spend approval with `GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>`, and the block says no helper writes a `gate.json` for it yet. Every other skill is told it writes no run directory and prints no result line, to stop at its first pending item and list it in its final report, and which record the parent reads: the ship receipt (`gstack-ship-receipt read --pr <n> --json`) for `/ship`, the review-log rows (`gstack-review-read`) for `/review`, the `qa-report-*.md` file for `/qa`, and the skill's own record in `docs/unattended.md` otherwise.
+
+### Tests
+- `test/gstack-skill-start.test.ts` renders the unattended block for `autoplan`, `eval-plan`, `ship`, `review`, `qa` and `investigate`. It checks that each keeps the shared decision rules, that only `autoplan` and `eval-plan` get a result line (with their own skill name, never `<name>`), and that the other four get no result line, gate list, `decisions.jsonl` or `run.json` and name their record. Against the old block it fails, and so does the existing unattended test, which now expects `skill=autoplan`.
+
+### Gate integrity
+- One test expectation changed: the existing unattended test expects `GSTACK_RESULT: skill=autoplan …` instead of the `skill=<name>` placeholder, which is stricter. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.203.0] - 2026-10-25
+
+**Asking gstack to fix a failure no longer always opens /investigate (#3157, #3158).** The router sent every bug report straight to the full /investigate workflow, even when the user had named the cause or one look at the failing code showed it. Now the router checks first. When the user names a cause and a narrow fix, it makes one read-only check of the evidence. When that confirms the cause, it makes the fix and runs the focused test. When the cause is unknown, it makes one bounded, read-only triage pass over the supplied evidence and the directly implicated test and code, with no reproduction, hypothesis testing or wider search, and fixes the failure directly only when that pass establishes the root cause. Anything still unclear, including a cause the check contradicts, goes to /investigate before any edit, so the root-cause bar holds. A failing test or stack trace no longer counts as proof of its cause.
+
+### Changed
+- **`SKILL.md.tmpl`** (root router): the bug-report rule points to a new **Failures** block that carries the two paths. Its text comes from `generateFailureRouting()` in `scripts/resolvers/preamble/generate-test-failure-triage.ts`.
+- **`bin/gstack-skill-start`** and `CLAUDE.md`: the routing section gstack offers for a project's CLAUDE.md now reads "Bugs/errors → invoke /investigate, unless one read-only check confirms the cause and a narrow fix (then fix it and run the focused test)", so it agrees with the router.
+- **`/ship` Test Failure Ownership Triage**, "Investigate and fix now": "Switch to /investigate mindset" becomes "One read-only root-cause pass, then `/investigate` if unclear."
+
+### Tests
+- New paid eval `test/skill-e2e-failure-routing.test.ts` (gate, `rule`): four fixture repos, two per issue. `router-failure-verified-cause` and `router-failure-triage-resolves` must fix the bug without /investigate and leave the suite green. `router-failure-contradicted-cause` (a user-supplied cause the code contradicts) and `router-failure-triage-unclear` (an intermittent CI-only failure) must invoke /investigate, and an edit before it is a contract violation. Every case needs one to four read-only calls before it routes. `GSTACK_ROUTER_ARM=before` runs the same cases against the base branch's router.
+- `test/skill-validation.test.ts` checks that the rendered router carries the rule and no longer sends bug reports straight to /investigate, that both paths keep the /investigate fallback, that the shipped CLAUDE.md routing line matches this repo's own, and that /ship's fix-now step uses the bounded pass.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count or existing case kind changed. The ship skill's parity size stays under its cap (313,260 of 313,281 bytes; 313,276 with #3372 merged). The new eval's negative controls are the two /investigate cases, and on the base router the triage cases go red.
+- Registries and pins the new gate-tier file needs, each with a stated reason: `test/eng-finding-retry-budget.test.ts` counts 110 paid test files (was 109). `test/helpers/e2e-hosts.ts` lists the four cases as `skill-tool` Claude-only, because they assert on the Claude Skill tool call. `test/codex-host.test.ts` counts 33 Claude-specific gate cases (was 29).
+- Each train gate now runs the four new cases, one trial each, for about $0.37 (measured at this head: $0.06, $0.06, $0.11 and $0.14; about 67 s wall when they run in parallel).
+
+## [1.91.202.0] - 2026-10-25
+
+**Team-mode session auto-update waits for live gstack sessions instead of moving the checkout under them (#3363).** `bin/gstack-upgrade` already refuses with `UPGRADE_BUSY` while another live session holds a workflow lease on the installation (`bin/gstack-lease`), but the SessionStart hook `bin/gstack-session-update` never read the leases. A shared `./setup --team` install could fast-forward and re-run `./setup` while another session was mid-workflow. Reproduced on main: with a live lease held, the hook logged `UPDATING` and moved the install's HEAD.
+
+### Fixed
+- **`bin/gstack-session-update`**: after taking its setup lock and before fetching, the background updater asks `gstack-lease live --root <install> --exclude-ancestry-of <hook pid>`. Any live lease from another session logs `SKIP leased pid=<pid>/<age>` and exits without fetching, fast-forwarding, retrying a pending setup stage or writing the hourly throttle stamp, so the next session start tries again. `GSTACK_UPGRADE_FORCE=1` overrides, as it does for `gstack-upgrade`. A dead or stale lease never blocks.
+
+### Tests
+- `test/session-update-stages.test.ts` holds a lease from a live process: the install's HEAD, setup runs and the throttle stamp are unchanged, and the first session start after the holder exits updates. A second case shows a lease also holds a pending setup retry. Both fail on main. Controls: `GSTACK_UPGRADE_FORCE=1` updates under a live lease, and a lease whose process is dead does not block.
+
+## [1.91.201.0] - 2026-10-25
+
+**/ship's review army and /plan-eng-review now ask for one severity scale, CRITICAL or INFORMATIONAL, the same scale /review, the specialist JSON and the review checklist already use (#3349).** The shared confidence rubric those two skills render told the model to label findings `[P1]` and `[P2]` and to report a 1-2 confidence finding "only if severity would be P0", while the rest of /ship's Step 9 (Pass 1 CRITICAL, Pass 2 INFORMATIONAL, `"severity":"CRITICAL|INFORMATIONAL"`) used the other scale. A finding from one skill couldn't be compared, deduplicated or gated against a finding from another. Garry picked CRITICAL/INFORMATIONAL for plan-eng-review on 2026-10-24.
+
+### Fixed
+- **`scripts/resolvers/confidence.ts`** (default branch, rendered into `ship/sections/review-army.md` and `plan-eng-review/sections/review-sections.md`): every finding carries a severity, CRITICAL (blocks shipping) or INFORMATIONAL (lower severity, still actioned). The format is `[CRITICAL|INFORMATIONAL] (confidence: N/10) file:line — description` with CRITICAL and INFORMATIONAL examples. A 1-2 score is reported only for a suspected release-blocking catastrophe, at CRITICAL severity and marked explicitly speculative, the rule /review already uses. Repeated sentences in the verification gate and the calibration-learning note were shortened, so ship's skeleton-plus-sections size falls by 77 bytes (313,204 against its 313,281 cap).
+
+### Tests
+- `test/eng-first-review.test.ts`: the two captured plan-eng-review first-review questions (`eng-annotated-cache-au`, `eng-declarative-as`) still open review when their `[P1]` label becomes `[CRITICAL]` or `[INFORMATIONAL]`. They stay closed for `[HIGH]`, `[critical]`, `[Critical]`, `[P4]`, `[CRITICAL|INFORMATIONAL]` and no label.
+
+### Gate integrity
+- One accepted-input change to review: the paid-test detectors `test/helpers/eng-cache-writer-decision.ts` and `test/helpers/pty/boundaries.ts` accept `[CRITICAL]` and `[INFORMATIONAL]` alongside `[P0]`-`[P3]` in a plan finding's annotation, because the skill now asks for those labels. Without it, both captures relabelled `[CRITICAL]` are rejected. Verdict: not a weakening. The label is metadata, and every substantive check (decision, assessment, actors, options) is unchanged. Mutation checks: restoring `P[0-3]` alone fails the positive cases; `[^\]]+`, `P[0-9]` or a case-insensitive CRITICAL each fail the negative controls. `scripts/harness-version.json` records `test/helpers/pty/boundaries.ts` as non-behavioral at HARNESS_VERSION 6: only the changed plan-eng-review prompt asks for the new labels, and the cases that run it already start their own series. The 11 plan-eng-review size pins in `test/fixtures/skill-md-size-allowlist.json` come down by 75 characters. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.200.0] - 2026-10-25
+
+**/cso doctor no longer calls a Go repository "stack: python".** A repository with a root `go.mod` and no Node, Bun, Rails or JVM build matched no supported stack, so preparation fell back to Python and doctor reported `stack: python` with `MISSING_METADATA requirements.txt`, which sent Go users looking for a Python file they never needed (#3263). Go runtime support itself is not planned for now (Garry, 2026-10-24), so /cso keeps running static assessment on Go repositories; the runtime catalog and the /cso release contract are unchanged.
+
+### Fixed
+- **`lib/cso/preparation.ts`**: a root `go.mod` with no other supported stack is reported as `stack: go` with `UNSUPPORTED_STACK` ("Go (go.mod) is not a supported runtime stack yet; supported runtime stacks are Node, Bun, Python, and Rails."), the way a Maven or Gradle build is already reported as Java. Python helper metadata beside `go.mod` (a docs `requirements.txt`, say) no longer turns the repository into Python. A `go.mod` beside a Node, Bun or Rails lockfile leaves that stack's detection as it was.
+
+### Tests
+- `test/cso-preparation.test.ts` checks that a Go module is `go` with exactly that prerequisite and never mentions `requirements.txt`, and that a hashed `requirements.txt` beside `go.mod` stays Go. Both fail on main. Controls: `go.mod` beside a Node lockfile stays a ready Node plan, a Python project without `go.mod` stays Python, and a repository with no stack metadata keeps the Python fallback.
+- `test/helpers/cso-runtime-catalog.ts` leaves `go` out of its qualified-runtime fixture list, as it already did `java`.
+
+### Gate integrity
+- No gate edit. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.199.0] - 2026-10-25
+
+**When /sync-gbrain refuses because a gbrain autopilot is running, it now says which process it found and what to do.** The guard against syncing while `gbrain autopilot` runs is machine-wide on purpose: two syncs sharing one brain or working tree can race and delete files (#1734). But the refusal only said `(process:gbrain autopilot)`, so someone whose autopilot served a different brain could not tell what was blocking them (#3360, part 1). Garry decided on 2026-10-24 to keep the check machine-wide and improve the message.
+
+### Changed
+- **`lib/gbrain-guards.ts`**: the live-process probe still runs `pgrep -f "gbrain autopilot"` across the whole machine, then reads each match's command line with `ps`. The refusal names every match as `pid <n> \`<command>\``, says the check counts any process on the machine whose command line contains "gbrain autopilot" (an autopilot serving another brain or repo included), and says to stop that autopilot or its `gbrain autopilot --install` service, or end a process that only mentions it. Commands are cut at 200 characters and the user and password part of a URL is masked. A pid that `ps` cannot describe still refuses, as `command unavailable`. The header comment now gives the machine-wide reason in place of the stale gbrain #1226 note.
+
+### Tests
+- `test/gbrain-guards.test.ts` pins the full refusal for one matched process, lists two matches, keeps an empty match inactive, and runs the real probe against a live process whose command line carries "gbrain autopilot" and a database URL with a password: the refusal names its pid and masks the password. All four fail on main. The existing probe, lock and stale-lock tests are unchanged.
+
+### Gate integrity
+- No gate edit: the guard refuses in exactly the cases it did before, and only its message changed. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.198.0] - 2026-10-25
+
+**A second-opinion reviewer that says "not ready" is no longer reported as clean.** When the outside reviewer (Codex or Claude Code) ended its reply with `Verdict: not ready` but listed only advisory P2 or P3 findings, `lib/outside-review-result.ts` printed `VERDICT: clean` and exited 0, so /ship and /codex carried on as if the reviewer had approved. The not-ready check only ran when no severity parsed at all, so a parsed P2 or P3 switched it off (#3329). Ported from #3364 by @mvanhorn.
+
+### Fixed
+- **`lib/outside-review-result.ts`**: when the reply's last recognized `Verdict:` line says `not ready`, the result is `findings` (exit 3) whatever severities parsed, and `FINDINGS:` still names the highest one. Advisory P2/P3 findings with a ready verdict, or with no verdict, stay `clean`. A `Verdict:` line quoted in a code fence or inline code still does not count, and the proposal and spec gates ignore it as before.
+- **`docs/troubleshooting.md`**: the "Every review gate" rule under *How the verdict is read from a review* now says a not-ready reply blocks even when P2 or P3 parsed.
+
+### Tests
+- `test/outside-review-unparsed-severity.test.ts` covers the issue's reply (numbered bold P2 plus P3, then `Verdict: not ready`) on the execution, structured and review gates, P3-only and unlabeled not-ready replies, the last verdict winning in both directions, bold, bulleted and heading verdict lines, and an unparsed label beside a parsed P2. Five of its tests fail on main's classifier and pass with the fix. Controls that stay `clean`: P2/P3 with `Verdict: ready` or no verdict, a not-ready verdict inside a code fence or inline code, and `ready-one-p3.txt`. Missing review markers, a failed execution, and the proposal and spec gates keep their old results.
+
+### Gate integrity
+- One gate edit, and it strengthens the gate: the pinned `bare-dash-p2.txt` fixture (two P2 lines, then `Verdict: not ready (2 P2)`) moves from `VERDICT: clean`, exit 0 to `VERDICT: findings`, exit 3. Garry approved this reversal on 2026-10-24. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.197.0] - 2026-10-25
+
+**Pregate gives touched Rust files a test lane, and runs a nested pnpm or vitest package with its own runner (#3344).** In a mixed Cargo and JavaScript repo, every touched `.rs` file failed `lanes` with "has no test lane", so /ship could not get a receipt, and a nested package's vitest tests ran under `bun test` from the repo root (about 98 false failures in the reporter's repo). Ported from #3346 by vilano93, whose two commits carry the feature; our commits on top close four findings from a security-focused review of the port and make the new fixtures hermetic.
+
+### Fixed
+- **`lib/pregate/rust.ts`** (new, vilano93): a crate is the nearest Cargo.toml with `[package]`. Its `.rs` files under `tests/` or holding a `#[cfg(test)]` are tests, and every `.rs` file of a crate and its Cargo.toml select that crate's tests and those of every crate depending on it. Manifests are parsed as TOML, so renamed, inherited, dotted, table-form and target-specific dependencies all count, and a crate runs from the workspace it is a member of under Cargo's rules (members, exclude, `package.workspace`). Nothing runs cargo to build the graph.
+- **`lib/pregate/checks/lanes.ts`** (vilano93): selected Rust tests run per crate as `cargo test -p <name>` from the workspace root and are judged on the summed `test result:` lines; zero tests is ZERO-RUN and a missing cargo is incomplete. A JS/TS test owned by a nested package.json that declares vitest or jest runs from that package through the package manager its `packageManager` field or nearest lockfile names (`pnpm exec`, `yarn`, `bun x`, else `npx`).
+- **`lib/pregate/checks/lanes.ts`**: the crate name comes from the repo's Cargo.toml and reaches the lane's shell. Before, a crate named `evil;touch pwned` ran `touch pwned` in the workspace, and a name containing `{files}` spliced the file list into the command. A name outside Cargo's grammar (letters, digits, `_`, `-`) now gets no runner, so its files are unclaimed and the lane is incomplete, as Cargo would refuse the manifest anyway; a valid name is quoted like every file and cwd. The lane only runs with `--allow-repo-commands`, under which the repo's tests run anyway, but no other repo input reached the shell unquoted.
+- **`lib/pregate/rust.ts`**: Cargo `members` globs are matched per path component and by Unicode code point, in one pass. The first cut used the policy glob matcher, which matched `[ab]` literally (a member listed that way lost its inherited workspace dependencies, so its tests were never selected) and backtracked for seconds on a hostile glob. Past 4096 characters of `members` globs, membership is undecided: every crate under the workspace counts as a member for dependency edges (more tests, never fewer), but its own tests are unclaimed and the lane is incomplete, because running `cargo test -p <name>` from the wrong root can test a same-named member instead.
+- **`lib/pregate/rust.ts`**: a plain `#[test]` or `#[tokio::test]` function in `src/` makes the file a test, so a dependent crate tested that way runs when its dependency changes. The `#[cfg(...)]` scan reads each attribute once, up to its closing `]`, so a file of unclosed attributes no longer takes seconds, and an attribute it cannot close counts as a test (more tests selected, never fewer).
+- **`lib/pregate/init-draft.ts`** (vilano93): `init` notes that Rust tests run per crate.
+
+### Tests
+- `test/pregate-rust.test.ts` (new, vilano93) covers the crate model, the dependency forms, workspace membership, the cargo summary parser and three end-to-end lane runs. New cases: crates named `evil;touch pwned-by-crate-name` and `evil{files}` never reach the shell (nothing is created, both are unclaimed) while `naïve_crate-2` still runs quoted; `crates/[ab]`, `nested/**/leaf` and `unicode/?` (a 📦 directory) members inherit workspace dependencies; a plain `#[test]` dependent and a `cfg(any(test, feature = "<300 chars>"))` are tests; and a same-named non-member past the size cap is unclaimed rather than run as the member; a hostile members glob, a million unmatched `[` and 100,000 unclosed `#[cfg(` run in a supervised Bun that kills a super-linear version at 30 s. Each failed before its fix.
+- The cargo stand-in is hermetic on POSIX: where Bun and cargo share a directory, the lane puts Bun's directory first and the real cargo ran against the fixture, so the shim PATH now uses the platform delimiter and the lane's bash puts the shim first again through `BASH_ENV`. On windows-free-shard (5) the two cases that run the stand-in failed deterministically (`local lane exited 1` with an empty log) and still did after the delimiter and a `Path`-key repair, so they are skipped on Windows (`test.skipIf(process.platform === 'win32')`, as other POSIX-shim pregate fixtures are); the selection, planning and hostile-name cases still run there.
+- `test/pregate-selection.test.ts` (vilano93) covers nested pnpm/yarn/vitest/jest packages. Its `pnpm` stand-in gets the same `BASH_ENV` fix: on a host with a real pnpm beside Bun, the end-to-end case installed vitest from the network and came back incomplete.
+
+### Gate integrity
+- One coverage change to review: the two new end-to-end cargo-lane cases in `test/pregate-rust.test.ts` are skipped on Windows (they never passed there); Linux and macOS run them, and the rest of the file runs on Windows.
+- No threshold, budget, timeout, trial count or case kind changed. Pregate's lanes now map and run tests for `.rs` files that previously failed closed with "no test lane", and nested vitest/jest packages run under their own runner instead of `bun test`. A `.rs` file outside any crate, a crate with no tests, and a missing cargo or package manager still fail closed or stay incomplete; the tests above cover each.
+- No new dependency (Cargo.toml is parsed with Bun's built-in TOML parser), no network call in pregate itself, no workflow change. As with the root runner detection on main (`npx vitest run`), a nested package's detected runner (`npx`, `bun x`) may fetch a missing tool when it runs under `--allow-repo-commands`.
+
+## [1.91.196.0] - 2026-10-25
+
+**`/land-and-deploy` no longer stops parallel PRs with a false "VERSION drift detected".** Step 3.4 compared the branch VERSION with the next free patch slot (`gstack-next-version --bump patch --exclude-pr`) under every ship policy. So it stopped a stamp-at-merge PR whenever a sibling shared its tentative stamp, a claim-at-open PR whenever a sibling had claimed a higher slot, and every MICRO bump even with no other PR open. Reported with a full reproduction by Evgenii Lopatin (@exGeni) in #3318.
+
+### Fixed
+- **`land-and-deploy/SKILL.md.tmpl` Step 3.4**: reads `gstack-ship-policy show-effective` and prints one `VERSION_CHECK:` verdict. Under `stamp-at-merge` it ignores claims and checks the exact head stamp: VERSION is the base's version plus one bump, and the changelog's top two headings are that version and then the base's top entry. Otherwise it stops with `STOP stamp stale` and names the `gstack-restamp --next` command. Under `claim-at-open`, and with no policy file, it stops only on a real collision: another open PR holds the same VERSION, or the base is already at or above it. MICRO bumps and versions below a sibling's claim pass.
+
+### Documentation
+- `docs/ship-policy.md` gains "What `/land-and-deploy` reads from it", which gives Step 3.4's stop and pass conditions for each `queue_mode`.
+
+### Tests
+- `test/land-and-deploy-version-check.test.ts` runs the template's own Step 3.4 block against real git fixtures with the real `gstack-ship-policy` and a stubbed claim list, under bash and, when installed, zsh. It covers the three false stops from #3318 (all pass now) and the real stops: a same-VERSION claim, a base at or above the branch, a stale stamp after a sibling landed, a base that moved by MICRO under a stamp, an `[Unreleased]` entry, and a two-bump stamp. A missing VERSION, an invalid policy and unread claims are `unavailable`.
+
+### Gate integrity
+- Step 3.4 now stops on fewer inputs: a unique VERSION below a sibling's claim, a MICRO bump, and a stamp-at-merge stamp that siblings share no longer stop. Every real collision still stops, and six mutation controls of the block (drop the collision check, the base check, the changelog binding, the one-bump rule, the policy read, or the unread-claims rule) each turn the new tests red. One new `unavailable` path: an invalid ship policy. It mirrors the existing offline path, and a base at or above the branch still stops there.
+- Owner-approved budget raise (Garry, 2026-10-24: "do it"): land-and-deploy's exact size pins in `test/fixtures/skill-md-size-allowlist.json` move up by 1,084 to 1,111 characters on 11 hosts, and its parity `maxSizeRatio` in `test/helpers/carve-guards.ts` goes from 1.112 to 1.125 (measured 1.1201). No threshold, timeout, trial count or case kind changed.
+
+## [1.91.195.0] - 2026-10-25
+
+**Four skill prompts stop contradicting themselves or their code.** dgrant's issues #3347, #3350, #3351 and #3352 each found a skill telling the model something wrong or ambiguous: /office-hours read a master-based repo as "no changes", /plan-design-review named a vision model the design binary no longer uses, /health gave two different GBrain scores for the same readings, and /ios-qa's demo mode claimed to override every other rule in the skill.
+
+### Fixed
+- **`office-hours/SKILL.md.tmpl`** (#3347): Phase 1 runs `git diff origin/HEAD --stat`, the remote's default branch, instead of `git diff origin/main --stat 2>/dev/null`. On a clone whose default branch is `master`, the old command exited 128 with its error hidden, so the model read the empty output as "no changes"; the new one shows the diff, and a repo without `origin/HEAD` now shows its error instead of passing for "no diff". The line is the same length, so office-hours stays at its pinned size on every host (the shared `{{BASE_BRANCH_DETECT}}` block would have added 1,727 chars, past the size-guard pins and the parity skeleton cap).
+- **`plan-design-review/SKILL.md.tmpl`** (#3350): the design binary's `check` command is described as "OpenAI vision" instead of "GPT-4o vision", so the prose no longer pins a model. The binary defaults to gpt-5.5 (`design/src/models.ts`), `GSTACK_DESIGN_MODEL` overrides it, and gpt-4o cannot drive gpt-image-2 at all. The swap is the same length, so the pinned host sizes don't move.
+- **`health/SKILL.md.tmpl`** (#3351): the GBrain score is computed by a `bun -e` snippet from the doctor component (10 for `ok`, 7 for `warnings`, else 0), the queue length and the hours since the last push, like the composite already was. The snippet takes only numeric `<N|null>` inputs, the placeholder form the generated-bash lint already allows. The rubric row's 10/7/4 bands, which disagreed with the weighted formula (doctor ok, queue 50, pushed 2h: 7 by the rubric, 9.1 by the formula) and overlapped (a queue of 3 matched both 10 and 7), now point at that computation. The bands are half-open (<10, <100 lines; <24, <72 hours), and with sync off the doctor component carries the whole score. History records `gbrain` with one decimal.
+- **`ios-qa/SKILL.md.tmpl`** (#3352): "DEMO MODE OVERRIDES ALL OTHER RULES" becomes the narrow rule it meant: in demo mode drive every action through visible UI rather than `POST /state/*` writes, and every other rule in the skill (the device lock, no replay of a lost tap, never hand-editing DebugBridge) still applies.
+
+### Tests
+- `test/qa-health-rubric.test.ts` checks that the GBrain rubric row defers to the computation, then runs the template's own snippet: the issue's two inputs score 9.1 and 8.5, the band edges (9/10/99/100 lines, 23.9/24/71.9/72 hours) land on the right side, a missing doctor reading counts as 0, and sync off gives 10, 7 and 0. All four new tests fail on the old template.
+
+- `test/helpers/safety-rules.ts`: the `ios-qa-demo-override` row's anchor moves from `/demo mode overrides/i` to `/drive every action through visible UI/i`, and its hash to the reworded paragraph, in the #3352 commit as the registry requires. `test/safety-rule-registry.test.ts` passes, including its unique-anchor and rule-removed-arm checks.
+
+### Gate integrity
+- One gate edit to review: the safety-rule registry row for `safety-ios-demo-ui-only` now anchors on the reworded paragraph. Verdict: not weaker. The paragraph still requires visible UI (`/tap`, `/swipe`, `/type`) over `POST /state/*` writes, and the only text removed is the "overrides all other rules" claim. The case's rule-removed arm deletes the same paragraph as before. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.194.0] - 2026-10-25
+
+**A read-only repo can now opt in to Memorable recall, one remote at a time, and a corrupt policy store no longer turns the recall veto off.** #3359 (exGeni) asked for a way to keep a repo out of the brain while still letting its prompts reach Memorable: today the recall hook skips every `deny` and `read-only` repo, and `read-only` is also the tier people pick just to stop code ingest. Garry approved a per-remote flag on 2026-10-24: off by default, and a `deny` always wins. While building the negative controls we found that the hook's policy lookup went through `get`, which quarantines a corrupt store and answers "unset", so a truncated `gbrain-repo-policy.json` let recall run in every repo, read-only and deny included, and reset the store on the way.
+
+### Added
+- **`bin/gstack-gbrain-repo-policy memorable set <remote-url> <allow|off>`** stores the opt-in under a reserved `_memorable_recall` map in the policy store. It is refused unless the remote is read-only (deny vetoes recall; read-write never needed it). `memorable get [<remote-url>]` prints `<tier>\t<allow|off>`, and `list` adds a `memorable=allow` column. Changing a remote's tier clears its opt-in, and the two metadata keys (`_schema_version`, `_memorable_recall`) are refused as remotes.
+- **`lib/gbrain-repo-policy-client.ts`**: `memorableRecallPolicy(url)` returns the tier and the opt-in in one spawn. Anything but exactly `<tier>\t<allow|off>` reads as `unreadable`.
+
+### Changed
+- **`hosts/claude/hooks/memorable-user-prompt-hook.ts`**: a `read-only` remote is recalled only when it is opted in; `deny` is always skipped. The skip line in `hook-errors.log` names the opt-in command.
+
+### Fixed
+- The recall hook's policy lookup is now a pure read that fails closed in either state root: a corrupt, empty or non-object store, a present key with an unknown tier, a path that is not a readable file (a dangling symlink included) and a path whose existence an unsearchable ancestor directory hides are all errors, never "no policy", and nothing is migrated, quarantined or rewritten. The opt-in counts only when it is exactly `"allow"` and every store that makes the remote read-only (including `~/.gstack` under a custom state root) opts it in.
+- The hook looks policy up by every configured `remote.origin.url`, as `get` and `/sync-gbrain` read it, instead of the first URL after `url.*.insteadOf` rewriting. A rewrite to another host, or a second origin URL, no longer dodges a deny: any denied or not-opted-in read-only URL skips recall. `hasRepoPolicyStore()` treats only confirmed absence as "no store", so a dangling symlink at or above the store, a file in its path, or an unreadable directory reaches the script's fail-closed checks instead of the no-policy fast path. Origin URLs are read NUL-delimited and used verbatim, so a valid local path containing a newline or edge whitespace is looked up whole.
+
+### Docs
+- `docs/memorable-workflow-memory.md` has a short "Recall in a read-only repo" section and updated refusal and troubleshooting lines.
+
+### Tests
+- `test/memorable-user-prompt-hook.test.ts` drives the real hook: read-only stays blocked by default, the opt-in recalls on that remote and not on a second read-only remote, `deny` with a hand-written opt-in is skipped, and a corrupt store skips recall and is left in place.
+- `test/gbrain-repo-policy.test.ts` covers the CLI: per-remote keying (a different remote, a prefix-sharing remote and an unset remote stay off; the SSH spelling of the same remote matches), refusal on deny, read-write and unset, clearing on a tier change, malformed opt-ins reading off, corrupt and non-file stores in both roots failing with exit 2, and the second-store rule.
+- `test/gbrain-repo-policy-client.test.ts` covers `memorableRecallPolicy`: fast path, per-remote opt-in, deny, corrupt store, an unknown tier, a dangling-symlink store and a timeout.
+- Review hardening, each test red at the pre-review head: empty, whitespace, `null`, array, number and two-document stores and `false`/`null`/unknown tier values fail with exit 2 in either root; dangling symlinks and an unsearchable directory or ancestor fail closed; the lookup leaves a schema-less store byte-for-byte unchanged; and the hook refuses a deny remote whose origin is rewritten to another host or carries a second, unlisted URL in either order, or whose local-path URL contains a newline or edge whitespace; and a dangling symlink above the store or a file in its path skips the no-store fast path.
+
+### Gate integrity
+- One deliberate widening of a privacy veto, approved by Garry: a read-only remote with an explicit opt-in is recalled. Nothing else is loosened, and the corrupt-store path is tightened. Seventeen mutations of the new gate were run against the focused tests. Sixteen turn at least one test red: the hook ignoring the opt-in, the hook dropping deny, the CLI reporting the opt-in on any tier, an unkeyed opt-in, a corrupt store read as no policy, the second store ignored, an opt-in accepted on deny, the hook using the rewritten URL, an existsSync fast path, any JSON document accepted, a non-file path read as absent, the hook checking only the last origin URL, a missing path trusted without checking its ancestors, origin URLs split on newlines or trimmed, and the client fast path ignoring a dangling ancestor symlink. The seventeenth, the client reading unknown script output as no policy, stays green because the script can no longer produce such output. That check is a second layer and is left in place. No threshold, budget, timeout, trial count or case kind changed.
+- Known limit, unchanged by this PR: remotes that the store already treats as one key (`host:8443/x` and `host/8443/x`, or paths that differ only in case) share the opt-in exactly as they already share a tier.
+
+## [1.91.193.0] - 2026-10-25
+
+**Windows: the browse terminal agent stops respawning every 60 seconds and stops flashing a console when Bun came from npm (#2295; ported from #3357 by @adammartin0087).** The agent was spawned as a bare `bun`. With Bun installed through `npm install -g bun`, that name resolves to npm's `bun.cmd` shim and runs as `cmd.exe /c bun …`, so `windowsHide` hid only `cmd.exe` while `bun.exe` opened its own visible console, and the recorded pid was `cmd.exe`'s. The agent's startup check never matched its record, it exited after 2 seconds, and the watchdog respawned it.
+
+### Fixed
+- **`browse/src/terminal-agent-control.ts`**: `spawnTerminalAgent` spawns `resolveBunExecutable()`, which on Windows is the real `bun.exe`: the running `bun.exe` itself, then `BUN_INSTALL\bin`, each absolute `PATH` entry (and, next to an npm `bun.cmd` shim, the `node_modules\bun\bin\bun.exe` it forwards to), then `USERPROFILE\.bun\bin`. With none found it falls back to `bun`, as before. macOS and Linux are unchanged.
+- **`browse/src/bun-child-config.ts`**, **`browse/src/cookie-import-native.ts`**: that lookup is `findWindowsBunExe()`, and the Windows native cookie-import worker now uses it instead of its own copy, so it also finds an npm-global Bun. It lives in `bun-child-config.ts` because that file is already in the native import's source-bound qualification set (`NATIVE_CODE_INPUTS`). The edit changes the hash of `cookie-import-native.ts` and `bun-child-config.ts`; the qualification list is empty today, so no receipt is invalidated.
+
+### Tests
+- `browse/test/terminal-agent-bun-exe.test.ts` (from the PR) covers POSIX, the running `bun.exe`, a compiled `browse.exe`, the npm shim, lookup order and the fallback, plus a source check that the spawn site never passes a bare `'bun'`. New: the shared lookup returns null when nothing is installed, finds the npm-global `bun.exe` for the cookie worker, and `cookie-import-native.ts` has no candidate list of its own.
+- Not verified here: real Windows behaviour. The PR author tested on Windows 11; the `windows-free-tests` lane runs the new unit tests.
+
+## [1.91.192.0] - 2026-10-25
+
+**Merge trains stop refusing correct heads and stop passing damaged CHANGELOGs.** This week's trains hit five defects in the ship-queue tooling. #3331's READY was invisible to the coordinator because its lane's origin was `https://git.capy.ai/...`. #3345's pin replaced the released `## [1.91.179.0]` heading, and three things then failed. The Version Gate passed the pin. `mergeChangelogs` copied 179's body into `[Unreleased]`. `verify --train` refused the correct hand-resolved head at 593e61c. Separately, the train slotted the /cso docs PR (#3337) ahead of the catalog PR it describes (#3343). Each defect now has a regression test built from the real case.
+
+### Fixed
+- **`lib/version-gate-train.ts`**: the unstamped-head check read CHANGELOG.md through `spawnSync`'s default 1 MiB buffer. gstack's CHANGELOG is 1.67 MB, so both reads failed and the check compared two empty strings and passed. That is how #3345's 1eb7092 got through: `classifyTrainHead(base a59b5e4, head 1eb7092)` returned `unstamped`. The buffer is now 64 MiB, a CHANGELOG that can't be read is refused, and a dropped released heading is named in the error ("CHANGELOG.md drops released heading 1.91.179.0"). `gstack-ship-queue ready` runs the same check and refuses with `QUEUE_NOT_READY`.
+- **`lib/changelog-check.ts`**: `mergeChangelogs(ours, theirs, base?)` returns null, meaning resolve by hand, when either side damaged released history. Damage means one of two things: a released heading the merge base carries is missing from that side (dropped or renamed), or a section only that side carries holds a paragraph of a released entry the other side has. The train merge, the gate-ahead recompute and `gstack-restamp --after` all pass the merge base. A damaged PR is now `QUEUE_TRAIN_CONFLICT` on CHANGELOG.md with the reason. Before, the damage went into T<i>.
+- **`lib/ship-queue-train-verify.ts`**: `verify --train` refused #3345's correct stamped head because T1's CHANGELOG was the damaged mechanical merge. The refusal printed the diff against the pin (main's files), not the diff against T1. A merged-in head is now accepted when it contains main and equals T<i> modulo stamps, with its CHANGELOG judged against main: main's header and sections must be unchanged, with only lines from the pin's own CHANGELOG diff above them. The refusal now names the real difference.
+- **`lib/ship-queue-train-record.ts`**: READY receipts, train records and freezes are keyed on origin normalized to `https://github.com/<owner>/<repo>`, whatever URL form the lane uses (github.com, git.capy.ai, scp, ssh, a token URL, with or without `.git`). The canonical key equals the github.com key existing records already use. Readers also accept the keys older versions wrote for the common URL forms, so #3331's `1fb5dd69740a8cf8` receipt is found. The stored `repo` URL never carries credentials.
+- **`lib/restamp.ts`**: its git reads use a 64 MiB buffer too. Before, `gstack-restamp --after` read each CHANGELOG conflict stage through the 1 MiB default.
+
+### Added
+- **`gstack-ship-queue train build --order <pr>,...`**: an explicit slot order naming every pinned PR once. The default order (screened first, then READY order) is unchanged, and the train's later `NEXT:` rebuild lines keep the explicit order.
+
+### Tests
+- `test/changelog-merge-damage.test.ts`: the GSTA-64 repro, plus #3345's real CHANGELOGs (pin 1eb7092, base a59b5e4, main 4a98e40, train T1 6755ab8, stamped de23f5d, under `test/fixtures/merge-train-3345/`). Negative controls: a correct hand resolve, a shared tentative stamp, and two `[Unreleased]` blocks are not damage. An invented line, an edited main section, a changed header and a duplicate heading are still refused.
+- `test/compare-pr-version.test.ts`: on a CHANGELOG over 1 MiB, #3345's edit is refused naming 1.91.179.0, an additive entry passes, and a corrupt CHANGELOG object is refused. All three failed before the fix.
+- `test/ship-queue-train.test.ts`: a git.capy.ai lane writes the owner/repo key, and a legacy-key receipt is admitted. A damaged PR is a CHANGELOG conflict, and ready refuses it. `--order` sets and records the order. A hand-resolved merged-in head verifies, while an invented CHANGELOG line, a head without main and a stray file are refused. `test/ship-queue-train-logic.test.ts`: URL normalization, #3331's real keys, `orderSlots` and `parseOrder`.
+
+### Gate integrity
+- Version Gate unstamped check: **stronger**. It refuses a head it can't read and names dropped headings. Additive heads still pass at full size.
+- `mergeChangelogs` and the train CHANGELOG merge: **stronger**. Damage is now a conflict.
+- `verify --train` merged-in path: **narrower in one place, stronger elsewhere**. The head must now contain main. A CHANGELOG that differs from T<i> is accepted only as main's CHANGELOG plus lines the pin itself added. Every other file must still equal T<i> modulo stamps, and the paid gate never reads CHANGELOG text.
+- READY receipt lookup: **unchanged strength**. The head and CI binding are the same; only the repository key is normalized.
+
+## [1.91.191.0] - 2026-10-25
+
+**`gstack-version-bump write --changelog` moves the branch's `[Unreleased]` entry under the new version, and /ship Step 12 stops treating a provisional queue pick as a verified slot.** Stamping by hand meant writing VERSION with `gstack-version-bump write` and then renaming the `## [Unreleased]` heading yourself, because only `gstack-restamp` re-headed the CHANGELOG. Separately, when `gstack-next-version` could not read some open PRs' VERSION it returned `complete:false` and a provisional pick, and Step 12 printed the warning and then wrote that version as if the queue had been checked (left over from #3258, noted in GSTA-45).
+
+### Fixed
+- **`bin/gstack-version-bump`**: `write` takes an opt-in `--changelog <path>`. It re-heads an existing `## [Unreleased]` section as `## [<version>] - <UTC date>` at the top, using the same `reheadChangelog` that `gstack-restamp` uses, so the result is byte-for-byte what a restamp produces. Only the heading changes; every entry is kept. A file with no `[Unreleased]` section, or no file, is left alone, so a released heading is never renamed. A move that would duplicate a version heading exits 2 before anything is written. The output gains a `changelog` field only when the flag is passed. `gstack-restamp` doesn't pass the flag, so under stamp-at-merge it still owns the re-heading, and a later restamp moves an entry this command headed as the branch's own stamp.
+- **`ship/SKILL.md.tmpl` Step 12**: an incomplete queue (`complete:false`) reruns the queue check once, then asks whether to use the provisional candidate (recommended, because Version Gate CI rereads the queue on every push) or stop, naming the PRs in `unknown_claims`. The write in item 4 passes `--changelog CHANGELOG.md`, so an `[Unreleased]` entry written early sits under the new version before Step 13 extends it.
+
+### Tests
+- `test/gstack-version-bump.test.ts`: eight cases for `--changelog`. They cover the re-heading (checked with `normalizeChangelog` and `checkChangelog`), an entry below the predecessor after a main merge, reruns, a file with no `[Unreleased]`, a missing file, the duplicate-heading refusal, bad paths, and a real `gstack-restamp` run after the write (`already headed`, then `1.2.4.0 -> 1.2.5.0`). Seven of them failed before the fix.
+- `test/ship-version-sync.test.ts`: the rendered Step 12 has to handle `complete:false`, using the field names `gstack-next-version` emits. Its write command, run verbatim, has to re-head `[Unreleased]` and leave a released heading alone. Both tests failed before the fix.
+
+## [1.91.190.0] - 2026-10-25
+
+**The weekly model-policy freshness check reads OpenAI's deprecations page again (#3155).** It has been red since the 2026-10-19 run: OpenAI's page now writes some deprecated models as a display name followed by the backticked ids, for example ``GPT-4o (`gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`)``, and the parser refused any model cell that did not start with a backtick, so every run stopped with `openai-lifecycle:unrecognized-deprecated-model-cell`. Left alone, the stored pinned-model evidence would have gone stale around 2026-11-11.
+
+### Fixed
+- **`lib/model-policy-freshness-sources.ts`**: an OpenAI deprecated-model cell is accepted when it contains backticked model ids, wherever they sit in the cell, and each id becomes its own lifecycle row. A cell with no backticked id still fails with `unrecognized-deprecated-model-cell`. The live page (42,211 bytes, fetched 2026-10-24) now parses to 177 rows, including the five ids from its four display-name rows.
+
+### Tests
+- `test/fixtures/model-policy-freshness/openai-lifecycle.md` gains a display-name row, and `test/model-policy-freshness.test.ts` checks that both of its ids come out with the row's shutdown date. With the old parser, 16 of the file's 21 tests fail on the new fixture.
+- Negative controls: the existing cell with its backticks removed, and the new display-name row with unticked ids, both still fail with `unrecognized-deprecated-model-cell`.
+
+### Gate integrity
+- One accepted-input change to review: the OpenAI lifecycle parser accepts a model cell with text before its backticked ids. It is a weekly advisory check, not a required check. The negative controls above still fail closed, and no threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.189.0] - 2026-10-25
+
+**A stalled apt mirror can no longer hold a Free Tests shard for 20 minutes, PR runs now see main's branch layout, and gstack's install default moves to Bun 1.4.4.** On 2026-10-21, free-suite (12) in run 39641712129 sat in "Install Playwright Chromium" until the job timeout cancelled it. The browser had already come from cache: `--with-deps` was waiting on apt's fetch of noble-security from archive.ubuntu.com. No tests ran, and a whole merge train had to be rebuilt. Separately, a push to main checks out a local `main` while PR runs check out a detached merge ref, so a fixture that created its own `main` passed its PR and then failed every main push until #3237 (run 38999168852). And Capy images and gbrain now run Bun 1.4.4, which no CI lane tested, while the installer still downloaded 1.4.3.
+
+### Fixed
+- **`.github/workflows/free-tests.yml`**: in free-suite and quick-bun-default, the Playwright install gets its own 5-minute timeout (a warm install takes about 15 s), and that install step alone gets one bounded retry, also 5 minutes. This retries infrastructure, never a test: a second failure fails the job. The browser cache is keyed on the Playwright version instead of `bun.lock`, with no prefix fallback, so a lockfile bump keeps the browser and a Playwright bump never restores a stale revision. quick-bun-default, which had no browser cache, now has one.
+- **`.github/workflows/free-tests.yml`**: free-suite and quick-bun-default run `git checkout -q -B main` right after checkout on every run whose ref is not main (PRs and train dispatches). Their clone then has the same local `main` a push run gets, so a PR run catches what the main push would.
+- **`bin/gstack-bun-version.sh`**: `GSTACK_BUN_DEFAULT` is 1.4.4, the Bun that Capy images ship, that gbrain pins, and that carries the CVE-2026-111497 fix. quick-bun-default runs the quick tier on it. The 1.4.2 minimum, engines.bun, Dockerfile.ci, every other CI lane and the verified archives (1.4.2, 1.4.3, 1.4.4) are unchanged. `docs/capy-install.md` and `docs/troubleshooting.md` name the new default.
+
+### Tests
+- `test/free-tests-workflow-wiring.test.ts` requires the version-keyed cache, the 5-minute install, its single retry as the only `continue-on-error` step in each job, and the local-main step. Both new cases fail against the previous workflow.
+- `test/gstack-capy-install.test.ts` reads the install default from `GSTACK_BUN_DEFAULT` wherever it meant "the install default", so the next bump doesn't need a literal sweep, and so does the `test/runtime-pins.test.ts` case that reads gstack's own CI pins. `test/bun-resolve.test.ts` moves its gbrain-like project pin from 1.4.3 to 1.4.4, gbrain's real pin.
+
+### Gate integrity
+- One gate edit to review: the Playwright install step in the required Free Tests lane is `continue-on-error`, and a retry step that is not marked that way repeats it. Verdict: not weakening. A shard still fails unless one of the two installs succeeds, and every test, threshold, timeout and trial count stays the same. The local-main step strengthens PR runs. No test assertion was removed.
+
+## [1.91.188.0] - 2026-10-24
+
+**Pregate maps extensionless .jsx imports to their tests (#3340).** On a Next.js or webpack JSX repo, `gstack-pregate` failed `lanes` with "has no test lane" for every component imported without an extension, so /ship's receipt refused and the only way out was shipping without one. The import resolver tried `.ts`, `.tsx`, `.js`, `.mjs` and `.cjs` but never `.jsx`, and a directory import found `index.ts` or `index.js` but not `index.jsx`, `index.tsx` or `index.mjs` (it fell back to selecting on the whole directory). Reported by adam-balazs.
+
+### Fixed
+- **`lib/pregate/import-graph.ts`**: `RESOLVE_EXT` adds `.jsx`, `.mts`, `.cts`, `/index.tsx`, `/index.jsx` and `/index.mjs`. The existing entries keep their order, so a `.js` file still wins over a `.jsx` sibling. Relative, `paths` alias and `baseUrl` imports share the list, so all three resolve the new forms.
+
+### Tests
+- `test/pregate-selection.test.ts` has three new cases: an extensionless import of a `.jsx`, `.mts` and `.cts` file; a directory import that reaches `index.jsx`, `index.tsx` and `index.mjs` and leaves the directory's other files unselected; and a jsconfig `paths` alias to a `.jsx` file, with a `.js` sibling that still wins. All three failed before the change.
+
+### Docs
+- `docs/pregate.md` lists the extensions and index forms an extensionless import tries, in order.
+
+## [1.91.187.0] - 2026-10-24
+
+**Four docs now say what the code does: the unattended run contract, the gate reply grammar, the session-kind override and voice triggers.** All four were reported by readers who checked the docs against the code. `docs/unattended.md` promised that every workflow skill ends an unattended run with a run directory and a `GSTACK_RESULT` line, but only `/autoplan` has the steps and helpers that write one (#3281, thanks @exGeni). `gstack-gate --help` still taught the reply grammar from before 1.91.107.0, without `rec` or `as-is`, while the render it relays leads with `rec` (#3282, thanks @exGeni). `docs/OPENCLAW.md` said only `spawned` is honored as a `GSTACK_SESSION_KIND` override, but `unattended` is honored too (#3287, thanks @exGeni). The README said natural phrases activate the right skill, without saying that only `voice-triggers:` aliases reach a host and that the plain `triggers:` list does not (#2118, thanks @jinzheio).
+
+### Fixed
+- **`docs/unattended.md`**: the terminal-line section lists who writes the line today: `/autoplan` (the only skill that writes a run directory), the workflow commands `gstack-pregate`, `gstack-regen`, `gstack-restamp` and `gstack-ship-queue` (each naming its own record), and a refused launch (`status=refused run=-`). For `/ship`, `/review`, `/qa` and the other workflow skills it says not to wait for a run directory and names each skill's own record to read instead. It also says `/eval-plan` has no `gate.json` writer yet and that `/cso` skips the shared unattended rules.
+- **`bin/gstack-gate --help`** and the `/autoplan` owner brief's answer hint (`lib/owner-brief.ts`) show the current grammar: `rec` (alias `all`), `rec except <tokens>`, `<id><option>` tokens and `as-is`. Display text only; the parser is unchanged and `all` still parses the same as `rec`.
+- **`docs/troubleshooting.md#gate-reply-unparsed`** gives the same grammar in its fix line.
+- **`docs/OPENCLAW.md`**: the `GSTACK_SESSION_KIND` section says `spawned` and `unattended` are honored, and links to `unattended.md`.
+- **`README.md`**: the voice input section says which phrases a host sees (`voice-triggers:` aliases, as router lines on Claude Code and in each description elsewhere) and that `triggers:` is metadata that does not make a skill activate.
 
 ## [1.91.186.0] - 2026-10-24
 

@@ -1125,6 +1125,10 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
 
      "scripts/resolvers/preamble/generate-preamble-bash.ts", "scripts/resolvers/preamble/generate-completion-status.ts"
   ],
+  'router-failure-verified-cause': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-contradicted-cause': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-triage-resolves': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-triage-unclear': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
 };
 
 /**
@@ -1525,6 +1529,10 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
   'overlay-harness-claude-dedicated-tools-vs-bash-sonnet': 'periodic',
   'overlay-harness-claude-dedicated-tools-vs-bash-opus-5-5': 'periodic',
   'journey-negatives': 'periodic',
+  'router-failure-verified-cause': 'gate',
+  'router-failure-contradicted-cause': 'gate',
+  'router-failure-triage-resolves': 'gate',
+  'router-failure-triage-unclear': 'gate',
 };
 
 /**
@@ -1890,6 +1898,10 @@ export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
   'overlay-harness-claude-dedicated-tools-vs-bash-sonnet': 'rule',
   'overlay-harness-claude-dedicated-tools-vs-bash-opus-5-5': 'rule',
   'journey-negatives': 'rule',
+  'router-failure-verified-cause': 'rule',
+  'router-failure-contradicted-cause': 'rule',
+  'router-failure-triage-resolves': 'rule',
+  'router-failure-triage-unclear': 'rule',
   'review/SKILL.md workflow': 'judge',
   'setup-browser-cookies/SKILL.md workflow': 'judge',
   'browse/SKILL.md reference': 'judge',

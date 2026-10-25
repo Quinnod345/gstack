@@ -109,7 +109,11 @@ and `/proc` start time; elsewhere `ps -o lstart`), because a pid is reused after
 a reboot or a machine wake. `bin/gstack-upgrade`, and so the session-start
 self-upgrade, refuses with [UPGRADE_BUSY](troubleshooting.md#upgrade-busy)
 while a lease held by a live process outside its own chain exists, naming each
-holder as `pid <p> (<age>m <command>)`. A lease whose pid now belongs to another
+holder as `pid <p> (<age>m <command>)`. The team-mode SessionStart hook
+(`bin/gstack-session-update`) honors the same leases: it logs
+`SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at
+the next session start, without writing its hourly throttle stamp. A lease whose
+pid now belongs to another
 process, or an identity-less lease from an older gstack past 120 minutes, is
 stale: `bin/gstack-lease live` reclaims it (`gstack-lease: reclaimed stale
 lease …`). Stale needs proof: two well-formed identities from the same backend
@@ -141,7 +145,7 @@ session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` s
    packageManager, `.tool-versions`, `.bun-version` and CI `bun-version:` lanes
    for this platform). CI exact pins for this platform are alternatives: a
    repository may test several Bun versions (gstack's own CI pins 1.4.2 and
-   runs one job on 1.4.3), so a Bun equal to any one of them satisfies CI;
+   runs one job on 1.4.4), so a Bun equal to any one of them satisfies CI;
    CI ranges and every non-CI pin stay required. One resolver picks the Bun (`gstack_bun_resolve` in
    `bin/gstack-bun-version.sh`; `resolveBun` in `lib/pregate/runtime.ts` is
    its TypeScript twin), and the installer, `--check`, the doctor, the bun
@@ -160,7 +164,7 @@ session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` s
    exact pin when gstack carries a verified archive for it
    (`GSTACK_BUN_VERIFIED`: 1.4.2, 1.4.3, 1.4.4); with only CI exact pins, the install
    default when it is one of them, else the highest verified one; else the
-   install default `GSTACK_BUN_DEFAULT` (1.4.3, above the 1.4.2 minimum; one
+   install default `GSTACK_BUN_DEFAULT` (1.4.4, above the 1.4.2 minimum; one
    CI job runs the quick free tier on it).
    `GSTACK_BUN_INSTALL_VERSION=<v>` overrides the default; a version without a
    verified archive or below the minimum stops the install

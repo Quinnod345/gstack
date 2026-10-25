@@ -1,6 +1,6 @@
 import type { CsoStack } from '../../lib/cso/preparation';
 
-type RuntimeStack = Exclude<CsoStack, 'java'>;
+type RuntimeStack = Exclude<CsoStack, 'java' | 'go'>;
 import { canonical, sha256 } from '../../lib/cso/contracts';
 import { ISOLATION_POLICY_HASH } from '../../lib/cso/docker';
 import {
