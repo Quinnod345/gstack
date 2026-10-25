@@ -47,7 +47,7 @@ const scanner = new Bun.Transpiler({ loader: 'tsx' });
 // that matches more text only gains an edge when it resolves to a repo file.
 const QUOTED = /['"`]([A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
 const JOIN = /\bjoin\(([^()]*)\)/g;
-const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '/index.ts', '/index.js'];
+const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 // A statement starts a line or follows `;` or a compound statement's `:`. The module spec is
 // non-empty and starts with a dot or a word character, so no two repetitions can share a dot or a space.
 const PY_IMPORT = /(?:^|[;:])[ \t\f]*(?:from[ \t]+(\.+(?:\w[\w.]*)?|\w[\w.]*)[ \t]+import[ \t]+(\([^)]*\)|[^\n;]+)|import[ \t]+([^\n;]+))/gm;

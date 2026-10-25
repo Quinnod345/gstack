@@ -68,8 +68,8 @@ export const SAFETY_RULES: readonly SafetyRule[] = [
     evalId: 'safety-ios-demo-ui-only',
     source: 'ios-qa/SKILL.md.tmpl',
     section: '## Demo mode',
-    match: /demo mode overrides/i,
-    sha256: '8d42208c888d76af49ebe6e4d58e85537c979f53ecb32fff7e85e95e6859182a',
+    match: /drive every action through visible UI/i,
+    sha256: '0ba3230bff9de32f03719daec35c6cef762e15c550264fcffd342dde52291e21',
   },
 ];
 
