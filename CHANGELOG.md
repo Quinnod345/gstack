@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.208.0] - 2026-10-25
 
 **The Capy install guide says that the team-mode session-start updater also waits for live workflow leases.** With #3385 (#3363), `bin/gstack-session-update` skips its background fast-forward while another session holds a live workflow lease, the same leases `bin/gstack-upgrade` already honors. `docs/capy-install.md` described only the upgrade side.
 
