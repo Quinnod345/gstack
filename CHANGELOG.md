@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**/ship's review army and /plan-eng-review now ask for one severity scale, CRITICAL or INFORMATIONAL, the same scale /review, the specialist JSON and the review checklist already use (#3349).** The shared confidence rubric those two skills render told the model to label findings `[P1]` and `[P2]` and to report a 1-2 confidence finding "only if severity would be P0", while the rest of /ship's Step 9 (Pass 1 CRITICAL, Pass 2 INFORMATIONAL, `"severity":"CRITICAL|INFORMATIONAL"`) used the other scale. A finding from one skill couldn't be compared, deduplicated or gated against a finding from another. Garry picked CRITICAL/INFORMATIONAL for plan-eng-review on 2026-10-24.
+
+### Fixed
+- **`scripts/resolvers/confidence.ts`** (default branch, rendered into `ship/sections/review-army.md` and `plan-eng-review/sections/review-sections.md`): every finding carries a severity, CRITICAL (blocks shipping) or INFORMATIONAL (lower severity, still actioned). The format is `[CRITICAL|INFORMATIONAL] (confidence: N/10) file:line — description` with CRITICAL and INFORMATIONAL examples. A 1-2 score is reported only for a suspected release-blocking catastrophe, at CRITICAL severity and marked explicitly speculative, the rule /review already uses. Repeated sentences in the verification gate and the calibration-learning note were shortened, so ship's skeleton-plus-sections size falls by 77 bytes (313,204 against its 313,281 cap).
+
+### Tests
+- `test/eng-first-review.test.ts`: the two captured plan-eng-review first-review questions (`eng-annotated-cache-au`, `eng-declarative-as`) still open review when their `[P1]` label becomes `[CRITICAL]` or `[INFORMATIONAL]`. They stay closed for `[HIGH]`, `[critical]`, `[Critical]`, `[P4]`, `[CRITICAL|INFORMATIONAL]` and no label.
+
+### Gate integrity
+- One accepted-input change to review: the paid-test detectors `test/helpers/eng-cache-writer-decision.ts` and `test/helpers/pty/boundaries.ts` accept `[CRITICAL]` and `[INFORMATIONAL]` alongside `[P0]`-`[P3]` in a plan finding's annotation, because the skill now asks for those labels. Without it, both captures relabelled `[CRITICAL]` are rejected. Verdict: not a weakening. The label is metadata, and every substantive check (decision, assessment, actors, options) is unchanged. Mutation checks: restoring `P[0-3]` alone fails the positive cases; `[^\]]+`, `P[0-9]` or a case-insensitive CRITICAL each fail the negative controls. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.191.0] - 2026-10-25
 
 **`gstack-version-bump write --changelog` moves the branch's `[Unreleased]` entry under the new version, and /ship Step 12 stops treating a provisional queue pick as a verified slot.** Stamping by hand meant writing VERSION with `gstack-version-bump write` and then renaming the `## [Unreleased]` heading yourself, because only `gstack-restamp` re-headed the CHANGELOG. Separately, when `gstack-next-version` could not read some open PRs' VERSION it returned `complete:false` and a provisional pick, and Step 12 printed the warning and then wrote that version as if the queue had been checked (left over from #3258, noted in GSTA-45).
