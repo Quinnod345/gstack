@@ -40,13 +40,20 @@ function gitBashLn(dir: string): string {
   return file;
 }
 
+/** A BASH_ENV file that logs every `sleep` (one per failed lock try) to $WAITS. */
+function sleepLog(dir: string): string {
+  const file = path.join(dir, 'sleep-log.sh');
+  fs.writeFileSync(file, 'sleep() { echo "$*" >> "$WAITS"; command sleep "$@"; }\n');
+  return file;
+}
+
 describe('gstack-lease under Git Bash semantics (#3330)', () => {
-  test('touch takes the lock and writes the lease at once with the default tries, leaving no lock behind', () => {
+  test('touch takes the lock on its first try with the default tries and writes the lease, leaving no lock behind', () => {
     const { dir, leases } = checkout();
-    const started = Date.now();
-    const r = runScriptSync(LEASE, ['touch', '--root', fwd(dir), '--pid', '4242'], { encoding: 'utf8', env: baseEnv, timeout: 120_000 });
+    const waits = path.join(dir, 'waits.log');
+    const r = runScriptSync(LEASE, ['touch', '--root', fwd(dir), '--pid', '4242'], { encoding: 'utf8', env: { ...baseEnv, BASH_ENV: fwd(sleepLog(dir)), WAITS: fwd(waits) }, timeout: 120_000 });
     expect(r.status, `${r.error ?? ''}${r.stdout}${r.stderr}`).toBe(0);
-    expect(Date.now() - started).toBeLessThan(25_000);
+    expect(fs.existsSync(waits), 'lock() slept between tries').toBe(false);
     expect(fs.readdirSync(leases)).toEqual(['4242']);
   });
 

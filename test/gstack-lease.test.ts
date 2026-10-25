@@ -333,11 +333,11 @@ describe('gstack-lease', () => {
   test('a lock that cannot be taken while nobody holds it fails at once instead of waiting out the tries', () => {
     const { dir, leases } = checkout();
     const holder = sleeper();
-    const broken = bashEnv(dir, 'mkdir() { case "$*" in *"/.lock") return 1 ;; esac; command mkdir "$@"; }\n');
-    const started = Date.now();
+    const waits = path.join(dir, 'waits.log');
+    const broken = bashEnv(dir, `mkdir() { case "$*" in *"/.lock") return 1 ;; esac; command mkdir "$@"; }\nsleep() { echo "$*" >> "${waits}"; command sleep "$@"; }\n`);
     const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: broken });
     expect(r.status, r.stdout + r.stderr).toBe(3);
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(fs.existsSync(waits), 'lock() slept between tries').toBe(false);
     expect(r.stderr).toContain('cannot take the lease directory lock');
     expect(r.stderr).not.toContain('locked by live process');
     expect(fs.readdirSync(leases)).toEqual([]);
