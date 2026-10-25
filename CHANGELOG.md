@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**The README is a first-ten-minutes page again: what gstack is, how to install it, the first three skills to try, the skills tables, platform notes, and links to docs/ for everything else.** It was 862 lines and 90 KB, with CSO producer sandboxing, Codex model-selection order and the uninstall script in the path of someone deciding whether to try it. It is now about 300 lines and 33 KB. Nothing was deleted: every removed section moved to a docs/ page, verbatim, and every anchor other files link to (`#install--about-30-seconds`, `#gbrain--persistent-knowledge-for-your-coding-agent`) still resolves.
+
+### Changed
+- **`README.md`**: a short intro, a three-skill quick start (/office-hours, /review, /qa), the two-step install with the host matrix, the demo transcript, the sprint table, the review picker and the power-tools table unchanged, a short GBrain section, new "Platform notes" (macOS, Linux, the Windows paragraphs), the Docs table with the new pages, a one-paragraph privacy summary and a short troubleshooting section that keeps the CLAUDE.md `/browse` rule.
+
+### Added
+- **`docs/why-gstack.md`**: the Karpathy quote, the LOC numbers and their caveats, the contribution graphs, "Karpathy's four failure modes", "Parallel sprints" and "10-15 parallel sprints".
+- **`docs/install.md`**: setup timing, the requirements paragraph in full, the CSO image-preload window, team mode's Node.js hook, and the hooks `./setup` registers (the timeline Stop hook and canonical-only hook paths).
+- **`docs/uninstall.md`**: the uninstall script and the manual removal steps, CLAUDE.md cleanup, Playwright and Aside notes.
+- **`docs/hosts.md`**: OpenClaw and the ClawHub skills, which agents a checkout renders for, the Copilot and Antigravity notes, outside-review providers, the `/claude` rename, the instruction-only digest, the Codex behavioral profile and model selection order, the plan-review and implementation tiers, the design binary's models, and adding a host.
+- **`docs/qa-without-a-webpage.md`**, **`docs/standalone-binaries.md`** (every `gstack-*` CLI plus the CSO evaluation producer contract and its host matrix), **`docs/voice-input.md`**, **`docs/privacy.md`** (the full Privacy & Telemetry section).
+- **`docs/domain-skills.md`** gains the README's summary of domain skills and the raw CDP escape hatch; **`docs/gbrain-quick-tour.md`** holds the README's short version of the four paths, trust policy and memory sync; **`docs/troubleshooting.md`** gains a "Quick answers" section with the README's short troubleshooting entries.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
