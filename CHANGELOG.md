@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**An issue we intend to fix later now stays open under the `parked` label instead of being closed into a TODOS theme.** The Oct 11 triage closed 75 feature requests with a "not rejected, tracked in TODOS.md" note, and GitHub showed them as closed with no fix. Those 75 are reopened under `parked`, each with one comment saying where it is tracked and what fixes it, and the rule is written down: closing means fixed, duplicate or won't fix, each with its reason.
+
+### Added
+- **`docs/triage.md`**: the three issue states (open, parked, closed), how to park an issue (the label plus one comment naming where it is tracked and what fixes it), the three close reasons with their GitHub close reason and label, and where the Wave 9 themes live.
+- The `parked` label on garrytan/gstack: "Not fixed yet, not rejected: stays open; a comment says where it is tracked and what fixes it".
+
+### Changed
+- **`CONTRIBUTING.md`**: an "Issue triage" section ahead of the PR wave process, pointing at docs/triage.md.
+- **`TODOS.md`**: the Wave 9 feature-themes note says issues stay open under `parked` with a link to their theme, instead of closing with one.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
