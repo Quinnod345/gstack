@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**The OpenSSF Scorecard workflow uploads its results with `github/codeql-action/upload-sarif` 4.39.0 (from 4.38.3), recreated from Dependabot's #3307.** Dependabot's branch can't take a version stamp at merge time, so the same one-line change ships from a crew branch. The new pin `6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee` is the commit that the annotated tag `v4.39.0` points to in github/codeql-action, and GitHub shows that commit as verified. 4.39.0's one breaking change raises the minimum CodeQL bundle to 2.20.7, which applies to `init` and `analyze`. This workflow uses only `upload-sarif` with Scorecard's own SARIF file.
+
+### Changed
+- **`.github/workflows/scorecard.yml`**: `upload-sarif` pinned to `6f2ac81f…` (`# v4.39.0`), byte-for-byte the change in #3307.
+
 ## [1.91.191.0] - 2026-10-25
 
 **`gstack-version-bump write --changelog` moves the branch's `[Unreleased]` entry under the new version, and /ship Step 12 stops treating a provisional queue pick as a verified slot.** Stamping by hand meant writing VERSION with `gstack-version-bump write` and then renaming the `## [Unreleased]` heading yourself, because only `gstack-restamp` re-headed the CHANGELOG. Separately, when `gstack-next-version` could not read some open PRs' VERSION it returned `complete:false` and a provisional pick, and Step 12 printed the warning and then wrote that version as if the queue had been checked (left over from #3258, noted in GSTA-45).
