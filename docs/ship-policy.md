@@ -337,7 +337,9 @@ gstack-ship-queue train build --prs 41@<sha>,42@<sha>,43@<sha>
 
 It prints `ORDER:` (the slot order to announce: screened PRs first in READY
 order, then unscreened; when `max_size` or more unscreened PRs wait they form
-their own train and `HELD:` lists them), one `PREFIX: T<i> <commit>
+their own train and `HELD:` lists them; `--order <pr>,<pr>,...` naming every
+pinned PR once replaces that rule, for a PR that must merge before another,
+and the train's later `NEXT:` rebuilds keep it), one `PREFIX: T<i> <commit>
 tree=<tree>` per prefix and one `SLOT:` per PR. `--dry-run` adds the
 `ESTIMATE:` line and writes, pushes and dispatches nothing. Otherwise it
 writes `train.json`, pushes `train/<nonce>`, dispatches `free_workflow` there
@@ -355,7 +357,11 @@ merging #<a>,#<b>; nothing dispatched, no branch pushed; fix: …` line names
 the build without that PR) and `QUEUE_TRAIN_FREE_RED` (free tests red,
 missing, cancelled or on another SHA). In a merge, version files take the
 prefix's side and the CHANGELOG merges by section, since the stamp at merge
-rewrites both.
+rewrites both; a PR whose CHANGELOG drops or renames a released heading (or
+carries a released entry's text in a section of its own) is a CHANGELOG
+conflict, never merged with the damage. READY receipts and train records are
+keyed on origin's GitHub owner/repo, so lanes whose origin uses another URL
+form (git.capy.ai, ssh, a token URL) share the coordinator's queue.
 
 **3. Coordinator: status and verdict.**
 
@@ -406,13 +412,13 @@ EVAL_POLICY records it. Bisect results never turn a train green.
 ```bash
 git fetch origin main
 git merge --no-ff --no-commit origin/main        # expect a CHANGELOG.md conflict only
-bun --no-env-file --config=/dev/null -e "import { mergeChangelogs } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogs(s(2), s(3)); if (!m) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m);"
+bun --no-env-file --config=/dev/null -e "import { mergeChangelogs } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogs(s(2), s(3), s(1)); if (!m) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m);"
 git add CHANGELOG.md && git commit --no-edit
 gstack-restamp --next --base main --pr 42 --expect-base <main sha> --expect-order <order> --allow-repo-commands
 git add CHANGELOG.md VERSION package.json <release outputs> && git commit -m "v<X> stamp" && git push
 ```
 
-A conflict in any file other than CHANGELOG.md means the merge isn't the train's prefix. Stop and report it. `verify` accepts the resulting head because its tree equals T<i> modulo stamps; the `head:` line says "T<i> with main merged in".
+A conflict in any file other than CHANGELOG.md means the merge isn't the train's prefix. Stop and report it. When the helper says the CHANGELOG needs a hand merge, take main's CHANGELOG unchanged and put your own entry above it. `verify` accepts the resulting head because it contains main and its tree equals T<i> modulo stamps, with its CHANGELOG judged as main's plus lines your pin added, however the conflict was resolved; the `head:` line says "T<i> with main merged in".
 
 **5. Coordinator: verify, merge, verify again.** For each slot in order:
 
@@ -423,8 +429,9 @@ gstack-ship-queue verify --pr 41 --train <nonce>   # VERIFY_TRAIN: #41 merged; m
 ```
 
 Before a merge, main's tree must equal the prefix before the PR modulo stamps
-and the PR must be at its pin (stamps aside) or at T<i> modulo stamps (its pin
-with main merged in); after it, main's tree
+and the PR must be at its pin (stamps aside) or contain main and be T<i>
+modulo stamps (its pin with main merged in; its CHANGELOG must be main's with
+only lines from the pin's own CHANGELOG diff above it); after it, main's tree
 must equal the prefix after it. Anything else is `QUEUE_TRAIN_TREE_MISMATCH`
 (or `QUEUE_TRAIN_MOVED`). When nothing of the train has merged, that is a plain
 refusal: build a new train on current main. When earlier slots already
