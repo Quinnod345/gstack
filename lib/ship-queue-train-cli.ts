@@ -15,7 +15,9 @@ import { trainBisect, trainRebuild, trainVerdict } from './ship-queue-train-verd
 import { verifyTrain } from './ship-queue-train-verify';
 import { redactCause } from './ship-queue-train-record';
 
-export const TRAIN_HELP = `  train build --prs <n>@<sha>[,...] [--urgent | --repair] [--dry-run] [--free-timeout <s>]
+export const TRAIN_HELP = `  train build --prs <n>@<sha>[,...] [--order <n>,...] [--urgent | --repair] [--dry-run] [--free-timeout <s>]
+                                           --order: explicit slot order, every PR in --prs once (default: screened
+                                           first, then READY order)
   train build --train <nonce>              resume a train (push, free tests, dispatch) from its record
                                            merge pinned unstamped heads in slot order onto main, free tests on
                                            train/<nonce>, then one full gate through eval-bg's nonce
@@ -77,8 +79,9 @@ export async function trainMain(ctx: QueueContext, args: string[]): Promise<numb
     const freeTimeoutSec = positive(flag(rest, '--free-timeout'), 2700);
     if (Number.isNaN(freeTimeoutSec)) return usage('--free-timeout needs seconds');
     if (rest.includes('--urgent') && rest.includes('--repair')) return usage('--urgent and --repair are separate one-PR trains; pass one');
+    if (rest.includes('--order') && (nonce || !flag(rest, '--order'))) return usage('--order <n>,... orders a new train from --prs; a resumed train keeps its recorded order');
     return guarded('train build', () => buildTrain(ctx, {
-      pins: flag(rest, '--prs'), resume: nonce, dryRun, urgent: rest.includes('--urgent'), repair: rest.includes('--repair'), freeTimeoutSec,
+      pins: flag(rest, '--prs'), order: flag(rest, '--order'), resume: nonce, dryRun, urgent: rest.includes('--urgent'), repair: rest.includes('--repair'), freeTimeoutSec,
       pollMs: Number(process.env.GSTACK_SHIP_QUEUE_POLL_MS) || 30_000,
     }));
   }

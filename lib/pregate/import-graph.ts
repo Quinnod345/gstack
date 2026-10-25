@@ -12,7 +12,10 @@
  *   3. the `bin/<name>` → `test/<name>*.test.*` convention (with and without
  *      the `gstack-` prefix);
  *   4. explicit `.gstack/pregate.json` `dependencies` declarations;
- *   5. in a Django project, the files Django loads by name (lib/pregate/django.ts).
+ *   5. in a Django project, the files Django loads by name (lib/pregate/django.ts);
+ *   6. in a Cargo crate, every `.rs` file and the Cargo.toml select the crate's
+ *      tests and its dependents' (lib/pregate/rust.ts); in-source
+ *      `#[cfg(test)]` files and `<crate>/tests/` files are the tests.
  * Dart directives (`import`/`export`/`part`, conditional URIs included) resolve
  * `package:<name>/x` through every tracked pubspec.yaml to `<root>/lib/x`.
  * Uncertainty selects more tests, never fewer: a dependency on a directory
@@ -25,6 +28,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { matchesAny } from '../ship-policy';
 import { djangoEdges } from './django';
+import { rustEdges } from './rust';
 
 export const SOURCE_EXT = /\.(?:[cm]?[jt]sx?|py|rb|sh|bash|go|rs|dart)$/;
 export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|spec|__tests__)\/.*\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)[^/]*\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go|rb)$|_spec\.rb$|(?:^|\/)[^/]*\.bats$|(?:^|\/)test\/(?:.*\/)?[^/]*_test\.dart$/;
@@ -47,7 +51,7 @@ const scanner = new Bun.Transpiler({ loader: 'tsx' });
 // that matches more text only gains an edge when it resolves to a repo file.
 const QUOTED = /['"`]([A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
 const JOIN = /\bjoin\(([^()]*)\)/g;
-const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '/index.ts', '/index.js'];
+const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 // A statement starts a line or follows `;` or a compound statement's `:`. The module spec is
 // non-empty and starts with a dot or a word character, so no two repetitions can share a dot or a space.
 const PY_IMPORT = /(?:^|[;:])[ \t\f]*(?:from[ \t]+(\.+(?:\w[\w.]*)?|\w[\w.]*)[ \t]+import[ \t]+(\([^)]*\)|[^\n;]+)|import[ \t]+([^\n;]+))/gm;
@@ -465,6 +469,9 @@ export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
     for (const { target, via } of referencesIn(files, dirs, rel, source, config, graph.tests.has(rel) ? unresolved : undefined, packages)) addEdge(graph, target, rel, via);
     if (unresolved.length) graph.unresolved!.set(rel, unresolved);
   }
+  const rust = rustEdges(all, rel => readRepoFile(repoRoot, rel, maxBytes));
+  for (const t of rust.tests) graph.tests.add(t);
+  for (const e of rust.edges) addEdge(graph, e.dependency, e.dependent, e.via);
   const django = djangoEdges({ files: [...files], tests: graph.tests, read: rel => pySources.get(rel) ?? readRepoFile(repoRoot, rel, maxBytes), code: pythonCode, resolveDotted: dotted => pythonPatchTarget(files, dotted) });
   for (const e of django) addEdge(graph, e.dependency, e.dependent, 'framework');
   for (const test of graph.tests) {
