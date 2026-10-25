@@ -185,6 +185,52 @@ describe('version gate: unstamped heads under a train policy', () => {
     }
   });
 
+  describe('a CHANGELOG over 1 MiB (GSTA-67: #3345 head 1eb7092 passed because the 1.67 MB CHANGELOG overflowed the read)', () => {
+    const excerpt = (name: string) => fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'merge-train-3345', name), 'utf8');
+    const baseTop = excerpt('base-a59b5e4.md');
+    const padding = Array.from({ length: 2400 }, (_, i) => `## [1.0.${2400 - i}.0] - 2026-01-01\n\nOlder release ${i}: ${'x'.repeat(440)}\n`).join('\n');
+    const big = `${baseTop}\n${padding}`;
+    const bigFixture = () => {
+      const r = fixture();
+      write(r, 'CHANGELOG.md', big);
+      commit(r, 'main with a full-size CHANGELOG');
+      r.git('push', '-q', 'origin', 'main');
+      r.git('fetch', '-q', 'origin');
+      branch(r);
+      expect(Buffer.byteLength(big)).toBeGreaterThan(1.05 * 1024 * 1024);
+      return r;
+    };
+
+    test("#3345's change (the 1.91.179.0 heading replaced by [Unreleased]) is refused, naming the dropped heading", () => {
+      const r = bigFixture();
+      write(r, 'CHANGELOG.md', big.replace(baseTop, excerpt('pin-1eb7092.md')));
+      const res = run(r, commit(r, 'the 1eb7092 CHANGELOG edit'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('::error::PR #3320: CHANGELOG.md drops released heading 1.91.179.0; an unstamped head may only add its [Unreleased] section above the latest release.');
+    });
+
+    test('control: an additive [Unreleased] entry above the latest release still passes at full size', () => {
+      const r = bigFixture();
+      write(r, 'CHANGELOG.md', big.replace('## [1.91.179.0]', '## [Unreleased]\n\n- the PR entry\n\n## [1.91.179.0]'));
+      const res = run(r, commit(r, 'additive entry'));
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('a CHANGELOG that cannot be read is refused, never passed', () => {
+      const r = bigFixture();
+      write(r, 'CHANGELOG.md', big.replace('## [1.91.179.0]', '## [Unreleased]\n\n- the PR entry\n\n## [1.91.179.0]'));
+      const head = commit(r, 'additive entry, then a damaged object');
+      const blob = r.git('rev-parse', `${head}:CHANGELOG.md`);
+      const loose = path.join(r.work, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+      fs.chmodSync(loose, 0o644);
+      fs.writeFileSync(loose, fs.readFileSync(loose).subarray(0, 2000));
+      const res = run(r, head);
+      expect(res.code).toBe(1);
+      expect(res.out).toContain(`::error::PR #3320: cannot read CHANGELOG.md at ${head}.`);
+    });
+  });
+
   test('the workflow runs the gate from the merge commit with the base ref and head sha', () => {
     const workflow = Bun.YAML.parse(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'version-gate.yml'), 'utf8')) as any;
     const steps = workflow.jobs.check.steps;

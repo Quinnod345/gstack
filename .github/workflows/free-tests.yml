@@ -238,12 +238,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # Push runs check out main with `checkout -B main`, so the clone holds a
+      # local main; PR runs are a detached merge ref and train dispatches sit on
+      # train/<nonce>. A fixture that made its own main passed its PR and then
+      # failed every push to main (#3237, run 38999168852). Give every run the
+      # push layout so a PR run catches what the main push would.
+      - name: Match main's local branch layout on PR and dispatch runs
+        if: github.ref != 'refs/heads/main'
+        run: git checkout -q -B main
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.4.3
+          bun-version: 1.4.4
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Read the Playwright version for the browser cache key
+        id: playwright
+        run: echo "version=$(node -p 'require("playwright-core/package.json").version')" >> "$GITHUB_OUTPUT"
+      # Keyed on the Playwright version, which fixes the Chromium revision: a
+      # lockfile bump that keeps Playwright reuses the browser, and a Playwright
+      # bump never restores a stale revision.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: linux-playwright-chromium-${{ steps.playwright.outputs.version }}
+      # The cache restores the browser; --with-deps still runs apt for system
+      # libraries. On 2026-10-21 apt stalled on an archive.ubuntu.com fetch and
+      # held free-suite (12) for the whole 20-minute job timeout (run
+      # 39641712129). Each attempt gets 5 minutes (a warm install takes about
+      # 15 s) and the install alone is retried once. This retries infrastructure,
+      # never a test.
       - name: Install Playwright Chromium
+        id: playwright_install
+        timeout-minutes: 5
+        continue-on-error: true
+        run: npx playwright install --with-deps chromium
+      - name: Retry the Playwright Chromium install once
+        if: steps.playwright_install.outcome == 'failure'
+        timeout-minutes: 5
         run: npx playwright install --with-deps chromium
       - name: Configure the bundled Chromium sandbox helper
         run: |
@@ -294,6 +325,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Push runs check out main with `checkout -B main`, so the clone holds a
+      # local main; PR runs are a detached merge ref and train dispatches sit on
+      # train/<nonce>. A fixture that made its own main passed its PR and then
+      # failed every push to main (#3237, run 38999168852). Give every run the
+      # push layout so a PR run catches what the main push would.
+      - name: Match main's local branch layout on PR and dispatch runs
+        if: github.ref != 'refs/heads/main'
+        run: git checkout -q -B main
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
@@ -314,16 +354,33 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Read the Playwright version for the browser cache key
+        id: playwright
+        run: echo "version=$(node -p 'require("playwright-core/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the Playwright version, which fixes the Chromium revision: a
+      # lockfile bump that keeps Playwright reuses the browser, and a Playwright
+      # bump never restores a stale revision.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/ms-playwright
-          key: linux-playwright-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            linux-playwright-
+          key: linux-playwright-chromium-${{ steps.playwright.outputs.version }}
 
-      # Cache restores browser binaries; install is still required for system
-      # deps and is a fast no-op for already-present browsers.
+      # The cache restores the browser; --with-deps still runs apt for system
+      # libraries. On 2026-10-21 apt stalled on an archive.ubuntu.com fetch and
+      # held free-suite (12) for the whole 20-minute job timeout (run
+      # 39641712129). Each attempt gets 5 minutes (a warm install takes about
+      # 15 s) and the install alone is retried once. This retries infrastructure,
+      # never a test.
       - name: Install Playwright Chromium
+        id: playwright_install
+        timeout-minutes: 5
+        continue-on-error: true
+        run: npx playwright install --with-deps chromium
+
+      - name: Retry the Playwright Chromium install once
+        if: steps.playwright_install.outcome == 'failure'
+        timeout-minutes: 5
         run: npx playwright install --with-deps chromium
 
       - name: Configure the bundled Chromium sandbox helper
