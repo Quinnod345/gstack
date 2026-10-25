@@ -38,6 +38,7 @@ most 80% of `JUDGE_MS` (96 s).
 | `cross-skill` | 0/24 | 0/24 | 23 / 23 | 0 | 0 / 0 | 19.7 / 22.6 | 0/8, 8/8 | $19.86 | lands |
 | `voice` | 0/24 | 0/24 | 22 / 22 | 0 | 0 / 0 | 13.3 / 13.7 | 0/8, 8/8 | $8.09 | lands |
 | `workflow-default` | 2/23 | 3/23 | 21 / 21 | 0 | 1 / 1 (refusal, f03) | 29.5 / 25.8 | 0/8, 8/8 | $19.66 | lands; UC3 prose step triggered by the errored sample |
+| `cookie-workflow` (2026-10-25, `claude-sonnet-5-5`) | 1/22 | 1/23 | 22 / 23 | 1 (a07) | 2 / 0 (parse, a05 and a07) | 13.6 / 9.6 | 1/7, 7/8 | $2.81 | held: one new false pass |
 
 No sample errored under either prompt except one refusal each on `workflow-default` item
 `f03` (a stubbed cookie-import workflow): the old prompt refused once in `old-b` and the new
@@ -46,6 +47,11 @@ prompt once, so that item's panels are incomplete and it is excluded from the fl
 trigger any errored new sample calls for a calibrated prose step, which is deferred to
 TODOS. `workflow-default` was funded after the first pass with a $25 extension of the W2
 reservation; its 14 cases now send `WORKFLOW_JUDGE_RESPONSE_SCHEMA` without the
-compact-reasoning validator (still only on `ship`). The frontier (`review`) and cookie workflow
-configurations have no corpus and stay on today's request. A $0.12 two-call pilot sized
+compact-reasoning validator (still only on `ship`). The frontier (`review`) configuration has no corpus and stays on today's request.
+
+`cookie-workflow` (GSTA-91, separately funded) is held and stays on today's request. Its one
+new false pass, a07, scored 4/4/4 on all three new samples and on all three `old-b` samples;
+`old-a`'s a07 panel is incomplete because one old sample returned invalid JSON (the defect the
+schema transport removes), so the comparison counts it against the new request only. The old
+request failed to parse 2 of 144 samples; the new one 0 of 72. A $0.12 two-call pilot sized
 output tokens before the manifest was priced. Total W2 spend: $90.47 of $115.
