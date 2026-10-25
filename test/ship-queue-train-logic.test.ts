@@ -8,13 +8,15 @@
 import { describe, expect, test } from 'bun:test';
 import { DISPATCH_INPUTS, dedupeKey, dispatchPlan, findDuplicateRun, makeNonce, nonceScope, type RunSummary } from '../scripts/eval-bg';
 import { DEFAULT_POLICY, TRAIN_KEYS_VERSION, validatePolicy } from '../lib/ship-policy';
-import { fillDue, orderSlots, parsePins } from '../lib/ship-queue-train';
+import { fillDue, orderSlots, parseOrder, parsePins, prsArgs } from '../lib/ship-queue-train';
 import { gstackPaidSelection, skillOwnCases, touchedSkills } from '../lib/ship-queue-train-ready';
-import type { TrainSlot } from '../lib/ship-queue-train-record';
+import { normalizeRemoteUrl, repoIdentity, type TrainSlot } from '../lib/ship-queue-train-record';
 import { INFRA_REDISPATCH, REBUILD_ONCE, classifyBisect, classifyGate } from '../lib/ship-queue-train-verdict';
 import { EVAL_POLICY } from './helpers/periodic-exclude-data';
 import { COMPLETE, FAIL, PASS, TRAIN_BLOCK } from './helpers/ship-queue-train-fixture';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dir, '..');
@@ -53,6 +55,54 @@ describe('ordering and fill', () => {
     expect(parsePins(`12@${SHA},#13@abcdef1`)).toEqual([{ pr: '12', sha: SHA }, { pr: '13', sha: 'abcdef1' }]);
     expect(parsePins('12')).toMatch(/entries are <pr>@<sha>/);
     expect(parsePins(`12@${SHA},12@${SHA}`)).toBe('a PR appears twice in --prs');
+  });
+
+  test('--order (GSTA-67, #3337 docs slotted ahead of the #3343 catalog it describes): an explicit order replaces screened-first and READY order; absent, the default is unchanged', () => {
+    const docs = slot('3337', false, '2026-10-22T18:00:00Z');
+    const catalog = slot('3343', false, '2026-10-22T19:00:00Z');
+    expect(orderSlots([docs, catalog], 5).train.map(s => s.pr)).toEqual(['3337', '3343']);
+    expect(orderSlots([docs, catalog], 5, undefined).train.map(s => s.pr)).toEqual(['3337', '3343']);
+    const pins = [{ pr: '3337' }, { pr: '3343' }];
+    const order = parseOrder('3343,#3337', pins);
+    expect(order).toEqual(['3343', '3337']);
+    expect(orderSlots([docs, catalog], 5, order as string[]).train.map(s => s.pr)).toEqual(['3343', '3337']);
+    const screened = slot('9', true, '2026-10-22T20:00:00Z');
+    const over = orderSlots([docs, catalog, screened], 2, ['3343', '3337', '9']);
+    expect([over.train.map(s => s.pr), over.held.map(s => s.pr), over.split]).toEqual([['3343', '3337'], ['9'], false]);
+    expect(parseOrder(undefined, pins)).toBeUndefined();
+    for (const bad of ['3343', '3343,3337,3337', '3343,3337,1', '3343,x']) expect(parseOrder(bad, pins)).toEqual({ error: `--order must list every PR in --prs exactly once (--prs has #3337,#3343; got ${bad})` });
+    expect(prsArgs([{ pr: '3343', head: SHA }, { pr: '3337', head: SHA }], true)).toBe(`--prs 3343@${SHA},3337@${SHA} --order 3343,3337`);
+    expect(prsArgs([{ pr: '3343', head: SHA }], false)).toBe(`--prs 3343@${SHA}`);
+  });
+});
+
+describe('repo identity (GSTA-67, #3331 on 2026-10-21)', () => {
+  test("every URL form of one GitHub repository gives one key, the github.com key gstack's records already use", () => {
+    const canonical = 'https://github.com/garrytan/gstack';
+    for (const url of ['https://github.com/garrytan/gstack', 'https://github.com/garrytan/gstack.git', 'https://git.capy.ai/garrytan/gstack', 'https://git.capy.ai/garrytan/gstack.git/',
+      'git@github.com:garrytan/gstack.git', 'ssh://git@github.com/garrytan/gstack.git', 'ssh://git@ssh.github.com:443/garrytan/gstack.git', 'https://x-access-token:PASSWORD@github.com/garrytan/gstack.git',
+      'http://www.github.com/GarryTan/GStack']) expect(normalizeRemoteUrl(url)).toBe(canonical);
+    expect(normalizeRemoteUrl('https://gitlab.com/acme/widget.git')).toBe('https://gitlab.com/acme/widget');
+    expect(normalizeRemoteUrl('https://user:PASSWORD@gitlab.com/acme/widget.git')).toBe('https://gitlab.com/acme/widget');
+    expect(normalizeRemoteUrl('/tmp/fixture/origin.git')).toBe('/tmp/fixture/origin');
+  });
+
+  test("#3331's lane (origin https://git.capy.ai/garrytan/gstack) now writes b321d228efd2bc14, and readers still accept the 1fb5dd69740a8cf8 receipt it wrote", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-identity-'));
+    try {
+      const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 30_000 });
+      git('init', '-q');
+      git('remote', 'add', 'origin', 'https://git.capy.ai/garrytan/gstack');
+      const lane = repoIdentity(dir);
+      expect(lane.key).toBe('b321d228efd2bc14');
+      expect(lane.url).toBe('https://github.com/garrytan/gstack');
+      expect(lane.keys).toContain('1fb5dd69740a8cf8');
+      git('remote', 'set-url', 'origin', 'https://github.com/garrytan/gstack.git');
+      const coordinator = repoIdentity(dir);
+      expect(coordinator.key).toBe('b321d228efd2bc14');
+      expect(coordinator.keys).toEqual(expect.arrayContaining(['b321d228efd2bc14', '1fb5dd69740a8cf8']));
+      expect(coordinator.keys[0]).toBe('b321d228efd2bc14');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
