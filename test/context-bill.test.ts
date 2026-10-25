@@ -273,7 +273,9 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     }
     // Every path the bill (and --exact) keys on stays under the skills root.
     for (const file of walkMd(skills)) expect(file.startsWith(skills + path.sep)).toBe(true);
+    // dirlink/SKILL.md links to review/sections, so its file is walked under both names.
     expect(walkMd(skills).map((f) => path.relative(skills, f)).sort()).toEqual([
+      path.join("dirlink", "SKILL.md", "flow.md"),
       path.join("office-hours", "SKILL.md"),
       path.join("office-hours", "sections", "flow.md"),
       path.join("review", "SKILL.md"),

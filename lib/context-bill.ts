@@ -233,8 +233,9 @@ function encloses(outer: string, inner: string): boolean {
  *
  * Symlinked files and directories are followed, and every returned path stays
  * the lexical path under `dir`, so buildBill and --exact key the same files.
- * Each real directory is walked once (cycle guard), and a link to a directory
- * that encloses `dir` is never followed.
+ * Two links to one directory are both walked (each is real scanner load), so
+ * the result never depends on readdir order. A directory that is already on
+ * the current walk (a loop) or that encloses `dir` is never entered.
  */
 export function walkMd(dir: string): string[] {
   const out: string[] = [];
@@ -244,8 +245,7 @@ export function walkMd(dir: string): string[] {
   } catch {
     return out;
   }
-  const visited = new Set([rootReal]);
-  const walk = (current: string) => {
+  const walk = (current: string, ancestors: string[]) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(current, { withFileTypes: true });
@@ -267,12 +267,11 @@ export function walkMd(dir: string): string[] {
       } catch {
         continue;
       }
-      if (visited.has(real) || encloses(real, rootReal)) continue;
-      visited.add(real);
-      walk(p);
+      if (ancestors.includes(real) || encloses(real, rootReal)) continue;
+      walk(p, [...ancestors, real]);
     }
   };
-  walk(dir);
+  walk(dir, [rootReal]);
   return out;
 }
 
