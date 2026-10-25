@@ -348,7 +348,7 @@ describe('gstack-skill-start behavior', () => {
       expect(out.match(/GUARD_NOT_INSTALLED/g)).toHaveLength(1);
       const ids = (out.match(/^GSTACK_INSTRUCTION_BEGIN: (\S+)/gm) ?? []).map((h) => h.replace(/^GSTACK_INSTRUCTION_BEGIN: /, ''));
       expect(ids).toEqual(['unattended-session']);
-      expect(out).toContain('GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>');
+      expect(out).toContain('GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>');
       expect(out).toMatch(/never approve/i);
       expect(out).toMatch(/^FIRST_TASK: $/m);
       expect(out).not.toContain('.telemetry-prompted');
@@ -377,6 +377,46 @@ describe('gstack-skill-start behavior', () => {
       fs.rmSync(freshGh, { recursive: true, force: true });
     }
   });
+
+  test('unattended block promises GSTACK_RESULT only to skills that write it; the rest name their record (#3281)', () => {
+    const block = (skill: string) => {
+      const out = runStart(['--skill', skill], { GSTACK_SESSION_KIND: 'unattended' });
+      const m = out.match(/^GSTACK_INSTRUCTION_BEGIN: unattended-session .*\n([\s\S]*?)\nGSTACK_INSTRUCTION_END$/m);
+      expect(m).not.toBeNull();
+      return m![1];
+    };
+    const blocks = Object.fromEntries(['autoplan', 'eval-plan', 'ship', 'review', 'qa', 'investigate'].map((s) => [s, block(s)]));
+    for (const text of Object.values(blocks)) {
+      expect(text).not.toContain('skill=<name>');
+      expect(text).toMatch(/never choose them/);
+      expect(text).toMatch(/never approve a gate/);
+      expect(text).toMatch(/never publish, push, sync or send data off this machine/);
+    }
+    const autoplan = blocks.autoplan;
+    expect(autoplan).toContain('`GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>`');
+    expect(autoplan).toContain('gate list (gstack-gate render)');
+    expect(autoplan).toMatch(/decisions\.jsonl with kind "auto"/);
+    expect(autoplan).toContain('gate.json');
+    const evalPlan = blocks['eval-plan'];
+    expect(evalPlan).toContain('`GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>`');
+    expect(evalPlan).toContain('No helper writes a gate.json');
+    expect(evalPlan).not.toContain('gate list');
+    const records: Record<string, string> = {
+      ship: 'gstack-ship-receipt read --pr <n> --json',
+      review: 'gstack-review-read',
+      qa: 'qa-report-*.md',
+      investigate: "this skill's own record (docs/unattended.md)",
+    };
+    for (const [skill, record] of Object.entries(records)) {
+      const text = blocks[skill];
+      expect(text).toContain('writes no run directory and prints no GSTACK_RESULT line');
+      expect(text).toContain(record);
+      expect(text).not.toContain('GSTACK_RESULT: skill=');
+      expect(text).not.toContain('gate list');
+      expect(text).not.toContain('decisions.jsonl');
+      expect(text).not.toContain('run.json');
+    }
+  }, 60_000);
 
   test('unattended session makes no egress call even with telemetry and artifacts sync enabled and a queue pending (plan B1)', () => {
     // Shadow bin: every helper is the real one except the egress sinks, which
