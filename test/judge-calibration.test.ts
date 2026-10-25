@@ -201,8 +201,8 @@ describe('judge calibration harness (free, stubbed provider)', () => {
 describe('committed calibration configurations and corpora', () => {
   test('comparison (1) changes only the JSON schema; prompts come from the eval builders', async () => {
     const { CALIBRATION_CONFIGS } = await import('../scripts/judge-calibration-configs');
-    expect(CALIBRATION_CONFIGS.map(config => config.id)).toEqual(['arm', 'qa-workflow', 'qa-health-rubric', 'qa-anti-refusal', 'cross-skill', 'voice', 'workflow-default']);
-    expect(CALIBRATION_CONFIGS.map(config => config.priority)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(CALIBRATION_CONFIGS.map(config => config.id)).toEqual(['arm', 'qa-workflow', 'qa-health-rubric', 'qa-anti-refusal', 'cross-skill', 'voice', 'workflow-default', 'cookie-workflow']);
+    expect(CALIBRATION_CONFIGS.map(config => config.priority)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     for (const config of CALIBRATION_CONFIGS) {
       const { jsonSchema, ...rest } = config.newOptions;
       expect(jsonSchema).toBeTruthy();
@@ -242,6 +242,10 @@ describe('committed calibration configurations and corpora', () => {
       expect(byId[id]!.verdict([qa(5, 5, 4), qa(5, 5, 3), qa(5, 5, 3)])).toBe('fail');
       expect(() => byId[id]!.validate({ ...qa(3, 3, 4), clarity: '3' })).toThrow();
     }
+    expect(byId['cookie-workflow']!.verdict([qa(4, 3, 4), qa(4, 3, 4), qa(4, 3, 4)])).toBe('pass');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 5, 4), qa(5, 5, 4), qa(3, 2, 3)])).toBe('pass');
+    expect(byId['cookie-workflow']!.verdict([qa(4, 3, 4), qa(3, 3, 4), qa(3, 3, 4)])).toBe('fail');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 2, 5), qa(5, 2, 5), qa(5, 3, 5)])).toBe('fail');
     const arm = (over_engineering: number) => ({ over_engineering, construct: over_engineering ? 'helper' : 'none', reasoning: '' });
     expect(byId.arm!.verdict([arm(0), arm(1), arm(3)])).toBe('pass');
     expect(byId.arm!.verdict([arm(1), arm(2), arm(2)])).toBe('fail');
@@ -282,18 +286,21 @@ describe('landed schemas match the recorded calibration', () => {
     expect(judgeSource).toContain('buildArmJudgePrompt(task, diff), ARM_JUDGE_MODEL, { jsonSchema: ARM_JUDGE_SCHEMA })');
   });
 
-  test('workflow transport follows the workflow-default calibration; uncalibrated configurations stay on today\'s request', () => {
+  test('workflow transport follows the workflow-default and cookie-workflow calibrations; uncalibrated configurations stay on today\'s request', () => {
     const recorded = result('workflow-default');
     expect(recorded.complete).toBe(true);
+    const cookie = result('cookie-workflow');
+    expect(cookie.complete).toBe(true);
     const registrations = [...evalSource.matchAll(/await runWorkflowJudge\(\{([\s\S]*?)\n    \}\);/g)].map(match => match[1]!);
     expect(registrations.length).toBeGreaterThan(14);
     for (const body of registrations) {
       const testName = /testName: '([^']+)'/.exec(body)![1];
       const defaultConfig = !/^\s+(?:agentCapability|model|readInput|thresholds|maxTokens|stream|effort):|\.\.\.COOKIE_WORKFLOW_JUDGE/m.test(body);
-      const expected = testName === 'ship/SKILL.md workflow' || (defaultConfig && recorded.landing.lands);
+      const expected = testName === 'ship/SKILL.md workflow' || (defaultConfig && recorded.landing.lands)
+        || (testName === 'setup-browser-cookies/SKILL.md workflow' && cookie.landing.lands);
       expect(body.includes('schemaTransport: true'), testName).toBe(expected);
       expect(body.includes('compactReasoning: true'), testName).toBe(testName === 'ship/SKILL.md workflow');
     }
-    expect(registrations.filter(body => body.includes('schemaTransport: true'))).toHaveLength(15);
+    expect(registrations.filter(body => body.includes('schemaTransport: true'))).toHaveLength(cookie.landing.lands ? 16 : 15);
   });
 });
