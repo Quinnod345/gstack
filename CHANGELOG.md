@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**The setup-browser-cookies workflow judge now has a preregistered calibration corpus, and its structured-output calibration is recorded as held, so the judge stays on today's request (GSTA-91).** In train-4 gate 40173759210, the cookie judge (claude-sonnet-5-5, free-text transport) returned JSON with an unescaped quote. The repo's fix for that shape is the JSON-schema transport, and `test/fixtures/judge-calibration/README.md` lets a configuration switch only after a calibration lands. The cookie configuration had no corpus until now. Its comparison-1 run removed the parse errors (old 2 of 144 samples, new 0 of 72) and matched or improved every other measure. It is held on one landing condition: a new false pass on a07. a07 scored 4/4/4 on all three new samples and on all three `old-b` samples. `old-a`'s a07 panel is incomplete because one old sample returned invalid JSON, and false passes are counted against `old-a` alone, so the result counts against the new request only.
+
+### Tests
+- `test/fixtures/judge-calibration/cookie-workflow/`: 24 items. p01 is the production bundle (`buildCookieWorkflowJudgeInput`); a02 and a05 are real earlier revisions; the rest are hand-edited variants rendered by the same builder. Labels were preregistered and committed before any request with the schema was sent. A separate run (openai/gpt-6.1-sol) then labeled every item blind, and a third reviewer (google/gemini-4-argon) adjudicated the two disagreements: a01 kept pass, a08 changed to fail. `runs/` holds every sample and the result. The cost was 216 calls and $2.81, priced in `manifest.json` before dispatch as a separately funded entry.
+- `scripts/judge-calibration-configs.ts`: the `cookie-workflow` configuration builds prompts with `buildWorkflowJudgePrompt(COOKIE_WORKFLOW_JUDGE, …)` and uses the eval's median floors of 4/3/4. Its new request differs from the old one only by `WORKFLOW_JUDGE_RESPONSE_SCHEMA`.
+- `test/judge-calibration.test.ts` covers the new configuration and its pass rule. The wiring test now requires the cookie registration to send the schema exactly when the recorded cookie calibration lands. It doesn't land, so the registration stays unchanged and 15 workflow registrations use the schema.
+
+### Gate integrity
+- No judge request, rubric, threshold, sample count, landing rule or case changed. The cookie judge keeps its free-text request. No gate exception is proposed.
+
 ## [1.91.216.0] - 2026-10-25
 
 **/sync-gbrain refuses an active autopilot before it touches the brain's source list (#3360, part 2; ported from #3362 by @exGeni).** The code stage checked for a running `gbrain autopilot` only right before its destructive walk. By then it had already cleaned up legacy sources, renamed a source and run `gbrain sources add`, so a refused run still registered a source it never synced.
