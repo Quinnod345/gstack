@@ -10,6 +10,7 @@
 # Optional: branch, outcome, duration_s, session, ts.
 # Validation failure → skip silently (non-blocking).
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GSTACK_BUN_CONFIG=NUL ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
 . "$(dirname "$0")/gstack-state-root.sh" 2>/dev/null || { echo "$0: cannot resolve the gstack state root: $(dirname "$0")/gstack-state-root.sh is missing. fix: reinstall with ./setup or /gstack-upgrade (docs/state-root.md)" >&2; exit 1; }
@@ -19,17 +20,23 @@ mkdir -p "$GSTACK_HOME/projects/$SLUG"
 
 INPUT="$1"
 
-# Validate: input must be parseable JSON with required fields
-if ! printf '%s' "$INPUT" | bun --no-env-file --config=/dev/null -e "
-  const j = JSON.parse(await Bun.stdin.text());
-  if (!j.skill || !j.event) process.exit(1);
-" 2>/dev/null; then
-  exit 0  # skip silently, non-blocking
-fi
+# Validate: input must be parseable JSON with required fields. Invalid input
+# exits 3; any other non-zero exit means Bun itself failed (#3415).
+VALIDATE_RC=0
+printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
+  let j;
+  try { j = JSON.parse(await Bun.stdin.text()); } catch { process.exit(3); }
+  if (!j || !j.skill || !j.event) process.exit(3);
+" || VALIDATE_RC=$?
+case "$VALIDATE_RC" in
+  0) ;;
+  3) exit 0 ;;  # skip silently, non-blocking
+  *) echo "gstack-timeline-log: bun exited $VALIDATE_RC before the event was validated; nothing was logged" >&2; exit "$VALIDATE_RC" ;;
+esac
 
 # Inject timestamp if not present
-if ! printf '%s' "$INPUT" | bun --no-env-file --config=/dev/null -e "const j=JSON.parse(await Bun.stdin.text()); if(!j.ts) process.exit(1)" 2>/dev/null; then
-  INPUT=$(printf '%s' "$INPUT" | bun --no-env-file --config=/dev/null -e "
+if ! printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "const j=JSON.parse(await Bun.stdin.text()); if(!j.ts) process.exit(1)" 2>/dev/null; then
+  INPUT=$(printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const j = JSON.parse(await Bun.stdin.text());
     j.ts = new Date().toISOString();
     console.log(JSON.stringify(j));
