@@ -17,6 +17,36 @@
 - `test/design-craft.test.ts`: every tell with its count; a finished page, inlined Pretext, a `100vh` line with its `100dvh` fallback, discount copy and in-page anchors stay clean; look-alike attributes, encoded markers, `!important` and reversed fallbacks; skip links judged by position and target in any language; the craft section's banned words and names all flagged; CLI exit codes.
 - `design-html-slop-gate` also requires the craft check to run once or twice; the design-html carve guard requires the craft section read.
 
+## [1.91.218.0] - 2026-10-25
+
+**`gstack-team-init required` now blocks skills when its gate can't run, instead of letting them through.** Issue #3319 (exGeni): the required-mode Skill hook is a `node -e` launcher. On a teammate's Mac or Linux machine without Node.js, the shell exits 127 with nothing on stdout. If `.claude/hooks/check-gstack.cjs` is missing, node exits 1. Claude Code treats any exit other than 0 or 2 as a non-blocking error, so in both cases the Skill call went ahead on exactly the machine the gate is for. A live Claude Code 2.1.310 session with node off PATH and no gstack install ran the skill.
+
+### Fixed
+- **`bin/gstack-team-init`**: the check-gstack handler is registered with `"onFailure": "block"`, Claude Code's documented fail-closed switch (2.1.295+). A launcher that can't start, or exits with any code other than 0 or 2, now blocks the Skill call. The reason shown is `blocking because onFailure is "block"` plus the shell's `node: not found` (or node's `Cannot find module …check-gstack.cjs`). Exit 2 (deny) and exit 0 (allow) are unchanged. Re-running `required` upgrades an existing registration in place, and the manual-registration fallback names the field.
+- The required CLAUDE.md section tells the agent what those two block reasons mean (install Node.js; the hook file is missing) and not to work around them. `required` prints that every developer needs node on PATH and Claude Code 2.1.295+, and the README says the same.
+
+### Compatibility
+- Measured with a live `claude -p` Skill call per version. 2.1.295 and 2.1.310 block when node is missing or the hook file is gone, still deny with exit 2 when gstack is absent, and still run the skill when gstack is installed. 2.1.294 ignores the unknown field without rejecting the settings file: the hook still loads and denies as before, and a machine without node is still let through there, as it was before this change.
+- Copilot CLI documents command `preToolUse` hooks as already failing closed on a crash or non-zero exit, so this change does not alter its outcome. Its handling of the extra field was not measured (no Copilot login on the test machine).
+
+### Tests
+- `test/gstack-team-init-hook-schema.test.ts`: the handler is `{ type, command, onFailure: 'block' }`. The registered command exits 127 with no stdout when node is off PATH and 1 when check-gstack.cjs is missing, the failures only `onFailure` turns into a block. Re-running upgrades a handler registered without the field to exactly one handler with it.
+- `test/team-init-hook-shell-neutral.test.ts`: through the platform's default shell, the command without node exits neither 0 nor 2 with empty stdout, and the bin registers the handler with `onFailure: 'block'`. The PowerShell case and its retries are unchanged.
+- `test/team-mode.test.ts`: the legacy-upgrade assertion pins the new field.
+
+### Gate integrity
+- One gate edit, and it tightens the gate: the required-mode Skill hook goes from fail-open to fail-closed when its launcher fails. Nothing that used to block now allows. Negative controls: with `onFailure` removed from the bin, 4 tests fail (the three new registration and upgrade tests plus the team-mode pin); with it dropped only from the in-place upgrade path, 2 fail. The live runs with gstack installed (2.1.294, 2.1.310) still run the skill, so the allow path is not broken. No threshold, budget, timeout, retry or trial count changed.
+
+## [1.91.217.0] - 2026-10-25
+
+**Windows free tests now also run on every push to main.** `windows-free-tests.yml` ran on pull requests and dispatch only: 194 PR runs, 6 dispatches and 0 pushes in its last 200 runs. Merge trains dispatch only `free-tests.yml` on the train branch. So no Windows run ever saw a train's combined tree or main after a merge, and a Windows break caused by two individually green PRs only surfaced on the next unrelated PR. Found while working on GSTA-68.
+
+### Fixed
+- **`.github/workflows/windows-free-tests.yml`**: adds `push: branches: [main]`, the same trigger free-tests.yml already has. The run uses the existing per-run concurrency group, and `record_durations` stays dispatch-only (on a push, `inputs.record_durations` is empty, so the lane runs and the recorder skips). Cost: about 40 job-minutes on GitHub's free `windows-latest` runners per merge.
+
+### Tests
+- `test/windows-native-workflows.test.ts` pins the new trigger set and requires the push trigger to be limited to main.
+
 ## [1.91.216.0] - 2026-10-25
 
 **/sync-gbrain refuses an active autopilot before it touches the brain's source list (#3360, part 2; ported from #3362 by @exGeni).** The code stage checked for a running `gbrain autopilot` only right before its destructive walk. By then it had already cleaned up legacy sources, renamed a source and run `gbrain sources add`, so a refused run still registered a source it never synced.
