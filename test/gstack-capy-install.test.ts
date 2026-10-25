@@ -15,6 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const REPO = path.resolve(import.meta.dir, '..');
+const BUN_DEFAULT = fs.readFileSync(path.join(REPO, 'bin/gstack-bun-version.sh'), 'utf8').match(/^GSTACK_BUN_DEFAULT="([^"]+)"$/m)![1];
 const bases: string[] = [];
 afterEach(() => { for (const b of bases.splice(0)) fs.rmSync(b, { recursive: true, force: true }); });
 
@@ -211,17 +212,17 @@ describe('gstack-capy-install', () => {
     const f = fixture({ bun: '1.3.14' });
     const zip = path.join(f.base, 'bad.zip');
     fs.mkdirSync(path.join(f.base, 'z/bun-linux-x64'), { recursive: true });
-    script(path.join(f.base, 'z/bun-linux-x64/bun'), ['echo 1.4.3']);
+    script(path.join(f.base, 'z/bun-linux-x64/bun'), [`echo ${BUN_DEFAULT}`]);
     expect(sh(`cd "${f.base}/z" && zip -qr "${zip}" bun-linux-x64`).status).toBe(0);
     const r = run(f, [], { STUB_CURL_ZIP: zip });
     expect(r.status).toBe(3);
     expect(r.stderr).toContain('SHA-256 mismatch');
     expect(r.stderr).toContain('nothing installed');
     expect(f.calls().filter(l => l.startsWith('curl '))).toHaveLength(1);
-    expect(f.calls()[0]).toContain('https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-linux-x64');
+    expect(f.calls()[0]).toContain(`https://github.com/oven-sh/bun/releases/download/bun-v${BUN_DEFAULT}/bun-linux-x64`);
     expect(fs.existsSync(path.join(f.home, '.bun/bin/bun'))).toBe(false);
-    expect(fs.existsSync(store(f, '1.4.3'))).toBe(false);
-    expect(fs.readdirSync(path.dirname(store(f, '1.4.3')))).toEqual([]);
+    expect(fs.existsSync(store(f, BUN_DEFAULT))).toBe(false);
+    expect(fs.readdirSync(path.dirname(store(f, BUN_DEFAULT)))).toEqual([]);
     expect(f.calls().some(l => l.startsWith('setup '))).toBe(false);
   });
 
@@ -230,16 +231,16 @@ describe('gstack-capy-install', () => {
     const target = sh('grep -q avx2 /proc/cpuinfo && echo linux-x64 || echo linux-x64-baseline').stdout.trim();
     const zip = path.join(f.base, 'good.zip');
     fs.mkdirSync(path.join(f.base, `z/bun-${target}`), { recursive: true });
-    script(path.join(f.base, `z/bun-${target}/bun`), ['echo 1.4.3']);
+    script(path.join(f.base, `z/bun-${target}/bun`), [`echo ${BUN_DEFAULT}`]);
     expect(sh(`cd "${f.base}/z" && zip -qr "${zip}" bun-${target}`).status).toBe(0);
-    trustZip(f.root, '1.4.3', target, zip);
+    trustZip(f.root, BUN_DEFAULT, target, zip);
     const r = run(f, ['--for', 'autoplan'], { STUB_CURL_ZIP: zip });
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(r.stdout).toContain('installing bun 1.4.3 from its release archive');
-    expect(r.stdout).toContain(`bun 1.4.3 installed at ${store(f, '1.4.3')}/bun`);
-    expect(r.stdout).toContain(`bun 1.4.3 at ${store(f, '1.4.3')}/bun (gstack's install default, from gstack's runtime store;`);
+    expect(r.stdout).toContain(`installing bun ${BUN_DEFAULT} from its release archive`);
+    expect(r.stdout).toContain(`bun ${BUN_DEFAULT} installed at ${store(f, BUN_DEFAULT)}/bun`);
+    expect(r.stdout).toContain(`bun ${BUN_DEFAULT} at ${store(f, BUN_DEFAULT)}/bun (gstack's install default, from gstack's runtime store;`);
     expect(fs.existsSync(path.join(f.home, '.bun/bin/bun'))).toBe(false);
-    expect(f.calls().filter(l => l.startsWith('env '))).toEqual(Array(2).fill('env GSTACK_SKIP_PLAYWRIGHT= GSTACK_SKIP_FONTS= bun=1.4.3'));
+    expect(f.calls().filter(l => l.startsWith('env '))).toEqual(Array(2).fill(`env GSTACK_SKIP_PLAYWRIGHT= GSTACK_SKIP_FONTS= bun=${BUN_DEFAULT}`));
     expect(lastLine(r.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
   });
 
@@ -333,15 +334,15 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
 
   test.skipIf(process.platform !== 'linux')('after installing Bun the launch line carries its PATH; a second run reuses it (one download) and skips setup on the same HEAD', () => {
     const f = fixture({ bun: '1.3.14' });
-    const zip = zipBun(f, '1.4.3');
-    const bunDir = store(f, '1.4.3');
+    const zip = zipBun(f, BUN_DEFAULT);
+    const bunDir = store(f, BUN_DEFAULT);
     const first = run(f, ['--for', 'autoplan'], { STUB_CURL_ZIP: zip });
     expect(first.status, first.stdout + first.stderr).toBe(0);
     expect(first.stdout).toContain(`GSTACK_LAUNCH: PATH=${bunDir}:$PATH GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=${path.join(f.home, '.gstack-state')} GSTACK_EPHEMERAL=1 GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=`);
     expect(first.stdout).toContain(`GSTACK_LAUNCH_PATH: ${bunDir}`);
     const second = run(f, ['--for', 'autoplan'], { STUB_CURL_ZIP: zip });
     expect(second.status, second.stdout + second.stderr).toBe(0);
-    expect(second.stdout).toContain(`bun 1.4.3 at ${bunDir}/bun`);
+    expect(second.stdout).toContain(`bun ${BUN_DEFAULT} at ${bunDir}/bun`);
     expect(second.stdout).toContain(`GSTACK_LAUNCH: PATH=${bunDir}:$PATH `);
     expect(f.calls().filter(l => l.startsWith('curl '))).toHaveLength(1);
     expect(f.calls().filter(l => l.startsWith('setup '))).toHaveLength(2);
@@ -477,19 +478,19 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
     expectLaunch(outside, `${bi}/bin/bun`);
   });
 
-  // Integration item 1: gstack's own CI pins 1.4.2 on every lane and 1.4.3 on
-  // the install-default job. They are alternatives, so the real checkout as
-  // --project certifies with either Bun; a repo whose CI pins only 1.4.3 still
-  // refuses 1.4.2.
-  test('the real gstack checkout as --project with a separate global install certifies with ~/.bun 1.4.2 and with 1.4.3; nothing is downloaded', () => {
-    for (const version of ['1.4.2', '1.4.3']) {
+  // Integration item 1: gstack's own CI pins 1.4.2 on every lane and the
+  // install default on the install-default job. They are alternatives, so the
+  // real checkout as --project certifies with either Bun; a repo whose CI pins
+  // only 1.4.3 still refuses 1.4.2.
+  test('the real gstack checkout as --project with a separate global install certifies with ~/.bun 1.4.2 and with the install default; nothing is downloaded', () => {
+    for (const version of ['1.4.2', BUN_DEFAULT]) {
       const f = fixture({ bun: '1.3.14' });
       withPins(f);
       realBun(path.join(f.home, '.bun/bin/bun'), version);
       const r = run(f, ['--for', 'review', '--project', REPO], {}, f.home);
       expect(r.status, r.stdout + r.stderr).toBe(0);
       expect(r.stderr).not.toContain('RUNTIME_PIN_CONFLICT');
-      expect(r.stdout).toContain(`bun ${version} at ${f.home}/.bun/bin/bun ($BUN_INSTALL/bin; satisfies gstack's supported minimum 1.4.2 and the project's CI pins (alternatives: 1.4.2 1.4.3))`);
+      expect(r.stdout).toContain(`bun ${version} at ${f.home}/.bun/bin/bun ($BUN_INSTALL/bin; satisfies gstack's supported minimum 1.4.2 and the project's CI pins (alternatives: 1.4.2 ${BUN_DEFAULT}))`);
       expect(f.calls().some(l => l.startsWith('curl '))).toBe(false);
       expect(verdictFor(f, r)).toMatchObject({ project: REPO, bun_version: version, bun_rule: 'BUN_INSTALL' });
       expect(run(f, ['--check', '--for', 'review', '--project', REPO], {}, f.home).status).toBe(0);
@@ -499,9 +500,9 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
   test('CI alternatives with nothing installed: the install default is published when it is one of them; a gbrain-like repo (CI 1.4.3 only) refuses ~/.bun 1.4.2 and installs 1.4.3', () => {
     const f = fixture({ bun: '1.3.14' });
     withPins(f);
-    const r = run(f, ['--for', 'review', '--project', REPO], { STUB_CURL_ZIP: zipFor(f, '1.4.3') }, f.home);
+    const r = run(f, ['--for', 'review', '--project', REPO], { STUB_CURL_ZIP: zipFor(f, BUN_DEFAULT) }, f.home);
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(r.stdout).toContain(`bun 1.4.3 at ${store(f, '1.4.3')}/bun (`);
+    expect(r.stdout).toContain(`bun ${BUN_DEFAULT} at ${store(f, BUN_DEFAULT)}/bun (`);
     const g = fixture({ bun: '1.3.14' });
     withPins(g);
     realBun(path.join(g.home, '.bun/bin/bun'), '1.4.2');
@@ -546,13 +547,13 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
   test('a broken store entry is repaired in place: the version directory is never moved aside, bun is renamed over its predecessor and bunx is published', () => {
     const f = fixture({ bun: '1.3.14' });
     withPins(f);
-    const dir = store(f, '1.4.3');
+    const dir = store(f, BUN_DEFAULT);
     realBun(path.join(dir, 'bun'), '1.4.0');
     const inode = fs.statSync(dir).ino;
-    const r = run(f, ['--for', 'autoplan'], { BUN_INSTALL: '', STUB_CURL_ZIP: zipFor(f, '1.4.3') }, f.base);
+    const r = run(f, ['--for', 'autoplan'], { BUN_INSTALL: '', STUB_CURL_ZIP: zipFor(f, BUN_DEFAULT) }, f.base);
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(fs.statSync(dir).ino).toBe(inode);
-    expect(sh(`"${dir}/bun" --version`).stdout.trim()).toBe('1.4.3');
+    expect(sh(`"${dir}/bun" --version`).stdout.trim()).toBe(BUN_DEFAULT);
     expect(fs.readlinkSync(path.join(dir, 'bunx'))).toBe('bun');
     expect(fs.readdirSync(path.dirname(dir)).filter(n => n.startsWith('.tmp'))).toEqual([]);
   });
@@ -588,10 +589,10 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
     const unset = run(f, ['--check', '--for', 'autoplan'], { BUN_INSTALL: '' });
     expect(unset.status, unset.stdout + unset.stderr).toBe(0);
     expectLaunch(unset, `${bi}/bin/bun`);
-    realBun(path.join(store(f, '1.4.3'), 'bun'), '1.4.3');
+    realBun(path.join(store(f, BUN_DEFAULT), 'bun'), BUN_DEFAULT);
     const newer = run(f, ['--check', '--for', 'autoplan'], { BUN_INSTALL: bi });
     expect(newer.status, newer.stdout + newer.stderr).toBe(0);
-    expect(newer.stdout).toContain(`note: the recorded bun 1.4.2 at ${bi}/bin/bun stays certified; bun 1.4.3 at ${store(f, '1.4.3')}/bun (default) would now resolve first; run ${f.root}/bin/gstack-capy-install --for autoplan to record the current resolution`);
+    expect(newer.stdout).toContain(`note: the recorded bun 1.4.2 at ${bi}/bin/bun stays certified; bun ${BUN_DEFAULT} at ${store(f, BUN_DEFAULT)}/bun (default) would now resolve first; run ${f.root}/bin/gstack-capy-install --for autoplan to record the current resolution`);
     expectLaunch(newer, `${bi}/bin/bun`);
     expect(newer.stdout).not.toContain('BUN_RESOLUTION_DRIFT');
     expect(run(f, ['--for', 'autoplan'], { BUN_INSTALL: bi }).status).toBe(0);
@@ -622,7 +623,7 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: one resoluti
     expect(f.calls().some(l => l.startsWith('curl ') || l.startsWith('setup '))).toBe(false);
     const r = run(f, ['--for', 'autoplan'], { GSTACK_BUN_INSTALL_VERSION: '1.4.2', STUB_CURL_ZIP: zipFor(f, '1.4.2') });
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(r.stdout).toContain('install version 1.4.2 from GSTACK_BUN_INSTALL_VERSION (default 1.4.3)');
+    expect(r.stdout).toContain(`install version 1.4.2 from GSTACK_BUN_INSTALL_VERSION (default ${BUN_DEFAULT})`);
     expect(r.stdout).toContain(`bun 1.4.2 at ${store(f, '1.4.2')}/bun (gstack's install default, from gstack's runtime store;`);
   });
 
@@ -662,8 +663,8 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     const state = path.join(f.base, 'custom-state');
     const storeDir = path.join(state, 'runtimes/bun');
     realBun(path.join(storeDir, '1.4.2/bun'), '1.4.2');
-    realBun(path.join(storeDir, '1.4.3/bun'), '1.4.3');
-    const a = repo(f, 'a', '1.4.2'), b = repo(f, 'b', '1.4.3'), c = repo(f, 'c');
+    realBun(path.join(storeDir, `${BUN_DEFAULT}/bun`), BUN_DEFAULT);
+    const a = repo(f, 'a', '1.4.2'), b = repo(f, 'b', BUN_DEFAULT), c = repo(f, 'c');
     for (const dir of [a, b, c]) {
       const r = run(f, ['--for', 'review'], { GSTACK_STATE_ROOT: state }, dir);
       expect(r.status, r.stdout + r.stderr).toBe(0);
@@ -673,14 +674,14 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     expect(shim).toContain(`store='${storeDir}'`);
     const outside = path.join(f.base, 'outside');
     fs.mkdirSync(outside);
-    for (const [dir, want] of [[a, '1.4.2'], [b, '1.4.3'], [a, '1.4.2'], [c, '1.4.3'], [outside, '1.4.3'], [b, '1.4.3']] as const) {
+    for (const [dir, want] of [[a, '1.4.2'], [b, BUN_DEFAULT], [a, '1.4.2'], [c, BUN_DEFAULT], [outside, BUN_DEFAULT], [b, BUN_DEFAULT]] as const) {
       const r = fresh(f, dir, 'bun --version');
       expect(r.stdout.trim(), `${dir}\n${r.stderr}`).toBe(want);
       expect(r.stderr).toBe('');
     }
     const explained = fresh(f, path.join(a), 'mkdir -p sub && cd sub && bun --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' });
     expect(explained.stderr).toMatch(new RegExp(`^gstack bun shim: project=${a} record=${state}/install-verdicts/[0-9a-f]{64}/[0-9a-f]{64}\\.json chose=${storeDir}/1\\.4\\.2/bun rule=record\\n$`));
-    expect(fresh(f, outside, 'bun --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' }).stderr).toBe(`gstack bun shim: project=none record=none chose=${storeDir}/1.4.3/bun rule=default\n`);
+    expect(fresh(f, outside, 'bun --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' }).stderr).toBe(`gstack bun shim: project=none record=none chose=${storeDir}/${BUN_DEFAULT}/bun rule=default\n`);
     const bunx = fresh(f, a, 'bunx --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' });
     expect(bunx.stderr).toContain(`chose=${storeDir}/1.4.2/bun rule=record`);
     const unrecordedPinned = repo(f, 'd', '1.4.2');
@@ -690,7 +691,7 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     // Integration item 6: an unrecorded, unpinned repo falls through quietly;
     // only GSTACK_BUN_SHIM_EXPLAIN=1 names the missing record.
     const e = fresh(f, unrecorded, 'bun --version');
-    expect([e.stdout.trim(), e.stderr]).toEqual(['1.4.3', '']);
+    expect([e.stdout.trim(), e.stderr]).toEqual([BUN_DEFAULT, '']);
     expect(fresh(f, unrecorded, 'bun --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' }).stderr).toContain(`gstack bun shim: ${unrecorded} has no recorded Bun and no exact pin; run ${f.root}/bin/gstack-capy-install --check here to record one\n`);
   });
 
@@ -700,7 +701,7 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     fs.mkdirSync(path.join(f.home, '.capy/system'), { recursive: true });
     const state = path.join(f.base, 'state');
     const storeDir = path.join(state, 'runtimes/bun');
-    realBun(path.join(storeDir, '1.4.3/bun'), '1.4.3');
+    realBun(path.join(storeDir, `${BUN_DEFAULT}/bun`), BUN_DEFAULT);
     expect(run(f, ['--for', 'autoplan'], { GSTACK_STATE_ROOT: state }, f.base).status).toBe(0);
     const pwned = path.join(f.base, 'pwned');
     const payload = (dir: string) => script(path.join(dir, 'bun'), [`touch "${pwned}"`, 'echo payload']);
@@ -709,15 +710,15 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     write(path.join(evilRepo, '.bun-version'), '../../../repo/payload\n');
     expect(fs.existsSync(path.join(storeDir, '../../../repo/payload/bun'))).toBe(true);
     const t = fresh(f, evilRepo, 'bun --version');
-    expect(t.stdout.trim()).toBe('1.4.3');
+    expect(t.stdout.trim()).toBe(BUN_DEFAULT);
     expect(t.stderr).toContain(`${evilRepo} pins bun ../../../repo/payload, which is not in gstack's runtime store`);
     payload(path.join(f.base, 'evil'));
     fs.symlinkSync(path.join(f.base, 'evil'), path.join(storeDir, '1.4.9'));
     const escape = fresh(f, repo(f, 'escape', '1.4.9'), 'bun --version');
-    expect(escape.stdout.trim()).toBe('1.4.3');
+    expect(escape.stdout.trim()).toBe(BUN_DEFAULT);
     write(path.join(storeDir, '1.4.8/bun'), '#!/bin/sh\n# gstack-bun-shim: gstack-owned; delete this file to remove it\necho loop\n', 0o755);
     const marked = fresh(f, repo(f, 'marked', '1.4.8'), 'bun --version');
-    expect(marked.stdout.trim()).toBe('1.4.3');
+    expect(marked.stdout.trim()).toBe(BUN_DEFAULT);
     expect(fs.existsSync(pwned)).toBe(false);
   });
 
@@ -732,7 +733,7 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     const r = run(f, ['--for', 'autoplan'], { BUN_INSTALL: '' }, outside);
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).toContain(`bun 1.4.2 at ${f.home}/.bun/bin/bun (~/.bun/bin;`);
-    expect(fs.existsSync(path.join(f.home, '.gstack-state/runtimes/bun/1.4.3'))).toBe(false);
+    expect(fs.existsSync(path.join(f.home, `.gstack-state/runtimes/bun/${BUN_DEFAULT}`))).toBe(false);
     for (const dir of [outside, f.root]) {
       const e = fresh(f, dir, 'bun --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' });
       expect(e.stdout.trim(), e.stderr).toBe('1.4.2');
@@ -752,13 +753,13 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     const f = fixture({ bun: '1.3.14' });
     fs.mkdirSync(path.join(f.home, '.capy/system'), { recursive: true });
     const state = path.join(f.base, "it's state");
-    realBun(path.join(state, 'runtimes/bun/1.4.3/bun'), '1.4.3');
+    realBun(path.join(state, `runtimes/bun/${BUN_DEFAULT}/bun`), BUN_DEFAULT);
     expect(run(f, ['--for', 'autoplan'], { GSTACK_STATE_ROOT: state }, f.base).status).toBe(0);
     expect(sh(`sh -n "${f.home}/.local/bin/bun"`).status).toBe(0);
     const r = fresh(f, f.base, 'bun --version && bunx --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout.trim().split('\n')[0]).toBe('1.4.3');
-    expect(r.stderr.split(`chose=${state}/runtimes/bun/1.4.3/bun rule=record`), r.stderr).toHaveLength(3);
+    expect(r.stdout.trim().split('\n')[0]).toBe(BUN_DEFAULT);
+    expect(r.stderr.split(`chose=${state}/runtimes/bun/${BUN_DEFAULT}/bun rule=record`), r.stderr).toHaveLength(3);
   });
 
   test('a foreign ~/.local/bin/bun or a dangling link is never touched; GSTACK_BUN_SHIM=0 writes nothing; a rerun rewrites only gstack\'s own file', () => {
@@ -789,8 +790,8 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
   test('the shim adds little over the Bun it runs (fixture timing bound)', () => {
     const f = fixture();
     fs.mkdirSync(path.join(f.home, '.capy/system'), { recursive: true });
-    const storeBun = path.join(f.home, '.gstack-state/runtimes/bun/1.4.3/bun');
-    realBun(storeBun, '1.4.3');
+    const storeBun = path.join(f.home, `.gstack-state/runtimes/bun/${BUN_DEFAULT}/bun`);
+    realBun(storeBun, BUN_DEFAULT);
     expect(run(f).status).toBe(0);
     const time = (cmd: string) => {
       const samples = Array.from({ length: 7 }, () => { const t = performance.now(); fresh(f, f.base, cmd); return performance.now() - t; }).sort((x, y) => x - y);
