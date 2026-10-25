@@ -135,12 +135,17 @@ is saved in a rescue ref instead of being left as conflict markers:
 cd -- "${INSTALL_DIR:?INSTALL_DIR is not set: re-run Step 2 and substitute the printed path}" || exit 1
 { [ -f VERSION ] && [ -f setup ] && [ -f bin/gstack-config ] && _p=$(git rev-parse --show-prefix 2>/dev/null) && [ -z "$_p" ] && [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ]; } || { echo "ERROR: $INSTALL_DIR is not a gstack checkout; nothing was changed. Re-run Step 2." >&2; exit 1; }
 git fetch origin
+# The update channel (docs/releases.md): origin/stable, the weekly release, for
+# a team install; origin/main otherwise. The helper fetches the channel ref
+# (single-branch clones do not get stable from a plain fetch) and names it.
+UPSTREAM_REF=$(bash bin/gstack-update-channel.sh --fetch-ref 2>/dev/null) || UPSTREAM_REF=origin/main
+echo "UPSTREAM_REF=${UPSTREAM_REF:=origin/main}"
 # Same pre-advance check as the auto-updater: the incoming release's Bun floor,
 # judged by bash whatever this tool shell is (zsh does not word-split).
-HOLD=$(bash -c '. bin/gstack-bun-version.sh && gstack_bun_incoming_hold . origin/main' 2>/dev/null) && { case "$HOLD" in bun-version-unreadable*) echo "BUN_VERSION_UNREADABLE: $HOLD; nothing was changed" >&2 ;; *) echo "BUN_TOO_OLD: $HOLD; nothing was changed" >&2 ;; esac; exit 1; }
+HOLD=$(bash -c '. bin/gstack-bun-version.sh && gstack_bun_incoming_hold . "$1"' _ "$UPSTREAM_REF" 2>/dev/null) && { case "$HOLD" in bun-version-unreadable*) echo "BUN_VERSION_UNREADABLE: $HOLD; nothing was changed" >&2 ;; *) echo "BUN_TOO_OLD: $HOLD; nothing was changed" >&2 ;; esac; exit 1; }
 PRE_UPGRADE_COMMIT=$(git rev-parse HEAD)
 echo "PRE_UPGRADE_COMMIT=$PRE_UPGRADE_COMMIT"
-FF=$(bash bin/gstack-ff-update . origin/main); FF_RC=$?
+FF=$(bash bin/gstack-ff-update . "$UPSTREAM_REF"); FF_RC=$?
 echo "$FF"
 case "$FF_RC" in
   0) if ./setup --refresh-registered; then echo "FF_OK"; else echo "SETUP_FAILED: git update succeeded; stop and inspect setup output (previous commit: $PRE_UPGRADE_COMMIT)" >&2; exit 1; fi ;;
@@ -176,8 +181,8 @@ On `SETUP_FAILED`, STOP; keep user changes and report the recovery commit. There
 --hard` DESTROYS things: a clean tree with unpushed local commits still loses
 those commits. Gate it:
 
-1. Run `git status --porcelain` and `git rev-list origin/main..HEAD --oneline`
-   in `$INSTALL_DIR`.
+1. Run `git status --porcelain` and `git rev-list "${UPSTREAM_REF:-origin/main}"..HEAD --oneline`
+   in `$INSTALL_DIR` (`UPSTREAM_REF` is the channel ref the fast-forward block printed).
 2. If BOTH are empty, the reset is provably safe — run the fallback block
    below without asking.
 3. Otherwise ask via AskUserQuestion (one-way door — destructive), listing
@@ -193,7 +198,7 @@ cd -- "${INSTALL_DIR:?INSTALL_DIR is not set: re-run Step 2 and substitute the p
 # Regenerable render-footprint dirt (setup re-renders it) never goes into the stash.
 git checkout -- 'SKILL.md' '*/SKILL.md' '*/sections/*.md' 2>/dev/null || true
 STASH_OUTPUT=$(git stash 2>&1)
-git reset --hard origin/main
+git reset --hard "${UPSTREAM_REF:-origin/main}"
 ./setup --refresh-registered
 ```
 If `$STASH_OUTPUT` contains "Saved working directory", warn the user: "Note: local changes were stashed (any modified generated SKILL.md/sections files were discarded first — they regenerate on setup). Run `git stash pop` in the skill directory to restore your own changes."

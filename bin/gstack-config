@@ -80,6 +80,9 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # ─── Updates ─────────────────────────────────────────────────────────
 # auto_upgrade: false       # true = silently upgrade on session start
 # update_check: true        # false = suppress version check notifications
+# update_channel: auto      # auto   = stable when team_mode is true, else main
+#                           # stable = the weekly tagged release (refs/heads/stable)
+#                           # main   = every merge to main (docs/releases.md)
 #
 # ─── Skill naming ────────────────────────────────────────────────────
 # skill_prefix: false       # true = namespace skills as /gstack-qa, /gstack-ship
@@ -284,6 +287,7 @@ lookup_default() {
     telemetry) echo "off" ;;
     auto_upgrade) echo "false" ;;
     update_check) echo "true" ;;
+    update_channel) echo "auto" ;; # auto | stable | main — bin/gstack-update-channel.sh resolves auto (docs/releases.md)
     skill_prefix) echo "false" ;;
     explain_level) echo "default" ;;
     plan_mode_preamble) echo "on" ;; # on | off — off drops the plan-mode preamble on the next ./setup (#3168)
@@ -841,6 +845,11 @@ $_gstack_legacy_root"
           echo "Error: $KEY '$VALUE' not recognized. Valid values: local, ubicloud. Existing value left unchanged." >&2
           exit 1
         fi ;;
+      update_channel)
+        case "$VALUE" in auto|stable|main) ;; *)
+          echo "Error: update_channel '$VALUE' not recognized. Valid values: auto, stable, main. Existing value left unchanged. (https://github.com/garrytan/gstack/blob/main/docs/releases.md#channels)" >&2
+          exit 1 ;;
+        esac ;;
     esac
     # design_detector_install_prompted records "never ask again" for the one-time
     # engine install offer. Rejecting a typo keeps the offer from silently coming
@@ -1025,7 +1034,7 @@ $_gstack_legacy_root"
     echo ""
     echo "# ─── Active values (including defaults for unset keys) ───"
     report_root_disagreement
-    for KEY in proactive routing_declined telemetry auto_upgrade update_check \
+    for KEY in proactive routing_declined telemetry auto_upgrade update_check update_channel \
                skill_prefix explain_level plan_mode_preamble \
                codex_reviews gstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted artifacts_sync_removals plan_tune_hooks \
@@ -1050,7 +1059,7 @@ $_gstack_legacy_root"
     ;;
   defaults)
     echo "# gstack-config defaults"
-    for KEY in proactive routing_declined telemetry auto_upgrade update_check \
+    for KEY in proactive routing_declined telemetry auto_upgrade update_check update_channel \
                skill_prefix explain_level plan_mode_preamble \
                codex_reviews gstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted artifacts_sync_removals plan_tune_hooks \

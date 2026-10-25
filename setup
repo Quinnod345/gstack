@@ -4098,6 +4098,10 @@ if [ "$TEAM_MODE" -eq 1 ]; then
   else
     log "Team mode enabled (auto-update hook pending a stable install — re-run ./setup after installing globally)."
   fi
+  case "$("$GSTACK_CONFIG" get update_channel 2>/dev/null || echo auto)" in
+    main) log "  Channel: main (every merge; gstack-config set update_channel stable follows the weekly release instead)" ;;
+    *)    log "  Channel: stable, the weekly tagged release (gstack-config set update_channel main follows every merge; docs/releases.md)" ;;
+  esac
   log "  To disable: ./setup --no-team"
   log ""
   log "Bootstrap your repo:"
