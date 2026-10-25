@@ -322,6 +322,7 @@ echo "GSTACK_PLAN_MODE: $GSTACK_PLAN_MODE"
 # GSTACK_SESSION_KIND=spawned override must light this up too.
 [ "$_SESSION_KIND" = "spawned" ] && echo "SPAWNED_SESSION: true" || true
 [ "$_SESSION_KIND" = "unattended" ] && echo "UNATTENDED_SESSION: true" || true
+[ "$_SESSION_KIND" = "unattended" ] && [ "$SKILL_NAME" = "ship" ] && echo "UNATTENDED_SHIP: no push, no PR; Step 18 takes the handoff section; receipt at .gstack/tmp/ship-receipt.md" || true
 
 # ---------------------------------------------------------------------------
 # Artifacts sync (the former "Artifacts Sync (skill start)" fence, verbatim
@@ -647,7 +648,7 @@ if [ "$_SESSION_KIND" = "unattended" ]; then
   case "$SKILL_NAME" in
     autoplan)  _UA_RECORD="This skill writes a run directory through gstack-autoplan (plan.md, review-record.md, tasks.jsonl, decisions.jsonl, findings.jsonl, timing.json, run.json, gate.json): append each recommended choice to decisions.jsonl with kind \"auto\" and each pending one with kind \"approval\" and status \"pending\". The final approval gate is written as a gate list (gstack-gate render) and this run ENDS there with \`GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>\`." ;;
     eval-plan) _UA_RECORD="This run ENDS at the Step 4 spend approval, left pending, with \`GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>\`, where <outdir> is the pilot's --out directory. No helper writes a gate.json for this skill yet, so the parent reads the pilot report and spend ledger in <outdir>." ;;
-    ship)      _UA_RECORD="$_UA_NONE The parent reads the ship receipt in the PR body (\`gstack-ship-receipt read --pr <n> --json\`)." ;;
+    ship)      _UA_RECORD="$_UA_NONE The parent reads the ship receipt from .gstack/tmp/ship-receipt.md when nothing was pushed, and from the PR body (\`gstack-ship-receipt read --pr <n> --json\`) only once a PR exists." ;;
     review)    _UA_RECORD="$_UA_NONE The parent reads the review-log rows (\`gstack-review-read\`)." ;;
     qa)        _UA_RECORD="$_UA_NONE The parent reads the \`qa-report-*.md\` file." ;;
     *)         _UA_RECORD="$_UA_NONE The parent reads this skill's own record (docs/unattended.md)." ;;
