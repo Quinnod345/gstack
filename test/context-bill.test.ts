@@ -232,6 +232,82 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("bills an installed tree whose SKILL.md files and section dirs are symlinks into the checkout", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-installed-"));
+    // The gstack checkout lives outside the skills root, as on a real install.
+    const checkout = path.join(tmp, "checkout");
+    fs.mkdirSync(path.join(checkout, ".git"), { recursive: true });
+    for (const name of ["review", "office-hours"]) {
+      fs.mkdirSync(path.join(checkout, name, "sections"), { recursive: true });
+      fs.writeFileSync(
+        path.join(checkout, name, "SKILL.md"),
+        `---\nname: ${name}\ndescription: ${name} skill\n---\n# ${name}\n${"body ".repeat(200)}\n`,
+      );
+      fs.writeFileSync(path.join(checkout, name, "sections", "flow.md"), "s".repeat(3_000));
+    }
+    // setup's layout: a real dir per skill, SKILL.md and sections/ as links,
+    // plus a gstack/ link to the checkout itself.
+    const skills = path.join(tmp, "skills");
+    for (const name of ["review", "office-hours"]) {
+      fs.mkdirSync(path.join(skills, name), { recursive: true });
+      fs.symlinkSync(path.join(checkout, name, "SKILL.md"), path.join(skills, name, "SKILL.md"));
+      fs.symlinkSync(path.join(checkout, name, "sections"), path.join(skills, name, "sections"));
+    }
+    fs.symlinkSync(checkout, path.join(skills, "gstack"));
+    // Negative controls: a dangling SKILL.md link and a SKILL.md link to a
+    // directory are not skills.
+    fs.mkdirSync(path.join(skills, "dangling"));
+    fs.symlinkSync(path.join(checkout, "missing", "SKILL.md"), path.join(skills, "dangling", "SKILL.md"));
+    fs.mkdirSync(path.join(skills, "dirlink"));
+    fs.symlinkSync(path.join(checkout, "review", "sections"), path.join(skills, "dirlink", "SKILL.md"));
+
+    const bill = buildBill(skills);
+    expect(bill.skills.map((s) => s.name).sort()).toEqual(["office-hours", "review"]);
+    for (const s of bill.skills) {
+      const target = path.join(checkout, s.name);
+      expect(s.frontmatterBytes).toBe(frontmatterBytes(path.join(target, "SKILL.md")));
+      expect(s.skillMdBytes).toBe(fileBytes(target, "SKILL.md"));
+      // The linked sections/ dir is part of the skill's on-disk total.
+      expect(s.totalMdBytes).toBe(fileBytes(target, "SKILL.md") + fileBytes(target, "sections", "flow.md"));
+    }
+    // Every path the bill (and --exact) keys on stays under the skills root.
+    for (const file of walkMd(skills)) expect(file.startsWith(skills + path.sep)).toBe(true);
+    expect(walkMd(skills).map((f) => path.relative(skills, f)).sort()).toEqual([
+      path.join("office-hours", "SKILL.md"),
+      path.join("office-hours", "sections", "flow.md"),
+      path.join("review", "SKILL.md"),
+      path.join("review", "sections", "flow.md"),
+    ]);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("never follows a link that loops or climbs out of the root", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-escape-"));
+    // A sibling skill outside the root, reachable only through a parent link.
+    fs.mkdirSync(path.join(tmp, "outside"));
+    fs.writeFileSync(path.join(tmp, "outside", "SKILL.md"), "---\nname: outside\ndescription: d\n---\n# o\n");
+    fs.writeFileSync(path.join(tmp, "outside", "SECRET.md"), "x".repeat(10_000));
+    const root = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(root, "qa", "references"), { recursive: true });
+    fs.writeFileSync(path.join(root, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(root, "qa", "references", "guide.md"), "g".repeat(500));
+    fs.symlinkSync(root, path.join(root, "self"));
+    fs.symlinkSync(tmp, path.join(root, "parent"));
+    fs.symlinkSync(path.join(root, "qa"), path.join(root, "qa", "references", "loop"));
+    fs.symlinkSync(tmp, path.join(root, "qa", "references", "up"));
+
+    expect(findSkillDirs(root).map((d) => path.relative(root, d))).toEqual(["qa"]);
+    expect(walkMd(path.join(root, "qa")).map((f) => path.relative(root, f)).sort()).toEqual([
+      path.join("qa", "SKILL.md"),
+      path.join("qa", "references", "guide.md"),
+    ]);
+    const bill = buildBill(root);
+    expect(bill.totals.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + fileBytes(root, "qa", "references", "guide.md"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it("prefers ./skills, then .agents/skills, then .claude/skills, project before user", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-detect-"));
     const home = path.join(tmp, "home");

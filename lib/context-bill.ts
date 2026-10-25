@@ -196,25 +196,83 @@ function parseFrontmatter(text: string): { bytes: number; keys: string[]; block:
 }
 
 /**
+ * What a directory entry is once symlinks are followed. Installed skills are
+ * symlinks into the gstack checkout (`review/SKILL.md -> <checkout>/review/SKILL.md`,
+ * `office-hours/sections -> <checkout>/office-hours/sections`), so a plain
+ * Dirent type check sees none of them. Dangling links and anything that is
+ * neither a file nor a directory are null.
+ */
+function entryKind(p: string, e: fs.Dirent): "file" | "dir" | null {
+  if (e.isFile()) return "file";
+  if (e.isDirectory()) return "dir";
+  if (!e.isSymbolicLink()) return null;
+  try {
+    const st = fs.statSync(p);
+    return st.isFile() ? "file" : st.isDirectory() ? "dir" : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether directory `outer` contains (or is) `inner`, both realpaths. A
+ * followed directory symlink that contains the tree being walked (`..`, `/`,
+ * `$HOME`) would climb out of that tree, so walkers refuse it.
+ */
+function encloses(outer: string, inner: string): boolean {
+  const rel = path.relative(outer, inner);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
  * Every .md file under a tree, for the on-disk total and for exact
  * measurement. Skips node_modules and dot-directories: a skills tree that is
  * also a repo checkout (dev symlink installs) would otherwise bill its
- * dependency tree and CI state as skill content.
+ * dependency tree and CI state as skill content. A child repo checkout (the
+ * `gstack/` link inside ~/.claude/skills) is skipped for the same reason.
+ *
+ * Symlinked files and directories are followed, and every returned path stays
+ * the lexical path under `dir`, so buildBill and --exact key the same files.
+ * Each real directory is walked once (cycle guard), and a link to a directory
+ * that encloses `dir` is never followed.
  */
 export function walkMd(dir: string): string[] {
   const out: string[] = [];
-  let entries: fs.Dirent[];
+  let rootReal: string;
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    rootReal = fs.realpathSync(dir);
   } catch {
     return out;
   }
-  for (const e of entries) {
-    if (e.name.startsWith(".") || e.name === "node_modules") continue;
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkMd(p));
-    else if (e.isFile() && e.name.endsWith(".md")) out.push(p);
-  }
+  const visited = new Set([rootReal]);
+  const walk = (current: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      const p = path.join(current, e.name);
+      const kind = entryKind(p, e);
+      if (kind === "file") {
+        if (e.name.endsWith(".md")) out.push(p);
+        continue;
+      }
+      if (kind !== "dir" || fs.existsSync(path.join(p, ".git"))) continue;
+      let real: string;
+      try {
+        real = fs.realpathSync(p);
+      } catch {
+        continue;
+      }
+      if (visited.has(real) || encloses(real, rootReal)) continue;
+      visited.add(real);
+      walk(p);
+    }
+  };
+  walk(dir);
   return out;
 }
 
@@ -275,8 +333,8 @@ export function parseSkill(skillDir: string, name: string, tokensOf: TokensOf = 
   // Foreign-host skill files sitting next to SKILL.md.
   const foreignFiles: { path: string; bytes: number; tokens: number }[] = [];
   for (const entry of fs.readdirSync(skillDir, { withFileTypes: true })) {
-    if (entry.isFile() && FOREIGN_SKILL_FILE.test(entry.name)) {
-      const abs = path.join(skillDir, entry.name);
+    const abs = path.join(skillDir, entry.name);
+    if (FOREIGN_SKILL_FILE.test(entry.name) && entryKind(abs, entry) === "file") {
       const bytes = bytesOf(abs) ?? 0;
       foreignFiles.push({ path: entry.name, bytes, tokens: tokensOf(abs, bytes) });
     }
@@ -333,13 +391,23 @@ export function parseSkill(skillDir: string, name: string, tokensOf: TokensOf = 
  * repo checkout (`gstack/`, with .git). Its nested SKILL.md files are the
  * repo's sources, not installed skills of the tree being billed.
  *
- * Directory symlinks are followed (setup's shell glob follows them, so a
- * symlinked skill like connect-chrome/ is real scanner load); a realpath
- * seen-set breaks cycles.
+ * Symlinks are followed. Directory links: setup's shell glob follows them, so
+ * a symlinked skill like connect-chrome/ is real scanner load. File links:
+ * setup installs every skill as a real directory whose SKILL.md is a symlink
+ * into the checkout, so skipping them billed a real install as two skills.
+ * A realpath seen-set breaks cycles, a link to a directory that encloses the
+ * root is never followed, and every returned path stays under the root.
  */
 export function findSkillDirs(root: string): string[] {
   const out: string[] = [];
   const visited = new Set<string>();
+  const rootDir = path.resolve(root);
+  let rootReal: string;
+  try {
+    rootReal = fs.realpathSync(rootDir);
+  } catch {
+    return out;
+  }
   const walk = (dir: string, isRoot: boolean) => {
     let entries: fs.Dirent[];
     try {
@@ -347,7 +415,7 @@ export function findSkillDirs(root: string): string[] {
     } catch {
       return;
     }
-    if (entries.some((e) => e.isFile() && e.name === "SKILL.md")) {
+    if (entries.some((e) => e.name === "SKILL.md" && entryKind(path.join(dir, e.name), e) === "file")) {
       out.push(dir);
       // Two symlinked paths to the same skill dir are BOTH billed (each is
       // real scanner load); only container recursion below is cycle-guarded.
@@ -365,20 +433,17 @@ export function findSkillDirs(root: string): string[] {
     for (const e of entries) {
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const child = path.join(dir, e.name);
-      let isDir = e.isDirectory();
-      if (!isDir && e.isSymbolicLink()) {
-        try {
-          isDir = fs.statSync(child).isDirectory();
-        } catch {
-          continue; // dangling symlink
-        }
-      }
-      if (!isDir) continue;
+      if (entryKind(child, e) !== "dir") continue;
       if (fs.existsSync(path.join(child, ".git"))) continue; // repo checkout, not a skill
+      try {
+        if (encloses(fs.realpathSync(child), rootReal)) continue; // would climb out of the root
+      } catch {
+        continue;
+      }
       walk(child, false);
     }
   };
-  walk(path.resolve(root), true);
+  walk(rootDir, true);
   return out.sort();
 }
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**`gstack-context-bill` now bills a real install.** On `~/.claude/skills` it reported "2 skills, ~134 tok" always-on, because setup installs each skill as a real directory whose `SKILL.md` and `sections/` are symlinks into the gstack checkout, and the walker only counted regular files. The tool built to answer the token-cost complaint gave a falsely tiny answer on the layout users actually have. On a fresh install it now reports 58 skills, ~6.8K tokens always-on, and 3.6 MB on disk (it was 37 KB across 2 skills). Billing the checkout itself is unchanged (66 skills, ~7.2K tokens).
+
+### Fixed
+- **`lib/context-bill.ts`**: `findSkillDirs`, `walkMd` and the foreign-file check follow symlinked files and directories. Every path the bill reports, and every file `--exact` keys on, stays the lexical path under the root you passed. Each real directory is walked once (cycle guard), and a link to a directory that contains the tree being walked (`..`, `/`, `$HOME`) is never followed, so a link cannot pull a sibling skill or your home directory into the bill. `walkMd` skips a child repo checkout (the `gstack/` link beside the installed skills), as `findSkillDirs` already did, so `--exact` does not send the whole checkout.
+
+### Tests
+- `test/context-bill.test.ts`: an installed-layout fixture (a checkout outside the skills root, real skill directories with symlinked `SKILL.md` and `sections/`, and a `gstack/` link to the checkout) bills both skills with the target's exact frontmatter, `SKILL.md` and section bytes, and keeps every walked path under the root. Negative controls: a dangling `SKILL.md` link and a `SKILL.md` link to a directory are not skills. A second fixture holds a self link, a parent link that reaches a skill outside the root, a loop back into the skill and a link up to the temp root; only the one real skill and its own files are billed. Both cases fail on main (the first finds no skills, the second bills the outside skill).
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or assertion changed. The bill of this repo's own tree, which the context-budget ratchet reads, is byte-for-byte unchanged.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
