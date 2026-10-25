@@ -113,6 +113,11 @@ gh run watch
 
 The step summary carries the same plan plus the full release notes.
 
+A pull request that touches `.github/workflows/weekly-release.yml` or
+`scripts/release-cut.ts` runs the same dry run against main as its own job
+(`Dry run against main`, read-only token), so a change to the release tooling
+is exercised against real check runs before it merges.
+
 ## Outcomes
 
 | Line | Meaning |
