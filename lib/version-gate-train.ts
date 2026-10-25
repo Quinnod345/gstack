@@ -18,7 +18,7 @@ export type TrainHead =
   | { kind: 'invalid'; reason: string };
 
 function git(repoRoot: string, args: string[]): string | null {
-  const r = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 });
+  const r = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
   return r.status === 0 ? r.stdout : null;
 }
 
@@ -50,11 +50,18 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
   }
 
   const file = typeof policy.changelog === 'string' ? policy.changelog : 'CHANGELOG.md';
-  const before = parseChangelog(show(mergeBase, file) ?? '');
-  const after = parseChangelog(show(o.head, file) ?? '');
+  const exists = (rev: string) => git(o.repoRoot, ['cat-file', '-e', `${rev}:${file}`]) !== null;
+  const read = (rev: string) => (exists(rev) ? show(rev, file) : '');
+  const [beforeText, afterText] = [read(mergeBase), read(o.head)];
+  if (beforeText === null || afterText === null) return { kind: 'invalid', reason: `cannot read ${file} at ${beforeText === null ? `the merge base ${mergeBase.slice(0, 12)}` : o.head}` };
+  const before = parseChangelog(beforeText);
+  const after = parseChangelog(afterText);
   const unreleased = after.sections.filter(s => s.unreleased);
   if (unreleased.length > 1) return { kind: 'invalid', reason: `${file} has ${unreleased.length} [Unreleased] sections` };
   if (unreleased.length === 1 && after.sections[0] !== unreleased[0]) return { kind: 'invalid', reason: `${file}: [Unreleased] must be the top section` };
+  const kept = new Set(after.sections.filter(s => !s.unreleased).map(s => s.version));
+  const dropped = before.sections.filter(s => !s.unreleased && !kept.has(s.version)).map(s => s.version);
+  if (dropped.length) return { kind: 'invalid', reason: `${file} drops released heading ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? ` (+${dropped.length - 3})` : ''}; an unstamped head may only add its [Unreleased] section above the latest release` };
   const released = (c: typeof after) => [c.header.join('\n'), ...c.sections.filter(s => !s.unreleased).map(s => s.lines.join('\n'))];
   const was = released(before);
   const now = released(after);

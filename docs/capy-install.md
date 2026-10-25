@@ -109,7 +109,11 @@ and `/proc` start time; elsewhere `ps -o lstart`), because a pid is reused after
 a reboot or a machine wake. `bin/gstack-upgrade`, and so the session-start
 self-upgrade, refuses with [UPGRADE_BUSY](troubleshooting.md#upgrade-busy)
 while a lease held by a live process outside its own chain exists, naming each
-holder as `pid <p> (<age>m <command>)`. A lease whose pid now belongs to another
+holder as `pid <p> (<age>m <command>)`. The team-mode SessionStart hook
+(`bin/gstack-session-update`) honors the same leases: it logs
+`SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at
+the next session start, without writing its hourly throttle stamp. A lease whose
+pid now belongs to another
 process, or an identity-less lease from an older gstack past 120 minutes, is
 stale: `bin/gstack-lease live` reclaims it (`gstack-lease: reclaimed stale
 lease …`). Stale needs proof: two well-formed identities from the same backend
