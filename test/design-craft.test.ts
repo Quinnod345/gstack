@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { acceptFindings, BUZZWORDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
+import { acceptFindings, BUZZWORDS, CRAFT_IDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
 import { catalogEntry } from '../lib/design-catalog';
 
 const ROOT = path.resolve(import.meta.dir, '..');
@@ -31,7 +31,7 @@ describe('design-craft check', () => {
     const counts = Object.fromEntries(checkCraft(DIRTY).map(f => [f.id, f.count]));
     expect(counts).toEqual({
       'placeholder-name': 1, 'placeholder-brand': 1, lorem: 1, 'marketing-buzzword': 2, 'round-number': 3, 'needs-proof': 1, oops: 1,
-      'scroll-listener': 1, 'transition-all': 1, 'dead-link': 1, alert: 1, 'img-no-alt': 1, 'vh-height': 1,
+      'scroll-listener': 1, 'layout-transition': 1, 'dead-link': 1, alert: 1, 'img-no-alt': 1, 'vh-height': 1,
       'missing-title': 1, 'missing-meta-description': 1, 'missing-favicon': 1,
       'missing-skip-link': 1, 'missing-aria-current': 1,
     });
@@ -42,6 +42,19 @@ describe('design-craft check', () => {
     const pretext = fs.readFileSync(path.join(ROOT, 'design-html', 'vendor', 'pretext.js'), 'utf-8');
     expect(checkCraft(CLEAN.replace('</body>', `<script type="module">${pretext}</script></body>`))).toEqual([]);
     expect(formatCraft([])).toBe('CRAFT_RESULT: clean');
+  });
+
+  test('every id the check prints is a grep-detectable catalog entry, and the fix it prints is the catalog fix', () => {
+    expect(new Set(CRAFT_IDS).size).toBe(CRAFT_IDS.length);
+    for (const id of CRAFT_IDS) {
+      const entry = catalogEntry(id);
+      expect(entry, id).toBeDefined();
+      expect(entry!.detect, id).toContain('grep');
+      expect(entry!.fix?.length ?? 0, id).toBeGreaterThan(0);
+    }
+    const findings = checkCraft(DIRTY);
+    expect(findings.map(f => f.id)).toEqual([...CRAFT_IDS]);
+    for (const f of findings) expect(f.fix).toBe(catalogEntry(f.id)!.fix!);
   });
 
   test('BUZZWORDS covers every word the catalog marketing-buzzword heuristic names', () => {

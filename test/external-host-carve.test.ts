@@ -68,7 +68,7 @@ describe('C4: external section pointers', () => {
 describe('C4: ship, plan-ceo-review and office-hours are carved on every external host', () => {
   for (const config of EXTERNAL) {
     test(`${config.name}: every pointer in the carved skill resolves to a generated section file`, () => {
-      for (const skill of ['ship', 'plan-ceo-review', 'office-hours']) {
+      for (const skill of ['ship', 'plan-ceo-review', 'office-hours', 'design-review']) {
         expect(usesLazySections(config.name, skill)).toBe(true);
         const dir = skillDir(config, renders.all, skill);
         const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, skill, 'sections', 'manifest.json'), 'utf8')) as { sections: Array<{ file: string }> };

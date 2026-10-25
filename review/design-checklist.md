@@ -85,7 +85,7 @@ If no frontend files changed: skip silently, no output.
 
 ## Categories
 
-### 1. AI Slop Detection (27 items) — highest priority
+### 1. AI Slop Detection (43 items) — highest priority
 
 These are the telltale signs of AI-generated UI that no designer at a respected studio would ship.
 
@@ -102,6 +102,32 @@ These are the telltale signs of AI-generated UI that no designer at a respected 
 - **[HIGH]** [oversized-h1] Display type past 6rem on a page that is not a poster. Size is not hierarchy. Grep h1 and display selectors for font-size above 6rem or 96px.
 
 - **[HIGH]** [extreme-negative-tracking] Letter-spacing below -0.04em on display type. Tight tracking is a taste; crushed tracking is a tell. Grep `letter-spacing` for values below -0.04em.
+
+- **[HIGH]** John Doe and Jane Doe in quotes, team rows and demo data. A supplied name, or one that fits the product. Grep visible copy for "John Doe" and "Jane Doe".
+
+- **[HIGH]** Lorem ipsum where a visitor can read it. Write the draft copy. Grep visible copy for "lorem ipsum".
+
+- **[HIGH]** A `[Needs proof: …]` marker still on the page. Supply the proof or cut the claim before it ships. Grep for `[Needs proof:`.
+
+- **[HIGH]** "Oops!" in place of what happened and what to do next. Grep visible copy for "oops".
+
+- **[HIGH]** Reveals driven by an unthrottled `scroll` listener. IntersectionObserver for reveals; scroll-linked effects read scroll inside requestAnimationFrame. Grep scripts for `addEventListener('scroll'`.
+
+- **[HIGH]** `href="#"` on links and buttons that go nowhere. Link it, or render the control disabled. Grep markup for `href="#"`.
+
+- **[HIGH]** `alert()` for errors and confirmations. Show the message inline, next to what it is about. Grep scripts and inline handlers for `alert(`.
+
+- **[HIGH]** An `<img>` with no alt attribute. Describe a meaningful image; `alt=""` on a decorative one. Grep markup for `<img` tags with no `alt=`.
+
+- **[HIGH]** Full-height sections on `100vh`, which jump under mobile browser chrome. `min-height: 100dvh`. Grep CSS for `height: 100vh` with no later `100dvh`, and for `h-screen`.
+
+- **[HIGH]** A full HTML document with no `<title>`. The tab, the bookmark and the search result all read it. Grep each full document for a non-empty `<title>`.
+
+- **[HIGH]** A full HTML document with no meta description. Search results and link previews make one up. Grep each full document for `<meta name="description"`.
+
+- **[HIGH]** No favicon, so every tab shows the browser default. A mark from the brand; an inline SVG when no file exists. Grep each full document for `<link rel="icon"`.
+
+- **[HIGH]** No "Skip to content" link as the first focusable element, targeting `<main>`. Keyboard users tab through the whole header on every page. Check that the first focusable element in `<body>` links to the id on `<main>`.
 
 - **[MEDIUM]** [ai-color-palette] Purple/violet/indigo gradient backgrounds or blue-to-purple color schemes. Look for `linear-gradient` with values in the `#6366f1` to `#8b5cf6` range, or CSS custom properties resolving to purple/violet.
 
@@ -134,6 +160,12 @@ These are the telltale signs of AI-generated UI that no designer at a respected 
 - **[MEDIUM]** Monospace on labels and body copy to look technical. Mono is for code and data columns. Grep `font-family` for a monospace stack on non-code, non-tabular selectors.
 
 - **[MEDIUM]** Selection color, caret, scrollbars, focus rings, underline offset, tabular numerals left at browser defaults. Theme them from the palette. Grep for `::selection`, `caret-color`, `accent-color`, `scrollbar-color`, `text-underline-offset`, `font-variant-numeric`: none present means none themed.
+
+- **[MEDIUM]** Acme, Nexus and SmartFlow as the customers in logos, quotes and sample data. A supplied customer, or none. Grep visible copy for Acme, Nexus, SmartFlow.
+
+- **[MEDIUM]** 99.9% uptime, 50% faster, 10x, 10,000+ users: round figures nobody measured. The supplied number, or no claim. Grep copy for 99.9%, a round percentage before faster, more or uptime, 10x, and "<n>0+ users".
+
+- **[MEDIUM]** Route navigation with no `aria-current="page"` on the current link. Mark it and style it; in-page section links stay unmarked. Grep `<nav>` blocks with two or more route links for `aria-current="page"`.
 
 - **[LOW]** **The 3-column feature grid:** icon-in-colored-circle + bold title + 2-line description, repeated 3x symmetrically. THE most recognizable AI layout. Look for a grid/flex container with exactly 3 children that each contain a circular element + heading + paragraph.
 

@@ -80,6 +80,12 @@ A faithful restatement of an existing or already approved contract, such as a wi
 ### Pass 1: Information Architecture
 Rate 0-10: Does the plan define what the user sees first, second, third?
 FIX TO 10: Add information hierarchy to the plan. Include ASCII diagram of screen/page structure and navigation flow. Apply "constraint worship" — if you can only show 3 things, which 3?
+**Persuade plan** (a landing, marketing, pricing, waitlist, campaign or comparison page; the Pass 4 classifier): the plan settles each check below, or the gap is a Pass 1 finding. Ask the user for missing proof and risk terms; never invent them.
+1. **One primary action**, named; nothing competes with it above the fold, and the closing CTA repeats it.
+2. **Named objections**: the visitor's top objections, each answered where it arises (FAQ of real questions, comparison, guarantee).
+3. **Proof beside each claim**: a supplied customer, quote or figure next to the claim it supports, never a metric row; an unsupported claim is cut or marked `[Needs proof: …]`.
+4. **A risk reversal** the business really offers (free plan, trial, no card, cancel anytime, refund); never an invented one.
+5. **An index/noindex decision**: an ad-only or time-bound page is `noindex`; an indexed one has a real title and description, and its FAQ ships as FAQPage JSON-LD.
 **STOP.** AskUserQuestion once per issue. Do NOT batch. Recommend + WHY. If no issues, say so and move on. Do NOT proceed until user responds.
 
 ### Pass 2: Interaction State Coverage
@@ -208,7 +214,7 @@ Review these as UI requirements in the plan, approved mockups, and referenced ex
 11. system-ui or `-apple-system` as the PRIMARY display/body font — the "I gave up on typography" signal. Pick a real typeface.
 
 Detector rule ids for the rest of the catalog (a `[rule-id]` in a finding is one of these): border-accent-on-rounded: Border accent on a rounded card; overused-font: Overused display font; flat-type-hierarchy: Flat type hierarchy; gradient-text: Gradient text; cream-palette: Cream default palette; nested-cards: Nested cards; monotonous-spacing: Monotonous spacing; bounce-easing: Bounce easing; pulsing-dot: Pulsing status dot; blinking-cursor: Blinking cursor effect; shape-assembled-illustration: Shape-assembled illustration; dark-glow: Dark-mode glow; radial-halo: Radial halo; radial-spotlight-glow: Radial spotlight glow; marquee: Logo marquee; icon-tile-stack: Icon tile above every heading; italic-serif-display: Italic serif display; hero-eyebrow-chip: Hero eyebrow chip; kicker-above-heading: Kicker above heading; numbered-section-labels: Numbered section labels; em-dash-overuse: Em-dash overuse; marketing-buzzword: Marketing buzzwords; aphoristic-cadence: Aphoristic cadence; oversized-h1: Oversized h1; extreme-negative-tracking: Extreme negative tracking; gpt-thin-border-wide-shadow: Thin border plus wide shadow; repeating-stripes-gradient: Repeating stripes gradient; codex-grid-background: Grid-paper background; theater-slop-phrase: Theater phrases; image-hover-transform: Image hover zoom.
-Judgment tells with no detector rule: gradient cta button, stock-photo hero, cards as the default component, generic testimonial section, left-text right-image hero, generic cta labels, hero metric template, identical card grids, glassmorphism, hand-drawn svg illustration, modal by default, monospace as costume, content stand-ins, mode picked by category, unthemed browser surfaces, missing states.
+Judgment tells with no detector rule: gradient cta button, stock-photo hero, cards as the default component, generic testimonial section, left-text right-image hero, generic cta labels, hero metric template, identical card grids, glassmorphism, hand-drawn svg illustration, modal by default, monospace as costume, content stand-ins, mode picked by category, unthemed browser surfaces, missing states, placeholder people, placeholder brands, lorem ipsum, round sample numbers, unresolved proof marker, "oops" errors, scroll-listener reveals, dead links, alert() messages, image without alt, 100vh sections, missing title, missing meta description, missing favicon, missing skip link, unmarked current page.
 
 Source: [OpenAI "Designing Delightful Frontends with GPT-5.4"](https://developers.openai.com/blog/designing-delightful-frontends-with-gpt-5-4) (Mar 2026) + gstack design methodology.
 
@@ -217,6 +223,7 @@ FIX TO 10: Rewrite vague UI descriptions with specific alternatives:
 - "Hero section" → what makes this hero feel like THIS product?
 - "Clean, modern UI" → meaningless. Replace with actual design decisions.
 - "Dashboard with widgets" → what makes this NOT every other dashboard?
+- "Trusted by thousands", "99.9% uptime" → on a Persuade plan, supplied proof beside the claim (Pass 1, check 3), or no claim.
 If visual mockups were generated in Step 0.5, evaluate them against the AI slop blacklist above. Read each mockup image using the Read tool. Does the mockup fall into generic patterns (3-column grid, centered hero, stock-photo feel)? If so, flag it and offer to regenerate with more specific direction via `$D iterate --feedback "$(cat "$FEEDBACK_FILE")"` (the feedback in a private file, never inline); use its printed `outputPath` for any later view, check or board.
 **STOP.** AskUserQuestion once per issue. Do NOT batch. Recommend + WHY.
 

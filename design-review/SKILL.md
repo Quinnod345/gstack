@@ -1250,7 +1250,7 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - Instructions detection: any visible instructions longer than one sentence. If users need to read instructions, the design has failed. Flag the instructions AND the interaction they're compensating for.
 - Happy talk word count: count total visible words on the page. Classify each text block as "useful content" vs "happy talk" (welcome paragraphs, self-congratulatory text, instructions nobody reads). Report: "This page has X words. Y (Z%) are happy talk."
 
-**9. AI Slop Detection** (11 blacklist patterns, 30 detector rules, 16 judgment tells; polish-level ones on the last line)
+**9. AI Slop Detection** (11 blacklist patterns, 30 detector rules, 32 judgment tells; polish-level ones on the last line)
 
 The test: would a human designer at a respected studio ever ship this? A `[rule-id]` is the detector's name for the same pattern; a scan hit and a judgment hit on one element are one finding.
 
@@ -1283,8 +1283,20 @@ Judgment tells (no detector rule; you are the detector):
 - Sparklines, progress rings, and fake avatars filling space where content should be. Real data or an honest empty state.
 - Dark because it is a dev tool, light because it is health. Light or dark comes from the use scene: who, where, under what light.
 - Only the happy path is designed. Empty, loading, error, and long-content states are part of the component.
+- John Doe and Jane Doe in quotes, team rows and demo data. A supplied name, or one that fits the product.
+- Acme, Nexus and SmartFlow as the customers in logos, quotes and sample data. A supplied customer, or none.
+- Lorem ipsum where a visitor can read it. Write the draft copy.
+- 99.9% uptime, 50% faster, 10x, 10,000+ users: round figures nobody measured. The supplied number, or no claim.
+- A `[Needs proof: …]` marker still on the page. Supply the proof or cut the claim before it ships.
+- Reveals driven by an unthrottled `scroll` listener. IntersectionObserver for reveals; scroll-linked effects read scroll inside requestAnimationFrame.
+- `href="#"` on links and buttons that go nowhere. Link it, or render the control disabled.
+- `alert()` for errors and confirmations. Show the message inline, next to what it is about.
+- An `<img>` with no alt attribute. Describe a meaningful image; `alt=""` on a decorative one.
+- A full HTML document with no `<title>`. The tab, the bookmark and the search result all read it.
+- A full HTML document with no meta description. Search results and link previews make one up.
+- No "Skip to content" link as the first focusable element, targeting `<main>`. Keyboard users tab through the whole header on every page.
 
-Polish-level tells, note but do not grade: [monotonous-spacing], [bounce-easing], [pulsing-dot], [blinking-cursor], [numbered-section-labels], [em-dash-overuse], [extreme-negative-tracking], [gpt-thin-border-wide-shadow], [repeating-stripes-gradient], [codex-grid-background], [image-hover-transform], monospace as costume, unthemed browser surfaces.
+Polish-level tells, note but do not grade: [monotonous-spacing], [bounce-easing], [pulsing-dot], [blinking-cursor], [numbered-section-labels], [em-dash-overuse], [extreme-negative-tracking], [gpt-thin-border-wide-shadow], [repeating-stripes-gradient], [codex-grid-background], [image-hover-transform], monospace as costume, unthemed browser surfaces, "oops" errors, 100vh sections, missing favicon, unmarked current page.
 
 **10. Performance as Design** (6 items)
 - LCP < 2.0s (web apps), < 1.5s (informational sites)
@@ -1562,9 +1574,21 @@ Tie everything to user goals and product objectives. Always suggest specific imp
 
 **Calibration: the three looks.** AI-built interfaces land in one of three looks no matter what the product is: (1) cream ground, high-contrast serif display, terracotta or signal-red accent; (2) near-black, one neon accent, glowing edges; (3) broadsheet hairlines, italic display serif, tiny tracked mono labels. Each is fine when the brief asks for it. If the brief left the look open and you landed in one anyway, you stopped looking. The test: could someone guess your look from the category alone? From "the category, but avoiding the obvious"? Either way, start over. "It's about books, so cream and a serif" fails this test. Book cloth and jackets come in every saturated color there is.
 
-**AI Slop blacklist:** the 11 legacy patterns, the 30 detector rules, and the 16 judgment tells are Methodology category 9. Grade against that list; do not re-derive it here.
+**AI Slop blacklist:** the 11 legacy patterns, the 30 detector rules, and the 32 judgment tells are Methodology category 9. Grade against that list; do not re-derive it here.
 
 Source: [OpenAI "Designing Delightful Frontends with GPT-5.4"](https://developers.openai.com/blog/designing-delightful-frontends-with-gpt-5-4) (Mar 2026) + gstack design methodology.
+
+## Section index — Read each section when its situation applies
+
+This skill is a decision-tree skeleton. The steps below point to on-demand
+sections. Read a section in full before doing its step; do not work from memory.
+
+| When | Read this section |
+|------|-------------------|
+| auditing a Persuade page, or running a redesign or craft audit | `sections/craft-audit.md` |
+
+> **STOP.** Before auditing a Persuade page, or running a redesign or craft audit, Read `~/.claude/skills/gstack/design-review/sections/craft-audit.md` and execute it
+> in full. Do not work from memory — that section is the source of truth for this step.
 
 Record baseline design score and AI slop score at end of Phase 6.
 
@@ -1747,7 +1771,7 @@ Detector findings carry their `[rule-id]`; a deferred one ends with its `handoff
 
 ## Phase 8: Fix Loop
 
-For each fixable finding, in impact order:
+For each fixable finding, in impact order (ties: the craft audit's fix order, when it ran):
 
 ### 8a. Locate source
 

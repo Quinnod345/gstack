@@ -119,6 +119,10 @@ Remember `RUN_ID` and restate it literally in later blocks (each bash block is a
 
 {{DESIGN_HARD_RULES}}
 
+{{SECTION_INDEX:design-review}}
+
+{{SECTION:craft-audit}}
+
 Record baseline design score and AI slop score at end of Phase 6.
 
 ---
@@ -161,7 +165,7 @@ Detector findings carry their `[rule-id]`; a deferred one ends with its `handoff
 
 ## Phase 8: Fix Loop
 
-For each fixable finding, in impact order:
+For each fixable finding, in impact order (ties: the craft audit's fix order, when it ran):
 
 ### 8a. Locate source
 

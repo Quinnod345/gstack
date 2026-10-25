@@ -1,0 +1,50 @@
+## Craft audit: Persuade pages and redesigns
+
+Run this in Phases 1-6, on every audited page, when a page is Persuade (the classifier in the Design Hard Rules) or the user asked for a redesign or a craft audit. It adds what generated sites ship and a reviewer catches in seconds: invented content, missing ship basics, scroll-listener reveals, `100vh`, and a Persuade page's conversion basics. Its rules render from /design-html's craft section, so a page is audited against the rules it was built to.
+
+### 1. Run the craft check on each page
+
+With a URL, save the page in the script that opens it. Aside: add `await fs.writeFile(path.join(pwd, "{page}.page.html"), await pg.content());`. Fallback engine: `_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gstack-craft.XXXXXX"); $B js 'document.documentElement.outerHTML' --out "$_TMP/{page}.page.html" --raw`. With no running app, use the page's HTML file in the repo. Then:
+
+```bash
+{{BIN_DIR}}/gstack-design-craft <path-to-page.html>
+```
+
+Each `CRAFT_CHECK: <id> <count> <fix>` line is one category 9 finding under that id; `CRAFT_RESULT: clean` adds none. For a /design-html page with a `finalized.json` beside it, add `--accepted <finalized.json>`: each `CRAFT_ACCEPTED` line is a finding the user already accepted, listed with its reason, not filed again. Exit 2 (framework source, an empty or unreadable file): say the check was unavailable for that page and judge the tells below by eye. A hit the user's real content explains (a customer named Nexus, a supplied 50% figure) is noted, not filed. Saved pages stay out of the report directory; delete them after the check.
+
+### 2. What the check cannot see
+
+{{DESIGN_CRAFT_RULE:Claims come from the user}}
+
+{{DESIGN_CRAFT_RULE:Illustrative content looks real}}
+
+{{DESIGN_CRAFT_RULE:Ship floor}}
+
+Beyond the document: a made-up path returns a designed 404 with a way back, every page has a way out, and cookie consent appears where the jurisdiction requires it.
+
+{{DESIGN_CRAFT_RULE:Motion}}
+
+### 3. Persuade pages
+
+A failed check costs the page its one job: file it as a High-impact finding.
+
+{{DESIGN_PERSUADE_CHECKS}}
+
+{{DESIGN_CRAFT_RULE:Conversion rules}}
+
+### 4. Fix order and stack (Phase 8)
+
+Within one impact level, take the biggest visible gain at the least risk first:
+1. Typeface and type roles
+2. Color and surfaces
+3. Hover, active and focus states
+4. Layout and spacing: grid, max width, the spacing scale, nested radius
+5. Motion
+6. Generic components
+7. Loading, empty and error states
+8. Copy
+9. Type-scale polish
+
+Work inside the existing stack: no framework or styling migration, and check the dependency file before importing a library. If the project uses Tailwind, read the installed major version (`tailwindcss` in package.json or the lockfile) before touching its config: v3 configures in `tailwind.config.*`, v4 in CSS (`@import "tailwindcss"` and `@theme`). Write for that version only.
+
+Adapted from Elaya's [redesign-skill](https://github.com/elayadesign/redesign-skill) and [ai-design-skills](https://github.com/elayadesign/ai-design-skills) (MIT, © 2026 Elaya), rewritten for gstack. See NOTICE.md.

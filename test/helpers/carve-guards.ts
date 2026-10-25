@@ -413,7 +413,7 @@ do not launch the downstream skill or open a browser.`,
     // eureka log, the office-hours lookup and the taste-profile read; measured
     // 1.0834 (2026-09-30). + named design-direction defaults to avoid in the native
     // subagent prompt (s02 H4a); measured 1.0911 (2026-10-02).
-    maxSizeRatio: 1.1600, // + v1.91.19.0 wave: design --version probe (B4), taste-profile load (F3), verdict-form outside voice (INV-1), plus v1.91.17.0's round accounting and board/approval blocks (#3022) merged in; measured 100,446 / 90,375 = 1.1114 (2026-10-03). + Oct 6 fix wave A3/CEO-12: free text reaches commands only through agent-written mktemp files (mktemp block, write rule, path rebuild and refusal at each posting, prompt and brief site); measured 103,384 / 90,375 = 1.1439 (2026-10-06). + Oct 7 wave B6: Aside rules 1, 4, 6 and 7 (offer a target-origin tab before openTab, a second sign-in wall means a tab- or URL-bound session, no early-return hint, fast [ok without the sentinel is an abort); measured 103,576 / 90,375 = 1.1461 (2026-10-07). + Oct 7 wave B3: the Codex probe runs as a command (select-model capture lines, check-sandbox/probe-model/run-with-timeout subcommands) instead of being sourced; measured 103,522 / 90,375 = 1.1455 (2026-10-07). Both merged: measured 103,726 / 90,375 = 1.1477 (2026-10-07). + Oct 7 wave guard (CEO-20): conditional `run_in_background` request plus the background-run recovery at each foreground dispatch site; measured 103,466 / 90,375 = 1.1449 (2026-10-07). Merged with the guard area: measured 103,804 / 90,375 = 1.1486 (2026-10-07). + Honest Work wave merged (W2/W3 gate integrity in review/ship, W4 kernel + DONE line in every tier-2+ skill, W5/W7 in spec/ship): re-measured on the integrated tree (2026-10-10).
+    maxSizeRatio: 1.1694, // + GSTA-92 Phase 2: the craft tells join the catalog's slop bullets in the proposal section (Garry 2026-10-25 'Do it' (GSTA-92)); measured 105,683 / 90,375 = 1.1694 (2026-10-25), from 104,422 / 90,375 = 1.1554. + v1.91.19.0 wave: design --version probe (B4), taste-profile load (F3), verdict-form outside voice (INV-1), plus v1.91.17.0's round accounting and board/approval blocks (#3022) merged in; measured 100,446 / 90,375 = 1.1114 (2026-10-03). + Oct 6 fix wave A3/CEO-12: free text reaches commands only through agent-written mktemp files (mktemp block, write rule, path rebuild and refusal at each posting, prompt and brief site); measured 103,384 / 90,375 = 1.1439 (2026-10-06). + Oct 7 wave B6: Aside rules 1, 4, 6 and 7 (offer a target-origin tab before openTab, a second sign-in wall means a tab- or URL-bound session, no early-return hint, fast [ok without the sentinel is an abort); measured 103,576 / 90,375 = 1.1461 (2026-10-07). + Oct 7 wave B3: the Codex probe runs as a command (select-model capture lines, check-sandbox/probe-model/run-with-timeout subcommands) instead of being sourced; measured 103,522 / 90,375 = 1.1455 (2026-10-07). Both merged: measured 103,726 / 90,375 = 1.1477 (2026-10-07). + Oct 7 wave guard (CEO-20): conditional `run_in_background` request plus the background-run recovery at each foreground dispatch site; measured 103,466 / 90,375 = 1.1449 (2026-10-07). Merged with the guard area: measured 103,804 / 90,375 = 1.1486 (2026-10-07). + Honest Work wave merged (W2/W3 gate integrity in review/ship, W4 kernel + DONE line in every tier-2+ skill, W5/W7 in spec/ship): re-measured on the integrated tree (2026-10-10).
   },
   cso: {
     skill: 'cso',
@@ -730,6 +730,31 @@ do not launch the downstream skill or open a browser.`,
     maxSkeletonBytes: 73_450, // + v1.78 AUQ spawned-trigger objectivity (explicit declaration + interactive fence); measured 73_059
     minUnionBytes: 66_000, // measured union 73,496
     mustContain: ['retrospective', '45-minute gap', 'Ship of the week', 'Praise'],
+  },
+
+  // ── GSTA-92 Phase 2 (2026-10-25): design-review carved on every host ──
+  // One lazy section, the craft audit, read for a Persuade page or a redesign;
+  // CARVED_ON_EVERY_HOST in scripts/resolvers/sections.ts keeps it out of the
+  // external skeletons too (Garry 2026-10-25 'Do it' (GSTA-92), Big decision 2a).
+  'design-review': {
+    skill: 'design-review',
+    expectedSections: ['craft-audit.md'],
+    requiredReads: ['craft-audit.md'],
+    scenario:
+      'Walk /design-review in SIMULATION — do not run bash, launch a browser, or edit files. The target is the landing page of a developer-tools SaaS (a Persuade page): treat Setup and Phase 1 as done. Read each pointed section before doing its step, then list the Phases 1-6 checks you would run on that page, including any section-specific check, and stop before Phase 7.',
+    staticInvariants: {
+      mustStayInSkeleton: ['## Phases 1-6: Design Audit Baseline', '**9. AI Slop Detection**', '## Phase 7: Triage', '## Phase 8: Fix Loop'],
+      mustPrecedeStop: ['### Design Hard Rules'],
+      mustMoveToSection: ['### 4. Fix order and stack (Phase 8)'],
+      gateAfterStop: undefined,
+    },
+    // No section-loading paid case yet: its touchfile row lives in
+    // test/helpers/touchfiles-data.ts, which #3413 owns.
+    behavioral: 'none',
+    maxSkeletonBytes: 139_202, // measured 139202 (2026-10-25): the craft-audit pointer and its index row, the Phase 8 tie-break, and the craft tells in Methodology category 9 (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
+    minUnionBytes: 143_300, // measured union 146511
+    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-craft', 'Proof beside each claim'],
+    maxSizeRatio: 1.3843, // first parity guard for design-review: measured 146511 / 105,842 = 1.3843 (2026-10-25), the skeleton's growth since v1.64.1.0 plus the craft audit (Garry 2026-10-25 'Do it' (GSTA-92)).
   },
 
   // ── Token-reduction Phase 4 wave 4 (v1.69.x branch): design doctrine carve ──

@@ -49,6 +49,12 @@ signature components are not carried over):
 - `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
   ship-floor tells, turned into a free check.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
+- `design-review/sections/craft-audit.md.tmpl` (and the generated
+  `sections/craft-audit.md`): the redesign-skill audit of an existing site,
+  its fix-priority order and Tailwind version check; `scripts/resolvers/design-craft.ts`:
+  the Persuade conversion checks, also rendered into
+  `plan-design-review/sections/review-sections.md`; and the craft-tell entries
+  in `lib/design-catalog.ts`.
 
 ## DESIGN.md specification — Copyright Google LLC — Apache License 2.0
 
