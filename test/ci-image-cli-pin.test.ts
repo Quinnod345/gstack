@@ -24,7 +24,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const ROOT = path.resolve(__dirname, '..');
-const DOCKERFILE = path.join(ROOT, '.github', 'docker', 'Dockerfile.ci');
+const DOCKERFILE = path.join(__dirname, '..', '.github', 'docker', 'Dockerfile.ci');
 
 /** Package specs from every `npm i -g` / `npm install -g` in the Dockerfile. */
 export function globalNpmInstallSpecs(source: string): string[] {
@@ -193,7 +193,7 @@ describe('other CI Bun installs match the image (#1713, #1706)', () => {
     test(`${rel} downloads the verified linux-x64 archive instead of piping an installer into a shell`, () => {
       expect(curlPipedToShell(source)).toEqual([]);
       const download = source.indexOf('/releases/download/bun-v$BUN_VERSION/bun-linux-x64.zip');
-      const verify = source.indexOf('sha256sum -c');
+      const verify = source.indexOf('sha256sum -c', download);
       const unpack = source.indexOf('unzip -q');
       expect(download).toBeGreaterThan(-1);
       expect(verify).toBeGreaterThan(download);
@@ -215,4 +215,44 @@ describe('other CI Bun installs match the image (#1713, #1706)', () => {
       expect(engines).toBe(`>=${imageVersion}`);
     });
   }
+});
+
+describe('CI Node.js installs match the image and are verified (#3354)', () => {
+  const docker = fs.readFileSync(DOCKERFILE, 'utf-8');
+  const imageVersion = docker.match(/^ENV NODE_VERSION=(\S+)$/m)?.[1];
+  const imageSha = docker.match(/^ARG NODE_SHA256=(\S+)$/m)?.[1];
+  const nodeRun = logicalLines(docker).find((line) => line.includes('nodejs.org/dist/v${NODE_VERSION}/')) ?? '';
+
+  test('Dockerfile.ci pins an exact Node.js version and the SHA-256 of its linux-x64 archive', () => {
+    expect(imageVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(imageSha).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test('Dockerfile.ci checks the Node.js archive before it is unpacked', () => {
+    expect(nodeRun, 'Node.js must come from the nodejs.org release archive').not.toBe('');
+    const download = nodeRun.indexOf('-o /tmp/node.tar.xz');
+    const verify = nodeRun.indexOf('echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c -');
+    const unpack = nodeRun.indexOf('tar -xJ');
+    expect(download).toBeGreaterThan(-1);
+    expect(verify).toBeGreaterThan(download);
+    expect(unpack).toBeGreaterThan(verify);
+  });
+
+  const rel = 'scripts/ubicloud/setup-free-suite.sh';
+  const source = fs.readFileSync(path.join(ROOT, rel), 'utf-8');
+
+  test(`${rel} pins the same Node.js version and SHA-256 as Dockerfile.ci`, () => {
+    expect(imageSha).toMatch(/^[0-9a-f]{64}$/);
+    expect(source.match(/^NODE_VERSION=(\S+)$/m)?.[1]).toBe(imageVersion!);
+    expect(source.match(/^NODE_SHA256=(\S+)$/m)?.[1]).toBe(imageSha!);
+  });
+
+  test(`${rel} checks the Node.js archive before it is unpacked`, () => {
+    const download = source.indexOf('/node-v$NODE_VERSION-linux-x64.tar.xz" -o "$node_tmp/node.tar.xz"');
+    const verify = source.indexOf('echo "$NODE_SHA256  $node_tmp/node.tar.xz" | sha256sum -c -');
+    const unpack = source.indexOf('tar -xJ');
+    expect(download).toBeGreaterThan(-1);
+    expect(verify).toBeGreaterThan(download);
+    expect(unpack).toBeGreaterThan(verify);
+  });
 });

@@ -234,7 +234,7 @@ function engNumberedFindingAUQ(fp: AskUserQuestionFingerprint): boolean {
   // A declarative severity-labelled issue can own the same cache repair as
   // an interrogative title. Require its native decision, current assessment,
   // and opposed implementation options; metadata alone never opens review.
-  const declaredCache = /^(?:Issue|Finding) ([1-9]\d*) \[P[0-3]\] \(confidence (?:10|[1-9])\/10\) [A-Za-z][\w./-]*:[1-9]\d*(?:-[1-9]\d*)?: ([A-Za-z_$][\w$]*) and ([A-Za-z_$][\w$]*) share a global mutable ([A-Za-z_$][\w$]*) via module-level export, and both mutate it\.$/.exec(title);
+  const declaredCache = /^(?:Issue|Finding) ([1-9]\d*) \[(?:P[0-3]|CRITICAL|INFORMATIONAL)\] \(confidence (?:10|[1-9])\/10\) [A-Za-z][\w./-]*:[1-9]\d*(?:-[1-9]\d*)?: ([A-Za-z_$][\w$]*) and ([A-Za-z_$][\w$]*) share a global mutable ([A-Za-z_$][\w$]*) via module-level export, and both mutate it\.$/.exec(title);
   if (declaredCache) return engDeclaredCacheFinding(q, declaredCache);
   if (engCacheWriterDecision(q)) return true;
   const libraryHooks = engLibraryHooksFinding(q, title);

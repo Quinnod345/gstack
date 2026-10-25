@@ -5,7 +5,8 @@
 set -euo pipefail
 
 BUN_VERSION=1.4.2
-NODE_VERSION=22.20.0
+NODE_VERSION=22.23.4
+NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
 
 export DEBIAN_FRONTEND=noninteractive
 sudo -E apt-get update -qq
@@ -17,9 +18,13 @@ sudo -E apt-get install -y -qq --no-install-recommends \
 # needs; GitHub-hosted runners ship with this relaxed.
 sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0
 
+# The same verified release archive as .github/docker/Dockerfile.ci.
 if ! command -v node >/dev/null; then
-  curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" \
-    | sudo tar -xJ -C /usr/local --strip-components=1
+  node_tmp=$(mktemp -d)
+  curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" -o "$node_tmp/node.tar.xz"
+  echo "$NODE_SHA256  $node_tmp/node.tar.xz" | sha256sum -c - >/dev/null
+  sudo tar -xJ -C /usr/local --strip-components=1 -f "$node_tmp/node.tar.xz"
+  rm -rf "$node_tmp"
 fi
 
 # The exact release archive, verified by SHA-256 before it is unpacked, as in

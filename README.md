@@ -66,6 +66,8 @@ No vendored files in your repo, no version drift, no manual upgrades. Every Clau
 
 Swap `required` for `optional` if you'd rather nudge teammates than block them.
 
+`required` blocks skills with a hook that runs on [Node.js](https://nodejs.org/), so every teammate needs Node.js on PATH, on every OS. With Claude Code 2.1.295 or later the hook also blocks when it can't run (no Node.js, or a missing `.claude/hooks/check-gstack.cjs`); older Claude Code lets skills through in that case.
+
 ### OpenClaw
 
 OpenClaw spawns Claude Code sessions via ACP, so every gstack skill just works
@@ -513,9 +515,18 @@ The sprint structure is what makes parallelism work. Without a process, ten agen
 
 ### Voice input (AquaVoice, Whisper, etc.)
 
-gstack skills have voice-friendly trigger phrases. Say what you want naturally —
-"run a security check", "test the website", "do an engineering review" — and the
-right skill activates. You don't need to remember slash command names or acronyms.
+Many gstack skills list speech-to-text aliases (`voice-triggers:` in their
+templates): "security check" for `/cso`, "run QA" or "test the app" for `/qa`,
+"tech review" for `/plan-eng-review`. Say one of those naturally and the right
+skill can be picked without the slash command name. On Claude Code the aliases
+are routing lines in the root `/gstack` router; on Codex and the other hosts
+they are appended to each skill's description, which is what those hosts match
+on.
+
+The separate `triggers:` list in a skill's frontmatter is gstack metadata, not a
+matching surface. Claude Code and Codex choose a skill from its name and
+description, so a phrase that appears only under `triggers:` does not activate
+the skill (Codex output drops the field; the GBrain host keeps it).
 
 ## Uninstall
 
