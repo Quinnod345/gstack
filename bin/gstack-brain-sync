@@ -1068,7 +1068,7 @@ subcmd_publish_removals() {
   sync_active || { echo "BRAIN_SYNC: artifacts sync is not active; nothing to publish" >&2; exit 1; }
   gstack_brain_lock_acquire "$GSTACK_HOME" try || { echo "BRAIN_SYNC: another sync is running; try again" >&2; exit 1; }
   list=$(mktemp "${TMPDIR:-/tmp}/brain-sync-removals.XXXXXX") || exit 1
-  trap 'rm -f "$list" "$list.gone"; gstack_brain_lock_release' EXIT INT TERM
+  trap "rm -f $(printf '%q ' "$list" "$list.gone"); gstack_brain_lock_release" EXIT INT TERM
   removal_candidates "$list" || { echo "BRAIN_SYNC: could not list removed files" >&2; exit 1; }
   n=$(grep -c . "$list" 2>/dev/null || true)
   if [ "$n" -eq 0 ]; then

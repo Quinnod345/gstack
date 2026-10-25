@@ -3,8 +3,8 @@
 ## Step 9: Pre-Landing Review
 
 Set CYCLES to 0 on first entry only. Keep existing approvals; changed finding scope
-needs a new decision. Run checklist/design, specialists (9.1), merge/Red Team (9.2),
-exploratory QA (9.2.1), dedup (9.3), then fixes and logging (9.4).
+needs a new decision. Order: checklist/design, specialists (9.1), Red Team (9.2),
+QA (9.2.1), dedup (9.3), fixes and logging (9.4).
 Gated/unsupported specialists skip only their dispatch, never QA or Step 11.
 Steps 10–11 queue findings without editing; include those findings in this pass.
 Every repeat starts before the checklist read and captures a fresh REVIEW_START.
@@ -73,6 +73,10 @@ This pass is static; defer product probes to Step 9.2.1.
 
 2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>`. Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
 
+   **Fix-range repeat** (decision 3): start with `--start review --fix-range`. It prints
+   REVIEW_START, then `FIX_BASE=<sha>`, which stands in for `origin/<base>` and `<base>` in this pass.
+   If it refuses, start a full pass.
+
 2.5. **Gate scan.** Before applying the checklist, run the gate scan on the same candidate:
 
 List every gate edit in the candidate (test, CI, runner/lint-config, snapshot and
@@ -116,9 +120,9 @@ fi
 
 ### Design-lite checklist
 
-Its numbering is local to this checklist. When frontend review applies, `/ship`
-automatically attempts this optional design check; `enabled` expresses that choice,
-not a new user question. Step 11 has its own outside-review switch and required native pass.
+Its numbering is local. `/ship` attempts this design check automatically when frontend
+review applies; `enabled` is that choice, not a user question. Step 11 has its own
+outside-review switch and required native pass.
 
 ## Design Review (conditional, diff-scoped)
 
@@ -252,10 +256,9 @@ Use the original DESIGN_START token. COMPLETED is true only when the native chec
 
 Substitute: TIMESTAMP = ISO 8601 datetime, STATUS = "clean" if 0 findings or "issues_found", N = total findings, M = auto-fixed count, D = counted detector findings from step 0 (0 when the detector did not run), COMMIT = output of `git rev-parse --short HEAD`.
 
-The parent owns design-lite; the Design specialist is an independent read.
-Before final counting/Fix-First, merge the same evidenced design defect at the same path/line
-into one item with both sources and stricter ASK. Retain actual specialist stats;
-distinct defects stay separate and neither pass substitutes for the other.
+Design-lite (parent) and the Design specialist are independent reads. Before counting
+and Fix-First, merge one evidenced design defect at the same path/line into one item
+with both sources and the stricter ASK. Keep actual specialist stats and distinct defects.
 
 ## Step 9.1: Review Army — Specialist Dispatch
 
@@ -618,11 +621,9 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
 2. **Auto-fix all AUTO-FIX items.** Apply each fix. Output one line per fix:
    `[AUTO-FIXED] [file:line] Problem → what you did`
 
-3. **If ASK items remain,** present them in ONE AskUserQuestion:
-   - List each with number, severity, problem, recommended fix
-   - Per-item options: A) Fix  B) Skip
-   - Overall RECOMMENDATION
-   - If 3 or fewer ASK items, you may use individual AskUserQuestion calls instead
+3. **If ASK items remain,** present them in ONE AskUserQuestion (or one per item for 3 or
+   fewer): each item's number, severity, problem and recommended fix with A) Fix  B) Skip,
+   plus an overall RECOMMENDATION.
 
    Save each explicit Skip immediately in the invocation action list with its
    identity, scope and supporting source evidence; keep it across repeats.
@@ -669,10 +670,10 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
 ```bash
 ~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"review","timestamp":"TIMESTAMP","status":"STATUS","issues_found":N,"critical":N,"informational":N,"quality_score":SCORE,"specialists":SPECIALISTS_JSON,"findings":FINDINGS_JSON,"commit":"'"$(git rev-parse --short HEAD)"'","via":"ship","completed":COMPLETED,"converged":CONVERGED,"cycles":CYCLES}' --finish REVIEW_START
 ```
-- `TIMESTAMP`: ISO 8601. `STATUS`: `unavailable` for missing dispatched reviewer output;
-  otherwise `clean` only for completed coverage with no
-  unresolved non-advisory defects; otherwise `issues_found`. N counts current
-  unresolved defects, not original totals. Missing coverage is not a defect.
+- `TIMESTAMP`: ISO 8601. `STATUS`: `unavailable` for missing dispatched reviewer output,
+  else `clean` only for completed coverage with no unresolved non-advisory defects,
+  else `issues_found`. N counts unresolved defects now, not original totals; missing
+  coverage is not a defect.
 - `REVIEW_START`: this pass's Step 9 token captured before reading the diff;
   never recapture at persistence to certify unreviewed fixes.
 - `COMPLETED`: checklist and dispatched specialists/Red Team finish, and all required probes pass.
@@ -694,13 +695,13 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
   `open` counts in `issues_found` and by severity. The logger stamps `actor` from
   `gstack-session-kind` (a supplied `actor` is discarded) and forces `"open"` on
   gate findings in a non-interactive session.
-Save the review output and the `Gate edits:` line — they go into the PR body in Step 19.
-Any `open` gate finding also decides Step 19's draft state.
+Save the review output and `Gate edits:` line for Step 19's PR body; an `open` gate
+finding makes that PR a draft.
 
 ### Decide whether to repeat Step 9
 
-After persistence, record missing dispatched output, CYCLES and applied fixes in
-the invocation record. Apply these decisions in order:
+After persistence, record missing output, CYCLES and fixes in the invocation record.
+Apply these decisions in order:
 
 1. **Dispatched reviewer output missing:** STOP and name each failed specialist or
    Red Team. Retain queued fixes and restore coverage. If this pass made edits,
@@ -710,10 +711,10 @@ the invocation record. Apply these decisions in order:
    `converged:false`; do not run a fourth fixing cycle.
 3. **Fixes applied below the cap:** Insert Step 5, affected Steps 6–8 and all of
    Step 9 before the pending Step 10 in the work list. Tests must pass or retain approval for the same verified pre-existing
-   failures and scope. Keep CYCLES and scoped approvals across this repeat.
+   failures and scope. Keep CYCLES and scoped approvals across this repeat; it may be a fix-range repeat.
 4. **No edits in this pass:** Resolve the required-probe gate below. Only after it
-   clears may you continue to Step 10. Undispatched gated/unsupported specialists
-   do not block independently, but never replace QA or required native review.
+   clears may you continue to Step 10, and only from a full pass: after a fix-range
+   pass, run one full Step 9 first.
 
 **Required-probe parent gate:** With completed checklist and dispatched reviewers,
 failed/unavailable required probes block continuation.
