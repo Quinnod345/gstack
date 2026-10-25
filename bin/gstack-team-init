@@ -102,7 +102,13 @@ Do not skip skills, ignore gstack errors, or work around missing gstack.
 Using gstack skills: After install, skills like /qa, /ship, /review, /investigate,
 and /browse are available. Use /browse for all web browsing (Aside first, the bundled gstack browser as fallback).
 Use the resolved install path above for gstack file paths
-(default: ~/.claude/skills/gstack).'
+(default: ~/.claude/skills/gstack).
+
+The Skill gate in .claude/settings.json runs .claude/hooks/check-gstack.cjs with
+Node.js and blocks when it cannot run. If a skill is blocked with "node: not
+found", tell the user to install Node.js (https://nodejs.org); if it is blocked
+with "Cannot find module ... check-gstack.cjs", the hook file is missing from
+this checkout. Do not work around either block.'
 fi
 
 # Check if CLAUDE.md already has a gstack section
@@ -176,15 +182,20 @@ HOOK_EOF
   GENERATED+=(".claude/hooks/check-gstack.cjs")
   echo "  + .claude/hooks/check-gstack.cjs — enforcement hook"
 
-  # Add hook to project-level settings.json
+  # Add hook to project-level settings.json. The command exits 0 (allow) or
+  # 2 (deny) only when node runs check-gstack.cjs. Without node the shell exits
+  # 127, and a require error exits 1; Claude Code treats any other exit as a
+  # non-blocking error and lets the Skill call through, so the handler is
+  # registered with onFailure: block (Claude Code 2.1.295+) to fail closed
+  # (#3319). Older Claude Code ignores the field and keeps the old behavior.
   HOOK_COMMAND="node -e \"require(require('path').resolve(process.env.CLAUDE_PROJECT_DIR || '.', '.claude', 'hooks', 'check-gstack.cjs'))\""
   if ! command -v bun >/dev/null 2>&1; then
-    echo "  ! bun not found — manually add this PreToolUse hook (matcher Skill|skill) to .claude/settings.json:"
+    echo "  ! bun not found — manually add this PreToolUse hook (matcher Skill|skill, \"onFailure\": \"block\") to .claude/settings.json:"
     echo "    $HOOK_COMMAND"
   elif GSTACK_SETTINGS_PATH="$SETTINGS" GSTACK_HOOK_COMMAND="$HOOK_COMMAND" bun --no-env-file --config=/dev/null -e "
       const fs = require('fs');
       const settingsPath = process.env.GSTACK_SETTINGS_PATH;
-      const command = process.env.GSTACK_HOOK_COMMAND;
+      const handler = { type: 'command', command: process.env.GSTACK_HOOK_COMMAND, onFailure: 'block' };
 
       let settings = {};
       try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
@@ -196,7 +207,8 @@ HOOK_EOF
       // Claude tool name maps to, so a bare 'Skill' never fired there (#2229).
       // A registration an older team-init wrote (the .sh hook, matcher Skill)
       // is replaced in place: exactly one check-gstack handler remains, and
-      // unrelated hooks in the same entry are kept.
+      // unrelated hooks in the same entry are kept. Re-running upgrades a
+      // handler registered without onFailure.
       const MATCHER = 'Skill|skill';
       const isOurs = h => h && typeof h.command === 'string' && h.command.includes('check-gstack');
       let placed = false;
@@ -207,12 +219,12 @@ HOOK_EOF
         const kept = [];
         for (const h of entry.hooks) {
           if (!isOurs(h)) kept.push(h);
-          else if (!placed) { kept.push({ type: 'command', command }); placed = true; }
+          else if (!placed) { kept.push({ ...handler }); placed = true; }
         }
         entry.hooks = kept;
         return kept.length > 0;
       });
-      if (!placed) settings.hooks.PreToolUse.push({ matcher: MATCHER, hooks: [{ type: 'command', command }] });
+      if (!placed) settings.hooks.PreToolUse.push({ matcher: MATCHER, hooks: [{ ...handler }] });
 
       const tmp = settingsPath + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
@@ -229,7 +241,7 @@ HOOK_EOF
       echo "  - .claude/hooks/check-gstack.sh — replaced by check-gstack.cjs"
     fi
   else
-    echo "  ! could not update .claude/settings.json — add this PreToolUse hook (matcher Skill|skill) manually:"
+    echo "  ! could not update .claude/settings.json — add this PreToolUse hook (matcher Skill|skill, \"onFailure\": \"block\") manually:"
     echo "    $HOOK_COMMAND"
   fi
 fi
@@ -248,3 +260,9 @@ echo ""
 echo "Each developer then runs:"
 echo "  git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack"
 echo "  cd ~/.claude/skills/gstack && ./setup --team"
+if [ "$MODE" = "required" ]; then
+  echo ""
+  echo "The Skill gate runs on Node.js and blocks when it cannot run, so every"
+  echo "developer also needs node on PATH and Claude Code 2.1.295 or later."
+  echo "Older Claude Code ignores onFailure: without node there, skills are not blocked."
+fi
