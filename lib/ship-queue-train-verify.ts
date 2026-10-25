@@ -20,8 +20,9 @@ import { git } from './ship-queue-gate';
 import { checkRun, execFor, repoSlug } from './ship-queue-train-github';
 import { activeFreeze, attemptsOf, nowIso, persist, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
 import {
-  effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, save, trainEnv, type TrainEnv, type TrainOut,
+  effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
 } from './ship-queue-train';
+import { ownEntryAboveMain } from './changelog-check';
 import { buildReceipt } from './tree-receipt';
 
 const Q = 'gstack-ship-queue';
@@ -30,6 +31,37 @@ function sameModuloStamps(env: TrainEnv, gated: string, current: string): { same
   const r = buildReceipt({ repoRoot: env.ctx.repoRoot, gated, current, policy: env.policy.policy, policyLabel: env.policy.source.label });
   if ('error' in r) return { same: false, detail: r.error };
   return { same: r.tree === 'same-modulo-stamps', detail: r.tree === 'same-modulo-stamps' ? `same modulo stamps (${r.files.length} stamp file(s))` : `differs: ${r.residual.slice(0, 8).join(', ')}` };
+}
+
+/**
+ * A slot head with main merged in (from slot 2 on the lane merges main into
+ * its pin so GitHub can merge it): it must contain main, and its tree must be
+ * the slot's prefix T<i> modulo stamps. The CHANGELOG is judged against main
+ * instead of T<i>'s mechanical merge, so a hand resolve is accepted when it
+ * is main's CHANGELOG plus the PR's own entry (ownEntryAboveMain); any other
+ * difference is refused.
+ */
+function mergedIn(env: TrainEnv, t: TrainRecord, i: number, head: string, main: string): { same: boolean; detail: string } {
+  const after = t.prefixes[i + 1]!;
+  const root = env.ctx.repoRoot;
+  if (!git(root, ['merge-base', '--is-ancestor', main, head]).ok) return { same: false, detail: `does not contain main ${main.slice(0, 12)}` };
+  const r = buildReceipt({ repoRoot: root, gated: after.commit, current: head, policy: env.policy.policy, policyLabel: env.policy.source.label });
+  if ('error' in r) return { same: false, detail: r.error };
+  const stamps = `${r.files.filter(f => f.verdict === 'stamp').length} stamp file(s)`;
+  if (r.tree === 'same-modulo-stamps') return { same: true, detail: `T${after.index} with main merged in, same modulo stamps (${stamps})` };
+  const cl = env.policy.policy.changelog;
+  const beyond = r.residual.filter(f => f !== cl);
+  if (beyond.length || !cl) return { same: false, detail: `differs from T${after.index}: ${r.residual.slice(0, 8).join(', ')}` };
+  const pin = t.slots[i]!.head;
+  const forkPoint = git(root, ['merge-base', pin, t.prefixes[0]!.commit]).out;
+  const diff = git(root, ['diff', '--unified=0', '--no-color', '--no-ext-diff', forkPoint, pin, '--', cl]);
+  const show = (rev: string) => git(root, ['show', `${rev}:${cl}`]);
+  const [headCl, mainCl] = [show(head), show(main)];
+  if (!forkPoint || !diff.ok || !headCl.ok || !mainCl.ok) return { same: false, detail: `cannot read ${cl} at the pin, the head or main` };
+  const authored = new Set(diff.out.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)));
+  const why = ownEntryAboveMain(headCl.out, mainCl.out, authored);
+  if (why) return { same: false, detail: `differs from T${after.index} in ${cl}, which is not main's plus #${t.slots[i]!.pr}'s own entry: ${why}` };
+  return { same: true, detail: `T${after.index} with main merged in, same modulo stamps (${stamps}) except ${cl}, resolved as main's ${cl} plus #${t.slots[i]!.pr}'s own entry` };
 }
 
 /**
@@ -61,8 +93,8 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
 /** Interrupted publication: freeze when earlier slots merged; otherwise a plain refusal (nothing was published). */
 async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[]): Promise<TrainOut> {
   const run = trainFile(t.nonce);
-  if (!t.merged.length) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build --prs ${pinList(t.slots)} (a new train on current main)`, run);
-  const f = activeFreeze(env.repo.key) ?? await freezeQueue(env, t, message, mainSha);
+  if (!t.merged.length) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
+  const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
 }
 
@@ -84,7 +116,7 @@ export async function verifyTrain(ctx: QueueContext, o: { pr: string; train: str
   if (check?.conclusion !== 'success') return outRefused({ code: 'QUEUE_GATE_MISSING', message: `no successful ${env.train.full_gate_check} check run on the train head ${t.head.slice(0, 12)}` }, [], `${Q} train verdict --train ${t.nonce}`, run);
   if (!fetchTrainBranch(env, t)) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the train's prefix commits are not here and ${t.branch} could not be fetched` }, [], `${Q} train status --train ${t.nonce}`, run);
   const main = git(ctx.repoRoot, ['rev-parse', `${env.remote}/${ctx.base}`]).out;
-  const freeze = activeFreeze(env.repo.key);
+  const freeze = activeFreeze(env.repo.keys);
   if (freeze && freeze.repair?.train !== t.nonce) return outRefused({ code: 'QUEUE_TRAIN_FROZEN', message: `the queue is frozen (${freeze.reason}); only the admitted repair train merges` }, frozenLines(freeze), `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
   const after = t.prefixes[i + 1]!;
   const before = t.prefixes[i]!;
@@ -98,9 +130,8 @@ export async function verifyTrain(ctx: QueueContext, o: { pr: string; train: str
   const headRef = o.noFetch ? '' : (git(ctx.repoRoot, ['fetch', '--no-tags', '-q', env.remote, `+refs/pull/${o.pr}/head:refs/gstack/queue/pr-${o.pr}`]).ok ? `refs/gstack/queue/pr-${o.pr}` : '');
   const head = headRef ? git(ctx.repoRoot, ['rev-parse', headRef]).out : t.slots[i]!.head;
   const pinned = head === t.slots[i]!.head ? { same: true, detail: 'the pinned head' } : sameModuloStamps(env, t.slots[i]!.head, head);
-  const asPrefix = pinned.same ? null : sameModuloStamps(env, after.commit, head);
-  const stampOnly = asPrefix?.same ? { same: true, detail: `T${after.index} with main merged in, ${asPrefix.detail}` } : pinned;
-  if (!stampOnly.same) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr} moved past its pinned head ${t.slots[i]!.head.slice(0, 12)} and is not T${after.index} modulo stamps (${head.slice(0, 12)}: ${pinned.detail})`, main, lines);
+  const stampOnly = pinned.same ? pinned : mergedIn(env, t, i, head, main);
+  if (!stampOnly.same) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr} moved past its pinned head ${t.slots[i]!.head.slice(0, 12)} and is not T${after.index} modulo stamps (${head.slice(0, 12)}: ${stampOnly.detail}; against the pin it ${pinned.detail})`, main, lines);
   return outOk([...lines, `main: ${main} = T${before.index} (${pre.detail})`, `head: ${head} (${stampOnly.detail})`,
     `VERIFY_TRAIN: #${o.pr} may merge as slot ${i + 1} of train ${t.nonce} (green run ${gate.run?.id ?? '-'}, ${env.train.full_gate_check} success)`, `MERGE_CONDITION: sha=${head}`],
   `merge #${o.pr} with expected head ${head.slice(0, 12)} (gstack-restamp stamps at merge), then ${Q} verify --pr ${o.pr} --train ${t.nonce}`, run);
@@ -113,7 +144,7 @@ function confirmMerged(env: TrainEnv, t: TrainRecord, pr: string, main: string, 
   effect(t, `verified #${pr} merged as T${index}`);
   save(env, t);
   lines.push(`VERIFY_TRAIN: #${pr} merged; main's tree is T${index} of train ${t.nonce} (${t.merged.length}/${t.slots.length} merged)`);
-  const freeze = activeFreeze(env.repo.key);
+  const freeze = activeFreeze(env.repo.keys);
   if (freeze && freeze.repair?.train === t.nonce && t.state === 'merged') {
     freeze.cleared_at = nowIso();
     freeze.cleared_by = `repair #${pr} via train ${t.nonce}; main ${main.slice(0, 12)} carries a green record`;

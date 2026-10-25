@@ -170,8 +170,10 @@ the readiness dashboard and the PR body, and never count it as a pass.
   findings.
 - **Every review gate.** These rules apply to every gate that summarises a
   review, including the `execution` gate behind `/codex` consult and challenge.
-  A reply whose last `Verdict:` line says `not ready` but carries no readable
-  severity prints `FINDINGS: unspecified` and exits 3 like a blocking finding.
+  A reply whose last `Verdict:` line says `not ready` is `findings` and exits
+  3 even when readable advisory severities (P2 or P3) were parsed; `FINDINGS:`
+  names the highest one. A not-ready reply with no readable severity still
+  prints `FINDINGS: unspecified` and exits 3.
 - **No findings.** A review with no tag and no label is `clean` only when its
   conclusion says so: the last sentence (or its last ", and" clause), or the
   `because` clause of its `Recommendation:` line, opens with `NO_FINDINGS`,
@@ -1590,7 +1592,7 @@ next `--check` passes.
 ### `gstack-capy-install: GSTACK_BUN_INSTALL_VERSION=<v> is not a verified Bun at or above gstack's supported minimum ...; fix: ... (BUN_INSTALL_VERSION_INVALID)`
 
 **Meaning.** `GSTACK_BUN_INSTALL_VERSION` overrides the Bun the installer
-downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.3). It
+downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.4). It
 must be listed in `GSTACK_BUN_VERIFIED` (a SHA-256-verified archive) and sit at
 or above the supported minimum (`GSTACK_BUN_TESTED`). Nothing was installed.
 
@@ -2440,9 +2442,9 @@ reply with the printed `gate_rev`.
 **Meaning.** Part of the reply matched no gate item or option. Nothing was
 applied; the unparsed tokens are listed.
 
-**Fix.** Reply with `all`, with `<id><option>` tokens (`d3b uc1a`), or with
-`all except <tokens>`. A bare `yes` or `no` is ambiguous across multi-option
-items and is never guessed.
+**Fix.** Reply with `rec` (alias `all`), with `rec except <tokens>`, with
+`<id><option>` tokens (`d3b uc1a`), or with `as-is` (the plan as written). A
+bare `yes` or `no` is ambiguous across multi-option items and is never guessed.
 
 <a id="answer-by-required"></a>
 ### `ANSWER_BY_REQUIRED`
