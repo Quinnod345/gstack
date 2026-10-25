@@ -31,7 +31,7 @@ export interface FreeRun { run: number | null; url: string | null; head_sha: str
 export interface TrainRecord {
   schema: 1; kind: 'train'; nonce: string; key: string; repo_key: string; repo: string; base: { ref: string; sha: string }; policy: string;
   slots: TrainSlot[]; held: string[]; prefixes: TrainPrefix[]; head: string; tree: string; branch: string;
-  urgent: boolean; repair: boolean; state: TrainState; free: FreeRun | null; attempts: string[];
+  urgent: boolean; repair: boolean; explicit_order?: boolean; state: TrainState; free: FreeRun | null; attempts: string[];
   merged: Array<{ pr: string; sha: string; tree: string; at: string }>; superseded_by: string | null;
   effects: Array<{ at: string; what: string }>; error: string | null; created_at: string; updated_at: string;
 }
@@ -87,11 +87,34 @@ const bisectPath = (nonce: string) => path.join(trainDir(nonce), 'bisect.json');
 const freezePath = (repoKey: string) => path.join(queueRoot(), 'freeze', `${repoKey}.json`);
 export const readyPath = (repoKey: string, pr: string, head: string) => path.join(queueRoot(), 'ready', repoKey, `${pr}-${head}.json`);
 
-/** The repository's identity: origin's URL, keyed so records of different repositories never mix. */
-export function repoIdentity(repoRoot: string): { key: string; url: string } {
-  const url = git(repoRoot, ['config', '--get', 'remote.origin.url']).out.trim() || repoRoot;
-  const norm = url.replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/').replace(/\/+$/, '');
-  return { key: sha256(norm).slice(0, 16), url: norm };
+/** Hosts that serve GitHub repositories at /<owner>/<repo> (git.capy.ai is Capy's GitHub proxy, set through url.insteadOf). */
+const GITHUB_HOSTS = ['github.com', 'www.github.com', 'ssh.github.com', 'git.capy.ai'];
+
+/** Before 1.91.187.0 the key hashed origin's URL with only .git, git@github.com: and trailing slashes normalized. */
+const legacyNorm = (url: string) => url.replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/').replace(/\/+$/, '');
+
+/** A remote URL as https://github.com/<owner>/<repo> when it names a GitHub repository in any form (scp, ssh, http(s), credentials, proxy host); otherwise the legacy form. */
+export function normalizeRemoteUrl(url: string): string {
+  const m = /^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/*$/i.exec(url.trim());
+  if (m && GITHUB_HOSTS.includes(m[1]!.toLowerCase())) return `https://github.com/${m[2]!.toLowerCase()}/${m[3]!.toLowerCase()}`;
+  return legacyNorm(url.trim().replace(/^([a-z+]+:\/\/)[^@/]+@/i, '$1'));
+}
+
+/**
+ * The repository's identity, keyed so records of different repositories
+ * never mix: a hash of origin's URL normalized to owner/repo, so lanes whose
+ * origin names the same GitHub repository in another form share one key.
+ * `keys` adds the keys earlier versions wrote for this URL and for the
+ * repository's common URL forms; readers accept all of them, writers use `key`.
+ */
+export function repoIdentity(repoRoot: string): { key: string; url: string; keys: string[] } {
+  const raw = git(repoRoot, ['config', '--get', 'remote.origin.url']).out.trim() || repoRoot;
+  const url = normalizeRemoteUrl(raw);
+  const key = sha256(url).slice(0, 16);
+  const gh = /^https:\/\/github\.com\/(.+)$/.exec(url)?.[1];
+  const forms = gh ? GITHUB_HOSTS.flatMap(h => ['https', 'http', 'ssh://git@'].map(s => `${s.includes('://') ? s : `${s}://`}${h}/${gh}`)) : [];
+  const keys = [...new Set([key, ...[raw, ...forms].map(u => sha256(legacyNorm(u)).slice(0, 16))])];
+  return { key, url, keys };
 }
 
 function readJson<T>(file: string, kind: string): T | null {
@@ -101,19 +124,25 @@ function readJson<T>(file: string, kind: string): T | null {
 export const loadTrain = (nonce: string) => (/^[A-Za-z0-9._-]{1,128}$/.test(nonce) ? readJson<TrainRecord>(trainFile(nonce), 'train') : null);
 export const loadAttempt = (nonce: string, id: string) => (/^[A-Za-z0-9._-]{1,64}$/.test(id) ? readJson<AttemptRecord>(attemptPath(nonce, id), 'train-attempt') : null);
 export const loadBisect = (nonce: string) => readJson<BisectRecord>(bisectPath(nonce), 'train-bisect');
-export const loadFreeze = (repoKey: string) => readJson<FreezeRecord>(freezePath(repoKey), 'freeze');
-export const loadReady = (repoKey: string, pr: string, head: string) => readJson<ReadyReceipt>(readyPath(repoKey, pr, head), 'ready');
-export const activeFreeze = (repoKey: string): FreezeRecord | null => { const f = loadFreeze(repoKey); return f && !f.cleared_at ? f : null; };
+/** A reader's repo keys: the current key first, then the legacy keys (repoIdentity().keys). */
+type RepoKeys = string | readonly string[];
+const keyList = (k: RepoKeys): readonly string[] => (typeof k === 'string' ? [k] : k);
+const firstOf = <T>(k: RepoKeys, read: (key: string) => T | null): T | null => { for (const key of keyList(k)) { const r = read(key); if (r) return r; } return null; };
+
+export const loadFreeze = (repoKeys: RepoKeys) => firstOf(repoKeys, key => readJson<FreezeRecord>(freezePath(key), 'freeze'));
+export const loadReady = (repoKeys: RepoKeys, pr: string, head: string) => firstOf(repoKeys, key => readJson<ReadyReceipt>(readyPath(key, pr, head), 'ready'));
+export const activeFreeze = (repoKeys: RepoKeys): FreezeRecord | null => firstOf(repoKeys, key => { const f = readJson<FreezeRecord>(freezePath(key), 'freeze'); return f && !f.cleared_at ? f : null; });
 
 export function attemptsOf(train: TrainRecord): AttemptRecord[] {
   return train.attempts.map(id => loadAttempt(train.nonce, id)).filter((a): a is AttemptRecord => !!a);
 }
 
 /** Every train of this repository, newest first. */
-export function listTrains(repoKey: string): TrainRecord[] {
+export function listTrains(repoKeys: RepoKeys): TrainRecord[] {
   const dir = path.join(queueRoot(), 'trains');
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).map(n => loadTrain(n)).filter((t): t is TrainRecord => !!t && t.repo_key === repoKey)
+  const keys = keyList(repoKeys);
+  return fs.readdirSync(dir).map(n => loadTrain(n)).filter((t): t is TrainRecord => !!t && keys.includes(t.repo_key))
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.nonce.localeCompare(a.nonce));
 }
 
