@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.203.0] - 2026-10-25
 
 **Asking gstack to fix a failure no longer always opens /investigate (#3157, #3158).** The router sent every bug report straight to the full /investigate workflow, even when the user had named the cause or one look at the failing code showed it. Now the router checks first. When the user names a cause and a narrow fix, it makes one read-only check of the evidence. When that confirms the cause, it makes the fix and runs the focused test. When the cause is unknown, it makes one bounded, read-only triage pass over the supplied evidence and the directly implicated test and code, with no reproduction, hypothesis testing or wider search, and fixes the failure directly only when that pass establishes the root cause. Anything still unclear, including a cause the check contradicts, goes to /investigate before any edit, so the root-cause bar holds. A failing test or stack trace no longer counts as proof of its cause.
 
