@@ -24,7 +24,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const ROOT = path.resolve(__dirname, '..');
-const DOCKERFILE = path.join(ROOT, '.github', 'docker', 'Dockerfile.ci');
+const DOCKERFILE = path.join(__dirname, '..', '.github', 'docker', 'Dockerfile.ci');
 
 /** Package specs from every `npm i -g` / `npm install -g` in the Dockerfile. */
 export function globalNpmInstallSpecs(source: string): string[] {
@@ -242,6 +242,7 @@ describe('CI Node.js installs match the image and are verified (#3354)', () => {
   const source = fs.readFileSync(path.join(ROOT, rel), 'utf-8');
 
   test(`${rel} pins the same Node.js version and SHA-256 as Dockerfile.ci`, () => {
+    expect(imageSha).toMatch(/^[0-9a-f]{64}$/);
     expect(source.match(/^NODE_VERSION=(\S+)$/m)?.[1]).toBe(imageVersion!);
     expect(source.match(/^NODE_SHA256=(\S+)$/m)?.[1]).toBe(imageSha!);
   });

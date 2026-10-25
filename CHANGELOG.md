@@ -11,9 +11,10 @@
 ### Tests
 - `test/ci-image-cli-pin.test.ts` gains four cases: Dockerfile.ci pins an exact Node version and a SHA-256, both files verify before they unpack, and `setup-free-suite.sh` pins the same version and hash as the image. On #3355's head alone, all four fail; on main, three fail.
 - The Bun ordering check in `setup-free-suite.sh` now looks for `sha256sum -c` after the Bun download instead of anywhere in the file, because the Node check now comes first.
+- The test names `Dockerfile.ci` as `join(__dirname, '..', '.github', …)`, the form pregate's literal scan resolves, so a change to the image now selects it (before, pregate refused a Dockerfile.ci-only change with `PREGATE_NO_LANE`).
 
 ### Gate integrity
-- One accepted-input change to review: the Bun ordering check searches for its `sha256sum -c` from the Bun download onward. A file whose only `sha256sum -c` sits before the download still fails, and so does removing the Bun hash or moving it after `unzip` (negative controls run). No threshold, budget, timeout, trial count or case kind changed.
+- One accepted-input change to review: the Bun ordering check searches for its `sha256sum -c` from the Bun download onward. It now accepts one input it used to reject: a file with some other `sha256sum -c` before the Bun download and the Bun check after it, which is this file. The property it guards, Bun verified after download and before unpack, is unchanged. A file whose only `sha256sum -c` sits before the download still fails, and so does removing the Bun hash or moving it after `unzip` (negative controls run). No threshold, budget, timeout, trial count or case kind changed.
 
 ## [1.91.191.0] - 2026-10-25
 
