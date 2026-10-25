@@ -22,6 +22,62 @@
 - `scripts/harness-version.json` records `test/helpers/llm-judge.ts` as non-behavioral at HARNESS_VERSION 6: only a parse failure's message changes, before any score is parsed, so no case's verdict or pass-rate series changes.
 - No threshold, trial count, case kind, rubric, judge request or prompt changed.
 
+## [1.91.215.0] - 2026-10-25
+
+**An unattended `/ship` leaves its receipt in a file the parent can read, and the parent is told to read that file (GSTA-88).** Before, Step 18's handoff section wrote the ship receipt only to stdout, and `docs/unattended.md` told the parent to read it from the PR body with `gstack-ship-receipt read --pr <n> --json`. An unattended run must not push, so there is no PR: the parent got a usage error or `RECEIPT_MISSING`, or, if an older PR existed, read that PR's receipt with exit 0 and a stale `head`. Now the handoff writes `.gstack/tmp/ship-receipt.md`, the parent reads it with `read --body` in the child's checkout, and it compares the receipt's `head` to the branch SHA either way.
+
+### Fixed
+- **`ship/sections/handoff.md.tmpl`**: the receipt write carries `--out .gstack/tmp/ship-receipt.md`. The completion-message step drops `(\`pr: none\`)`, which was wrong (the block omits `pr`; only the `SHIP_RECEIPT:` line shows `pr=-`), and the "nothing precedes the identifiers" clause, which repeated "identifiers first". Ship's skeleton plus sections is 313,151 bytes, 13 below main and under its 313,281 cap; no cap or pin moved.
+- **`bin/gstack-skill-start`**: an unattended `/ship` prints one status line, `UNATTENDED_SHIP: no push, no PR; Step 18 takes the handoff section; receipt at .gstack/tmp/ship-receipt.md`. No other skill or session kind prints it, and no instruction block was added. The unattended block's `/ship` record sentence names the file for a run that did not push and the PR body only once a PR exists.
+- **`docs/unattended.md`**: for `/ship`, read `gstack-ship-receipt read --body .gstack/tmp/ship-receipt.md --json` in the child's checkout when the run did not push, use `read --pr <n> --json` only once a PR exists, and in both cases compare the receipt's `head` to the branch SHA, because `read` does not check that the receipt is current.
+
+### Tests
+- `test/gstack-ship-receipt.test.ts` runs the handoff template's write command as written in a fixture repository, then reads the file back with `read --body`: `head` is HEAD, `session_kind` is `unattended` and there is no `pr`. It also checks that the template and the generated section carry `--out` and that `docs/unattended.md` names the same file with `read --body`.
+- `test/gstack-skill-start.test.ts` checks that the `UNATTENDED_SHIP` line appears exactly once for an unattended `/ship`, alongside only the `unattended-session` block, and never for `/review`, `/qa`, `/autoplan` or for `/ship` in an interactive, spawned or headless session.
+
+## [1.91.214.0] - 2026-10-25
+
+**`gstack-brain-sync --publish-removals --yes` no longer prints `list: unbound variable` when it finishes, and it now removes its temp list and releases the sync lock.** The command's EXIT trap named the function's local `$list`. When a publish succeeded, the function returned before the script exited, so the trap ran after `list` had gone out of scope. Under `set -u` it stopped at the unbound variable and never reached the cleanup, which left `brain-sync-removals.*` in `$TMPDIR` and `.brain-sync.lock.d` in `~/.gstack` until a later run cleared the lock as stale (found by GSTA-44).
+
+### Fixed
+- **`bin/gstack-brain-sync`**: `--publish-removals` writes the temp file paths into its EXIT/INT/TERM trap when it installs the trap (quoted with `printf %q`), so the cleanup and lock release work however the function ends. The drain's trap in `--once` also names locals, but every path in that function ends with `exit` while they are still in scope, so it's unchanged. The other trap sites (the drain's lock-only trap and `gstack-brain-restore`'s, which uses a global) don't have the bug.
+
+### Tests
+- `test/brain-sync-removals.test.ts`: a new case runs `--publish-removals`, then `--publish-removals --yes` twice (publishing, then nothing to publish) with a private `TMPDIR`. After each run, stderr has no `unbound variable`, the exit status is 0, `TMPDIR` is empty and the lock directory is gone. It failed before the fix.
+
+## [1.91.213.0] - 2026-10-25
+
+**The CI image and the Ubicloud free-suite VMs move off Node.js 22.20.0 to 22.23.4, and both now check the Node archive's SHA-256 before unpacking it (#3354, port of #3355 by @michael-sumner).** 22.20.0 is affected by the October 21, 2026 Node.js security releases, including the Brotli decoder out-of-bounds write (CVE-2026-111497, high) and the TLS hostname bypass for leading-zero IPv4 hosts (CVE-2026-106069, high). 22.23.4 is the patched 22.x release. #3355 bumped `.github/docker/Dockerfile.ci`, but `scripts/ubicloud/setup-free-suite.sh` pins Node separately and would have kept installing 22.20.0 on every remote free-suite run.
+
+### Fixed
+- **`.github/docker/Dockerfile.ci`**: `NODE_VERSION` is 22.23.4 (Michael Sumner's commit). The archive is checked against `NODE_SHA256`, the linux-x64 hash from the release's SHASUMS256.txt, whose signature verifies against the Node.js release keyring, before it is unpacked.
+- **`scripts/ubicloud/setup-free-suite.sh`**: pins the same 22.23.4 and hash, and downloads the archive to a temporary file and verifies it instead of piping `curl` straight into `sudo tar`.
+
+### Tests
+- `test/ci-image-cli-pin.test.ts` gains four cases: Dockerfile.ci pins an exact Node version and a SHA-256, both files verify before they unpack, and `setup-free-suite.sh` pins the same version and hash as the image. On #3355's head alone, all four fail; on main, three fail.
+- The Bun ordering check in `setup-free-suite.sh` now looks for `sha256sum -c` after the Bun download instead of anywhere in the file, because the Node check now comes first.
+- The test names `Dockerfile.ci` as `join(__dirname, '..', '.github', …)`, the form pregate's literal scan resolves, so a change to the image now selects it (before, pregate refused a Dockerfile.ci-only change with `PREGATE_NO_LANE`).
+
+### Gate integrity
+- One accepted-input change to review: the Bun ordering check searches for its `sha256sum -c` from the Bun download onward. It now accepts one input it used to reject: a file with some other `sha256sum -c` before the Bun download and the Bun check after it, which is this file. The property it guards, Bun verified after download and before unpack, is unchanged. A file whose only `sha256sum -c` sits before the download still fails, and so does removing the Bun hash or moving it after `unzip` (negative controls run). No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.212.0] - 2026-10-25
+
+**/careful no longer asks about words inside a commit message (#1060; ported from #3221 by @Bhumika-1432006).** The careful hook matched its MEDIUM patterns against the whole command, so `git commit -m "fix: prevent drop table in migration"` asked for approval as an SQL DROP. The hook now masks git commit's own literal message before those checks, including the `-m "$(cat <<'EOF' … EOF
+)"` form agents use most. Our commits on top of the contributor's scanner fix four problems found in review: the inline awk program made the whole hook a bash syntax error on bash 3.2 (macOS `/bin/bash`), so every Bash call failed the hook there; a newline after the message was dropped, so `-m x⏎truncate …` stopped asking; any `-m '…'` after a commit was masked, including another command's argument; and the heredoc form was never masked.
+
+### Fixed
+- **`careful/bin/mask-commit-message.awk`** (new, from the contributor's scanner): reads the command as one string and keeps its newlines. It splits at unquoted `;` `&` `|` `(` `)` and newlines (a redirection's `&` does not split) and masks `-m`, `-am`, `--message` and `--message=` only in a segment whose first word is `git` with a `commit` word after it. Single-quoted messages, double-quoted messages without `$`, backtick or backslash, and a double-quoted `$(cat <<'DELIM' … DELIM )` with a quoted delimiter are masked. Quotes, backslashes and comments are parsed as bash does. The command is left unmasked when it contains any other command, parameter or process substitution, a backtick, `$'…'`, a heredoc, an unterminated quote, or a pipe after a masked message (git prints the message on stdout).
+- **`careful/bin/check-careful.sh`**: runs the program with `awk -f` from the hook's own directory, so bash 3.2 parses the hook again. A missing program or an awk error leaves the command unmasked. The HIGH deny tier, the PowerShell table and the obfuscation tripwire still read the unmasked command.
+
+### Tests
+- `test/hook-scripts.test.ts` keeps the contributor's 10 cases and adds 31. Masked (no prompt): every flag form, `git -C repo commit`, `--amend`, multi-line messages and four heredoc spellings (`'EOF'`, `"MSG"`, `<<-` with a tab, a quoted word in the body). Still asking: a command on the next line, a quote that spans a line break, another command's `-m`, `echo git commit -m '…'`, an escaped quote, a backslash-newline, a heredoc with an unquoted delimiter, a substitution that closes the message early, a backtick, `git commit -F - <<'EOF'`, `$'…'`, a pipe after the commit (direct, after `2>&1`, or from a subshell), a process substitution and a parameter expansion. A partial install without the awk file still asks.
+- The same cases pass with mawk and the one-true-awk (`original-awk`, the awk macOS ships). In a `bash:3.2` container the hook as submitted in #3221 exits 2 with `unexpected EOF while looking for matching '"'` on every command; with this change it answers normally.
+
+### Gate integrity
+- One accepted-input change to review, in a safety hook: MEDIUM checks (and custom `careful-patterns.txt` rules) no longer see the masked text of git commit's own literal message. That is a weakening by design, limited to text that bash passes to git as a literal argument. The negative controls listed under Tests still ask. Commands that combine a commit with anything that could execute the message, or that the scanner cannot read with certainty, are checked unmasked, exactly as on main. No threshold, budget, timeout, trial count or case kind changed.
+- Known limit, still a false positive as on main: `git commit -F - <<'EOF'` messages and commits after an environment assignment or `sudo` are not masked.
+
 ## [1.91.211.0] - 2026-10-25
 
 **`gstack-diff-scope` sees Python tests and nested test directories (#3335).** A branch that changed `components/orch/services/shared/tests/test_native_store_custody.py` reported `SCOPE_TESTS=false`, because the Tests rule only knew `*.test.*`-style suffixes and `test/`, `tests/`, `spec/` and `__tests__/` at the repository root. /ship and /review use that flag to route the testing specialist, so a backend change whose tests follow pytest's `test_*.py` convention skipped it. The test-bootstrap resolver already counted these files, so the two detectors disagreed.
