@@ -89,8 +89,9 @@ git diff "$DIFF_BASE"
 1. Save the printed REVIEW_START for this core candidate before reading its diff.
 2. Each re-review captures a new token before reading, never at log time. After an
    edited pass, start the next with `--start review --fix-range`: it prints
-   REVIEW_START, then `FIX_BASE=<sha>`, which replaces DIFF_BASE, `origin/<base>` and
-   `<base>` in this pass. On refusal, start a full pass.
+   REVIEW_START, then `FIX_BASE=<sha>`. Wherever this pass sets DIFF_BASE outside
+   Step 4.8, use FIX_BASE instead; Step 4.8 and every other `<base>` use stay full.
+   On refusal, start a full pass.
 3. Native/outside reviewer attempts own separate PASS_START tokens, not REVIEW_START.
 4. Read non-ignored untracked source too (`git ls-files --others --exclude-standard`);
    the captured candidate includes it.
@@ -124,13 +125,13 @@ OFFLINE=$(echo "$QUEUE_JSON" | jq -r '.offline // false')
 - `OFFLINE=true`: skip this section.
 - Otherwise, include ONE line in the review output: `Version claimed: v<BRANCH_VERSION>. Queue: <CLAIMED_COUNT> PR(s) ahead. <VERDICT>` where VERDICT is either `Slot free` (if `BRANCH_VERSION >= NEXT_SLOT`) or `⚠ queue moved — rerun /ship to reconcile v<BRANCH_VERSION> → v<NEXT_SLOT>`.
 
-Compare dotted version components as integers from left to right; missing trailing components count as zero.
+Compare versions numerically per dotted component; missing ones count as zero.
 
 ---
 
 ## Step 3.5: Diff scans
 
-Run the gate scan first (local, seconds; every diff size), then the slop scan.
+Run the gate scan first (local; every diff size), then the slop scan.
 
 ### Gate scan
 
@@ -179,10 +180,8 @@ a clean result. Gate findings are ASK in Step 5 regardless of how mechanical the
 revert looks. {{FLAKE_FIX_NUMBER:review}}
 
 **Search-before-recommending:** Research proposed fixes through Aside, especially
-concurrency, caching, auth and framework behavior:
-- Check current best practice for the installed framework version.
-- Look for a newer built-in before proposing a workaround.
-- Verify API signatures against current docs.
+concurrency, caching, auth and framework behavior: current best practice for the
+installed version, newer built-ins that replace a workaround, and current API signatures.
 
 Prompt file text (create, write and send it with the Web research runs in Aside blocks above): `{framework} {version} {pattern} current best practice and whether a built-in replaces it. Reply with up to 5 bullets, each with its source URL.`
 
@@ -366,7 +365,7 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
 
 3. **VALID BUT ALREADY FIXED comments:** Reply with greptile-triage.md's **Already Fixed reply template**, no AskUserQuestion: what was done and the fixing commit SHA; save to both per-project and global greptile-history.
 
-4. **SUPPRESSED comments:** Skip silently (known false positives from previous triage).
+4. **SUPPRESSED comments:** Skip silently.
 
 ---
 
@@ -376,7 +375,8 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
 
 1. A pass covers Steps 3–5, including all reviewers before fixes. Allow at most 3 fix cycles:
    - Edited: increment CYCLES once, then fill and save the record below with
-     `converged:false`. Below 3, repeat Steps 3–5 with a new REVIEW_START. At 3, report
+     `converged:false`. Step 5.0 never treats this invocation's records as prior
+     reviews. Below 3, repeat Steps 3–5 with a new REVIEW_START. At 3, report
      nonconvergence and coverage gaps, then STOP this invocation, without a clean
      summary or a fourth pass.
    - No edits: after a full pass, fill the record below. A fix-range pass is never

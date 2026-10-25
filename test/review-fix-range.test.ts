@@ -221,16 +221,16 @@ describe('review Step 3 and Step 5.8 instructions', () => {
   const step58 = skill.slice(skill.indexOf('## Step 5.8: Persist Eng Review result'), skill.indexOf('### Report the final review'));
   const flat3 = step3.replace(/\s+/g, ' '), flat58 = step58.replace(/\s+/g, ' ');
 
-  test('the first pass starts full and only the pass after an edited pass narrows, with FIX_BASE replacing every base', () => {
+  test('the first pass starts full and only the pass after an edited pass narrows its DIFF_BASE, never Step 4.8 or other base uses', () => {
     const block = step3.slice(step3.indexOf('```bash'), step3.indexOf('```', step3.indexOf('```bash') + 7));
     expect(block).toContain('gstack-review-log --start review\ngit diff "$DIFF_BASE"');
     expect(block).not.toContain('--fix-range');
-    expect(flat3).toContain('After an edited pass, start the next with `--start review --fix-range`: it prints REVIEW_START, then `FIX_BASE=<sha>`, which replaces DIFF_BASE, `origin/<base>` and `<base>` in this pass. On refusal, start a full pass.');
+    expect(flat3).toContain('After an edited pass, start the next with `--start review --fix-range`: it prints REVIEW_START, then `FIX_BASE=<sha>`. Wherever this pass sets DIFF_BASE outside Step 4.8, use FIX_BASE instead; Step 4.8 and every other `<base>` use stay full. On refusal, start a full pass.');
     expect(skill.match(/--fix-range/g)).toHaveLength(1);
   });
 
-  test('an edited pass is logged before the repeat, and a fix-range pass is never the final review', () => {
-    const edited = flat58.indexOf('Edited: increment CYCLES once, then fill and save the record below with `converged:false`.');
+  test('an edited pass is logged before the repeat, kept out of Step 5.0, and a fix-range pass is never the final review', () => {
+    const edited = flat58.indexOf("Edited: increment CYCLES once, then fill and save the record below with `converged:false`. Step 5.0 never treats this invocation's records as prior reviews.");
     const repeat = flat58.indexOf('Below 3, repeat Steps 3–5 with a new REVIEW_START.');
     const none = flat58.indexOf('No edits: after a full pass, fill the record below. A fix-range pass is never final: repeat Steps 3–5 with a full start.');
     expect(edited).toBeGreaterThan(-1);
@@ -254,6 +254,9 @@ describe('review Step 3/5.8 order against the real logger', () => {
 
   test('a committed first pass narrows the next repeat to the uncommitted fixes, then the chain returns to a full pass', () => {
     const reviewed = head();
+    // Step 4.8 saves its attempt row before fixes, so it precedes the core row and never blocks the narrowed start.
+    const attempt = bin('gstack-review-log', ['--start', 'adversarial-review']).out;
+    expect(bin('gstack-review-log', [JSON.stringify({ skill: 'adversarial-review', status: 'clean', source: 'claude', ...clean }), '--finish', attempt]).code).toBe(0);
     reviewPass(fixing, ['--start', 'review'], 'export const a = 2;\n');
     expect(reviewPass(fixing, ['--start', 'review', '--fix-range'], 'export const a = 3;\n')).toBe(`FIX_BASE=${reviewed}`);
     expect(gitIn(repo, `diff --name-only ${reviewed}`).trim()).toBe('a.ts');
@@ -266,7 +269,7 @@ describe('review Step 3/5.8 order against the real logger', () => {
     expect(reviewFreshness(last, last.wtree)?.status).toBe('CURRENT');
   });
 
-  test('a zero-edit fix-range pass is never CURRENT, so the final record needs a full pass', () => {
+  test('a zero-edit fix-range pass is never CURRENT even if it were logged, so the final record needs a full pass', () => {
     reviewPass(fixing, ['--start', 'review'], 'export const a = 2;\n');
     reviewPass(clean, ['--start', 'review', '--fix-range']);
     const narrowed = rows().at(-1)!;

@@ -249,7 +249,7 @@ test('review finalization ownership: late findings use Fix-First before the boun
   expect(positions.every(position => position >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
   expect(flat).toContain('at most 3 fix cycles');
-  expect(flat).toContain('Edited: increment CYCLES once, then fill and save the record below with `converged:false`. Below 3,');
+  expect(flat).toContain('Edited: increment CYCLES once, then fill and save the record below with `converged:false`.');
   const limit = flat.slice(flat.indexOf('At 3,'), flat.indexOf('No edits:'));
   expect(limit).toMatch(/then stop this invocation/i);
   expectMentions(limit, [['without', 'summary', 'fourth']], 'limit');
