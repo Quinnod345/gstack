@@ -170,8 +170,10 @@ the readiness dashboard and the PR body, and never count it as a pass.
   findings.
 - **Every review gate.** These rules apply to every gate that summarises a
   review, including the `execution` gate behind `/codex` consult and challenge.
-  A reply whose last `Verdict:` line says `not ready` but carries no readable
-  severity prints `FINDINGS: unspecified` and exits 3 like a blocking finding.
+  A reply whose last `Verdict:` line says `not ready` is `findings` and exits
+  3 even when readable advisory severities (P2 or P3) were parsed; `FINDINGS:`
+  names the highest one. A not-ready reply with no readable severity still
+  prints `FINDINGS: unspecified` and exits 3.
 - **No findings.** A review with no tag and no label is `clean` only when its
   conclusion says so: the last sentence (or its last ", and" clause), or the
   `because` clause of its `Recommendation:` line, opens with `NO_FINDINGS`,
@@ -1590,7 +1592,7 @@ next `--check` passes.
 ### `gstack-capy-install: GSTACK_BUN_INSTALL_VERSION=<v> is not a verified Bun at or above gstack's supported minimum ...; fix: ... (BUN_INSTALL_VERSION_INVALID)`
 
 **Meaning.** `GSTACK_BUN_INSTALL_VERSION` overrides the Bun the installer
-downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.3). It
+downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.4). It
 must be listed in `GSTACK_BUN_VERIFIED` (a SHA-256-verified archive) and sit at
 or above the supported minimum (`GSTACK_BUN_TESTED`). Nothing was installed.
 
@@ -2440,9 +2442,9 @@ reply with the printed `gate_rev`.
 **Meaning.** Part of the reply matched no gate item or option. Nothing was
 applied; the unparsed tokens are listed.
 
-**Fix.** Reply with `all`, with `<id><option>` tokens (`d3b uc1a`), or with
-`all except <tokens>`. A bare `yes` or `no` is ambiguous across multi-option
-items and is never guessed.
+**Fix.** Reply with `rec` (alias `all`), with `rec except <tokens>`, with
+`<id><option>` tokens (`d3b uc1a`), or with `as-is` (the plan as written). A
+bare `yes` or `no` is ambiguous across multi-option items and is never guessed.
 
 <a id="answer-by-required"></a>
 ### `ANSWER_BY_REQUIRED`
@@ -2472,7 +2474,13 @@ file is described in [docs/ship-policy.md](ship-policy.md); the queue flow in
 **Meaning.** The policy is read from the committed copy on `origin/<base>`,
 and that ref does not resolve here (a shallow or detached gate checkout, or a
 fetch that never happened). The tool exits 3 and never falls back to the
-working-tree file silently.
+working-tree file silently. For `gstack-pregate` the same refusal covers a base
+`.gstack/pregate.json` git cannot read (a timeout, an oversized blob, a missing
+or corrupt object) that `git ls-tree` cannot confirm is absent; it never falls
+through to the user-owned file. It also refuses when Bun loaded a `.env` file
+from the working directory (a bare `bun gstack-pregate`), since a branch could
+then pick the user policy: run `gstack-pregate` directly or as
+`bun --no-env-file`.
 
 **Fix.** `git fetch origin <base> --depth=1`, then rerun. To run against the
 branch's own file deliberately, pass `--policy-from head --allow-repo-commands`;
@@ -2875,7 +2883,11 @@ or `REALITY: surface-check finding bun upgrade --version absent on 1.3.14 bin/gs
 
 Both tools read their pin file (`.gstack/generated.json`, `.gstack/pregate.json`)
 from `origin/<base>`, never the working tree, and run repo-declared commands only
-under `--allow-repo-commands` or inside `/ship`. Details: docs/pregate.md.
+under `--allow-repo-commands` or inside `/ship`. When the base carries no
+`.gstack/pregate.json`, `gstack-pregate run` reads
+`<state root>/projects/<slug>/pregate.json` instead (outside the repository; see
+docs/pregate.md for the state root and slug).
+Details: docs/pregate.md.
 
 <a id="regen-registry-invalid"></a>
 ### `REGEN_REGISTRY_INVALID`
@@ -2930,10 +2942,16 @@ repository's lockfile), then rerun `gstack-regen check` or the pre-gate.
 
 **Meaning.** `.gstack/pregate.json` has an unknown key, a wrong type, a glob
 that escapes the repository, a runner without `{files}`, or `secrets` in `warn`.
+The user-owned `<state root>/projects/<slug>/pregate.json` also refuses when it
+sets `sealed` or `price_file` (both are read only from the base branch's copy)
+or exists but cannot be read (a dangling symlink on its path counts).
 
 **Fix.** `gstack-pregate validate`. `secrets` and required-lane obligations
 cannot be downgraded; every other check id in `warn` is honoured only from the
-base branch's copy.
+base branch's copy or the user-owned file. For the user-owned file, edit it
+directly at the path the message names. A user file inside the repository, or
+reached through a symlink into it, is ignored rather than read (`--explain`
+names it).
 
 <a id="pregate-secrets"></a>
 ### `PREGATE_SECRETS`
@@ -2978,7 +2996,7 @@ allowlisted tool config no test names, are the assets-and-tool-config empty lane
 not this error.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
-for files with no behaviour) under `dependencies` in `.gstack/pregate.json`.
+for files with no behaviour) under `dependencies` in `.gstack/pregate.json` (or the user-owned file the message names).
 Other non-Markdown documentation goes in `empty_lanes` on the base branch.
 Dart files under `integration_test/` or `test_driver/` need a device, so pregate
 never runs them: declare `"**/integration_test/**": []` (and
@@ -3017,7 +3035,7 @@ declare `runner`), raise `--timeout`, or keep the tree still, then rerun.
 
 **Meaning.** A test command the lanes check (or a guard, or the `--remote`
 gate) launched wrote nothing to its log for the stall timeout (default 300 s,
-`stall_timeout_s` in the base branch's `.gstack/pregate.json`, or
+`stall_timeout_s` in the base branch's `.gstack/pregate.json` or the user-owned file, or
 `--stall-timeout`). pregate killed its process group and names the last test
 file started. The check is incomplete, never pass.
 
@@ -3045,7 +3063,10 @@ file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
 ### `PREGATE_STALE`
 
 **Meaning.** `pregate.json` was recorded against a different working-tree
-fingerprint than the one being published (the final stamp, a regen, any edit).
+fingerprint than the one being published (the final stamp, a regen, any edit),
+or the user-owned policy it ran under was edited or deleted (or one appeared,
+or a symlink on its path started pointing nowhere, after a run under the
+defaults).
 
 **Fix.** Rerun `gstack-pregate` after the final generation and stamp; Step 18
 refuses to write the ship receipt otherwise.
@@ -3274,8 +3295,9 @@ next `./setup` prints no CRLF warning.
 <a id="pregate-guard-failed"></a>
 ### `PREGATE_GUARD_FAILED`
 
-**Meaning.** A guard from the base branch's `.gstack/pregate.json` (a repo
-command such as a serial-test manifest check or a CLI golden test) matched a
+**Meaning.** A guard (a repo command such as a serial-test manifest check or a
+CLI golden test) from the base branch's `.gstack/pregate.json`, or from the
+user-owned file when the base carries none, matched a
 file the branch touched and exited non-zero. Guards cover what the import graph
 cannot see: manifests, subprocess goldens, registries. They cannot be
 downgraded to warn.

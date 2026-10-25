@@ -23,7 +23,7 @@ import {
   type AttemptRecord, type BisectRecord, type CasePanel, type GateOutcome, type PrefixResult, type TrainRecord,
 } from './ship-queue-train-record';
 import {
-  dispatchAttempt, effect, findTrain, gateDispatch, nextFor, outFailed, outOk, outPending, outRefused, pinList, save, trainEnv,
+  dispatchAttempt, effect, findTrain, gateDispatch, nextFor, outFailed, outOk, outPending, outRefused, prsArgs, save, trainEnv,
   type TrainEnv, type TrainOut,
 } from './ship-queue-train';
 
@@ -309,7 +309,7 @@ export async function trainRebuild(ctx: QueueContext, o: { train: string; infra:
   const run = trainFile(t.nonce);
   const gates = gateAttempts(t);
   const last = gates.at(-1);
-  const repair = `route ${last?.red_cases.join(',') || 'the red cases'} to a repair lane (GStack Minder); the train is rebuilt only once the repair merges: ${Q} train build --prs ${pinList(t.slots)}`;
+  const repair = `route ${last?.red_cases.join(',') || 'the red cases'} to a repair lane (GStack Minder); the train is rebuilt only once the repair merges: ${Q} train build ${prsArgs(t.slots, t.explicit_order)}`;
   const refuse = (reason: string) => outRefused({ code: 'QUEUE_TRAIN_REBUILD_REFUSED', message: `rebuild refused: ${reason}` }, gates.map(attemptLine), repair, run);
   if (o.infra) {
     if (!last || last.outcome !== 'INCOMPLETE' || !last.infra_eligible) return refuse(`no INFRA/INCOMPLETE-only record (the last gate is ${last?.outcome ?? 'missing'})`);
@@ -321,7 +321,7 @@ export async function trainRebuild(ctx: QueueContext, o: { train: string; infra:
     if (b.outcome.kind !== 'unattributed' || !b.outcome.all_green) return refuse(`the bisect was not all green (${Object.entries(b.outcome.patterns).map(([c, s]) => `${c}=${s}`).join(' ')})`);
   }
   const tip = remoteBranchSha(args => git(ctx.repoRoot, args), env.remote, t.branch);
-  if (tip !== t.head) return outRefused({ code: 'QUEUE_TRAIN_MOVED', message: `${t.branch} is at ${tip?.slice(0, 12) ?? 'nothing'}, not the recorded head ${t.head.slice(0, 12)}` }, [], `${Q} train build --prs ${pinList(t.slots)}`, run);
+  if (tip !== t.head) return outRefused({ code: 'QUEUE_TRAIN_MOVED', message: `${t.branch} is at ${tip?.slice(0, 12) ?? 'nothing'}, not the recorded head ${t.head.slice(0, 12)}` }, [], `${Q} train build ${prsArgs(t.slots, t.explicit_order)}`, run);
   const slug = repoSlug(ctx);
   if (!slug) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: 'gh repo view could not name the repository' }, [], `${Q} train rebuild --train ${t.nonce}${o.infra ? ' --infra' : ''}`, run);
   const a = await dispatchAttempt(env, slug, t, o.infra ? 'infra-redispatch' : 'rebuild', gateDispatch(env, t, `${t.nonce}.${gates.length + 1}`));
