@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**The Capy install guide says that the team-mode session-start updater also waits for live workflow leases.** With #3385 (#3363), `bin/gstack-session-update` skips its background fast-forward while another session holds a live workflow lease, the same leases `bin/gstack-upgrade` already honors. `docs/capy-install.md` described only the upgrade side.
+
+### Documentation
+- **`docs/capy-install.md`**: the workflow-lease paragraph now says the team-mode SessionStart hook (`bin/gstack-session-update`) honors the same leases. It logs `SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at the next session start, without writing its hourly throttle stamp.
+
 ## [1.91.189.0] - 2026-10-25
 
 **A stalled apt mirror can no longer hold a Free Tests shard for 20 minutes, PR runs now see main's branch layout, and gstack's install default moves to Bun 1.4.4.** On 2026-10-21, free-suite (12) in run 39641712129 sat in "Install Playwright Chromium" until the job timeout cancelled it. The browser had already come from cache: `--with-deps` was waiting on apt's fetch of noble-security from archive.ubuntu.com. No tests ran, and a whole merge train had to be rebuilt. Separately, a push to main checks out a local `main` while PR runs check out a detached merge ref, so a fixture that created its own `main` passed its PR and then failed every main push until #3237 (run 38999168852). And Capy images and gbrain now run Bun 1.4.4, which no CI lane tested, while the installer still downloaded 1.4.3.
