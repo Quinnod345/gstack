@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**/plan-eng-review no longer points its reader at three things its own text never defines.** The plan-eng-review sections judge marked down clarity and actionability for these references. All three live in shared resolvers, so the fixes reach every skill that renders them:
+
+### Fixed
+- **Claims Need Evidence kernel** (`scripts/resolvers/preamble/generate-evidence-directive.ts`): the evidence-kind bullet ended with "Reuse rules: Step 16." That step exists only in /ship, so in every other skill the pointer led nowhere. It's gone. /ship's Step 16 still states its own reuse rule ("Reuse a check when its inputs match"), and every tier's DONE line still asks you to name reuse.
+- **AskUserQuestion Tool resolution** (`generate-ask-user-format.ts`): "per its Unattended session block" read like a section of the skill, but the block is runtime output. Item 1 now names the `unattended-session` block that gstack-skill-start prints, which is the id on its `GSTACK_INSTRUCTION_BEGIN` line. The failure fallback's `unattended` branch dropped its repeat of that pointer, because item 1 already states the rule.
+- **Reality rows, eng/ceo branch** (`scripts/resolvers/plan-reality.ts`): the Completion Summary row and plan-eng-review's checklist ask for the `PLAN_REALITY` line, but the operative block never said where that line comes from. It now says `gstack-plan-reality check` prints it.
+
+### Tests
+- `test/honesty-kernel.test.ts` no longer requires the Step 16 pointer. It now rejects any `Step <n>` cross-reference in the kernel, which every skill renders.
+- Every changed SKILL.md shrank, so 89 pins in `test/fixtures/skill-md-size-allowlist.json` were lowered to their new exact sizes (a ratchet: nothing grew). The /ship goldens were regenerated.
+
+### Gate integrity
+- No threshold, rubric, trial count, case kind or judge prompt changed. The size pins only went down.
+
 ## [1.91.220.0] - 2026-10-25
 
 **A design doc edited in host plan mode no longer goes stale for the plan reviews (#542).** When /office-hours ran inside Claude Code's plan mode, the design doc lived twice: gstack's copy under `~/.gstack/projects/<slug>/` and the host's plan file under `.claude/plans/`. Later edits went only to the plan file, so /plan-ceo-review and /plan-eng-review read the older gstack copy and called it the source of truth. The gstack design doc stays the single source (Garry, Oct 17: "designdoc"). Edits made in the plan copy are now written through to it, and every plan review is warned when the copy is newer.
