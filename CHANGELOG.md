@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+**A fresh install is about 520 MB smaller: `./setup` installs production dependencies only.** Setup ran `bun install` without `--production`, so every user also got the test and eval toolchain from `devDependencies`, mostly the Claude Agent SDK's native binaries (both the glibc and musl builds on Linux, ~440 MB). Measured on a clean Ubuntu 24.04 container with a cold Bun cache (4 vCPU, two runs each): `node_modules` goes from 1,094 MB to 572 MB, the checkout from 1.74 GB to 1.22 GB, and the whole install with Chromium from 2.42 GB to 1.90 GB. `./setup` took 24.6 s and 20.0 s before, 21.1 s and 18.9 s after.
+
+### Changed
+- **`setup`**: every dependency install (before the build, the Codex render and each host render) goes through one `install_runtime_deps` function: `bun install --production --frozen-lockfile`, falling back to `bun install --production`. **`bin/gstack-browser-ensure`** installs the same way when `node_modules` is missing.
+- **`package.json`**: `@anthropic-ai/sdk` (loaded by `gstack-distill-free-text`, /plan-tune's dream cycle) and `xterm` and `xterm-addon-fit` (copied into the browser extension by `bun run build`) move to `dependencies`, because a user install runs them. The Claude Agent SDK, TypeScript, Prettier and `@types/bun` stay dev-only.
+- **Contributors and CI keep the full install.** Bun never removes packages that are already installed, so a full `bun install` survives any later `./setup`. `bin/dev-setup` now always runs `bun install` (it skipped it when `node_modules` existed, which would have left a checkout first set up by `./setup` without the dev toolchain). CI workflows already run `bun install --frozen-lockfile` themselves. CONTRIBUTING.md says which command installs what.
+
+### If you already have gstack installed
+- An existing install keeps its dev dependencies, because `./setup` never removes packages. To get the space back: `cd ~/.claude/skills/gstack && rm -rf node_modules && bun install --production --frozen-lockfile`. Don't do this in a checkout you develop gstack in.
+
+### Tests
+- `test/setup-production-deps.test.ts`: `install_runtime_deps`, sliced out of `setup` and run against a recording `bun`, passes `--production` on the frozen-lockfile call and on the fallback. No other line in `setup` calls `bun install` (the pre-change line is the negative control). `bin/dev-setup`'s install block, run over an existing `node_modules`, still calls plain `bun install`. A scan of every shipped file (`bin`, `lib`, `browse/src`, `design/src`, `make-pdf/src`, `hosts`, `extension`, the resolvers, and the scripts `setup` and the build call by path) finds no import or `require` of a package outside `dependencies`. Negative controls: a planted Agent SDK import is caught, a type-only import is not, and moving `@anthropic-ai/sdk` back to dev flags `gstack-distill-free-text`. The packages `bun run build` copies out of `node_modules` are production dependencies.
+- The install fixtures' stub `bun` (`test/helpers/install-fixture.ts`, `test/helpers/claude-overlay-fixture.ts`, `test/team-mode.test.ts`) now matches `install --production --frozen-lockfile`, so a setup that dropped the flag would reach the real `bun` instead of the stub.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or assertion was weakened. The three stub patterns changed to the new argv only.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
