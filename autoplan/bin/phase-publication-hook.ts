@@ -627,12 +627,21 @@ function phaseDecision(input: PublicationHookInput, root: string, before: Event[
  * A worktree session gets the repository root as CLAUDE_PROJECT_DIR while its
  * journal is rooted in the linked worktree. Only git's own two-way link makes
  * a directory that worktree: <root>/.git/worktrees/<name>/gitdir names
- * <worktree>/.git, and that file names the same admin entry back.
+ * <worktree>/.git, and that file names the same admin entry back. A project
+ * directory below the root (#3296) uses the first .git found walking up; a
+ * .git file there means a linked worktree or submodule, which has no registry.
  */
 export function linkedWorktrees(projectDir: string): string[] {
-  let entries: fs.Dirent[];
-  const admin = path.join(projectDir, '.git', 'worktrees');
-  try { entries = fs.readdirSync(admin, { withFileTypes: true }); } catch { return []; }
+  let entries: fs.Dirent[], admin: string | undefined;
+  try {
+    for (let dir = path.resolve(projectDir); ; dir = path.dirname(dir)) {
+      const dotGit = fs.statSync(path.join(dir, '.git'), { throwIfNoEntry: false });
+      if (dotGit) { if (dotGit.isDirectory()) admin = path.join(dir, '.git', 'worktrees'); break; }
+      if (path.dirname(dir) === dir) break;
+    }
+    if (!admin) return [];
+    entries = fs.readdirSync(admin, { withFileTypes: true });
+  } catch { return []; }
   return entries.filter(entry => entry.isDirectory()).slice(0, 256).flatMap(entry => {
     try {
       const link = path.join(admin, entry.name);
