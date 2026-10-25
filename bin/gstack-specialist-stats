@@ -5,6 +5,8 @@
 # Reads all *-reviews.jsonl files across branches, parses specialist fields,
 # and outputs hit rates. Tags specialists as GATE_CANDIDATE (0 findings in 10+
 # dispatches) or NEVER_GATE (security, data-migration, state-machines — insurance policy).
+# Fix-range passes (scope "fix-range", #3339) are skipped: a narrowed dispatch
+# says nothing about a specialist's hit rate on a whole branch.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
@@ -40,7 +42,7 @@ let reviewed = 0;
 for (const line of lines) {
   try {
     const e = JSON.parse(line);
-    if (!e.specialists) continue;
+    if (!e.specialists || e.scope === 'fix-range') continue;
     reviewed++;
     for (const [name, info] of Object.entries(e.specialists)) {
       if (!stats[name]) stats[name] = { dispatched: 0, findings: 0 };

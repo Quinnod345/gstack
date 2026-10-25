@@ -21,6 +21,119 @@
 - No threshold, budget, timeout, trial count, case kind or skip changed. The user file can relax lanes only where the base has no policy at all, and only from outside the repository; the two fixes make that containment stricter.
 - No new dependency, no network call, no workflow change.
 
+## [1.91.205.0] - 2026-10-25
+
+**/ship's Step 9 can re-review just the fixes after a fixing pass, and a narrowed pass can never be the review that ships (#3339).** Before, every fix cycle reran every specialist and the Red Team over the whole branch. On a large branch each full pass tends to find something new in code earlier passes already read, so the loop often ran to the three-cycle stop without converging. Now the pass after a fixing pass can review only what changed since that pass. One full pass still has to come last: a fix-range record is never CURRENT, and Step 11.5 can't bind it. Garry approved this on 2026-10-24 ("only with a mandatory final full pass").
+
+### Added
+- **`bin/gstack-review-log --start review --fix-range`** prints the start token, then `FIX_BASE=<sha>`. The base comes from the review log, never from the caller or the working tree, so `gstack-wtree`'s fingerprint is untouched. It is the commit of the latest pass of the same skill, and that commit's tree must be exactly the content the pass started from, so `git diff <FIX_BASE>` holds every fix, committed or not. The start refuses (exit 1, "run a full pass") in each of these cases: there is no earlier pass, that pass didn't complete (restoring coverage always takes a full pass), it made no fixes, it has no captured start, it ran on another branch, a Step 11 review followed it, it started from uncommitted or untracked content, or its commit no longer resolves or is no longer an ancestor of HEAD (after a rebase). On the start-work-then-ship flow, where Step 9 first reviews uncommitted work, the first repeat therefore stays full.
+- **`lib/review-evidence.ts`**: the start token carries `scope: "fix-range"` and `fix_base`. The logged row takes `scope` and `fix_base` only from the token (a caller's values are dropped either way), and a token that names any fix base stays narrowed even if its scope is rewritten. On unchanged content its `review_binding` is `{state: "fix-range", range_start_wtree, range_end_wtree, …}`, with no `start_wtree`/`end_wtree` and no root `wtree`. `reviewFreshness` returns UNVERIFIED for any fix-range row ("fix-range pass; only a later full pass can clear review"), even one with a verified-looking binding.
+- **`bin/gstack-specialist-stats`** skips fix-range rows, so narrowed dispatches don't push specialists toward `[GATE_CANDIDATE]`.
+
+### Changed
+- **`ship/sections/review-army.md.tmpl`**: the core checklist explains the fix-range start, and that `FIX_BASE` stands in for `origin/<base>` and `<base>` for that pass. Decision 3 allows the repeat to be a fix-range pass. Decision 4 continues to Step 10 only from a full pass. Nearby prose was tightened to pay for the growth, so ship's skeleton plus sections is 313,246 bytes against its 313,281 cap (35 bytes below main).
+
+### Tests
+- `test/review-fix-range.test.ts` (20 cases) follows Step 9.4's real order (fixes applied before the row is logged). It covers the base with committed and uncommitted fixes, chained fix-range passes, the eight refusals, a rewritten start token, a caller claiming `scope: "full"` on a fix-range token (it is still recorded as fix-range) or `"fix-range"` on a full one (it is dropped), Step 11.5's missing binding fields, UNVERIFIED freshness followed by CURRENT after a full pass, shared-libs reuse refusing a fix-range row, the stats exclusion, and the rendered Step 9 rules.
+
+### Gate integrity
+- One gate change to review: Step 9 may narrow a repeat pass. Verdict: not a weakening of what ships, because the narrowed pass can't be the final review. Three things enforce that: its row is never CURRENT, Step 11.5 has no `start_wtree`/`end_wtree` to bind, and decision 4 requires a full pass before Step 10. Mutation checks, each caught by the suite: dropping the freshness check, giving a narrowed row the normal binding, allowing a fix-range start after a clean, an incomplete or a Step 11-followed pass, accepting a non-ancestor base, accepting a start from uncommitted content, trusting the token's scope alone, and counting fix-range rows in stats. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.204.0] - 2026-10-25
+
+**An unattended run is told to end with `GSTACK_RESULT` only when its skill can write that line.** The unattended block `gstack-skill-start` prints told every unattended skill to log choices in `decisions.jsonl`, write a gate list and end with `GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>`. Only `/autoplan` has helpers that write a run directory, so `/ship`, `/review`, `/qa` and the rest were asked to produce files and a result line nothing writes, and a parent that trusted the block would wait for them. `docs/unattended.md` already names which skills write the line and what a parent reads for the others (#3281); the runtime text now says the same thing.
+
+### Fixed
+- **`bin/gstack-skill-start`**: the decision rules in the unattended block are the same for every skill: take the recommended option, leave unrecommended questions, consents, destructive options and the final gate pending, and never approve, publish or push. Only the sentence about the run's record changes by skill. `/autoplan` keeps its run directory, its `decisions.jsonl` rows, the gate list and `GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>`. `/eval-plan` ends at its spend approval with `GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>`, and the block says no helper writes a `gate.json` for it yet. Every other skill is told it writes no run directory and prints no result line, to stop at its first pending item and list it in its final report, and which record the parent reads: the ship receipt (`gstack-ship-receipt read --pr <n> --json`) for `/ship`, the review-log rows (`gstack-review-read`) for `/review`, the `qa-report-*.md` file for `/qa`, and the skill's own record in `docs/unattended.md` otherwise.
+
+### Tests
+- `test/gstack-skill-start.test.ts` renders the unattended block for `autoplan`, `eval-plan`, `ship`, `review`, `qa` and `investigate`. It checks that each keeps the shared decision rules, that only `autoplan` and `eval-plan` get a result line (with their own skill name, never `<name>`), and that the other four get no result line, gate list, `decisions.jsonl` or `run.json` and name their record. Against the old block it fails, and so does the existing unattended test, which now expects `skill=autoplan`.
+
+### Gate integrity
+- One test expectation changed: the existing unattended test expects `GSTACK_RESULT: skill=autoplan …` instead of the `skill=<name>` placeholder, which is stricter. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.203.0] - 2026-10-25
+
+**Asking gstack to fix a failure no longer always opens /investigate (#3157, #3158).** The router sent every bug report straight to the full /investigate workflow, even when the user had named the cause or one look at the failing code showed it. Now the router checks first. When the user names a cause and a narrow fix, it makes one read-only check of the evidence. When that confirms the cause, it makes the fix and runs the focused test. When the cause is unknown, it makes one bounded, read-only triage pass over the supplied evidence and the directly implicated test and code, with no reproduction, hypothesis testing or wider search, and fixes the failure directly only when that pass establishes the root cause. Anything still unclear, including a cause the check contradicts, goes to /investigate before any edit, so the root-cause bar holds. A failing test or stack trace no longer counts as proof of its cause.
+
+### Changed
+- **`SKILL.md.tmpl`** (root router): the bug-report rule points to a new **Failures** block that carries the two paths. Its text comes from `generateFailureRouting()` in `scripts/resolvers/preamble/generate-test-failure-triage.ts`.
+- **`bin/gstack-skill-start`** and `CLAUDE.md`: the routing section gstack offers for a project's CLAUDE.md now reads "Bugs/errors → invoke /investigate, unless one read-only check confirms the cause and a narrow fix (then fix it and run the focused test)", so it agrees with the router.
+- **`/ship` Test Failure Ownership Triage**, "Investigate and fix now": "Switch to /investigate mindset" becomes "One read-only root-cause pass, then `/investigate` if unclear."
+
+### Tests
+- New paid eval `test/skill-e2e-failure-routing.test.ts` (gate, `rule`): four fixture repos, two per issue. `router-failure-verified-cause` and `router-failure-triage-resolves` must fix the bug without /investigate and leave the suite green. `router-failure-contradicted-cause` (a user-supplied cause the code contradicts) and `router-failure-triage-unclear` (an intermittent CI-only failure) must invoke /investigate, and an edit before it is a contract violation. Every case needs one to four read-only calls before it routes. `GSTACK_ROUTER_ARM=before` runs the same cases against the base branch's router.
+- `test/skill-validation.test.ts` checks that the rendered router carries the rule and no longer sends bug reports straight to /investigate, that both paths keep the /investigate fallback, that the shipped CLAUDE.md routing line matches this repo's own, and that /ship's fix-now step uses the bounded pass.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count or existing case kind changed. The ship skill's parity size stays under its cap (313,260 of 313,281 bytes; 313,276 with #3372 merged). The new eval's negative controls are the two /investigate cases, and on the base router the triage cases go red.
+- Registries and pins the new gate-tier file needs, each with a stated reason: `test/eng-finding-retry-budget.test.ts` counts 110 paid test files (was 109). `test/helpers/e2e-hosts.ts` lists the four cases as `skill-tool` Claude-only, because they assert on the Claude Skill tool call. `test/codex-host.test.ts` counts 33 Claude-specific gate cases (was 29).
+- Each train gate now runs the four new cases, one trial each, for about $0.37 (measured at this head: $0.06, $0.06, $0.11 and $0.14; about 67 s wall when they run in parallel).
+
+## [1.91.202.0] - 2026-10-25
+
+**Team-mode session auto-update waits for live gstack sessions instead of moving the checkout under them (#3363).** `bin/gstack-upgrade` already refuses with `UPGRADE_BUSY` while another live session holds a workflow lease on the installation (`bin/gstack-lease`), but the SessionStart hook `bin/gstack-session-update` never read the leases. A shared `./setup --team` install could fast-forward and re-run `./setup` while another session was mid-workflow. Reproduced on main: with a live lease held, the hook logged `UPDATING` and moved the install's HEAD.
+
+### Fixed
+- **`bin/gstack-session-update`**: after taking its setup lock and before fetching, the background updater asks `gstack-lease live --root <install> --exclude-ancestry-of <hook pid>`. Any live lease from another session logs `SKIP leased pid=<pid>/<age>` and exits without fetching, fast-forwarding, retrying a pending setup stage or writing the hourly throttle stamp, so the next session start tries again. `GSTACK_UPGRADE_FORCE=1` overrides, as it does for `gstack-upgrade`. A dead or stale lease never blocks.
+
+### Tests
+- `test/session-update-stages.test.ts` holds a lease from a live process: the install's HEAD, setup runs and the throttle stamp are unchanged, and the first session start after the holder exits updates. A second case shows a lease also holds a pending setup retry. Both fail on main. Controls: `GSTACK_UPGRADE_FORCE=1` updates under a live lease, and a lease whose process is dead does not block.
+
+## [1.91.201.0] - 2026-10-25
+
+**/ship's review army and /plan-eng-review now ask for one severity scale, CRITICAL or INFORMATIONAL, the same scale /review, the specialist JSON and the review checklist already use (#3349).** The shared confidence rubric those two skills render told the model to label findings `[P1]` and `[P2]` and to report a 1-2 confidence finding "only if severity would be P0", while the rest of /ship's Step 9 (Pass 1 CRITICAL, Pass 2 INFORMATIONAL, `"severity":"CRITICAL|INFORMATIONAL"`) used the other scale. A finding from one skill couldn't be compared, deduplicated or gated against a finding from another. Garry picked CRITICAL/INFORMATIONAL for plan-eng-review on 2026-10-24.
+
+### Fixed
+- **`scripts/resolvers/confidence.ts`** (default branch, rendered into `ship/sections/review-army.md` and `plan-eng-review/sections/review-sections.md`): every finding carries a severity, CRITICAL (blocks shipping) or INFORMATIONAL (lower severity, still actioned). The format is `[CRITICAL|INFORMATIONAL] (confidence: N/10) file:line — description` with CRITICAL and INFORMATIONAL examples. A 1-2 score is reported only for a suspected release-blocking catastrophe, at CRITICAL severity and marked explicitly speculative, the rule /review already uses. Repeated sentences in the verification gate and the calibration-learning note were shortened, so ship's skeleton-plus-sections size falls by 77 bytes (313,204 against its 313,281 cap).
+
+### Tests
+- `test/eng-first-review.test.ts`: the two captured plan-eng-review first-review questions (`eng-annotated-cache-au`, `eng-declarative-as`) still open review when their `[P1]` label becomes `[CRITICAL]` or `[INFORMATIONAL]`. They stay closed for `[HIGH]`, `[critical]`, `[Critical]`, `[P4]`, `[CRITICAL|INFORMATIONAL]` and no label.
+
+### Gate integrity
+- One accepted-input change to review: the paid-test detectors `test/helpers/eng-cache-writer-decision.ts` and `test/helpers/pty/boundaries.ts` accept `[CRITICAL]` and `[INFORMATIONAL]` alongside `[P0]`-`[P3]` in a plan finding's annotation, because the skill now asks for those labels. Without it, both captures relabelled `[CRITICAL]` are rejected. Verdict: not a weakening. The label is metadata, and every substantive check (decision, assessment, actors, options) is unchanged. Mutation checks: restoring `P[0-3]` alone fails the positive cases; `[^\]]+`, `P[0-9]` or a case-insensitive CRITICAL each fail the negative controls. `scripts/harness-version.json` records `test/helpers/pty/boundaries.ts` as non-behavioral at HARNESS_VERSION 6: only the changed plan-eng-review prompt asks for the new labels, and the cases that run it already start their own series. The 11 plan-eng-review size pins in `test/fixtures/skill-md-size-allowlist.json` come down by 75 characters. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.200.0] - 2026-10-25
+
+**/cso doctor no longer calls a Go repository "stack: python".** A repository with a root `go.mod` and no Node, Bun, Rails or JVM build matched no supported stack, so preparation fell back to Python and doctor reported `stack: python` with `MISSING_METADATA requirements.txt`, which sent Go users looking for a Python file they never needed (#3263). Go runtime support itself is not planned for now (Garry, 2026-10-24), so /cso keeps running static assessment on Go repositories; the runtime catalog and the /cso release contract are unchanged.
+
+### Fixed
+- **`lib/cso/preparation.ts`**: a root `go.mod` with no other supported stack is reported as `stack: go` with `UNSUPPORTED_STACK` ("Go (go.mod) is not a supported runtime stack yet; supported runtime stacks are Node, Bun, Python, and Rails."), the way a Maven or Gradle build is already reported as Java. Python helper metadata beside `go.mod` (a docs `requirements.txt`, say) no longer turns the repository into Python. A `go.mod` beside a Node, Bun or Rails lockfile leaves that stack's detection as it was.
+
+### Tests
+- `test/cso-preparation.test.ts` checks that a Go module is `go` with exactly that prerequisite and never mentions `requirements.txt`, and that a hashed `requirements.txt` beside `go.mod` stays Go. Both fail on main. Controls: `go.mod` beside a Node lockfile stays a ready Node plan, a Python project without `go.mod` stays Python, and a repository with no stack metadata keeps the Python fallback.
+- `test/helpers/cso-runtime-catalog.ts` leaves `go` out of its qualified-runtime fixture list, as it already did `java`.
+
+### Gate integrity
+- No gate edit. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.199.0] - 2026-10-25
+
+**When /sync-gbrain refuses because a gbrain autopilot is running, it now says which process it found and what to do.** The guard against syncing while `gbrain autopilot` runs is machine-wide on purpose: two syncs sharing one brain or working tree can race and delete files (#1734). But the refusal only said `(process:gbrain autopilot)`, so someone whose autopilot served a different brain could not tell what was blocking them (#3360, part 1). Garry decided on 2026-10-24 to keep the check machine-wide and improve the message.
+
+### Changed
+- **`lib/gbrain-guards.ts`**: the live-process probe still runs `pgrep -f "gbrain autopilot"` across the whole machine, then reads each match's command line with `ps`. The refusal names every match as `pid <n> \`<command>\``, says the check counts any process on the machine whose command line contains "gbrain autopilot" (an autopilot serving another brain or repo included), and says to stop that autopilot or its `gbrain autopilot --install` service, or end a process that only mentions it. Commands are cut at 200 characters and the user and password part of a URL is masked. A pid that `ps` cannot describe still refuses, as `command unavailable`. The header comment now gives the machine-wide reason in place of the stale gbrain #1226 note.
+
+### Tests
+- `test/gbrain-guards.test.ts` pins the full refusal for one matched process, lists two matches, keeps an empty match inactive, and runs the real probe against a live process whose command line carries "gbrain autopilot" and a database URL with a password: the refusal names its pid and masks the password. All four fail on main. The existing probe, lock and stale-lock tests are unchanged.
+
+### Gate integrity
+- No gate edit: the guard refuses in exactly the cases it did before, and only its message changed. No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.198.0] - 2026-10-25
+
+**A second-opinion reviewer that says "not ready" is no longer reported as clean.** When the outside reviewer (Codex or Claude Code) ended its reply with `Verdict: not ready` but listed only advisory P2 or P3 findings, `lib/outside-review-result.ts` printed `VERDICT: clean` and exited 0, so /ship and /codex carried on as if the reviewer had approved. The not-ready check only ran when no severity parsed at all, so a parsed P2 or P3 switched it off (#3329). Ported from #3364 by @mvanhorn.
+
+### Fixed
+- **`lib/outside-review-result.ts`**: when the reply's last recognized `Verdict:` line says `not ready`, the result is `findings` (exit 3) whatever severities parsed, and `FINDINGS:` still names the highest one. Advisory P2/P3 findings with a ready verdict, or with no verdict, stay `clean`. A `Verdict:` line quoted in a code fence or inline code still does not count, and the proposal and spec gates ignore it as before.
+- **`docs/troubleshooting.md`**: the "Every review gate" rule under *How the verdict is read from a review* now says a not-ready reply blocks even when P2 or P3 parsed.
+
+### Tests
+- `test/outside-review-unparsed-severity.test.ts` covers the issue's reply (numbered bold P2 plus P3, then `Verdict: not ready`) on the execution, structured and review gates, P3-only and unlabeled not-ready replies, the last verdict winning in both directions, bold, bulleted and heading verdict lines, and an unparsed label beside a parsed P2. Five of its tests fail on main's classifier and pass with the fix. Controls that stay `clean`: P2/P3 with `Verdict: ready` or no verdict, a not-ready verdict inside a code fence or inline code, and `ready-one-p3.txt`. Missing review markers, a failed execution, and the proposal and spec gates keep their old results.
+
+### Gate integrity
+- One gate edit, and it strengthens the gate: the pinned `bare-dash-p2.txt` fixture (two P2 lines, then `Verdict: not ready (2 P2)`) moves from `VERDICT: clean`, exit 0 to `VERDICT: findings`, exit 3. Garry approved this reversal on 2026-10-24. No threshold, budget, timeout, trial count or case kind changed.
+
 ## [1.91.197.0] - 2026-10-25
 
 **Pregate gives touched Rust files a test lane, and runs a nested pnpm or vitest package with its own runner (#3344).** In a mixed Cargo and JavaScript repo, every touched `.rs` file failed `lanes` with "has no test lane", so /ship could not get a receipt, and a nested package's vitest tests ran under `bun test` from the repo root (about 98 false failures in the reporter's repo). Ported from #3346 by vilano93, whose two commits carry the feature; our commits on top close four findings from a security-focused review of the port and make the new fixtures hermetic.
