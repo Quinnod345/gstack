@@ -1332,7 +1332,7 @@ Write ${workDir}/gate-output.md listing what you fixed and every remaining findi
     const scans = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-detect\.ts scan /.test(String(c.input?.command ?? '')));
     expect(scans.length).toBeGreaterThanOrEqual(1);
     expect(scans.length).toBeLessThanOrEqual(2);
-    const craftRuns = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-craft\b/.test(String(c.input?.command ?? '')));
+    const craftRuns = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-craft['"]?\s+[^\s;|&]*\.html\b/.test(String(c.input?.command ?? '')));
     expect(craftRuns.length).toBeGreaterThanOrEqual(1);
     expect(craftRuns.length).toBeLessThanOrEqual(2);
     const outPath = path.join(workDir, 'gate-output.md');

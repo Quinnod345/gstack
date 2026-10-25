@@ -38,7 +38,7 @@
 
 **Illustrative content looks real.** Sample data in product shots and UI (table rows, chart values, people in a demo inbox):
 - No placeholder people or brands (John Doe, Jane Doe, Acme, Nexus, SmartFlow); distinct avatars; varied dates.
-- No round sample numbers (99.99%, 50%, $100.00, 10x). In a claim, a round number signals it was made up: use the supplied figure or drop it.
+- No round sample numbers (99.99%, 50%, 1,000+ customers, 10x). In a claim, a round number signals it was made up: use the supplied figure or drop it.
 - No buzzwords: elevate, seamless, effortless, supercharge, streamline, revolutionize, unlock, empower, unleash, next-gen, game-changer, delve, tapestry, "in the world of".
 - Sentence-case headings. Errors say what happened and what to do, never "Oops!". No exclamation marks in success messages.
 
