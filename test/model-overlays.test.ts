@@ -119,7 +119,8 @@ describe('GPT-5.6 Sol model profile', () => {
     const generic = generateModelOverlay(ctx('gpt'));
     const completeness = generateCompletenessSection(ctx('gpt'));
     expect(generic).toContain('make your best judgment and proceed');
-    expect(completeness).toContain('the complete thing is the goal');
+    expect(completeness).toContain('Complete coverage, minimal code.');
+    expect(completeness).toContain('prefer the smaller diff');
   });
 
   test('terse mode still suppresses the completeness section for Sol', () => {

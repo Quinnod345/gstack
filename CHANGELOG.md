@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**The Completeness Principle now asks for complete coverage with minimal code.** Every tier-2+ skill's preamble said "the complete thing is the goal", and ETHOS.md told models to "always prefer A" because "the 70-line delta costs seconds". Models read that as permission to write more code, which is the "50-line job arriving as 400" complaint (GSTA-93). Coverage of the requirement is still non-negotiable; code beyond it is no longer a virtue.
+
+### Changed
+- **`scripts/resolvers/preamble/generate-completeness-section.ts`**: the default section reads "Complete coverage, minimal code": recommend full coverage of the requirement (tests, edge cases, error paths) and no code beyond it, prefer the smaller diff at equal coverage, and add no checks for impossible states. Unrelated work stays separate scope. The `Completeness: X/10` scoring rule and the GPT-5.6 Sol variant are unchanged. The section is 5 characters shorter, so every regenerated skill shrinks and 89 size pins go down.
+- **`ETHOS.md`**: "Completeness is cheap ... always prefer A" becomes "Complete coverage, minimal code": completeness is measured in coverage, not lines; at equal coverage choose the smaller diff; no speculative abstractions, impossible-state checks or unneeded refactors. A new anti-pattern names the impossible-state fallback.
+- `review/specialists/simplification.md` and `CLAUDE.md` quote the new house rule instead of "If A is 70 lines more, choose A".
+
+### Tests
+- `test/model-overlays.test.ts` asserts the new default wording ("Complete coverage, minimal code.", "prefer the smaller diff").
+- `test/fixtures/skill-md-size-allowlist.json`: 89 pins lowered by 3 characters each. None raised.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or assertion weakened. The section heading "Completeness Principle — Boil the Ocean" is unchanged, so every skip list that names it still matches.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).
