@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.214.0] - 2026-10-25
 
 **`gstack-brain-sync --publish-removals --yes` no longer prints `list: unbound variable` when it finishes, and it now removes its temp list and releases the sync lock.** The command's EXIT trap named the function's local `$list`. When a publish succeeded, the function returned before the script exited, so the trap ran after `list` had gone out of scope. Under `set -u` it stopped at the unbound variable and never reached the cleanup, which left `brain-sync-removals.*` in `$TMPDIR` and `.brain-sync.lock.d` in `~/.gstack` until a later run cleared the lock as stale (found by GSTA-44).
 
