@@ -90,18 +90,6 @@ User asks for a listed face by name: comply, state the tradeoff once.
 - Sparklines, progress rings, and fake avatars filling space where content should be. Real data or an honest empty state.
 - Dark because it is a dev tool, light because it is health. Light or dark comes from the use scene: who, where, under what light.
 - Only the happy path is designed. Empty, loading, error, and long-content states are part of the component.
-- John Doe and Jane Doe in quotes, team rows and demo data. A supplied name, or one that fits the product.
-- Acme, Nexus and SmartFlow as the customers in logos, quotes and sample data. A supplied customer, or none.
-- Lorem ipsum where a visitor can read it. Write the draft copy.
-- 99.9% uptime, 50% faster, 10x, 10,000+ users: round figures nobody measured. The supplied number, or no claim.
-- A `[Needs proof: …]` marker still on the page. Supply the proof or cut the claim before it ships.
-- Reveals driven by an unthrottled `scroll` listener. IntersectionObserver for reveals; scroll-linked effects read scroll inside requestAnimationFrame.
-- `href="#"` on links and buttons that go nowhere. Link it, or render the control disabled.
-- `alert()` for errors and confirmations. Show the message inline, next to what it is about.
-- An `<img>` with no alt attribute. Describe a meaningful image; `alt=""` on a decorative one.
-- A full HTML document with no `<title>`. The tab, the bookmark and the search result all read it.
-- A full HTML document with no meta description. Search results and link previews make one up.
-- No "Skip to content" link as the first focusable element, targeting `<main>`. Keyboard users tab through the whole header on every page.
 
 ### Coherence Validation
 

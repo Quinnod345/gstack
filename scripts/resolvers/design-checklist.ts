@@ -12,7 +12,7 @@
  *
  * Derived in part from pbakaus/impeccable (Apache-2.0), modified. See NOTICE.md.
  */
-import { DESIGN_SLOP_CATALOG, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
+import { DESIGN_SLOP_CATALOG, RENDERED, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
 import { SENTINEL, DETECT_EXIT_ECHO } from '../../lib/design-detect-contract';
 
 export const DESIGN_CHECKLIST_HEADER =
@@ -27,7 +27,7 @@ const TIER_ORDER: Record<DesignSlopEntry['confidence'], number> = { HIGH: 0, MED
 /** Category 1: slop entries a code reader can grep for, plus the legacy blacklist lines. */
 export function checklistSlopEntries(): DesignSlopEntry[] {
   // Array.prototype.sort is stable, so catalog order survives within a tier.
-  return DESIGN_SLOP_CATALOG
+  return RENDERED
     .filter(e => e.kind === 'slop' && (e.detect.includes('grep') || e.legacyBlacklist))
     .sort((a, b) => TIER_ORDER[a.confidence] - TIER_ORDER[b.confidence]);
 }
