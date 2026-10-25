@@ -59,6 +59,19 @@ function otherStart(recorded: string): string {
   return recorded.startsWith('linux ') ? recorded.replace(/\d+$/, (n) => String(Number(n) + 1)) : 'ps Thu Jan  1 00:00:00 1970';
 }
 
+/** A directory lock as gstack-lease takes it: <path>/owner holds the holder's token. */
+function plantLock(lockPath: string, token: string) {
+  fs.mkdirSync(lockPath, { recursive: true });
+  fs.writeFileSync(path.join(lockPath, 'owner'), token + '\n');
+}
+const ownerOf = (lockPath: string) => fs.readFileSync(path.join(lockPath, 'owner'), 'utf8').trim();
+
+/** Each lock layout a holder can leave: the directory lock, and the symlink lock an older gstack took. */
+const LAYOUTS: Array<[string, (lockPath: string, token: string) => void]> = [
+  ['directory lock', plantLock],
+  ['legacy symlink lock', (lockPath, token) => fs.symlinkSync(token, lockPath)],
+];
+
 /** A BASH_ENV file whose functions shadow commands inside the lease script (fault injection). */
 function bashEnv(dir: string, body: string): string {
   const file = path.join(dir, 'bash-env.sh');
@@ -160,7 +173,7 @@ describe('gstack-lease', () => {
     const renewed = path.join(dir, 'renewed');
     fs.writeFileSync(renewed, fresh);
     // The holder renews just before reclaim takes the lock, as if touch ran after the stale verdict.
-    const racing = bashEnv(dir, `ln() { case "$*" in *"/.lock") command cp "${renewed}" "${file}" ;; esac; command ln "$@"; }\n`);
+    const racing = bashEnv(dir, `mkdir() { case "$*" in *"/.lock") command cp "${renewed}" "${file}" ;; esac; command mkdir "$@"; }\n`);
     const r = run(['live', '--root', dir], { BASH_ENV: racing });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stderr).not.toContain('reclaimed');
@@ -168,23 +181,24 @@ describe('gstack-lease', () => {
     expect(fs.readdirSync(leases).filter((n) => n.startsWith('.'))).toEqual([]);
   });
 
-  test('a lock whose holder died, or whose pid now belongs to another process, is broken at once', () => {
+  test.each(LAYOUTS)('a %s whose holder died, or whose pid now belongs to another process, is broken at once', (_layout, plant) => {
     const { dir, leases } = checkout();
     const holder = sleeper();
     fs.mkdirSync(leases, { recursive: true });
-    fs.symlinkSync(`${deadPid()} `, path.join(leases, '.lock'));
+    plant(path.join(leases, '.lock'), `${deadPid()} `);
     const r = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(fs.existsSync(path.join(leases, '.lock'))).toBe(false);
     const identity = fs.readFileSync(path.join(leases, String(holder)), 'utf8').trim();
     expect(identity).toMatch(/^(linux|ps) /);
-    fs.symlinkSync(`${holder} ${otherStart(identity)}`, path.join(leases, '.lock'));
+    plant(path.join(leases, '.lock'), `${holder} ${otherStart(identity)}`);
     const again = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
     expect(again.status, again.stdout + again.stderr).toBe(0);
     expect(fs.existsSync(path.join(leases, '.lock'))).toBe(false);
+    expect(fs.readdirSync(leases).filter((n) => n.startsWith('.'))).toEqual([]);
   });
 
-  test('a live holder\'s lock is never broken, however old: touch exits 3 without writing and a reclaim keeps the lease', () => {
+  test.each(LAYOUTS)('a live holder\'s %s is never broken, however old: touch exits 3 without writing and a reclaim keeps the lease', (layout, plant) => {
     const { dir, leases } = checkout();
     const owner = sleeper();
     const holder = sleeper();
@@ -192,9 +206,10 @@ describe('gstack-lease', () => {
     expect(run(['touch', '--root', dir, '--pid', String(holder)]).status).toBe(0);
     const ownerToken = `${owner} ${fs.readFileSync(path.join(leases, String(owner)), 'utf8').trim()}`;
     const lockPath = path.join(leases, '.lock');
-    fs.symlinkSync(ownerToken, lockPath);
+    plant(lockPath, ownerToken);
     const old = new Date(Date.now() - 5 * 60_000);
     fs.lutimesSync(lockPath, old, old);
+    if (layout === 'directory lock') fs.utimesSync(path.join(lockPath, 'owner'), old, old);
     const holderFile = path.join(leases, String(holder));
     const stale = otherStart(fs.readFileSync(holderFile, 'utf8').trim()) + '\n';
     fs.writeFileSync(holderFile, stale);
@@ -207,7 +222,7 @@ describe('gstack-lease', () => {
     expect(l.stderr).not.toContain('reclaimed');
     expect(l.stdout).toContain(`${holder} `);
     expect(fs.existsSync(holderFile)).toBe(true);
-    expect(fs.readlinkSync(lockPath)).toBe(ownerToken);
+    expect(layout === 'directory lock' ? ownerOf(lockPath) : fs.readlinkSync(lockPath)).toBe(ownerToken);
   });
 
   test('two breakers of one dead lock: the second rereads under .lock.break and leaves the lock the first one took', () => {
@@ -217,21 +232,21 @@ describe('gstack-lease', () => {
     expect(run(['touch', '--root', dir, '--pid', String(owner)]).status).toBe(0);
     const ownerToken = `${owner} ${fs.readFileSync(path.join(leases, String(owner)), 'utf8').trim()}`;
     const lockPath = path.join(leases, '.lock');
-    fs.symlinkSync(`${deadPid()} `, lockPath);
+    plantLock(lockPath, `${deadPid()} `);
     // Between this breaker's dead verdict and its .lock.break, another breaker removes the dead lock and takes it.
-    const first = bashEnv(dir, `ln() { case "$*" in *"/.lock.break") command rm -f "${lockPath}"; command ln -s "${ownerToken}" "${lockPath}" ;; esac; command ln "$@"; }\n`);
+    const first = bashEnv(dir, `mkdir() { case "$*" in *"/.lock.break") command rm -rf "${lockPath}"; command mkdir "${lockPath}"; printf '%s\\n' "${ownerToken}" > "${lockPath}/owner" ;; esac; command mkdir "$@"; }\n`);
     const t = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: first, GSTACK_LEASE_LOCK_TRIES: '3' });
     expect(t.status, t.stdout + t.stderr).toBe(3);
-    expect(fs.readlinkSync(lockPath)).toBe(ownerToken);
-    expect(fs.existsSync(path.join(leases, '.lock.break'))).toBe(false);
+    expect(ownerOf(lockPath)).toBe(ownerToken);
+    expect(fs.readdirSync(leases).filter((n) => n.startsWith('.')).sort()).toEqual(['.lock']);
   });
 
-  test('a .lock.break left by a dead breaker is cleared and the dead lock is still broken', () => {
+  test.each(LAYOUTS)('a .lock.break (%s) left by a dead breaker is cleared and the dead lock is still broken', (_layout, plant) => {
     const { dir, leases } = checkout();
     const holder = sleeper();
     fs.mkdirSync(leases, { recursive: true });
-    fs.symlinkSync(`${deadPid()} `, path.join(leases, '.lock'));
-    fs.symlinkSync(`${deadPid()} `, path.join(leases, '.lock.break'));
+    plant(path.join(leases, '.lock'), `${deadPid()} `);
+    plant(path.join(leases, '.lock.break'), `${deadPid()} `);
     const r = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '5' });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(fs.existsSync(path.join(leases, String(holder)))).toBe(true);
@@ -249,10 +264,83 @@ describe('gstack-lease', () => {
     fs.writeFileSync(holderFile, otherStart(fs.readFileSync(holderFile, 'utf8').trim()) + '\n');
     const lockPath = path.join(leases, '.lock');
     // While reclaim deletes the stale lease under its lock, the lock changes hands.
-    const swap = bashEnv(dir, `rm() { if [ "$*" = "-f ${holderFile}" ]; then command rm -f "${lockPath}"; command ln -s "${ownerToken}" "${lockPath}"; fi; command rm "$@"; }\n`);
+    const swap = bashEnv(dir, `rm() { if [ "$*" = "-f ${holderFile}" ]; then command rm -rf "${lockPath}"; command mkdir "${lockPath}"; printf '%s\\n' "${ownerToken}" > "${lockPath}/owner"; fi; command rm "$@"; }\n`);
     const r = run(['live', '--root', dir, '--exclude-ancestry-of', String(owner)], { BASH_ENV: swap });
     expect(r.stderr).toContain(`reclaimed stale lease ${holder}`);
-    expect(fs.readlinkSync(lockPath)).toBe(ownerToken);
+    expect(ownerOf(lockPath)).toBe(ownerToken);
+  });
+
+  test('a lock held by a running gstack-lease excludes a second taker, which names it; both leases land once it is released', async () => {
+    const { dir, leases } = checkout();
+    const [first, second] = [sleeper(), sleeper()];
+    // The first touch holds the lock across its prune (find runs under the lock).
+    const slow = bashEnv(dir, 'find() { sleep 3; command find "$@"; }\n');
+    const holder = spawn('bash', [LEASE, 'touch', '--root', dir, '--pid', String(first)], { env: { ...baseEnv, BASH_ENV: slow }, stdio: 'ignore' });
+    children.push(holder);
+    const exited = new Promise<number | null>((resolve) => holder.on('exit', resolve));
+    const owner = path.join(leases, '.lock', 'owner');
+    for (let i = 0; i < 100 && !fs.existsSync(owner); i++) await Bun.sleep(20);
+    expect(fs.readFileSync(owner, 'utf8')).toMatch(new RegExp(`^${holder.pid} `));
+    const blocked = run(['touch', '--root', dir, '--pid', String(second)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(blocked.status, blocked.stdout + blocked.stderr).toBe(3);
+    expect(blocked.stderr).toContain(`locked by live process ${holder.pid};`);
+    expect(await exited).toBe(0);
+    expect(run(['touch', '--root', dir, '--pid', String(second)]).status).toBe(0);
+    expect(fs.readdirSync(leases).sort()).toEqual([String(first), String(second)].sort());
+  });
+
+  test('parallel touches all take the lock in turn and leave no lock, claim or temp file behind', async () => {
+    const { dir, leases } = checkout();
+    const pids = Array.from({ length: 16 }, (_, i) => 4300 + i);
+    const codes = await Promise.all(pids.map((p) => new Promise<number | null>((resolve) => {
+      const c = spawn('bash', [LEASE, 'touch', '--root', dir, '--pid', String(p)], { env: baseEnv, stdio: 'ignore' });
+      children.push(c);
+      c.on('exit', resolve);
+    })));
+    expect(codes).toEqual(pids.map(() => 0));
+    expect(fs.readdirSync(leases).sort()).toEqual(pids.map(String).sort());
+  });
+
+  // #3330: a taker killed between its mkdir and its owner rename leaves an ownerless lock.
+  test('an ownerless lock is broken once every claimant is gone, and kept while a live claimant may still own it', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const lockPath = path.join(leases, '.lock');
+    fs.mkdirSync(lockPath, { recursive: true });
+    fs.writeFileSync(path.join(leases, `.lock.claim.${holder}`), `${holder} \n`);
+    const kept = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(kept.status, kept.stdout + kept.stderr).toBe(3);
+    expect(kept.stderr).toContain('cannot take the lease directory lock');
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(false);
+    expect(fs.readdirSync(lockPath)).toEqual([]);
+
+    const dead = deadPid();
+    fs.renameSync(path.join(leases, `.lock.claim.${holder}`), path.join(leases, `.lock.claim.${dead}`));
+    fs.writeFileSync(path.join(leases, `.lock.claim.${dead}`), `${dead} \n`);
+    fs.writeFileSync(path.join(leases, '.lock.claim.1'), '');
+    const broken = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(broken.status, broken.stdout + broken.stderr).toBe(0);
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(true);
+    expect(fs.existsSync(lockPath)).toBe(false);
+
+    fs.rmSync(path.join(leases, `.lock.claim.${dead}`));
+    fs.mkdirSync(lockPath);
+    const unclaimed = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(unclaimed.status, unclaimed.stdout + unclaimed.stderr).toBe(0);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  test('a lock that cannot be taken while nobody holds it fails at once instead of waiting out the tries', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const broken = bashEnv(dir, 'mkdir() { case "$*" in *"/.lock") return 1 ;; esac; command mkdir "$@"; }\n');
+    const started = Date.now();
+    const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: broken });
+    expect(r.status, r.stdout + r.stderr).toBe(3);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(r.stderr).toContain('cannot take the lease directory lock');
+    expect(r.stderr).not.toContain('locked by live process');
+    expect(fs.readdirSync(leases)).toEqual([]);
   });
 
   test('a lease without a recorded identity (older gstack) counts while fresh and is stale past the 120-minute window', () => {
@@ -333,7 +421,7 @@ describe('gstack-lease', () => {
     fs.writeFileSync(path.join(state, 'config.yaml'), 'update_check: false\n');
     const leaseDir = path.join(state, 'leases');
     fs.mkdirSync(leaseDir);
-    fs.symlinkSync(`${sleeper()} `, path.join(leaseDir, '.lock'));
+    plantLock(path.join(leaseDir, '.lock'), `${sleeper()} `);
     const r = spawnSync(START, ['--skill', 'testskill', '--parent-pid', '424244'], {
       encoding: 'utf8', cwd: home, env: { PATH: process.env.PATH!, HOME: home, GSTACK_HOME: state, GSTACK_LEASE_DIR: leaseDir, GSTACK_LEASE_LOCK_TRIES: '2' }, timeout: 30_000,
     });

@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**Skills start at once on Windows again: the workflow lease lock no longer depends on symlinks (#3330).** `bin/gstack-lease` took its lock with `ln -s "<holder token>" .lock`. In Git for Windows' default symlink mode (`MSYS` unset), `ln -s` cannot link to a target that does not exist, so the lock was never taken. Every skill start then waited out all 300 tries (0.1 s apart, plus process start costs) before `gstack-skill-start` printed anything, and still wrote no lease. One report measured 499 s per skill start. The error also blamed a "live process" with an empty pid.
+
+### Fixed
+- **`bin/gstack-lease`**: the lock is now a `.lock` directory taken with `mkdir`, which is atomic on every host gstack runs on, with an `owner` file naming the holder's pid and start identity. A taker writes a claim (`.lock.claim.<pid>`) before its `mkdir` and renames it in as the owner after, so a lock left ownerless by a taker killed between the two steps is broken once every claimant is dead, never by age. A lock is removed by renaming it aside first, so nobody sees it half-removed. Stale-holder semantics are unchanged: a lock is broken only when its holder is dead or its pid now belongs to another process, breakers still serialize on `.lock.break` and reread before removing, and unlock removes only the caller's own lock. A symlink `.lock` left by an older gstack is still read and broken the same way, and it excludes the new lock at the same path, so mixed versions never both hold it.
+- When the lock cannot be taken although nobody holds it, `touch` now fails after three quick retries with `gstack-lease: cannot take the lease directory lock <path>` instead of waiting out every try and naming an empty pid. `gstack-skill-start` stays fail-open, as before.
+- `docs/capy-install.md` describes the directory lock.
+
+### Tests
+- `test/gstack-lease-git-bash.test.ts` (new, in the curated windows-free-tests lane, launched through `lib/script-invocation.ts`, so Git Bash on `windows-latest`): `touch` with the default 300 tries writes its lease and leaves no lock; a host whose `ln -s` fails like Git Bash's still takes the lock (with a control that the shim really fails `ln -s`); a lock held by a live Git Bash process is kept and named, and a dead holder's lock is broken. The last two fail against the old bin.
+- `test/gstack-lease.test.ts`: the dead-holder, live-holder and dead-breaker cases run against both the directory lock and the legacy symlink lock. The race cases inject at `mkdir` instead of `ln`. New cases: a lock held by a running gstack-lease excludes a second taker, which names it; 16 parallel touches all land and leave nothing behind; an ownerless lock is kept while a claimant lives and broken once none does; a lock that cannot be taken while nobody holds it fails in under 10 s. Seven of these fail against the old bin.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count, case kind or assertion was weakened. Three existing race tests moved their fault injection from `ln` to `mkdir`, because the lock no longer calls `ln`. Their assertions are unchanged.
+
 ## [1.91.221.0] - 2026-10-25
 
 **The session-start updater no longer skips because of its own session's workflow lease, and the autostash tests stop failing their first pass in Free Tests.** Since #3385, `gstack-session-update` skips the fast-forward while another session holds a workflow lease, and it means to ignore the session that started it (`--exclude-ancestry-of`). The check runs in the forked background updater, though, and passed the hook's own `$$`, which has exited by then, so the ancestry walk excluded nothing. A Claude Code process that had already run a skill (and so held a lease) and then started a session again in the same process (`/clear`, resume or compaction) logged `SKIP leased pid=<its own pid>` and never updated. `test/session-update-autostash.test.ts` hit the same gap plus a fixture leak: its first two fixtures spawned the updater with the whole parent environment, so it read the test preload's `GSTACK_LEASE_DIR`, which every test file in the same Bun process shares. A lease another file left there gave "Received: SKIP leased pid=3196/1m" where UPDATING or PULL_FAILED was expected, in 13 Free Tests runs since #3385 merged (each passed on the serial retry).

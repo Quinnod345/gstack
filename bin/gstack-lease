@@ -31,7 +31,7 @@
 # runtime root's .source-path, else ../). A root that is not a git checkout
 # exits 2 and writes nothing. GSTACK_LEASE_DIR overrides the lease directory
 # (hermetic tests; a dev checkout's own tests must not lease it). Bash 3.2
-# plus git, ps, find, ln, readlink.
+# plus git, ps, find, mkdir, mv, readlink.
 set -u
 BIN="$(cd "$(dirname "$0")" && pwd -P)"
 # shellcheck source=bin/gstack-install-verdict.sh
@@ -99,43 +99,97 @@ state() {
 }
 # The lease directory's lock: touch's publish and prune, and reclaim's
 # reread-and-delete, run under it, so a reclaim never deletes a renewal and a
-# lease never disappears while it is live. The lock is a symlink whose target
-# names its holder (`<pid> <start identity>`): ln -s creates it and its owner
-# in one atomic step. It is broken only when that holder is dead or its pid
-# now belongs to another process, never by age, and unlock removes only the
-# caller's own lock. A live holder makes lock() give up after
-# GSTACK_LEASE_LOCK_TRIES tries 0.1 s apart (default 300).
+# lease never disappears while it is live. The lock is a directory, .lock,
+# whose owner file names its holder (`<pid> <start identity>`); mkdir is
+# atomic everywhere gstack runs, Git Bash on Windows included, where ln -s to a
+# target that does not exist always fails (#3330). A taker publishes its token
+# as a claim (.lock.claim.<pid>) before its mkdir and renames the claim into
+# the lock as its owner after, so a lock without an owner is either being
+# taken by a live claimant or orphaned by a dead one. A lock is broken only
+# when its holder (or, ownerless, every claimant) is dead or its pid now
+# belongs to another process, never by age, and unlock removes only the
+# caller's own lock. A symlink .lock left by an older gstack names its holder
+# the same way and excludes a directory lock at the same path. A live holder
+# makes lock() give up after GSTACK_LEASE_LOCK_TRIES tries 0.1 s apart
+# (default 300).
 LOCK="$DIR/.lock" TOKEN=""
+# take PATH — create the lock PATH owned by TOKEN; 1 when it exists.
+take() {
+  printf '%s\n' "$TOKEN" > "$1.claim.$$" || return 1
+  if mkdir "$1" 2>/dev/null; then
+    mv -f "$1.claim.$$" "$1/owner" && return 0
+    rm -rf "$1"
+  fi
+  rm -f "$1.claim.$$"
+  return 1
+}
+# owner_of PATH — the token the lock PATH names, empty when it names none.
+owner_of() { if [ -L "$1" ]; then readlink "$1" 2>/dev/null; else head -1 "$1/owner" 2>/dev/null; fi; }
+# orphaned PATH — PATH is a lock directory without an owner and no live
+# claimant. Claims are read before the owner, so a taker that renames its
+# claim in between is seen as the owner. An empty claim is a taker that has
+# not reached its mkdir, so it never made this lock.
+orphaned() {
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  for _c in "$1".claim.*; do
+    _t=$(head -1 "$_c" 2>/dev/null)
+    [ -n "$_t" ] && ! holder_gone "$_t" && return 1
+  done
+  [ ! -e "$1/owner" ]
+}
+# drop PATH — remove a lock in one step: a directory is renamed aside first,
+# so nobody sees it ownerless on the way out.
+drop() {
+  if [ -L "$1" ]; then rm -f "$1"; return; fi
+  mv "$1" "$1.gone.$$" 2>/dev/null && rm -rf "$1.gone.$$"
+}
 lock() {
   [ -n "$TOKEN" ] || TOKEN="$$ $(identity $$)"
-  _tries=0
-  until ln -s "$TOKEN" "$LOCK" 2>/dev/null; do
-    _tries=$((_tries + 1))
-    LOCK_OWNER=$(readlink "$LOCK" 2>/dev/null)
-    [ -n "$LOCK_OWNER" ] && holder_gone "$LOCK_OWNER" && break_lock "$LOCK_OWNER" && continue
+  _tries=0 _gone=0
+  until take "$LOCK"; do
+    LOCK_OWNER=$(owner_of "$LOCK")
+    if [ ! -e "$LOCK" ] && [ ! -L "$LOCK" ]; then
+      # Released since take, or take itself cannot work here: never wait out
+      # the tries for a lock nobody holds.
+      _gone=$((_gone + 1))
+      [ "$_gone" -ge 3 ] && return 1
+      continue
+    fi
+    _gone=0 _tries=$((_tries + 1))
+    if [ -n "$LOCK_OWNER" ]; then holder_gone "$LOCK_OWNER" && break_lock "$LOCK_OWNER" && continue
+    elif orphaned "$LOCK"; then break_lock "" && continue
+    fi
     [ "$_tries" -ge "${GSTACK_LEASE_LOCK_TRIES:-300}" ] && return 1
     sleep 0.1
   done
 }
 holder_gone() { case "$(state "${1%% *}" "${1#* }" 0)" in dead|stale) return 0 ;; esac; return 1; }
-# break_lock OWNER — remove the lock only if it still names OWNER. Breakers
-# take a second symlink, .lock.break, and reread the lock under it, so a lock
-# taken since the verdict is never removed; a .lock.break whose holder is gone
-# is cleared. Returns 1 when another breaker holds .lock.break. Known limit:
-# that clear is not atomic, so two gstack-lease processes killed in a row (one
-# holding .lock, the next inside this function) can let a reclaim delete a
-# renewal; one crash is always safe.
+# break_lock OWNER — remove the lock only if it still names OWNER (empty: is
+# still orphaned). Breakers take a second lock, .lock.break, and reread the
+# lock under it, so a lock taken since the verdict is never removed; a
+# .lock.break whose holder is gone is cleared. Returns 1 when another breaker
+# holds .lock.break. Known limit: that clear is not atomic, so two
+# gstack-lease processes killed in a row (one holding .lock, the next inside
+# this function) can let a reclaim delete a renewal; one crash is always safe.
 break_lock() {
-  if ! ln -s "$TOKEN" "$LOCK.break" 2>/dev/null; then
-    _b=$(readlink "$LOCK.break" 2>/dev/null)
-    [ -n "$_b" ] && holder_gone "$_b" && [ "$(readlink "$LOCK.break" 2>/dev/null)" = "$_b" ] && rm -f "$LOCK.break"
+  if ! take "$LOCK.break"; then
+    _b=$(owner_of "$LOCK.break")
+    if [ -n "$_b" ]; then
+      holder_gone "$_b" && [ "$(owner_of "$LOCK.break")" = "$_b" ] && drop "$LOCK.break"
+    else
+      orphaned "$LOCK.break" && drop "$LOCK.break"
+    fi
     return 1
   fi
-  [ "$(readlink "$LOCK" 2>/dev/null)" = "$1" ] && rm -f "$LOCK"
-  rm -f "$LOCK.break"
+  if [ -n "$1" ]; then
+    [ "$(owner_of "$LOCK")" = "$1" ] && drop "$LOCK"
+  else
+    orphaned "$LOCK" && drop "$LOCK"
+  fi
+  drop "$LOCK.break"
   return 0
 }
-unlock() { [ "$(readlink "$LOCK" 2>/dev/null)" = "$TOKEN" ] && rm -f "$LOCK"; return 0; }
+unlock() { [ "$(owner_of "$LOCK")" = "$TOKEN" ] && { drop "$LOCK" || rm -rf "$LOCK"; }; return 0; }
 # reclaim FILE RECORD — delete a stale lease only if, under the lock, it still
 # holds the record judged stale; a renewal since then keeps it.
 reclaim() {
@@ -153,7 +207,12 @@ case "$VERB" in
   touch)
     [ -n "$PID" ] || PID=$(gstack_harness_pid "${FROM:-$PPID}")
     mkdir -p "$DIR" || exit 2
-    lock || { echo "gstack-lease: the lease directory is locked by live process ${LOCK_OWNER%% *}; lease $PID not renewed" >&2; exit 3; }
+    lock || {
+      if [ -n "${LOCK_OWNER:-}" ]; then echo "gstack-lease: the lease directory is locked by live process ${LOCK_OWNER%% *}; lease $PID not renewed" >&2
+      else echo "gstack-lease: cannot take the lease directory lock $LOCK; lease $PID not renewed" >&2
+      fi
+      exit 3
+    }
     _tmp="$DIR/.$PID.$$"
     identity "$PID" > "$_tmp" && mv -f "$_tmp" "$DIR/$PID" || { rm -f "$_tmp"; unlock; exit 2; }
     find "$DIR" -mmin +120 -type f -exec rm -f {} + 2>/dev/null
