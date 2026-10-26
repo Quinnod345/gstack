@@ -11,7 +11,7 @@ import { runScriptSync } from '../../script-invocation';
 import { allowlistDigest, applyAllowlist, describeAllowlisted, type AllowlistFinding } from '../allowlist';
 import { baseInputs, sha256 } from '../context';
 import { environmentResult } from '../environment';
-import { checkScratch } from '../scratch';
+import { checkScratch } from '../run-scratch';
 import type { CheckDef, CheckResult, PregateContext } from '../types';
 
 const BIN_DIR = path.resolve(path.dirname(Bun.fileURLToPath(import.meta.url)), '..', '..', '..', 'bin');

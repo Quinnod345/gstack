@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { validateConfig } from '../lib/pregate/config';
 import { CHECK_IDS } from '../lib/pregate/index';
+import { nearestTestsFor } from '../lib/pregate/starter';
 import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -117,5 +118,15 @@ describe('no policy anywhere: warn plus a printed starter (never PREGATE_NO_LANE
     expect(init.out).toContain('PREGATE_CONFIG_WRITTEN');
     expect(runBin(repo, 'gstack-pregate', ['validate']).out).toContain('PREGATE_CONFIG_VALID');
     expect(BASE_PREGATE.runner).toBe('node --test {files}');
+  });
+});
+
+describe('nearestTestsFor: the nearest directory with tests, else the tests sharing the stem', () => {
+  const tests = ['lib/render/a.test.ts', 'lib/render/b.test.ts', 'test/report.test.js', 'test/report-golden.test.js', 'test/reporter.test.js'];
+  test('a file under a directory with tests takes those tests; one with none takes its stem; a stem with no match is empty', () => {
+    expect(nearestTestsFor(tests, 'lib/render/draw.ts')).toEqual(['lib/render/a.test.ts', 'lib/render/b.test.ts']);
+    expect(nearestTestsFor(tests, 'src/report.js')).toEqual(['test/report.test.js', 'test/report-golden.test.js']);
+    expect(nearestTestsFor(tests, 'src/orphan.js')).toEqual([]);
+    expect(nearestTestsFor(tests, 'README')).toEqual([]);
   });
 });

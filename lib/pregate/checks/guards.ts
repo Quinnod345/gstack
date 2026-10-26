@@ -19,7 +19,7 @@ import type { Guard } from '../config';
 import { baseInputs, sha256 } from '../context';
 import { classifyEnvironment, environmentLine, environmentResult } from '../environment';
 import { launchRuntime } from '../runtime';
-import { checkScratch } from '../scratch';
+import { checkScratch } from '../run-scratch';
 import { readRange, supervise } from '../supervise';
 import type { EnvironmentCause } from '../types';
 import type { CheckDef, CheckResult, PregateContext } from '../types';

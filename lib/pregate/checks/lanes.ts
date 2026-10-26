@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { baseInputs, sha256 } from '../context';
 import { PREGATE_CONFIG_PATH } from '../config';
 import { classifyEnvironment, environmentLine, environmentResult } from '../environment';
-import { checkScratch } from '../scratch';
+import { checkScratch } from '../run-scratch';
 import { starterPolicy } from '../starter';
 import { isDeviceDart, listRepoFiles, readRepoFile } from '../import-graph';
 import { selectLanes, type Selection } from '../lane-selection';

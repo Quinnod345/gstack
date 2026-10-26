@@ -1,5 +1,5 @@
 /**
- * pregate/scratch — one scratch directory per run under the state root
+ * pregate/run-scratch — one scratch directory per run under the state root
  * (Lane D, GSTA-112): `<state root>/projects/<slug>/pregate/runs/<run id>/`.
  * Every check keeps its working files there (the secrets scan's added-line
  * copies, the lane and guard logs, the remote gate's file list) instead of

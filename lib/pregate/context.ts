@@ -21,7 +21,7 @@ import { policyUnavailableLine, resolveBaseBranch } from '../ship-policy';
 import { PREGATE_CONFIG_PATH, isConfigUnavailable, loadConfigFromBase, loadConfigFromHead, loadConfigFromUser, type ConfigError, type ConfigLoad, type PregateConfig } from './config';
 import type { CheckResult, PregateContext, TouchedFile } from './types';
 import { discoverLanes } from './workflows';
-import { createScratch, scratchRunId } from './scratch';
+import { createScratch, scratchRunId } from './run-scratch';
 import type { RegistryError } from '../regen';
 
 export interface BuildContextOptions {
@@ -179,7 +179,7 @@ export function defaultUserConfigPath(root: string): string {
   return path.join(resolveStateRoot(), 'projects', slugFromEnvironment(undefined, root), 'pregate.json');
 }
 
-/** `<state root>/projects/<slug>/pregate/runs`: where every run's scratch directory lives (lib/pregate/scratch.ts), from the caller's environment. */
+/** `<state root>/projects/<slug>/pregate/runs`: where every run's scratch directory lives (lib/pregate/run-scratch.ts), from the caller's environment. */
 export function defaultScratchRoot(root: string, env: NodeJS.ProcessEnv = process.env): string {
   const stateRoot = resolveStateRoot(env);
   return path.join(stateRoot, 'projects', slugFromEnvironment(stateRoot, root), 'pregate', 'runs');
