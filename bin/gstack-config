@@ -54,8 +54,11 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # Docs: https://github.com/garrytan/gstack
 #
 # ─── Behavior ────────────────────────────────────────────────────────
-# proactive: true           # Auto-invoke skills when your request matches one.
-#                           # Set to false to only run skills you type explicitly.
+# proactive: core           # core = auto-invoke only /office-hours, /review, /qa and /ship
+#                           # when your request matches one; every other skill waits
+#                           # for you to type it. all = auto-invoke any matching skill.
+#                           # off = only run skills you type explicitly.
+#                           # (true and false still work: true means all, false means off.)
 #
 # routing_declined: false   # Set to true to skip the CLAUDE.md routing injection
 #                           # prompt. Set back to false to be asked again.
@@ -282,7 +285,7 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # AND the env override is not set. Keep in sync with the CONFIG_HEADER comments.
 lookup_default() {
   case "$1" in
-    proactive) echo "true" ;;
+    proactive) echo "core" ;; # core | all | off (true = all, false = off); core suggests only /office-hours, /review, /qa, /ship
     routing_declined) echo "false" ;;
     telemetry) echo "off" ;;
     auto_upgrade) echo "false" ;;
@@ -745,6 +748,20 @@ $_gstack_legacy_root"
     if [ "$KEY" = "explain_level" ] && [ "$VALUE" != "default" ] && [ "$VALUE" != "terse" ]; then
       echo "Warning: explain_level '$VALUE' not recognized. Valid values: default, terse. Using default." >&2
       VALUE="default"
+    fi
+    if [ "$KEY" = "proactive" ]; then
+      # Case-insensitive, and the YAML yes/no family maps like gstack-skill-start
+      # reads a hand-edited value: an opt-out must never fail open to core.
+      VALUE=$(printf '%s' "$VALUE" | tr '[:upper:]' '[:lower:]')
+      case "$VALUE" in
+        yes|y|on|1) VALUE="all" ;;
+        no|n|none|0|disabled|never) VALUE="off" ;;
+        core|all|off|true|false) ;;
+        *)
+          echo "Warning: proactive '$VALUE' not recognized. Valid values: core, all, off (true = all, false = off). Using core." >&2
+          VALUE="core"
+          ;;
+      esac
     fi
     if [ "$KEY" = "plan_mode_preamble" ] && [ "$VALUE" != "on" ] && [ "$VALUE" != "off" ]; then
       echo "Warning: plan_mode_preamble '$VALUE' not recognized. Valid values: on, off. Using on." >&2

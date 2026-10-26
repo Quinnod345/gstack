@@ -15,6 +15,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import * as path from 'path';
 import { isErrorResponse, directiveFor } from '../hosts/claude/hooks/auq-error-fallback-hook.ts';
 import { SPAWNED_ESCAPE_SENTENCE } from '../hosts/claude/hooks/spawned-directive.ts';
@@ -83,6 +84,18 @@ describe('directiveFor — per-session-kind instruction', () => {
     expect(d).toMatch(/approval gate[\s\S]*never approved/);
     expect(d).toMatch(/status=gate_pending/);
     expect(d).not.toMatch(/BLOCKED/);
+  });
+
+  test('unattended directive names the same GSTACK_RESULT writers as docs/unattended.md and gstack-skill-start (GSTA-91)', () => {
+    const d = directiveFor('unattended');
+    expect(d).toMatch(/Only \/autoplan and \/eval-plan print `GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>`/);
+    expect(d).toMatch(/\/ship prints its own line at Step 22/);
+    expect(d).toMatch(/every other skill prints no GSTACK_RESULT line/);
+    const doc = readFileSync(path.join(import.meta.dir, '..', 'docs', 'unattended.md'), 'utf8');
+    expect(doc).toContain('**`/autoplan`**');
+    expect(doc).toContain('**`/ship`**');
+    expect(doc).toMatch(/`\/eval-plan` asks for a `gate_pending` line/);
+    expect(doc).toMatch(/\*\*Every other workflow skill\*\*[\s\S]*prints the line/);
   });
 
   test('spawned directive carries a self-contained destructive carve-out (#2733 review)', () => {
