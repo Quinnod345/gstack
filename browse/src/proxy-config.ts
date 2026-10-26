@@ -332,9 +332,9 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
  * parser as written, so a typo such as `http:/host:3128` keeps the
  * diagnostic it had; parseProxyConfig then rejects any path, query or
  * fragment, so no part of a password can land outside the redacted userinfo.
- * A userinfo that opens with a known scheme (`https:bob:pw@host:3128`, the
- * slash-less spelling the URL parser reads as `https://bob:pw@host:3128`)
- * is a scheme, not credentials, so it is excluded too.
+ * A userinfo that opens with a known scheme (`https:bob@host:3128`, the
+ * slash-less spelling the URL parser reads as an `https://` URL with user
+ * `bob`) is a scheme, not credentials, so it is excluded too.
  */
 const SCHEMELESS_PROXY_RE = /^(?:[^/\\?#@\s]+@)?(?:\[[0-9a-f:.]+\]|(?=[^:]*[a-z.])[^/\\?#@\s:[\]]+)(?::\d+)?$/i;
 const LEADING_SCHEME_RE = /^(?:https?|socks5h?):/i;
