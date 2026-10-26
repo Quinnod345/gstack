@@ -1449,7 +1449,7 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
   'design-review-detector-shim-dom': 'gate',   // same shim, DOM mode through the browse binary's dump; self-skips when the binary is absent
   'design-review-plugin-handoff': 'gate',
   'design-html-slop-gate': 'periodic',         // one-pass gate behavior is a judgment call on a fake engine's fixed output
-  'design-motion-showcase': 'periodic',       // a showcase capture is a judgment-heavy creative run; it needs ffmpeg and Chromium
+  'design-motion-showcase': 'marathon',       // a full capture-check-export flow (3-6 min a trial) that needs ffmpeg and Chromium; the periodic census is at its 38-slice cap
 
   // /diagram — triplet is deterministic functional (gstack-render falls back
   // to the browse daemon, so CI runs it); judge is a quality benchmark
