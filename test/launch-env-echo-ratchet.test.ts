@@ -9,12 +9,16 @@
  * installer's sourceable file); nothing in a fence may dump the environment.
  *
  * Rules, per command segment (split on `;`, `&&`, `||` and `|`):
- *   export-subst   `export $(...)` or `export "$(...)"` anywhere in the segment
- *   env            `env` with no arguments, piped or not (`env FOO=1 cmd` launches, fine)
+ *   export-subst   `export` whose first argument is a substitution or an unquoted expansion
+ *                  (`export $(...)`, `export "$(...)"`, `export \`...\``, `export $VAR`), each of
+ *                  which can splat a whole NAME=value file; `export "$name"` is one word, so
+ *                  like `export NAME=value` and `export NAME` it stays allowed
+ *   env            `env` or `/usr/bin/env` with no arguments or only flags, piped or
+ *                  not (`env FOO=1 cmd` launches, fine)
  *   printenv       `printenv`, with or without a name (`echo "$NAME"` is explicit)
- *   export         bare `export`, `export -p`, `declare -x`, `typeset -x`, `declare -p`
- *   set            bare `set` as the whole line; `set | grep '^NAME_'` prints only the
- *                  variables the anchored name filter admits and stays allowed
+ *   export         bare `export`, `export -p`, `declare -x`, `typeset -x`, `declare -p`, `typeset -p`
+ *   set            bare `set` as a segment, redirections included; `set | grep '^NAME_'`
+ *                  prints only the variables the anchored name filter admits and stays allowed
  * Fenced blocks in Markdown (generated SKILL.md, sections, DRIVER.md, the Capy
  * skill) are scanned line by line; a shell helper under bin/ is scanned whole.
  * Comments are skipped. The negative-control fixtures prove the scanner fires.
@@ -27,32 +31,44 @@ const ROOT = path.resolve(import.meta.dir, '..');
 
 export type Violation = { file: string; line: number; rule: string; text: string };
 
-const EXPORT_SUBST = /\bexport\s+"?\$\(/;
+const EXPORT_SUBST = /\bexport\s+(?:"?\$\(|"?`|\$\{?[A-Za-z_])/;
+const SEGMENTS = /\s*(?:;|&&|\|\||\|)\s*/g;
 const BARE = {
-  env: /^env$/,
+  env: /^(\/usr\/bin\/)?env(\s+-\S+)*$/,
   printenv: /^printenv(\s|$)/,
-  export: /^(export|export -p|declare -x|typeset -x|declare -p)$/,
+  export: /^(export|export -p|declare -x|typeset -x|declare -p|typeset -p)$/,
+  set: /^set(\s+[0-9&]*>\S*)*$/,
 } as const;
+/** The one allowed `set` shape: piped straight into an anchored name filter. */
+const SET_FILTER = /^grep\s+(?:-\S+\s+)*["']\^/;
 
-/** Strip single- and double-quoted strings so a quoted word is never read as a command. */
+/** Blank single- and double-quoted strings, keeping every offset, so a quoted word is never read as a command. */
 function unquoted(line: string): string {
-  return line.replace(/'[^']*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  return line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, q => q[0] + ' '.repeat(q.length - 2) + q[0]);
 }
 
 export function rulesFor(line: string): string[] {
   const trimmed = line.trim();
   if (trimmed === '' || trimmed.startsWith('#')) return [];
   const rules: string[] = [];
-  const uncommented = trimmed.replace(/\s+#.*$/, '');
-  if (EXPORT_SUBST.test(uncommented)) rules.push('export-subst');
-  const bare = unquoted(uncommented);
-  if (/^set$/.test(bare)) rules.push('set');
-  for (const segment of bare.split(/\s*(?:;|&&|\|\||\|)\s*/)) {
-    const cmd = segment.replace(/^\$\s+/, '').trim();
+  const blanked = unquoted(trimmed);
+  const comment = blanked.search(/\s+#/);
+  const raw = comment >= 0 ? trimmed.slice(0, comment) : trimmed;
+  const bare = comment >= 0 ? blanked.slice(0, comment) : blanked;
+  const subst = EXPORT_SUBST.exec(raw);
+  if (subst && bare.startsWith('export', subst.index)) rules.push('export-subst');
+  const segments: Array<[number, number]> = [];
+  let start = 0;
+  for (const sep of bare.matchAll(SEGMENTS)) { segments.push([start, sep.index]); start = sep.index + sep[0].length; }
+  segments.push([start, bare.length]);
+  segments.forEach(([from, to], i) => {
+    const cmd = bare.slice(from, to).replace(/^\$\s+/, '').trim();
     if (BARE.env.test(cmd)) rules.push('env');
     if (BARE.printenv.test(cmd)) rules.push('printenv');
     if (BARE.export.test(cmd)) rules.push('export');
-  }
+    const next = segments[i + 1];
+    if (BARE.set.test(cmd) && !(next && SET_FILTER.test(raw.slice(next[0], next[1]).trim()))) rules.push('set');
+  });
   return rules;
 }
 
@@ -119,6 +135,15 @@ describe('launch-env echo ratchet', () => {
       ['typeset -x', 'export'],
       ['declare -p', 'export'],
       ['cd /repo && env', 'env'],
+      ['typeset -p', 'export'],
+      ['export `cat launch.env`', 'export-subst'],
+      ['export $LAUNCH', 'export-subst'],
+      ['export ${LAUNCH}', 'export-subst'],
+      ['cd /repo && set', 'set'],
+      ['set 2>&1 | tee out.txt', 'set'],
+      ['env -0', 'env'],
+      ['/usr/bin/env', 'env'],
+      ['echo "a #b" && env', 'env'],
     ]);
     const allowedStart = fs.readFileSync(path.join(ROOT, file), 'utf8').split('\n').findIndex(l => l === 'Allowed:') + 1;
     expect(found.every(v => v.line < allowedStart)).toBe(true);
