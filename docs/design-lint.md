@@ -41,8 +41,11 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   either; outside any project it is bounded only by the disk, and only `.css`
   files are read.
 - Markup inside an HTML comment is dead for every rule, a commented-out
-  `<style>` or `<script>` included. A tag start with no `>` (a stray `<img `)
-  is text, so a page whose tail is ten thousand of them costs its length. A tree nests at most 512 elements deep
+  `<style>` or `<script>` included; a comment that never closes runs to the
+  end of the file, as it does in the browser. A tag start with no `>` (a stray
+  `<img `) and any `<` that starts no tag (`<1`, `a < b`) are read as text
+  and dropped from the markup, so a page whose tail is ten thousand of them
+  costs its length; a `<!doctype>` or `<?xml?>` declaration stays. A tree nests at most 512 elements deep
   (the browser's own cap); a start tag deeper than that is read as empty. An
   open heading is closed by the next heading start tag, an open `<p>` by the
   next block start, and a repeated `<li>`, `<button>`, `<a>`, `<label>`,
@@ -135,8 +138,10 @@ not apply (a stylesheet has no prose), so the claim cannot reach a finding in
 the page's own markup. A claim written in the page answers for that page,
 including a finding in a stylesheet it links; a second page linking the same
 sheet without answering still reports it, so the sheet's finding may print
-once waived and once at ask, each from its own page. In a directory of
-components (under either scope) each file's claim answers for that file alone,
+once waived and once at ask, each from its own page. Which of these a context
+gets follows its shape, not the `--scope` flag: one html page keeps page
+semantics under either scope. In a directory of components, or a lone
+component file beside a stylesheet (under either scope), each file's claim answers for that file alone,
 weighed against that file's own text and its own suspected rules, so a sibling
 component is never covered and a sibling that measures a blocking rule does
 not turn this file's suspected finding into the Floor; a stylesheet beside the
@@ -179,7 +184,7 @@ waiver can answer it.
 | `overflow-x-unclipped` | ask | 34 | overflow-x missing on html and body, or a 100vw width | overflow-x: clip on both; width: 100% |
 | `horizontal-scroll` | blocks | 34 | horizontal scroll at a width between 320 and 1920 (render) | find the element wider than its viewport and cap it |
 | `hero-balance` | ask | 44a/44c | the hero's content sits off centre for its screen, or its visual stands apart from the text (render) | centre the content in its screen; put the visual beside the text |
-| `hero-fold` | blocks | 44b | the headline's bottom or the hero's first action below the 800px fold at 1280 wide (render; the lede and the visual are not measured) | pull the display clamp down, tighten leading, a two-line lede, trim padding |
+| `hero-fold` | blocks | 44b | the headline's bottom or the hero's first action below the 800px fold at 1280 wide; the lede and the visual are not measured (render) | pull the display clamp down, tighten leading, a two-line lede, trim padding |
 | `wide-container` | blocks | 44d | at 1920x1080 the container has no max-width, gutters under 120px, or a grid gains columns | cap 1360 to 1520px and centre; hold column counts; cap vw visuals |
 | `bare-fr-track` | blocks | 50 | an image-bearing grid track on bare 1fr | minmax(0, 1fr) |
 | `display-head-unwrapped` | blocks | 50 | a display head without overflow-wrap: break-word and min-width: 0 | overflow-wrap: break-word; min-width: 0 (never anywhere) |
@@ -293,7 +298,9 @@ Several rules key on hallmark's token names, which are also the names
 `--font-title` / `--font-hero` (`overused-font`), `--space-*` (`raw-spacing`,
 `off-scale-spacing`) and any `--color-*` or `--font-*` token
 (`literal-outside-tokens` fires only on a page that declares one, since a
-literal on a page with no tokens bypasses nothing). A project that names its
+literal on a page with no tokens bypasses nothing; its Tailwind half, an
+arbitrary value like `bg-[#0b0b12]` or `font-['Inter']`, fires on any page,
+since Tailwind's theme is the token block it bypasses). A project that names its
 tokens `--bg` or `--brand` gets none of those checks and no signal that they
 did not run; Phase 2 reads the roles from DESIGN.md.
 
@@ -324,7 +331,12 @@ container with no responsive handling (`wide-container` reads the opposite
 case). The copy tier
 reports at the document's first line with a count, because
 `gstack-design-craft` counts matches without positions; Phase 2 folds those
-patterns into the lint with lines. Where a rule id is shared with
+patterns into the lint with lines. It reads the page with every open
+`<script>`, `<style>`, `<template>` or `<nav>` that nothing closes after it
+dropped, so a page of unclosed openers costs its length there too.
+`tooltip-focus-delay` reads a delay of 100ms or 1s and more in a tooltip's
+`transition` or `transition-delay`; a `0.2s` fade is a duration, not a
+delay. Where a rule id is shared with
 `lib/design-catalog.ts`, the tier here follows hallmark's gate (several
 catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
 catalog row is marked `detect: lint`. Also outside the lint: `system-ui` or
