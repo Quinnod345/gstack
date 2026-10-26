@@ -1,5 +1,17 @@
 {
   "newModules": [
+    { "file": "lib/design-lint/render.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/assets.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/chrome-copy.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/chrome-eyebrow.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/chrome.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/color.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/component.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/finish.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/motion.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/structure.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/rules/type.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
+    { "file": "lib/design-lint/tailwind.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
     { "file": "lib/design-lint/css.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
     { "file": "lib/design-lint/color.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },
     { "file": "lib/design-lint/html.ts", "movedFrom": "(new: the bundled design lint, GSTA-105; ported from hallmark sloplint.mjs)" },

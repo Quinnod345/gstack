@@ -172,7 +172,7 @@ function check29Glow(ctx: LintContext, r: Reporter): void {
     r.report('glow-wash', file, line, ev, { fix });
   };
   for (const rule of mergedRules(ctx)) {
-    if (isTokenRule({ ...rule, keyframes: null })) continue;
+    if (isTokenRule(rule)) continue;
     const local: Tokens = {};
     for (const d of rule.decls) if (d.prop.startsWith('--')) local[d.prop] = d.value;
     const name = trunc(rule.selector, 36);

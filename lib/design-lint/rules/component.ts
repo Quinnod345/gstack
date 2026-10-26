@@ -93,7 +93,11 @@ function checkComponentText(ctx: LintContext, r: Reporter): void {
       if (!text) continue;
       if (/(?:link|button|btn|cta)$/i.test(t.name) && /(→|->|›|»|⟶)\s*$/.test(text)) r.report('template-punctuation', doc.file, t.line, `arrow glued to the label "${trunc(text, 40)}" (<${t.name}>)`, { fix: 'a verb as the label; the link already says it goes somewhere' });
       if ((text.match(/\s[·•]\s/g) || []).length >= 2) r.report('template-punctuation', doc.file, t.line, `middle-dot meta string "${trunc(text, 50)}"`, { fix: 'line breaks, columns or hairlines; one dot in a byline at most' });
-      if (text.length <= 4 && EMOJI_ICON.test(text)) r.report('emoji-decoration', doc.file, t.line, `emoji icon "${text}" in <${t.name}>`, { fix: 'one icon library or custom SVG' });
+      if (text.length <= 4 && EMOJI_ICON.test(text)) {
+        const outer = r.findings.findIndex((f) => f.rule === 'emoji-decoration' && f.file === relPath(doc.file, r.cwd) && f.evidence.includes(`"${text}"`));
+        if (outer >= 0) r.findings.splice(outer, 1);
+        r.report('emoji-decoration', doc.file, t.line, `emoji icon "${text}" in <${t.name}>`, { fix: 'one icon library or custom SVG' });
+      }
     }
   }
 }

@@ -7,9 +7,9 @@
  */
 import type { LintContext } from '../context';
 import { lineIndex } from '../css';
-import { getAttr, innerOf, plainText, type Doc, type Tag } from '../html';
+import { getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
-import { maskedProse, runChromeCopy } from './chrome-copy';
+import { runChromeCopy } from './chrome-copy';
 import { runEyebrow } from './chrome-eyebrow';
 
 // sloplint check42 (gate 42)

@@ -155,7 +155,7 @@ export type Tokens = Record<string, string>;
 const TOKEN_SEL = /^(?:html|:root)?(?:\[data-(?:theme|mode|scheme)[^\]]*\]|:root|:not\([^)]*\))*$/i;
 
 /** Whether a rule belongs to the token block: :root / html / a data-theme scope, @font-face, @theme, or anything in tokens.css. */
-export function isTokenRule(rule: CssRule): boolean {
+export function isTokenRule(rule: Pick<CssRule, 'selector' | 'file'>): boolean {
   if (rule.selector === '@font-face' || rule.selector === '@theme' || path.basename(rule.file).toLowerCase() === 'tokens.css') return true;
   return rule.selector.split(',').every((p) => { const t = p.trim(); return t && TOKEN_SEL.test(t); });
 }

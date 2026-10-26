@@ -293,7 +293,7 @@ function check67(ctx: LintContext, r: Reporter): void {
   const upperDisplay = bySel.some((rule) => displayish(rule) && !LABEL67.test(rule.selector) && rule.decls.some((d) => d.prop === 'text-transform' && /uppercase/.test(d.value)));
   const seen = new Set<string>();
   for (const rule of bySel) {
-    if (isTokenRule({ ...rule, keyframes: null }) || exempt67(rule.selector) || /::first-letter\s*(,|$)/.test(rule.selector)) continue;
+    if (isTokenRule(rule) || exempt67(rule.selector) || /::first-letter\s*(,|$)/.test(rule.selector)) continue;
     const caps = caps67(ctx, bySel, rule);
     if (!caps) continue;
     const { upper, smallCaps, em, px } = caps;

@@ -237,7 +237,7 @@ describe('design-lint tailwind: type rules', () => {
     const f = await lintFiles({ 'index.html': page(body) });
     expect(only(f, 'kicker-above-heading').map((x) => [x.line, x.grade])).toEqual([[BODY + 3, 'ask'], [BODY + 5, 'ask']]);
     expect(only(f, 'kicker-above-heading').map((x) => x.evidence)).toEqual([
-      'eyebrow "Features" before <h2> (uppercase at 14px)',
+      'the eyebrow "Features" before <h2>',
       'eyebrow "Fewer handoffs" before <h3> (text-indigo-600 at 14px)',
     ]);
     expect(only(await lintFiles({ 'index.html': page(body) }, { scope: 'component' }), 'kicker-above-heading')).toEqual([]);

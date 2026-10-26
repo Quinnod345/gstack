@@ -9,31 +9,9 @@
  */
 import { styleFor, type LintContext } from '../context';
 import { resolveVars } from '../css';
-import { ancestorMap, getAttr, innerOf, plainText, type Doc, type Tag } from '../html';
+import { ancestorMap, getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 
-const pad = (m: string): string => m.replace(/[^\n]/g, ' ');
-
-// sloplint proseRun
-const proseRun = (run: string): string => {
-  let r = run;
-  for (let k = 0; k < 3 && /\{[^{}]*\}/.test(r); k++) r = r.replace(/\{[^{}]*\}/g, pad);
-  return /[;=(){}]|\breturn\b/.test(r) ? pad(r) : r;
-};
-
-/** The document's prose: tags, comments, scripts, styles and code blanked with positions preserved; component text runs that read as code are blanked too. */
-// sloplint maskedProse
-export function maskedProse(doc: Doc): string {
-  const cached = doc.cache.prose as string | undefined;
-  if (cached != null) return cached;
-  const src = doc.kind !== 'html' ? doc.src.replace(/(^|>)([^<>]*)(?=<|$)/g, (_m0, a: string, run: string) => a + proseRun(run)) : doc.src;
-  const prose = src
-    .replace(/<(script|style|pre|code|kbd|samp|textarea)\b[^>]*>[\s\S]*?<\/\1>/gi, pad)
-    .replace(/<!--[\s\S]*?-->/g, pad)
-    .replace(/<[^>]*>/g, pad);
-  doc.cache.prose = prose;
-  return prose;
-}
 
 // sloplint TELLS19 (gate 19), less the lines the copy tier owns
 const HERO_TELLS: Array<[RegExp, string]> = [

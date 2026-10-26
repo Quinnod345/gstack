@@ -6,10 +6,9 @@
  */
 import { mergedRules, type LintContext } from '../context';
 import { HEADING_SEL, isTokenRule, lineIndex, pxOf, resolveVars, type MergedRule } from '../css';
-import { getAttr } from '../html';
+import { getAttr, maskedProse } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twVariants } from '../tailwind';
-import { maskedProse } from './chrome-copy';
 
 /** The largest px, rem or em length in a value, at a 16px root; null when it has none. */
 // sloplint maxPxIn
@@ -27,8 +26,6 @@ const baseSelector = (sel: string): string => sel.replace(/::?[a-z-]+(\([^)]*\))
 
 const firstFile = (ctx: LintContext): string | null => ctx.cssFiles[0]?.file || ctx.docs[0]?.file || null;
 
-/** isTokenRule over a merged rule (merging already dropped keyframes). */
-const tokenRule = (rule: MergedRule): boolean => isTokenRule({ ...rule, keyframes: null });
 
 // sloplint checkF1 (F1)
 function checkStraightQuotes(ctx: LintContext, r: Reporter): void {
@@ -75,7 +72,7 @@ function checkPrimaryRecipes(ctx: LintContext, r: Reporter): void {
   const BTN = /\b(btn|button|cta)\b|__(btn|button|cta)\b/i;
   const filled = new Map<string, { rule: MergedRule; line: number }>();
   for (const rule of mergedRules(ctx)) {
-    if (tokenRule(rule) || /:hover|:active|:focus|:disabled|\.is-|\[disabled/i.test(rule.selector)) continue;
+    if (isTokenRule(rule) || /:hover|:active|:focus|:disabled|\.is-|\[disabled/i.test(rule.selector)) continue;
     const first = baseSelector(rule.selector.split(',')[0]);
     if (!BTN.test(first)) continue;
     for (const d of rule.decls) {
@@ -93,7 +90,7 @@ function checkPrimaryRecipes(ctx: LintContext, r: Reporter): void {
 // sloplint checkF5 (F5)
 function checkIconCoins(ctx: LintContext, r: Reporter): void {
   for (const rule of mergedRules(ctx)) {
-    if (tokenRule(rule) || !/icon|\bico\b/i.test(rule.selector)) continue;
+    if (isTokenRule(rule) || !/icon|\bico\b/i.test(rule.selector)) continue;
     const radius = rule.decls.find((d) => d.prop === 'border-radius');
     if (!radius) continue;
     const rv = resolveVars(radius.value, ctx.tokens);
@@ -115,7 +112,7 @@ function checkTabularFigures(ctx: LintContext, r: Reporter): void {
   const covered = new Set(bySel.filter(hasTnum).map((rule) => baseSelector(rule.selector)));
   const warned = new Set<string>();
   for (const rule of bySel) {
-    if (tokenRule(rule) || !NUM_SEL.test(rule.selector)) continue;
+    if (isTokenRule(rule) || !NUM_SEL.test(rule.selector)) continue;
     const base = baseSelector(rule.selector);
     if (warned.has(base) || covered.has(base)) continue;
     const size = rule.decls.find((d) => d.prop === 'font-size');
@@ -129,7 +126,7 @@ function checkTabularFigures(ctx: LintContext, r: Reporter): void {
 function checkStampedRecipe(ctx: LintContext, r: Reporter): void {
   const byKey = new Map<string, { sels: Set<string>; rule: MergedRule }>();
   for (const rule of mergedRules(ctx)) {
-    if (tokenRule(rule) || /::(before|after)/.test(rule.selector)) continue;
+    if (isTokenRule(rule) || /::(before|after)/.test(rule.selector)) continue;
     const get = (re: RegExp): string => {
       const d = rule.decls.filter((x) => re.test(x.prop)).pop();
       return d ? resolveVars(d.value, ctx.tokens).replace(/\s+/g, ' ').trim() : '';
@@ -155,7 +152,7 @@ function checkPillRadius(ctx: LintContext, r: Reporter): void {
   const sels = new Set<string>();
   let where: { rule: MergedRule; line: number } | null = null;
   for (const rule of mergedRules(ctx)) {
-    if (tokenRule(rule)) continue;
+    if (isTokenRule(rule)) continue;
     const d = rule.decls.filter((x) => x.prop === 'border-radius').pop();
     if (!d || !/^(9999px|999px|50rem)$/.test(resolveVars(d.value, ctx.tokens).trim())) continue;
     for (const part of rule.selector.split(',')) {
