@@ -1022,7 +1022,10 @@ where it came from, with credentials redacted.
   silently reuse a daemon that routes differently. The refusal prints the
   daemon's settings and this session's. Fix: run `browse stop` to restart the
   daemon with this session's settings (stop works whatever the proxy settings
-  are), or set `BROWSE_PROXY_URL=direct` when the running daemon has no proxy.
+  are), or match the daemon: unset the variable that differs, or on Linux set
+  `BROWSE_PROXY_URL=direct` when the running daemon has no proxy (on macOS and
+  Windows that opt-out is itself part of the daemon settings, so it only
+  matches a daemon started with it).
 
 **Stealth scope (Layer C, always on).** Every context — headless `launch`,
 `--headed`/`--proxy`, `handoff`, and the `useragent`/`viewport --scale`

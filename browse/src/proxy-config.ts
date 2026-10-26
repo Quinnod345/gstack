@@ -133,9 +133,11 @@ export function toUpstreamConfig(cfg: ParsedProxyConfig): UpstreamConfig {
 }
 
 /**
- * Compute a stable hash of (proxyUrl + headed flag) for daemon-mismatch
- * detection (D2). The hash is deterministic across CLI invocations on the
- * same machine and survives daemon restarts via the state file.
+ * Compute a stable hash of the daemon config (proxyUrl + headed flag, plus
+ * the NO_PROXY rules beside a proxy and the explicit direct opt-out where it
+ * bypasses the system proxy settings, #3440) for daemon-mismatch detection
+ * (D2). The hash is deterministic across CLI invocations on the same machine
+ * and survives daemon restarts via the state file.
  *
  * NEVER include resolved creds — the hash compares config intent, not
  * specific credential values, and we don't want creds in any persisted form.

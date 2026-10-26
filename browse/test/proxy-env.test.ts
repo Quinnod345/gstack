@@ -208,6 +208,16 @@ describe('proxyMismatchLines', () => {
     expect(lines[3]).toContain('or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy');
   });
 
+  test('an env proxy meeting a system-proxy daemon (macOS/Windows) offers unsetting the variable, not BROWSE_PROXY_URL=direct, which that daemon would refuse (#3440)', () => {
+    const env = { HTTPS_PROXY: 'http://proxy.example:3128' };
+    const lines = proxyMismatchLines(extractGlobalFlags(['text'], env, 'darwin'), state(), env, 'darwin')!;
+    expect(lines[0]).toContain('(HTTPS_PROXY differs)');
+    expect(lines[3]).toBe("fix: run 'browse stop' to restart the daemon with this session's proxy settings, or unset HTTPS_PROXY to use the running daemon with the system proxy settings.");
+    expect(lines[3]).not.toContain('BROWSE_PROXY_URL=direct');
+    const linux = proxyMismatchLines(extractGlobalFlags(['text'], env, 'linux'), state(), env, 'linux')!;
+    expect(linux[3]).toContain('or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy');
+  });
+
   test('a credentialed proxy is redacted on both sides', () => {
     const lines = proxyMismatchLines(extractGlobalFlags(['text'], { HTTPS_PROXY: 'http://USER:PASSWORD@proxy.example:3128' }), state(), {})!;
     expect(lines.join('\n')).not.toContain('PASSWORD');

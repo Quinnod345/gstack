@@ -486,9 +486,12 @@ function reportDaemonBusyAndExit(pid: number): never {
  * #915 refusal for a daemon whose proxy differs from this session's when
  * either side came from the environment: names the variable, the two
  * settings and the remedies. Null leaves the --proxy/--headed refusals as they
- * were (a headed difference always uses those).
+ * were (a headed difference always uses those). The BROWSE_PROXY_URL=direct
+ * remedy is offered only where it matches a proxy-less daemon's hash: on
+ * Linux, or when that daemon was started with it (#3440); elsewhere following
+ * it would be refused again.
  */
-export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: NodeJS.ProcessEnv = process.env): string[] | null {
+export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string[] | null {
   if ((state.mode === 'headed') !== flags.headed) return null;
   const fromEnv = (source?: string | null) => !!source && source !== '--proxy';
   const optedOut = env.BROWSE_PROXY_URL === 'direct' && !flags.proxyUrl;
@@ -504,7 +507,8 @@ export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: 
   const remedies = [`run 'browse stop' to restart the daemon with this session's proxy settings`];
   if (state.proxy) remedies.push(`or run this session with the daemon's ${variable} so the settings match`);
   else if (flags.explicitDirect && !state.proxyDirect) remedies.push(`or unset BROWSE_PROXY_URL to use the running daemon with the system proxy settings`);
-  else remedies.push(`or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy`);
+  else if (state.proxyDirect || platform === 'linux') remedies.push(`or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy`);
+  else remedies.push(`or unset ${variable} to use the running daemon with the system proxy settings`);
   return [
     `the running browse daemon was started with different proxy settings (${variable} differs), so it was not reused.`,
     `  daemon:  ${daemon}`,
