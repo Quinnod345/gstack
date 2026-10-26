@@ -117,7 +117,9 @@ SKILL.md files are **generated** from `.tmpl` templates. To update docs:
 
 1. Edit the `.tmpl` file (e.g. `SKILL.md.tmpl` or `browse/SKILL.md.tmpl`)
 2. Run `bun run gen:skill-docs` (or `bun run build` which does it automatically)
-3. Commit both the `.tmpl` and generated `.md` files
+3. Commit both the `.tmpl` and generated `.md` files, including a tier 2+ skill's
+   `sections/preamble.md` (the shared preamble, rendered by
+   `scripts/resolvers/preamble-hoist.ts`; change the preamble resolvers, never that file)
 
 The same `gen:skill-docs` run writes two more generated files from `lib/`:
 `review/design-checklist.md` (from `lib/design-catalog.ts`, through
