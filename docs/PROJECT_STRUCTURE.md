@@ -103,7 +103,7 @@ gstack/
 ├── SKILL.md         # Generated from SKILL.md.tmpl (don't edit directly)
 ├── SKILL.md.tmpl    # Template: edit this, run gen:skill-docs
 ├── ETHOS.md         # Builder philosophy (Boil the Ocean, Search Before Building)
-├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (both Apache-2.0)
-├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt)
+├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (both Apache-2.0) and from Elaya's design skills (MIT)
+├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt, MIT-elaya.txt)
 └── package.json     # Build scripts for browse
 ```
