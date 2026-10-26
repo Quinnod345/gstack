@@ -95,9 +95,12 @@ for (const source of sources) describe(`CEO clarity routing — ${source.label}`
 });
 
 describe('CEO completeness posture', () => {
+  // Value: protects=CEO Philosophy bullet bounds extra code by the accepted scope, so SCOPE/SELECTIVE EXPANSION still build accepted items;
+  // fails_when=the bullet says "no code beyond the requirement" again, contradicting EXPANSION; why_new=the rule group lacked 'accepted scope';
+  // seam=none; no_claim=model behavior in a real CEO review (keyword check on the template only)
   test('the Philosophy bullet measures completeness in coverage, not code', () => {
     const philosophy = readFileSync(resolve(root, 'plan-ceo-review/SKILL.md.tmpl'), 'utf8').split('## Philosophy')[1]!.split('## Prime Directives')[0]!;
-    expectMentions(philosophy, [['whole requirement', '90% shortcut', 'no code beyond', 'equal coverage', 'smaller diff']], 'philosophy');
+    expectMentions(philosophy, [['whole requirement', '90% shortcut', 'no code beyond', 'accepted scope', 'equal coverage', 'smaller diff']], 'philosophy');
     expectAbsent(philosophy, ['COMPLETENESS IS CHEAP', '~150 LOC'], 'philosophy');
   });
 });
