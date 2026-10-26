@@ -230,7 +230,7 @@ describe('ready under a train policy: the screen choice', () => {
     repo.git('remote', 'set-url', 'origin', originUrl);
     expect(unlisted.status).toBe(EXIT.refused);
     expect(unlisted.err).toMatch(/git fetch origin main failed: .*\(POLICY_SOURCE_UNAVAILABLE\)/);
-    expect(unlisted.err.split('\n').filter(Boolean).length).toBeGreaterThan(0);
+    expect(unlisted.err.split('\n').filter(Boolean).length).toBe(1);
     expect(dispatches(fx)).toEqual([]);
     expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
     repo.git('push', '-q', '-f', 'origin', `${mergeRefCommit(fx, moved)}:refs/pull/1/merge`);
