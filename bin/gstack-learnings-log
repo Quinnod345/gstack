@@ -6,6 +6,7 @@
 # Append-only storage. Duplicates (same key+type) are resolved at read time
 # by gstack-learnings-search ("latest winner" per key+type).
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Windows git-bash (#1950): pwd yields a POSIX path (/c/Users/...), which Bun
 # on Windows cannot resolve as an ES module specifier in the import below.
@@ -27,7 +28,7 @@ INPUT="$1"
 TMPERR=$(mktemp "${TMPDIR:-/tmp}/gstack-learnings-log.XXXXXX") || { echo "gstack-learnings-log: could not create a temp file in ${TMPDIR:-/tmp}, so the learning was not recorded. Fix: point TMPDIR at a writable directory." >&2; exit 1; }
 trap 'rm -f "$TMPERR"' EXIT
 set +e
-VALIDATED=$(printf '%s' "$INPUT" | GSTACK_LIB_DIR="$SCRIPT_DIR/../lib" bun --no-env-file --config=/dev/null -e "
+VALIDATED=$(printf '%s' "$INPUT" | GSTACK_LIB_DIR="$SCRIPT_DIR/../lib" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
 const { hasInjection } = await import(process.env.GSTACK_LIB_DIR + '/jsonl-store.ts');
 const raw = await Bun.stdin.text();
 let j;
