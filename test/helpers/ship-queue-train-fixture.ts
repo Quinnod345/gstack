@@ -13,7 +13,9 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { ShipReceipt } from '../../lib/headless-artifacts';
 import { TRAIN_KEYS_VERSION } from '../../lib/ship-policy';
+import { orderReceipt, renderReceiptBlock } from '../../lib/ship-receipt';
 import { BASE_POLICY, makeFixtureRepo, runBin, type FixtureRepo } from './restamp-fixture';
 
 export const TRAIN_BLOCK = {
@@ -58,8 +60,18 @@ export function repoKey(fx: TrainFixture): string {
   return createHash('sha256').update(norm).digest('hex').slice(0, 16);
 }
 
-/** A same-repo PR: a branch from origin/main touching `file`, published as refs/pull/<n>/head (and /merge), known to the gh shim. */
-export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text?: string; changelog?: boolean | ((text: string) => string); cross?: boolean; from?: string } = {}): string {
+/** The PR body /ship leaves behind: the receipt block first (lib/ship-receipt.ts), bound to `head`, then prose. */
+export function shippedBody(pr: string, head: string, extra: Partial<ShipReceipt> = {}): string {
+  return renderReceiptBlock(orderReceipt({ schema_version: 1, pr: Number(pr), head, base: 'main', queue_mode: 'stamp-at-merge', ...extra })) + `\n## What changed\n\n#${pr} change\n`;
+}
+
+/** Set a shimmed PR's body (`shippedBody` for a receipt bound to another head, '' for none). */
+export function setPrBody(fx: TrainFixture, pr: string, body: string): void {
+  fx.write(d => { d.prs[pr] = { ...(d.prs[pr] as Record<string, unknown>), body }; });
+}
+
+/** A same-repo PR: a branch from origin/main touching `file`, published as refs/pull/<n>/head (and /merge), known to the gh shim with a /ship receipt for its head (`shipped: false` leaves the body empty). */
+export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text?: string; changelog?: boolean | ((text: string) => string); cross?: boolean; from?: string; shipped?: boolean } = {}): string {
   const { repo } = fx;
   repo.git('checkout', '-q', opts.from ?? 'origin/main', '-B', `pr-${pr}`);
   const file = opts.file ?? `pr-${pr}.txt`;
@@ -73,7 +85,7 @@ export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text
   repo.git('commit', '-q', '-m', `feat #${pr}`);
   const head = repo.git('rev-parse', 'HEAD');
   repo.git('push', '-q', '-f', 'origin', `HEAD:refs/pull/${pr}/head`, `HEAD:refs/pull/${pr}/merge`);
-  fx.write(d => { d.prs[pr] = { headRefOid: head, isCrossRepository: !!opts.cross, state: 'OPEN', headRefName: `pr-${pr}`, url: `https://github.com/fixture/repo/pull/${pr}`, body: '' }; });
+  fx.write(d => { d.prs[pr] = { headRefOid: head, isCrossRepository: !!opts.cross, state: 'OPEN', headRefName: `pr-${pr}`, url: `https://github.com/fixture/repo/pull/${pr}`, body: opts.shipped === false ? '' : shippedBody(pr, head) }; });
   return head;
 }
 

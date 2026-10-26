@@ -132,6 +132,17 @@ export const RELEASE_RESULT_CODES = {
     summary: 'a train stopped partway through publication, so main holds a prefix no gate covered on its own; ordinary trains are refused until a repair lands',
     fix: 'admit one repair PR at its exact head (train build --repair --prs <n>@<sha>); the freeze clears when verify finds main’s tree after that merge in a green record',
   },
+  // CREW rule 22 (Garry, 2026-10-25): /ship runs before every READY; the queue refuses a PR whose body has no current receipt.
+  QUEUE_RECEIPT_MISSING: {
+    anchor: 'queue-receipt-missing',
+    summary: 'the PR body carries no valid /ship receipt, so the PR was never shipped through gstack and cannot be READY’d, admitted to a train or merged',
+    fix: 'run /ship on the branch (unattended it writes the receipt with gstack-ship-receipt write --pr <n> --body …), then gstack-ship-queue ready again; there is no flag to skip this',
+  },
+  QUEUE_RECEIPT_STALE: {
+    anchor: 'queue-receipt-stale',
+    summary: 'the PR body’s /ship receipt is for another head than the one being READY’d or merged (a push after /ship, or a receipt copied from another PR)',
+    fix: 'rerun /ship on the current head so the receipt names it, then gstack-ship-queue ready again; a slot’s stamp commit keeps the receipt written for its pinned head',
+  },
   READY_SCREEN_CHOICE_REQUIRED: {
     anchor: 'ready-screen-choice-required',
     summary: 'the base policy turns trains on, so READY needs an explicit screen choice: --screen (pay for a diff-relevant screen now) or --no-screen',

@@ -110,6 +110,19 @@ describe('install verdict keyed by (checkout, project): both twins', () => {
     expect(both('review', b, { GSTACK_STATE_ROOT: legacySr })).toMatchObject({ refuse: false, status: 'ok' });
   });
 
+  test("GSTA-85: an installer run from the skill's own folder (no project) leaves /ship from the project with no verdict; both twins name the project directory to run the installer from", () => {
+    const sr = tmp();
+    const env = { GSTACK_STATE_ROOT: sr };
+    const proj = project('lane');
+    writeVerdict(sr, { project: '', bun_path: BUN, bun_version: '1.4.2', schema_version: 2, for: 'ship' });
+    const r = both('ship', proj, env);
+    expect(r).toMatchObject({ refuse: true, status: 'verdict', code: 'INSTALL_UNVERIFIED' });
+    expect(r.detail).toBe(`no install verdict at ${installVerdictPath(REAL, sr, proj)} for ${REAL}`);
+    const fix = `fix: run the Capy skill installer (scripts/install.sh --for ship) from ${proj}: the verdict is keyed by the project directory the installer runs in, so a run from the skill's own folder does not cover ${proj}; then launch with the GSTACK_LAUNCH line it prints (INSTALL_UNVERIFIED)`;
+    expect(r.line).toContain(fix);
+    expect(bashAdmit('ship', proj, { _GH: sr, ...env }).line).toContain(fix);
+  });
+
   test('a running Bun other than the recorded one refuses with BUN_RESOLUTION_DRIFT and names both', () => {
     const sr = tmp();
     const a = project('a');

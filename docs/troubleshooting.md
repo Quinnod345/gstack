@@ -4021,6 +4021,38 @@ trains and other trains' merges are refused until a repair lands.
 <n>@<sha>`). The freeze clears when verify finds main's tree after that merge
 in a green record; `NEXT:` then builds a train of the PRs still unmerged.
 
+<a id="queue-receipt-missing"></a>
+### `QUEUE_RECEIPT_MISSING`
+
+**Meaning.** The PR body carries no valid ```gstack-ship-receipt``` block, so
+/ship never ran on this branch (or its receipt was lost when the body was
+rewritten). `gstack-ship-queue ready` refuses to READY it, `train build`
+refuses the pin by PR number before any write, push or dispatch (dry run
+included), and `verify --train` refuses the slot. The block still prints the
+informational `SHIP_RECEIPT: none in the PR body` (or `invalid`) line. There
+is no flag that skips this check (Garry, 2026-10-25: use the gstack ship skill
+before merging PRs; [ship-policy.md](ship-policy.md#ship-before-ready)).
+
+**Fix.** Run /ship on the branch. Unattended, it ends by writing the receipt
+into the PR body (`gstack-ship-receipt write --pr <n> … --body <file>`, then
+`gstack-post pr-body`). Then rerun `gstack-ship-queue ready --pr <n>
+--screen|--no-screen` and send the new READY block.
+
+<a id="queue-receipt-stale"></a>
+### `QUEUE_RECEIPT_STALE`
+
+**Meaning.** The PR body's ship receipt is valid but names another head than
+the one being READY'd or merged (a push after /ship, a receipt copied from
+another PR, or a `pr` field for another PR), so the receipt does not cover
+what would merge. The one accepted difference is a train slot's stamp: when
+the current head is the pinned head's stamp commit (same tree modulo stamp
+files, or the pin with main merged in at slot 2 and later), the receipt
+written for the pinned head is the binding one and `verify --train` accepts it.
+
+**Fix.** Rerun /ship on the current head so the receipt names it, then rerun
+`gstack-ship-queue ready --pr <n> --screen|--no-screen`. A lane never stamps
+to fix this: the stamp comes only when the slot is called.
+
 <a id="ready-screen-choice-required"></a>
 ### `READY_SCREEN_CHOICE_REQUIRED`
 

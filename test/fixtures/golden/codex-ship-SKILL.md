@@ -1177,7 +1177,9 @@ Lookup failure or ambiguous matches **STOP** for resolution, never mean no PR.
 Save the result for Step 19's recheck.
 
 The pr-body section prepares the title from that result, then publishes;
-`--no-pr` or an automation lane takes the handoff section.
+`--no-pr` or an automation lane takes the handoff section. Unattended
+(`UNATTENDED_SHIP:` echoed): an open PR at HEAD takes the pr-body section's
+existing-PR path (body and title only, never `pr-create` or a push); else handoff.
 
 > **STOP.** Before preparing the title and creating or updating the PR/MR with the verified documentation outcome (Steps 18-19), Read `sections/pr-body.md` relative to the installed `gstack-ship` SKILL.md directory and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
@@ -1228,6 +1230,22 @@ fi
 ```
 
 The marker or enabled question_tuning suppresses it; remove the marker to re-enable.
+
+---
+
+## Step 22: Terminal line (every run)
+
+The last line printed is the result line a parent greps (docs/unattended.md):
+
+```bash
+[ -d "${GSTACK_ROOT:-/-}/bin" ]&&[ -d "$GSTACK_ROOT/lib" ]||{ _r=$(git rev-parse --show-toplevel 2>/dev/null)/.agents/skills/gstack;[ -d "$_r/bin" ]||_r=${CODEX_HOME:-~/.codex}/skills/gstack;[ -d "$_r/bin" ]||{ echo "gstack: no install found (tried $_r). Fix: ./setup --host codex from your gstack checkout; ./setup --status shows it.">&2;exit 1;};GSTACK_ROOT=$_r;}
+$GSTACK_ROOT/bin/gstack-ship-receipt result --pr <pr-number>   # handoff: --body .gstack/tmp/ship-receipt.md
+```
+
+It binds the receipt to HEAD, writes `<state>/ship/runs/<utc>-<head12>/` and prints
+`GSTACK_RESULT: skill=ship status=complete run=<dir>`. `QUEUE_RECEIPT_STALE`: HEAD moved after
+the receipt; rewrite, repost, rerun. A run that STOPs earlier ends with the literal
+`GSTACK_RESULT: skill=ship status=refused run=-` after its reason.
 
 ---
 

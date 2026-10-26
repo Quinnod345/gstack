@@ -5,8 +5,9 @@
  * so every step ends in a line a coordinator can act on:
  *
  *   ready       READY #<pr> <head> STAMP_VERSION=<X|unstamped> plus head, base,
- *               CI at that exact head, the PREGATE line and the gate state;
- *               refused when the tree is not the pushed PR head.
+ *               CI at that exact head, the PREGATE line, the gate state and the
+ *               /ship receipt; refused when the tree is not the pushed PR head
+ *               or the PR body carries no receipt for it (QUEUE_RECEIPT_*).
  *   stamp       preflight (gated head equals HEAD modulo stamps, base, policy,
  *               gate record under full_e2e), restamp, commit, tree receipt,
  *               each stage journaled; QUEUE_STAMP: <pr> <version> head= gated=
@@ -23,7 +24,7 @@ import * as path from 'node:path';
 import { readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
-import { extractReceipt, receiptSummaryLine } from './ship-receipt';
+import { bindReceipt } from './ship-receipt';
 import { isUnavailable, loadPolicyFromBase, type LoadedPolicy } from './ship-policy';
 import {
   QUEUE_DIR_REL, applyStampPatch, commitForTree, currentAttempt, git, listAttempts, recomputeMergeTree, sha256, writeJsonAtomic,
@@ -141,7 +142,7 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
   }
-  const receipt = extractReceipt(info.body ?? '');
+  const receipt = bindReceipt(info.body ?? '', o.pr, [head]);
   const attempt = currentAttempt(ctx.repoRoot, o.pr);
   const lines = [
     `READY #${o.pr} ${head} STAMP_VERSION=${version}`,
@@ -152,13 +153,14 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
     `ci: ${ci.line}`,
     pregateLine,
     gateLine(policy, attempt),
-    receipt.found && receipt.receipt && !receipt.errors.length ? receiptSummaryLine(receipt.receipt) : `SHIP_RECEIPT: ${receipt.found ? 'invalid' : 'none'} in the PR body`,
+    receipt.line,
   ];
   const gate = policy.policy.full_e2e ? gateEvidence(ctx, o.pr, head, attempt, o.gateExit, o.gateLog) : null;
   if (gate) lines.push(gate.line);
   if (!ci.green) return fail({ code: 'QUEUE_NOT_READY', message: `CI is not green at ${head.slice(0, 12)}: ${ci.line}` }, lines, run);
   if (!pregateOk) return fail({ code: 'QUEUE_NOT_READY', message: `the pregate result is not a current pass: ${pregateLine}` }, lines, run);
   if (gate && !gate.ok) return fail({ code: 'QUEUE_GATE_MISSING', message: `full_e2e is set and no passing gate is bound to ${head.slice(0, 12)}: ${gate.line}` }, lines, run);
+  if (!receipt.ok) return fail({ code: receipt.code, message: receipt.message }, lines, run);
   return { ok: true, lines, run };
 }
 
