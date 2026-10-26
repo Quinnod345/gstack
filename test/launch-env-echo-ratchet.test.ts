@@ -182,6 +182,10 @@ describe('launch-env echo ratchet', () => {
     expect(installer).toContain('LAUNCH_FILE="${VERDICT%.json}.env"');
     expect(installer).toContain('chmod 0600 "$tmp"');
     for (const name of CAPY_LAUNCH_MARKERS) expect(installer, name).toMatch(new RegExp(`^\\s*echo "export ${name}=`, 'm'));
+    // Both directions: every variable the launch file exports is either a marker the shard sandbox
+    // and the test preload strip, or one of the two they keep on purpose (GSTA-99).
+    const exported = [...installer.matchAll(/^\s*echo "export ([A-Z_]+)=/gm)].map(m => m[1]).sort();
+    expect(exported).toEqual([...CAPY_LAUNCH_MARKERS, 'GSTACK_STATE_ROOT'].sort());
     expect(installer).toContain('echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"');
     for (const file of ['ship/sections/documentation.md', 'document-release/SKILL.md', 'autoplan/DRIVER.md', 'capy/skill/gstack/SKILL.md']) {
       const text = fs.readFileSync(path.join(ROOT, file), 'utf8');

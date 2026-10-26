@@ -35,9 +35,9 @@
 # installs it on first use); --with-browser installs it now. The last lines
 # are the GSTACK_LAUNCH line the parent supplies to every gstack command it
 # launches, GSTACK_LAUNCH_PATH when the certified Bun is not first on PATH,
-# GSTACK_LAUNCH_FILE (the same assignments as a sourceable mode-0600 file
-# beside the verdict; callers and their children `. <file>` it, never re-type
-# it) and the doctor's trailer (`gstack: ok ...` or `gstack: fail ...`;
+# GSTACK_LAUNCH_FILE on a passing run (the same assignments as a sourceable
+# mode-0600 file beside the verdict; callers and their children `. <file>` it,
+# never re-type it) and the doctor's trailer (`gstack: ok ...` or `gstack: fail ...`;
 # grep that, never pipe through tail).
 # Exit: 0 ok, 1 a component failed, 2 usage, 3 preflight stopped before ./setup.
 set -u
@@ -605,7 +605,7 @@ write_launch_file() {
     echo "export GSTACK_INSTALL_VERDICT=$(shq "$VERDICT")"
   } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE" || { rm -f "$tmp"; return 1; }
 }
-write_launch_file || { say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }
+if [ "$RC" -eq 0 ]; then write_launch_file || { say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }; else LAUNCH_FILE=""; fi
 echo "GSTACK_LAUNCH: ${LAUNCH_DIR:+PATH=$LAUNCH_DIR:\$PATH }GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=$GSTACK_STATE_ROOT GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-1} GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=$VERDICT"
 [ -n "$LAUNCH_DIR" ] && echo "GSTACK_LAUNCH_PATH: $LAUNCH_DIR"
 [ -n "$LAUNCH_FILE" ] && echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"
