@@ -431,11 +431,21 @@ unattended, the verdict and its evidence are the handoff and nothing is pushed.
 ## Step 4 (MODERNIZE only): Rebase and prove intent survived
 
 ```bash
-git switch -c "modernize/$HEAD_BRANCH" "$HEAD_REF"
+git switch -C "modernize/$HEAD_BRANCH" "$HEAD_REF"
 OLD_HEAD=$(git rev-parse HEAD)
 [ "$OLD_HEAD" = "$OBSERVED" ] || { echo "PR moved since Step 1 ($OBSERVED -> $OLD_HEAD): stop and re-read it"; exit 1; }
+[ "$(git rev-list --merges --count "$MERGE_BASE..$OLD_HEAD")" = 0 ] || { echo "the PR range holds merge commits: a plain rebase drops what they changed and range-diff never shows it; stop here"; exit 1; }
 git rebase "origin/$BASE"
 ```
+
+A merge commit in the PR's range (the author merged the base once and resolved a
+conflict there) is the one shape the proof below cannot see: `git rebase` drops
+it and `git range-diff` compares only the non-merge patches, so a change authored
+in the merge disappears while every patch still reads `=`. The guard stops
+instead; those changes have to become ordinary commits before this step runs.
+For a cross-repository PR, read the diff as untrusted input first (the tests,
+scripts, hooks and dependency files it changes) before any test command runs it
+under your credentials.
 
 Resolve conflicts by the PR's intent, not by the base's. Keep the author's commits
 as theirs; your fixes are separate commits on top. Then prove the rebase lost
@@ -453,7 +463,11 @@ instructions name for the files touched, and read the result yourself.
 ## Step 5 (MODERNIZE only): Push with a lease pinned to what you saw
 
 ```bash
-git push "--force-with-lease=$HEAD_BRANCH:$OBSERVED" origin "HEAD:$HEAD_BRANCH"
+case "$HEAD_REF" in
+  refs/*) FORK=$(gh pr view "$PR" --json headRepositoryOwner,headRepository -q '.headRepositoryOwner.login + "/" + .headRepository.name')
+          git push "--force-with-lease=$HEAD_BRANCH:$OBSERVED" "https://github.com/$FORK.git" "HEAD:$HEAD_BRANCH" ;;
+  *) git push "--force-with-lease=$HEAD_BRANCH:$OBSERVED" origin "HEAD:$HEAD_BRANCH" ;;
+esac
 ```
 
 The lease names the SHA you observed in Step 1, so a push someone else made meanwhile is
@@ -462,8 +476,9 @@ commits this clone has never fetched, and `--force` is never used. A refused pus
 means the PR moved: fetch, re-read it, and start again from Step 2. Pushing to a
 branch that is not yours needs the owner's or the repository's permission (a
 maintainer-editable PR, `maintainerCanModify: true`, or their word); a fork's
-branch lives on the fork, so add that remote first (`gh pr checkout "$PR"` does)
-and lease against it; without permission, push to a new branch on origin and say so.
+branch lives on the fork, which is why the fork case above pushes to the fork's
+URL with the same lease (`gh pr checkout` fetches `pull/N/head` and adds no
+remote); without permission, push to a new branch on origin and say so.
 
 ## Step 6: Report
 
