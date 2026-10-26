@@ -181,6 +181,32 @@ carry base + bump. The tool runs as head code in a throwaway worktree with a
 bare environment and no tokens; one that fails at the head is an error, never
 a pass.
 
+**A PR that conflicts with the base on CHANGELOG.md alone.** GitHub shows every
+READY PR as conflicting each time main stamps; the train merges the CHANGELOG
+by section, so the lane never merges main for it. The conflict does mean GitHub
+has no merge ref for the PR, so no `pull_request` CI runs on the head and
+`ready` prints `ci: none at <head12>` with a `ci-hint:` line. The lane then
+dispatches the free workflows on the branch (`gh workflow run free-tests.yml
+--ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>`),
+clears the requires-remote pregate lanes with those runs
+(`gstack-pregate clear --remote <lane> --run-url <run>`) and reruns `ready`,
+which passes because the dispatched check runs attach to the commit; the
+`ci-hint:` line then says those non-pull_request runs count. The `ci-hint:` line is
+advisory text for the lane; nothing parses it, and a PR whose head is on a fork
+gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
+PR refuses, because there is no merge ref to screen (`QUEUE_SCREEN_STALE_REF`,
+`<remote> has no refs/pull/<n>/merge`); that refusal's "merge <base> into the
+branch" advice does not apply to a CHANGELOG-only conflict, so the lane READYs
+with `--no-screen` after the skill's own paid cases ran focused.
+
+`ci:` counts the latest run per check (one app's check name), as GitHub's
+rollup does: a check that was re-run or superseded on the same commit (a
+cancelled run beside a later pass of the same name from a second workflow run)
+is judged by its newest run (latest `completed_at`, then id; a run still in
+progress is newest); two apps reporting the same name stay separate; a run with
+no name or no readable `completed_at` counts on its own; commit-status contexts
+are counted one each.
+
 It refuses (`QUEUE_NOT_READY`) when the working tree has tracked edits, HEAD
 is not the PR's pushed head, CI at that exact head is not green, or the pregate
 result is not a current pass, and (`QUEUE_RECEIPT_MISSING`,
@@ -536,7 +562,7 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 | Line | Effect |
 |---|---|
 | `ship: history merge-only: …` | never rebase, squash or force-push; `check-history --plan <merge\|squash\|rebase>` refuses a rewrite plan (`HISTORY_POLICY_VIOLATION`, exit 3) |
-| `ship: queue_mode stamp-at-merge: …` | Step 12 items 1–4 are replaced by `gstack-restamp --next --base <base> --pr <n> --expect-base <sha>` when the PR is next, `--after <predecessor-pr>` when it is not; the restamp's own `next:` line says what follows (NEW_VERSION, CHANGELOG entry text only, the merge's expected head) |
+| `ship: queue_mode stamp-at-merge: …` | Step 12 items 1–4 are replaced by `gstack-restamp --next --base <base> --pr <n> --expect-base <sha>` when the PR is next, `--after <predecessor-pr>` when it is not; the restamp's own `next:` line says what follows: under `stamp-at-merge`, `commit and push only the stamp diff above (FILES), with no edit of your own` and the merge's expected head (the stamp commit holds restamp's output alone); under the per-PR queue, NEW_VERSION and the CHANGELOG entry text |
 | `ship: shared merge queue: …` | in a coordinator-run queue, `gstack-ship-queue ready`, `gate-ahead` and `stamp` replace the restamp calls; see [Run a shared merge queue](#run-a-shared-merge-queue) |
 | `ship: gate-ahead: …` | with `.gstack/tmp/gate-ahead.json` present, Step 16 reuses only the lanes `gstack-tree-receipt … --json > .gstack/tmp/tree-receipt.json` marks reusable; stamp-sensitive and not-eligible lanes run live; `--force-gate <reason>` is the coordinator's call |
 | `ship: bump patch: …` | Step 12 never asks for MINOR or MAJOR; PATCH or MICRO by size |
@@ -585,7 +611,7 @@ Stages, each journaled in `.gstack/tmp/restamp-journal.json`:
 0. **restamp_command** (only when the policy sets it): the repo's own restamp, see [restamp_command](#restamp-command).
 1. **version**: `gstack-version-bump write --version <X>` in the staging worktree (VERSION, the manifest, npm lockfiles); skipped when `restamp_command` owns the version.
 2. **release_tool**: the policy command, under the contract below.
-3. **changelog**: the PR's `[Unreleased]` or old-version section moves to the top under `<X>`, above its predecessor's entry. Duplicate headings (`CHANGELOG_DUPLICATE_HEADING`) and a top entry that is not `<X>` (`CHANGELOG_TOP_MISMATCH`) are errors.
+3. **changelog**: the PR's `[Unreleased]` or old-version section moves to the top under `<X>`, above its predecessor's entry. A duplicate heading the PR introduces (`CHANGELOG_DUPLICATE_HEADING`: the headings are counted against the base's CHANGELOG at `origin/<base>` and at the fork point, so a version the base already heads twice passes as long as the PR adds no further copy) and a top entry that is not `<X>` (`CHANGELOG_TOP_MISMATCH`) are errors; the section being re-headed itself may exist only once.
 4. **stamp_paths**: exact `(was X)`, `since: X` and `vX` rewrites, plus every `stamp_patterns` template, within `stamp_paths` and `stamp_files`. `X` is the branch's own tentative stamp (its VERSION when it moved past base), else `--was <X>`, else the version an unstamped branch would have taken next (`base + bump`); mentions of a version the base never released (not a CHANGELOG heading at base, not a tag) are rewritten too, so a queue reorder that moves the base under a branch still finds its `since:` fields. Only the repo's own version width counts, so a 3-digit dependency pin in a 4-digit repo is never a candidate.
 5. **mirror**: tier 2; declared and validated, reported as not run.
 6. **apply**: every changed file is written to the branch only after all stages validated, each against the fingerprinted preimage; a file edited meanwhile is `RESTAMP_CONFLICT` and the applied writes roll back (rollback refuses to overwrite a file whose bytes differ from the recorded postimage).

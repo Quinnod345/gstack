@@ -156,7 +156,7 @@ export function directiveFor(kind: SessionKind): string {
         '/eval-plan print `GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>` there, and /ship prints its ' +
         'own line at Step 22 (`gstack-ship-receipt result`); every other skill prints no GSTACK_RESULT line of its own ' +
         '(only a refused install check prints `status=refused run=-` for any skill), so do not invent one ' +
-        '(Unattended session block; docs/unattended.md names each skill\'s record).'
+        '(docs/unattended.md names each skill\'s record).'
       );
     case 'headless':
       // #2733 review (multi-specialist): a spawned-marked subagent under a
