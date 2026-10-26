@@ -23,6 +23,10 @@ const dbPasswdValue = "passwd-passwd-passwd";
 const lowerCaseValue = "lower-case-name-value";
 const monkeyValue = "banana-banana-banana";
 const tokenizerValue = "tokenizer-value-here";
+const sslKeyPath = "/etc/ssl/private/x.key";
+const winKeyPath = "C:\\Users\\me\\key.pem";
+const homeKeyPath = "~/.ssh/id_key";
+const lockOwner = ["12345", "6789", "17"].join("-");
 
 const env = {
   ANTHROPIC_API_KEY: anthropicValue,
@@ -137,6 +141,23 @@ describe("env-value scan", () => {
     expect(preview).toBe("********");
     expect(scan(`pk: ${monkeyValue}`, { processEnv: { NEXT_PUBLIC_STRIPE_KEY: monkeyValue, APP_PUBLIC_KEY: monkeyValue } }).findings).toEqual([]);
     expect(credentialEnvValues({ PUBLICITY_KEY: monkeyValue }).map(e => e.name)).toEqual(["PUBLICITY_KEY"]);
+  });
+
+  // /ship Step 11 adversarial fixes: (1) the name rule also admits *_PASS, *_PAT, *_APIKEY and *_PWD,
+  // while the shell's own PWD and OLDPWD stay out; (2) a credential-named variable whose value is a
+  // filesystem path (SSL_KEY=/etc/ssl/private/x.key) names where the credential lives, so the path
+  // is not a finding; (3) gstack's own GSTACK_BRAIN_LOCK_TOKEN (pid-random-epoch, written to the lock
+  // owner file) is not a secret. fails_when: PWD is admitted (every mention of the cwd becomes HIGH),
+  // the path rule goes, or the non-secret set loses the lock token.
+  test("more credential suffixes, path values and gstack's own lock token", () => {
+    const names = credentialEnvValues({
+      DB_PASS: dbValue, GITHUB_PAT: ghValue, STRIPE_APIKEY: lowerCaseValue, MYSQL_PWD: dbPasswdValue,
+      PWD: "/workspace/gstack", OLDPWD: "/workspace/other",
+      SSL_KEY: sslKeyPath, WIN_KEY: winKeyPath, HOME_KEY: homeKeyPath,
+      GSTACK_BRAIN_LOCK_TOKEN: lockOwner,
+    }).map(e => e.name).sort();
+    expect(names).toEqual(["DB_PASS", "GITHUB_PAT", "MYSQL_PWD", "STRIPE_APIKEY"]);
+    expect(credentialEnvValues({ SLASH_KEY: "/abc12345-no-second-slash" }).map(e => e.name)).toEqual(["SLASH_KEY"]);
   });
 
   test("the default environment is process.env", () => {

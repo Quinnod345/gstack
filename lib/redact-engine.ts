@@ -79,8 +79,9 @@ export interface ScanOptions {
   sourcePath?: string;
   /**
    * The environment whose credential-named variables (a name whose last
-   * `_`-separated word is KEY, TOKEN, SECRET, PASSWORD or PASSWD, any case,
-   * and that carries no PUBLIC word) are scanned for BY VALUE: wherever one of those
+   * `_`-separated word is KEY, TOKEN, SECRET, PASSWORD, PASSWD, PASS, PAT or
+   * APIKEY, or that ends in _PWD, any case, carrying no PUBLIC word; see
+   * `credentialEnvValues`) are scanned for BY VALUE: wherever one of those
    * values appears in the text it is an `env.value` HIGH finding, whatever its
    * shape, so a value that reached the text (a dumped environment in a tool
    * output, GSTA-96) never reaches a PR body, receipt, report or Drive file.
@@ -518,25 +519,31 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
   return { findings, counts, repoVisibility, oversize: false };
 }
 
-const CREDENTIAL_ENV_NAME = /(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD)$/i;
+const CREDENTIAL_ENV_NAME = /(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PAT|APIKEY)$|_PWD$/i;
 /** Framework-public keys (NEXT_PUBLIC_*_KEY, VITE_PUBLIC_*, *_PUBLIC_KEY) are committed on purpose. */
 const PUBLIC_ENV_NAME = /(^|_)PUBLIC(_|$)/i;
+/** gstack's own credential-named variables whose values are not secrets. */
+const NON_SECRET_ENV_NAMES = new Set(["GSTACK_BRAIN_LOCK_TOKEN"]);
+/** A credential-named variable holding a filesystem path names where the credential lives, not the credential. */
+const PATH_VALUE = /^(~?\/[^\s]*\/[^\s]*|[A-Za-z]:\\[^\s]*)$/;
 const MIN_ENV_VALUE_LENGTH = 8;
 
 /**
  * The (name, value) pairs of `env` worth scanning for by value: credential-named
- * variables whose trimmed value is long enough to be a credential and is not a
- * placeholder. A short or placeholder value would match ordinary prose. The
- * value is trimmed, so a key read from a file with a trailing newline still
- * matches its leaked form.
+ * variables (the last `_`-separated word is KEY, TOKEN, SECRET, PASSWORD, PASSWD,
+ * PASS, PAT or APIKEY, or the name ends in _PWD; names carrying a PUBLIC word and
+ * gstack's own non-secret tokens are exempt) whose trimmed value is long enough to
+ * be a credential, is not a placeholder and is not a filesystem path. A short or
+ * placeholder value would match ordinary prose. The value is trimmed, so a key
+ * read from a file with a trailing newline still matches its leaked form.
  */
 export function credentialEnvValues(env: Record<string, string | undefined>): Array<{ name: string; value: string }> {
   const out: Array<{ name: string; value: string }> = [];
   for (const [name, raw] of Object.entries(env)) {
-    if (!CREDENTIAL_ENV_NAME.test(name) || PUBLIC_ENV_NAME.test(name)) continue;
+    if (!CREDENTIAL_ENV_NAME.test(name) || PUBLIC_ENV_NAME.test(name) || NON_SECRET_ENV_NAMES.has(name)) continue;
     const value = raw?.trim() ?? "";
     if (value.length < MIN_ENV_VALUE_LENGTH) continue;
-    if (isPlaceholderSpan(value)) continue;
+    if (isPlaceholderSpan(value) || PATH_VALUE.test(value)) continue;
     out.push({ name, value });
   }
   return out;
