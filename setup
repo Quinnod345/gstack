@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # gstack setup — build browser binary + register skills with Claude Code / Codex
 set -e
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 umask 077  # Restrict new files to owner-only (0o600 files, 0o700 dirs)
 
 # Heredoc delivery guard. bash 5.2+ writes a heredoc body <=64KiB through a
@@ -362,7 +363,7 @@ _runtime_root_refused() {
 # --claude-model is validated before anything is written, and persisted once
 # Claude is known to be selected (below, and in the --refresh-registered parent).
 if [ "$CLAUDE_MODEL_SET" -eq 1 ]; then
-  if ! _CLAUDE_MODEL_RESOLVED="$(cd "$SOURCE_GSTACK_DIR" && bun --no-env-file --config=/dev/null run scripts/models.ts claude-overlay "$CLAUDE_MODEL_ARG" 2>&1)"; then
+  if ! _CLAUDE_MODEL_RESOLVED="$(cd "$SOURCE_GSTACK_DIR" && bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" run scripts/models.ts claude-overlay "$CLAUDE_MODEL_ARG" 2>&1)"; then
     printf 'Error: --claude-model %s\n' "$_CLAUDE_MODEL_RESOLVED" | sed '2,$s/^/  /' >&2
     echo "  Nothing was installed or changed." >&2
     exit 1
@@ -1317,7 +1318,7 @@ if [ "$LOCAL_INSTALL" -eq 0 ]; then
     _CODEX_PREFLIGHT_SELECTED=1
   fi
 fi
-bun --no-env-file --config=/dev/null "$SOURCE_GSTACK_DIR/scripts/preflight-codex-overlap.ts" \
+bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$SOURCE_GSTACK_DIR/scripts/preflight-codex-overlap.ts" \
   --source "$SOURCE_GSTACK_DIR" --namespace "$CODEX_SKILLS" \
   --selected "$_CODEX_PREFLIGHT_SELECTED" --local "$CODEX_REPO_LOCAL" \
   --windows "$IS_WINDOWS" --relocation "$HOME/.gstack/repos/gstack" || exit 1
@@ -1584,7 +1585,7 @@ ensure_playwright_browser() {
     echo "gstack setup failed: Node.js is required on Windows" >&2
     return 1
   else
-    probe_cmd="bun --no-env-file --config=/dev/null --eval 'import { chromium } from \"playwright\"; const browser = await chromium.launch(); await browser.close();'"
+    probe_cmd="bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" --eval 'import { chromium } from \"playwright\"; const browser = await chromium.launch(); await browser.close();'"
   fi
   (
     cd "$SOURCE_GSTACK_DIR"
@@ -1709,6 +1710,24 @@ prepare_bun_for_windows_compile() {
 
 bun_cmd() {
   "$BUN_CMD" "$@"
+}
+
+# Users get production dependencies only. devDependencies are the test and eval
+# toolchain (the Claude Agent SDK's native binaries alone are ~440 MB on Linux), and
+# nothing setup, the build or an installed skill runs needs them. Bun never
+# prunes packages that are already installed, so a contributor's full
+# `bun install` (CONTRIBUTING.md, bin/dev-setup, CI) survives a later ./setup.
+# Bun's --production implies a frozen lockfile, so when bun.lock is out of date
+# (a fork or a local edit) refresh it first, then install production-only again.
+# A checkout that already has the dev toolchain (node_modules/typescript) is a
+# contributor's: a production install would leave its dev packages at old
+# versions after bun.lock moves, so it gets the full install instead.
+install_runtime_deps() {
+  if [ -d node_modules/typescript ]; then
+    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    return
+  fi
+  bun_cmd install --production --frozen-lockfile 2>/dev/null || { bun_cmd install --lockfile-only && bun_cmd install --production --frozen-lockfile; }
 }
 
 cleanup_copied_bun() {
@@ -1928,7 +1947,7 @@ if [ "$NEEDS_BUILD" -eq 1 ]; then
   log "Building browse binary..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     if [ "$CSO_BUILD_AVAILABLE" -eq 0 ]; then
       export GSTACK_SETUP_SKIP_CSO_BUILD=1
     fi
@@ -2079,7 +2098,7 @@ if [ "$NEEDS_AGENTS_GEN" -eq 1 ]; then
   log "Generating .agents/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host codex --model "$CODEX_GENERATION_MODEL" ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
   _prune_stale_generated "$SOURCE_GSTACK_DIR" "$AGENTS_DIR" "$CODEX_SKILLS"
@@ -2092,7 +2111,7 @@ if [ "$INSTALL_FACTORY" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MO
   log "Generating .factory/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host factory ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2102,7 +2121,7 @@ if [ "$INSTALL_OPENCODE" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_M
   log "Generating .opencode/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host opencode ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2112,7 +2131,7 @@ if [ "$INSTALL_CURSOR" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MOD
   log "Generating .cursor/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host cursor ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2122,7 +2141,7 @@ if [ "$INSTALL_COPILOT" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MO
   log "Generating .copilot/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host copilot ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2132,7 +2151,7 @@ if [ "$INSTALL_AGY" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MODE_A
   log "Generating .agy/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host agy ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi

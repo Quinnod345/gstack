@@ -5,7 +5,9 @@
 #   JUST_UPGRADED <old> <new>       — marker found from recent upgrade
 #   UPGRADE_AVAILABLE <old> <new>   — remote VERSION differs from local
 #   UPGRADE_AVAILABLE <ver> <ver>+<n> <sha>
-#                                   — VERSION is equal but main moved <n>
+#                                   — VERSION is equal but the channel branch
+#                                     (main, or stable for a team install:
+#                                     bin/gstack-update-channel.sh) moved <n>
 #                                     commits past this checkout's HEAD (the
 #                                     GitHub compare API says so); the snooze
 #                                     is keyed by <sha>
@@ -74,9 +76,15 @@ CACHE_FILE="$STATE_DIR/last-update-check"
 MARKER_FILE="$STATE_DIR/just-upgraded-from"
 SNOOZE_FILE="$STATE_DIR/update-snoozed"
 VERSION_FILE="$GSTACK_DIR/VERSION"
-REMOTE_URL="${GSTACK_REMOTE_URL:-https://raw.githubusercontent.com/garrytan/gstack/main/VERSION}"
-REMOTE_REPO="${GSTACK_REMOTE_REPO:-https://github.com/garrytan/gstack.git}"
+# Channel (bin/gstack-update-channel.sh, docs/releases.md): a stable install
+# compares with refs/heads/stable, the weekly release, so it is not told every
+# hour that main moved. A missing helper means main.
+. "$GSTACK_DIR/bin/gstack-update-channel.sh" 2>/dev/null || gstack_update_channel() { echo main; }
+CHANNEL=$(gstack_update_channel "$GSTACK_DIR" 2>/dev/null) || CHANNEL=main
+case "$CHANNEL" in stable|main) ;; *) CHANNEL=main ;; esac
 REMOTE_RAW_BASE="${GSTACK_REMOTE_RAW_BASE:-https://raw.githubusercontent.com/garrytan/gstack}"
+REMOTE_URL="${GSTACK_REMOTE_URL:-$REMOTE_RAW_BASE/$CHANNEL/VERSION}"
+REMOTE_REPO="${GSTACK_REMOTE_REPO:-https://github.com/garrytan/gstack.git}"
 COMPARE_API="${GSTACK_COMPARE_API:-https://api.github.com/repos/garrytan/gstack/compare}"
 
 # ─── Force flag (busts cache + snooze for standalone /gstack-upgrade) ──
@@ -99,6 +107,8 @@ if [ -e "$GSTACK_DIR/.git" ]; then
   if echo "$_H" | grep -qE '^[0-9a-f]{40}$'; then LOCAL_HEAD="$_H"; fi
 fi
 if [ -n "${GSTACK_REMOTE_URL:-}" ]; then UPSTREAM="$(_display_url "$REMOTE_URL")"; else UPSTREAM="$(_display_url "$REMOTE_REPO")"; fi
+# A channel switch is a new upstream: the cached outcome of the other channel never replays.
+[ "$CHANNEL" = stable ] && UPSTREAM="$UPSTREAM#stable"
 
 # _identity_field <name> — a field of the cache's IDENTITY line (empty when absent).
 _identity_field() {
@@ -309,12 +319,24 @@ if [ -z "${GSTACK_REMOTE_URL:-}" ]; then
   # Disable credential prompts and apply a 5-second low-speed timeout so a
   # flaky network or captive portal can't hang every skill preamble.
   _REPO_HOST="${REMOTE_REPO#*://}"; _REPO_HOST="${_REPO_HOST#*@}"; _REPO_HOST="${_REPO_HOST%%[/:]*}"
-  _LSR_LINE="$(GSTACK_HOME="$STATE_DIR" _receipted_git open update-check "${_REPO_HOST:-unknown}" version-ls-remote "update_check!=false" \
-    bash -c 'GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=5 \
-      git ls-remote "$1" refs/heads/main 2>/dev/null' _ "$REMOTE_REPO" || true)"
+  _ls_remote_branch() { # <branch> — the tip line of refs/heads/<branch> on REMOTE_REPO; exit 0 and nothing when origin has no such branch
+    GSTACK_HOME="$STATE_DIR" _receipted_git open update-check "${_REPO_HOST:-unknown}" version-ls-remote "update_check!=false" \
+      bash -c 'GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=5 \
+        git ls-remote "$1" "refs/heads/$2" 2>/dev/null' _ "$REMOTE_REPO" "$1"
+  }
+  _LSR_LINE="$(_ls_remote_branch "$CHANNEL")" || _LSR_LINE=""
+  if [ "$CHANNEL" = stable ] && [ -z "$_LSR_LINE" ] && _ls_remote_branch stable >/dev/null 2>&1; then
+    # Before the first release origin has no stable (ls-remote answered, empty):
+    # this check follows main, as bin/gstack-session-update (CHANNEL_FALLBACK)
+    # and bin/gstack-upgrade do. The cache identity keeps #stable, so the
+    # outcome replays within its TTL like any other.
+    CHANNEL=main
+    REMOTE_URL="$REMOTE_RAW_BASE/main/VERSION"
+    _LSR_LINE="$(_ls_remote_branch main)" || _LSR_LINE=""
+  fi
   _REMOTE_SHA="$(echo "$_LSR_LINE" | awk '{print $1}')"
   if echo "$_REMOTE_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-    # The same main SHA, HEAD and upstream as the cache: its outcome still holds.
+    # The same channel SHA, HEAD and upstream as the cache: its outcome still holds.
     if [ "$(_identity_field remote)" = "$_REMOTE_SHA" ] && _identity_ok; then
       case "$CACHED" in
         UP_TO_DATE*)
@@ -385,9 +407,9 @@ if [ "$LOCAL" = "$REMOTE" ]; then
     _write_cache "CHECK_FAILED $LOCAL $_CMP_SHOWN ${_WHY:-unreadable}"
     if [ "$FORCE" = "1" ]; then
       if [ "$_WHY" = "diverged" ]; then
-        echo "CHECK_FAILED this checkout (${LOCAL_HEAD:0:12}) has diverged from main (${_REMOTE_SHA:0:12}) at the same VERSION $LOCAL — update status UNKNOWN, not up-to-date"
+        echo "CHECK_FAILED this checkout (${LOCAL_HEAD:0:12}) has diverged from $CHANNEL (${_REMOTE_SHA:0:12}) at the same VERSION $LOCAL — update status UNKNOWN, not up-to-date"
       else
-        echo "CHECK_FAILED could not compare this checkout (${LOCAL_HEAD:0:12}) with main (${_REMOTE_SHA:0:12}) at $_CMP_SHOWN — update status UNKNOWN, not up-to-date"
+        echo "CHECK_FAILED could not compare this checkout (${LOCAL_HEAD:0:12}) with $CHANNEL (${_REMOTE_SHA:0:12}) at $_CMP_SHOWN — update status UNKNOWN, not up-to-date"
       fi
     fi
     exit 0
