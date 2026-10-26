@@ -178,8 +178,11 @@ draft are cut: the artifact path is tool-owned, a child's self-reported
 path list is both a pathspec-injection surface and a self-report, and the
 only history need is calibration, which `--commit <sha>` covers by scanning
 one commit's first-parent delta without the working tree.) Positional
-base defaults the way `gstack-diff-scope` does (`origin/HEAD` → `main` →
-`master`); an already-qualified ref is used as given. stdout: one
+base defaults the way `gstack-diff-scope` does (the remote's `HEAD` target,
+origin first, then the other remotes → `main` → `master`); an
+already-qualified ref is used as given, and a branch name with no local
+branch resolves through its remote-tracking twin (`origin/main` for `main`:
+the merge-base is the same commit), noted once on stderr. stdout: one
 `GATE_SUMMARY: listed=N read=N tagged={RH-1:2,RH-15:1} unmatched=N
 coverage=<patterns> languages_unlisted=<…> candidate=<sha+wtree>` line, then
 the read-level listing (bounded; the full listing goes to `--out`).

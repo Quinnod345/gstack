@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**Three /ship frictions the unattended lanes hit (GSTA-102).** Each fix is one commit.
+
+### Fixed
+- **`gstack-gate-diff <base>` in a clone with no local `<base>` branch.** Before, `gstack-gate-diff main` in a checkout that cloned only its feature branch printed `GATE_ERROR=no_base ref=main fix=git fetch origin main`, and that fix did not help: the tool only tried the local branch, and in a single-branch clone a bare `git fetch origin main` updates FETCH_HEAD alone. Now `lib/gate-diff/git.ts` resolves the base to its remote-tracking branch (`origin/main`, origin first, then the other remotes) when no local branch exists, says so once on stderr, and the merge-base is the same commit. When the remote-tracking branch is missing too, the fix line fetches into it explicitly: `git fetch origin +main:refs/remotes/origin/main` (with `--unshallow` on a shallow clone), which works in every clone shape. `test/gate-diff-cli.test.ts` adds a single-branch clone fixture with no local `main` and no `origin/main`: it asserts the error, runs the printed fix verbatim, and expects the next run to list the fixture's RH-1 hunk; two more clones cover a second remote that carries the branch when origin does not, and an upstream-only clone of a master-default repository whose default base (no argument) now comes from the same remote list as the fix line. The refspec is forced (`+main:refs/remotes/origin/main`) so the line also repairs a tracking ref that exists but shares no history with HEAD.
+
 ## [1.91.226.0] - 2026-10-26
 
 **/review can re-review just its own fixes after a fixing pass, under the same rules as /ship (#3339).** Before, every /review fix cycle reran the whole review over the whole branch, so a large branch could hit the three-cycle stop on findings in code the earlier passes had already read. Now the pass after an edited pass starts with `gstack-review-log --start review --fix-range` and its checklist, specialists and QA read only what changed since that pass. The Step 4.8 adversarial review still reads the whole branch on every pass, because its rows carry their own freshness. A narrowed pass is never the final review: when it makes no edits, /review runs one full pass before writing the final record, and a fix-range record is never CURRENT. Garry's "do it" on 2026-10-24 for a fix-range re-review with a final full pass covers it.
