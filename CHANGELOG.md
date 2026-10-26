@@ -11,6 +11,7 @@
 
 ### Tests
 - `test/factory-scorecard.test.ts`: the recorded window (`test/fixtures/factory-scorecard/recorded.json`) yields the expected merges, lead times, gate kinds and outcomes, artifact and comment cost sources, flake counts, free retries, issues and releases; a crew login list overrides the association rule; runs older than the window, non-dispatch events and draft releases are left out; the artifact cap leaves later runs without cost or flake data; a missing input marks only its lines unavailable; the markdown and CSV carry every row; gate classification, READY-marker matching, verdict-cost and flake-record parsing and nearest-rank percentiles; `--gate-event any` keeps non-dispatch runs; an empty window prints n/a instead of NaN; a failed merged-PR read leaves the gate rows standing; the bin end to end with `--fixtures`, `--crew`, `--out-dir`, `--csv`, `--ready-marker`, bad usage (including `--now`) and `--help`; the retro template pins the fence.
+- `test/host-conformance.test.ts` C3 ("--status names a symlinked router and a broken section link per host") deletes a named section (`scope.md`) instead of the first `.md` that `readdirSync` returns: two gstack-qa sections are referenced only in table form, which `setup --status` does not count as links, so on an ext4 directory order that listed one of them first the case failed deterministically on remote-gate VMs while passing on Actions (#3479).
 
 ## [1.91.246.0] - 2026-10-26
 
