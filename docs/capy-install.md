@@ -126,9 +126,10 @@ deleted and a live lease never disappears from a concurrent scan. The lock is a
 directory because `mkdir` is atomic on every host, while Git Bash on Windows
 cannot `ln -s` to a target that does not exist (#3330). A taker publishes a
 claim before its `mkdir` and renames it in as the owner after, so an ownerless
-lock (or one whose owner is empty or names no valid pid) is broken only once
-every claimant is dead and the lock is at least 2 s old, which keeps a taker
-between its two steps safe. The lock is broken only when its holder is dead or
+lock is broken only once no claimant younger than 2 minutes lives and the
+lock is at least 2 s old and unchanged while checked, which keeps a taker
+between its two steps safe; an owner that names no valid pid counts as a dead
+holder. A live holder that never lets go bounds the wait at 300 tries or 30 s. The lock is broken only when its holder is dead or
 its pid was reused, never by age, and breakers serialize on a second lock and
 reread the lock before removing it. A symlink `.lock` left by an older gstack
 is honored the same way. Two known limits remain. An older gstack's `ln -s`
