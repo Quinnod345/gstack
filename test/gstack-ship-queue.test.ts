@@ -292,6 +292,30 @@ describe('ready', () => {
     const stalePregate = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } }));
     expect(stalePregate.status).toBe(EXIT.refused);
     expect(stalePregate.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
+    // A lane that cleared its pregate from a separate clone (gstack-pregate --remote cannot run in a worktree) holds the verdict under
+    // <state root>/pregate/by-tree/<tree>.json; ready reads that mirror for the current tree when its own record is stale or missing.
+    const stateRoot = path.join(repo.root, 'state-root');
+    const movedShim = ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } });
+    const movedTree = runBin(repo, 'gstack-wtree', []).out.trim();
+    const mirror = path.join(stateRoot, 'pregate', 'by-tree', `${movedTree}.json`);
+    fs.mkdirSync(path.dirname(mirror), { recursive: true });
+    fs.writeFileSync(path.join(stateRoot, 'pregate', 'by-tree', `${'0'.repeat(movedTree.length)}.json`), JSON.stringify({ schema_version: 1, tree: '0'.repeat(movedTree.length), head: moved, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
+    const otherTree = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(otherTree.status).toBe(EXIT.refused);
+    expect(otherTree.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
+    const missing = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(missing.status).toBe(EXIT.refused);
+    expect(missing.out).toMatch(/^PREGATE: missing \(\.gstack\/tmp\/pregate\.json; run gstack-pregate run --allow-repo-commands\)$/m);
+    fs.writeFileSync(mirror, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }, { id: 'lanes', status: 'pass' }] }));
+    const fromMirror = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([fromMirror.status, fromMirror.err]).toEqual([EXIT.ok, '']);
+    expect(line(fromMirror.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=2 (from ${mirror}, recorded by another checkout)`);
+    const missingFromMirror = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([missingFromMirror.status, missingFromMirror.err]).toEqual([EXIT.ok, '']);
+    expect(line(missingFromMirror.out, 'PREGATE:')).toContain(`(from ${mirror}, recorded by another checkout)`);
+    const current = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, moved)], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([current.status, current.err]).toEqual([EXIT.ok, '']);
+    expect(line(current.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1`);
     fs.appendFileSync(path.join(repo.work, 'pr-a.txt'), 'dirty\n');
     expect(queue(repo, ['ready', '--pr', '1'], shim(moved, green)).err).toMatch(/uncommitted tracked changes: pr-a\.txt.*\(QUEUE_NOT_READY\)/);
   }, 180_000);

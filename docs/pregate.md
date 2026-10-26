@@ -274,6 +274,19 @@ The record is `.gstack/tmp/pregate.json` (`gstack-artifact validate --as pregate
 receipt then carries `pregate` and `requires_remote`. `gstack-pregate verify`
 runs the same check standalone.
 
+**By tree.** Every record `gstack-pregate` writes is also mirrored, byte for
+byte, to `<state root>/pregate/by-tree/<tree>.json` (the state root from
+docs/state-root.md). `gstack-ship-queue ready` reads the checkout's
+`.gstack/tmp/pregate.json` first; when that file is missing or was recorded
+for another tree, it looks the current tree up in the mirror and uses that
+record when it verifies, printing `PREGATE: … (from <mirror path>, recorded by
+another checkout)`. This is for the lane whose `gstack-pregate --remote` had
+to run from a separate clone (a worktree cannot host it): the clone's record
+clears the lane's own checkout as long as both hold the same tree. An explicit
+`--pregate <file>` that verifies is used as before; a mirror for a different
+tree changes nothing. Writing the mirror is best effort and never fails the
+record itself.
+
 Unknown flags exit 2 with usage on every verb (an agent told to run a flag this
 gstack lacks never gets a green it did not ask for). Tier 2 checks still to come
 (`ratchets`, `lint`, `links`, `hermetic`, `patches`, `integrator`) are named in

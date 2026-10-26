@@ -8,6 +8,10 @@
  *               CI at that exact head, the PREGATE line, the gate state and the
  *               /ship receipt; refused when the tree is not the pushed PR head
  *               or the PR body carries no receipt for it (QUEUE_RECEIPT_*).
+ *               A pregate record missing from this checkout, or recorded for
+ *               another tree, is looked up by the current tree under
+ *               <state root>/pregate/by-tree/ (gstack-pregate mirrors every
+ *               record there), and the PREGATE line says where it came from.
  *   stamp       preflight (gated head equals HEAD modulo stamps, base, policy,
  *               gate record under full_e2e), restamp, commit, tree receipt,
  *               each stage journaled; QUEUE_STAMP: <pr> <version> head= gated=
@@ -21,7 +25,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
+import { pregateMirrorPath, readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
 import { bindReceipt, extractReceipt } from './ship-receipt';
@@ -30,6 +34,7 @@ import {
   QUEUE_DIR_REL, applyStampPatch, commitForTree, currentAttempt, git, listAttempts, recomputeMergeTree, sha256, writeJsonAtomic,
   type AttemptRecord, type QueueFailure,
 } from './ship-queue-gate';
+import { wtreeFingerprint } from './script-invocation';
 import { buildReceipt, type TreeReceipt } from './tree-receipt';
 
 export type Gh = (args: string[]) => { ok: boolean; out: string; err?: string };
@@ -205,13 +210,25 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
   const pregateFile = path.resolve(ctx.repoRoot, o.pregate ?? PREGATE_OUT_REL);
   let pregateLine = `PREGATE: missing (${path.relative(ctx.repoRoot, pregateFile)}; run gstack-pregate run --allow-repo-commands)`;
   let pregateOk = false;
+  const treeNow = wtreeFingerprint({ cwd: ctx.repoRoot });
+  let otherTree = true;
   if (fs.existsSync(pregateFile)) {
     const read = readPregateFile(pregateFile);
+    otherTree = read.file !== null && 'tree' in treeNow && read.file.tree !== treeNow.tree;
     if (read.file) {
-      const v = verifyPregate(ctx.repoRoot, read.file);
+      const v = verifyPregate(ctx.repoRoot, read.file, treeNow);
       pregateOk = v.ok;
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
+  }
+  if (!pregateOk && otherTree && 'tree' in treeNow) {
+    const mirror = pregateMirrorPath(treeNow.tree);
+    const read = fs.existsSync(mirror) ? readPregateFile(mirror) : null;
+    const v = read?.file ? verifyPregate(ctx.repoRoot, read.file, treeNow) : null;
+    if (read?.file && v?.ok) {
+      pregateOk = true;
+      pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length} (from ${mirror}, recorded by another checkout)`;
+    }
   }
   const receipt = bindReceipt(info.body ?? '', o.pr, acceptedReceiptHeads(ctx, policy, head, info.body ?? ''));
   const attempt = currentAttempt(ctx.repoRoot, o.pr);

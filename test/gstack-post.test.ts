@@ -226,6 +226,44 @@ describe("gstack-post owns the redaction scan", () => {
     }
   });
 
+  // Value: protects=an 11-digit GitHub Actions run id written after a run word (run, screen, gate, backstop, bisect, rerun, dispatched, failed, passed,
+  // workflow, job, attempt, id, with an optional ':' '#' '='), or chained after one with ",", "and", "&", "or" or "/" (a "(#1234)" between allowed), posts
+  // without a pii.phone.e164 confirmation; fails_when=real receipts ("failed 40269992077 | rerun passed 40287239206", "screen 40269992077 (#3434) and
+  // 40275443393 (#3453)", "gate 40323989742") need --confirm, or a bare 11-digit number, a 10-digit national number or an E.164 number stops reporting;
+  // why_new=the receipt-token test allowlists only "run <id>" and the /actions/runs/ URL; seam=none; no_claim=none beyond protects
+  test("run ids next to run words, and the ids chained after them, are not phone numbers; a bare id, a national number and an E.164 number still are", () => {
+    const clean = [
+      "failed 40269992077 | rerun passed 40287239206",
+      "screen 40269992077 (#3434) and 40275443393 (#3453)",
+      "gate 40323989742",
+      "gates: 40323989742, 40323989743 or 40323989744",
+      "backstop=40323989742 bisect #40323989745",
+      "dispatched 40323989742 / 40323989746 & 40323989747",
+      "workflow 40323989742; job: 40323989748; attempt 40323989749; id 40323989750; ids 40323989751, 40323989752",
+      "runs 40323989742 and 40323989753 (#3454), 40323989754",
+    ];
+    for (const body of clean) {
+      const f = fakeEnv({ files: { "/b": body + "\n" }, visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.posted]);
+      expect(f.posts()).toHaveLength(1);
+    }
+    const controls = [
+      "the id is 19368712345",
+      "40269992077 failed",
+      "gate 40323989742. Then 40323989743 on its own",
+      "gate 4155551234",
+      "call +14155551234 for the on-call",
+      "run +14155551234",
+      "see 40323989742, 40323989743",
+    ];
+    for (const body of controls) {
+      const f = fakeEnv({ files: { "/b": body + "\n" }, visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.confirm]);
+      expect(f.stdout()).toContain("RULE: pii.phone.e164 LINE: 1 PART: body");
+      expect(f.posts()).toEqual([]);
+    }
+  });
+
   test("the title is scanned too, and the pusher's own email is not a finding", () => {
     const f = fakeEnv({ files: { "/t": "v1 fix for jane.roe@acme-corp.io", "/b": "body" } });
     expect(run(["pr-create", "--base", "main", "--title-file", "/t", "--body-file", "/b"], f)).toBe(EXIT.confirm);
@@ -261,5 +299,75 @@ describe("gstack-post reports CLI failures and repairs known edit failures", () 
     const f = fakeEnv({ files: { "/b": "hi" }, remote: "https://proxy.internal/acme/widget.git", respond: c => (c.args[0] === "repo" && c.cmd === "gh" ? { status: 0, stdout: "https://github.com/acme/widget\n" } : undefined) });
     expect(run(["pr-comment", "https://github.com/acme/widget/pull/3", "--body-file", "/b"], f)).toBe(EXIT.posted);
     expect(f.posts()[0]!.args.slice(0, 3)).toEqual(["pr", "comment", "3"]);
+  });
+});
+
+describe("gstack-post pr-body merges the PR body by section", () => {
+  const RECEIPT = (head: string) => "```gstack-ship-receipt\n{\n  \"schema_version\": 1,\n  \"pr\": \"5\",\n  \"head\": \"" + head + "\"\n}\n```\n";
+  const CURRENT = RECEIPT("aaaa") + "\n## What changed\n\n- the old summary\n\n## Why\n\nBecause.\n\n## Approvals\n\n- owner: do it\n";
+  const withBody = (current: string, files: Record<string, string>) => fakeEnv({
+    files,
+    respond: c => (c.cmd === "gh" && c.args[1] === "view" && c.args.includes("body") ? { status: 0, stdout: current + "\n" } : undefined),
+  });
+  const sent = (f: ReturnType<typeof fakeEnv>) => f.posts().find(c => c.args[1] === "edit")!;
+
+  // Value: protects=a pr-body post holding one section replaces only that section: same-titled sections (case-insensitively) are replaced in place, the
+  // receipt block is its own section, sections the new body lacks are kept, new sections are appended, and one stderr line names each group;
+  // fails_when=pr-body overwrites the whole body (a "## What changed"-only post wipes Why, Approvals and the receipt), the receipt is folded into the
+  // section before it, or the merge changes the kept sections' bytes; why_new=pr-body was a plain overwrite; seam=the fake run answers gh pr view --json body;
+  // no_claim=real gh (unit through runPost)
+  test("a first-section-only body keeps the other sections and the receipt; a same-titled section is replaced in place; new sections are appended", () => {
+    const f = withBody(CURRENT, { "/b": "## What Changed\n\n- the new summary\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], f)).toBe(EXIT.posted);
+    expect(sent(f).input).toBe(RECEIPT("aaaa") + "\n## What Changed\n\n- the new summary\n\n## Why\n\nBecause.\n\n## Approvals\n\n- owner: do it\n");
+    expect(f.stderr()).toBe("gstack-post: pr-body merged by section: replaced What changed; kept ship receipt, Why, Approvals; added none\n");
+    expect(f.calls.find(c => c.cmd === "gh" && c.args[1] === "view")!.args).toEqual(["pr", "view", "5", "--json", "body", "--jq", ".body"]);
+
+    const receipt = withBody(CURRENT, { "/b": RECEIPT("bbbb") });
+    expect(run(["pr-body", "5", "--body-file", "/b"], receipt)).toBe(EXIT.posted);
+    expect(sent(receipt).input).toBe(CURRENT.replace(RECEIPT("aaaa"), RECEIPT("bbbb")));
+    expect(receipt.stderr()).toBe("gstack-post: pr-body merged by section: replaced ship receipt; kept What changed, Why, Approvals; added none\n");
+
+    const added = withBody(CURRENT, { "/b": "## Why\n\nStill because.\n\n## Tests\n\n- one\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], added)).toBe(EXIT.posted);
+    expect(sent(added).input).toBe(RECEIPT("aaaa") + "\n## What changed\n\n- the old summary\n\n## Why\n\nStill because.\n\n## Approvals\n\n- owner: do it\n\n## Tests\n\n- one\n");
+    expect(added.stderr()).toBe("gstack-post: pr-body merged by section: replaced Why; kept ship receipt, What changed, Approvals; added Tests\n");
+
+    const fenced = withBody("## Notes\n\n```md\n## not a heading\n```\n\n## Why\n\nold\n", { "/b": "## Why\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], fenced)).toBe(EXIT.posted);
+    expect(sent(fenced).input).toBe("## Notes\n\n```md\n## not a heading\n```\n\n## Why\n\nnew\n");
+  });
+
+  // Value: protects=--replace keeps the plain overwrite for a caller that composed the whole body, a current body with no H2 headings is kept as the leading
+  // section, an empty current body posts the new body byte for byte, the scan runs on the merged bytes, and an unreadable current body is exit 3 with
+  // the --replace hint rather than an overwrite; fails_when=--replace merges, headingless text is dropped, the merge changes a lone new body, a secret in a
+  // kept section passes the scan, or a failed read overwrites; why_new=first pr-body merge tests; seam=fake run; no_claim=real gh
+  test("--replace overwrites; a body without H2 headings is kept as a leading section; the merged bytes are what is scanned; a failed read refuses", () => {
+    const replaced = withBody(CURRENT, { "/b": "## What changed\n\nonly this\n" });
+    expect(run(["pr-body", "5", "--replace", "--body-file", "/b"], replaced)).toBe(EXIT.posted);
+    expect(sent(replaced).input).toBe("## What changed\n\nonly this\n");
+    expect(replaced.stderr()).toBe("");
+    expect(replaced.calls.some(c => c.cmd === "gh" && c.args[1] === "view")).toBe(false);
+
+    const plain = withBody("Just a paragraph.\nAnother line.", { "/b": "## Tests\n\n- one\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], plain)).toBe(EXIT.posted);
+    expect(sent(plain).input).toBe("Just a paragraph.\nAnother line.\n\n## Tests\n\n- one\n");
+    expect(plain.stderr()).toBe("gstack-post: pr-body merged by section: replaced none; kept leading text; added Tests\n");
+
+    const empty = withBody("", { "/b": "new body" });
+    expect(run(["pr-body", "6", "--body-file", "/b"], empty)).toBe(EXIT.posted);
+    expect(sent(empty).input).toBe("new body");
+
+    const secret = fakeEnv({ files: { "/b": "## What changed\n\nclean\n" }, respond: c => (c.cmd === "gh" && c.args[1] === "view" ? { status: 0, stdout: "## Keys\n\n" + AWS + "\n" } : undefined) });
+    expect(run(["pr-body", "5", "--body-file", "/b"], secret)).toBe(EXIT.refused);
+    expect(secret.stdout()).toContain("HIGH RULE: ");
+    expect(secret.posts().filter(c => c.args[1] === "edit")).toEqual([]);
+
+    const unreadable = fakeEnv({ files: { "/b": "## What changed\n\nx\n" }, respond: c => (c.cmd === "gh" && c.args[1] === "view" ? { status: 1, stderr: "GraphQL: Could not resolve to a PullRequest" } : undefined) });
+    expect(run(["pr-body", "5", "--body-file", "/b"], unreadable)).toBe(EXIT.cliFailed);
+    expect(unreadable.stderr()).toContain("cannot read PR 5's current body");
+    expect(unreadable.stderr()).toContain("--replace");
+    expect(unreadable.posts()).toEqual([]);
+    expect(run(["pr-comment", "5", "--replace", "--body-file", "/b"], fakeEnv({ files: { "/b": "x" } }))).toBe(EXIT.usage);
   });
 });

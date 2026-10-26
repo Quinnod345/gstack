@@ -2029,6 +2029,29 @@ override is never cached.
 `gstack-gate-diff` records a candidate ending in a tree id instead of
 `+nowtree`.
 
+<a id="gate-error-no-base"></a>
+### `GATE_ERROR=no_base`
+
+**Meaning.** `gstack-gate-diff` could not resolve the base it diffs against
+(`GATE_ERROR=no_base ref=<ref> fix=<git command>` is its only stdout line,
+exit 2). The ref is not a commit in this checkout: a shallow clone (CI's
+default `fetch-depth: 1`), a remote branch never fetched
+(`origin/main` with no `refs/remotes/origin/main`), or a `--commit` whose
+first parent is missing from a shallow history. The tool never guesses a
+base, because an empty diff against a wrong or absent base would read as "no
+gate edits" and pass review. `gstack-diff-scope` prints `SCOPE_ERROR=no_base`
+(all flags false, exit 2) for the same cause.
+
+**Fix.** Run the command the line prints. It is built for this checkout:
+`git fetch origin +<branch>:refs/remotes/origin/<branch>` for an unfetched
+branch, `git fetch --unshallow origin <refspec>` or
+`git fetch --deepen=50 origin` when the clone is shallow. In a workflow, check
+out with `fetch-depth: 0` (or fetch the base explicitly) before the step that
+runs `gstack-gate-diff` or `gstack-diff-scope`.
+
+**Expected result.** `gstack-gate-diff <base>` prints `GATE_SUMMARY:` and
+`gstack-diff-scope` prints its `SCOPE_*` flags without an error line.
+
 ---
 
 ## Memory and gbrain
@@ -2266,6 +2289,60 @@ release of this repository (or the post ran outside the checkout).
 
 **Fix.** Write it as `version: 1.2.3.4`, `"version": "..."` or `v1.2.3.4`.
 MEDIUM findings do not block pushes.
+
+<a id="redact-run-id-as-phone"></a>
+### `pii.phone.e164` MEDIUM on a receipt token or a GitHub Actions run id
+
+**Meaning.** An all-digit identifier reads as a phone number: a 12-hex receipt
+sha that happens to be all digits (a `tree`, `head`, `gated_tree` or
+`predecessor` value), or an 11-digit GitHub Actions run id written somewhere
+`gstack-post` cannot tell from a number. `gstack-post` allowlists only the
+exact tokens it finds in these positions:
+
+- a 12-digit value right after `tree`, `gated_tree`, `head` or `predecessor`
+  with `=` or a space (`tree=704992822996`, `tree 704992822996`);
+- an 11-digit id inside an `/actions/runs/<id>` URL or as that link's text;
+- an 11-digit id right after a run word on the same line, with an optional
+  `:`, `#` or `=` between: `run`, `runs`, `screen`, `screens`, `gate`,
+  `gates`, `backstop`, `bisect`, `rerun`, `dispatched`, `dispatch`,
+  `failed`, `passed`, `workflow`, `job`, `attempt`, `id`, `ids`
+  (`failed 40269992077 | rerun passed 40287239206`, `gate 40323989742`,
+  `run #19368712345`);
+- every 11-digit id chained after an allowlisted one through `, `, ` and `,
+  ` & `, ` or ` or ` / `, optionally with a `(#1234)` between
+  (`screen 40269992077 (#3434) and 40275443393 (#3453)`).
+
+A bare 11-digit number with none of that context, a 10-digit national number
+and an E.164 `+14155551234` still report, so the finding means the id stands
+without a run word (`the id is 40269992077`, `40269992077 failed`) or follows
+a word that is not one (`see 40323989742`).
+
+**Fix.** Write the id next to a run word (`run 40269992077`) or as an
+`/actions/runs/` link. For anything else, rerun with `--confirm <token>`
+using the `TOKEN:` line the refusal printed; MEDIUM findings do not block
+pushes.
+
+<a id="gstack-post-pr-body-merge"></a>
+### `gstack-post pr-body` kept sections the body file did not contain
+
+**Meaning.** `pr-body` merges the file into the PR's current body by `## `
+section instead of overwriting it: a section in the file replaces the
+same-titled section (title compared case-insensitively), the
+````gstack-ship-receipt```` block is a section of its own so a receipt
+rewrite replaces only the receipt, sections the file does not rewrite stay in
+place, new sections are appended after them, and a current body with no
+`## ` headings is kept as the leading text. One stderr line names what was
+replaced, kept and added (`gstack-post: pr-body merged by section: replaced
+What changed; kept ship receipt, Why, Approvals; added Tests`). A body file
+holding only its first section therefore no longer wipes the rest of the PR.
+The redaction scan runs on the merged bytes, so a MEDIUM or HIGH finding can
+come from a kept section; the `RULE:` line's `LINE:` is in the merged text.
+When the current body cannot be read (`gh pr view --json body` fails) nothing
+is posted, exit 3.
+
+**Fix.** Nothing, when the kept sections are wanted. To overwrite the whole
+body with the file, rerun with `--replace`. To drop a section, post the body
+with `--replace` or edit it on the host.
 
 <a id="redact-prepush-email"></a>
 ### `MEDIUM  pii.email  <file>:<line>` from the pre-push hook
