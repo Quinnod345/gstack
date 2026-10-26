@@ -783,27 +783,37 @@ async function countTokens(text: string, { model, apiKey, fetchImpl }: CountToke
   return json.input_tokens;
 }
 
+export interface ExactSendSet {
+  /** Each real file once, under the first lexical path a skill's walk reaches it by. */
+  files: string[];
+  /** Realpaths of the SKILL.md files whose frontmatter the bill prices. */
+  frontmatter: Set<string>;
+}
+
 /**
- * The files --exact sends: the .md files the root walk reaches that the bill
- * actually prices, each real file once. The root walk alone would also reach
- * files a skill's own walk refuses (a symlinked skill's link up to its real
- * parent), and those must not leave the machine when nothing bills them.
+ * What --exact sends: the same per-skill walks totalMd bills, with the same
+ * fences, so nothing is walked or sent that no skill bills.
  *
  * The root is resolved before keying. buildBill resolves its root, so a
  * relative root here would produce keys that never match and every lookup
  * would fall back to the estimate.
  */
-export function exactSendFiles(root: string): string[] {
+export function exactSendSet(root: string): ExactSendSet {
   const resolved = path.resolve(root);
-  const fmSuffix = frontmatterKey("");
-  const priced = new Set<string>();
-  buildBill(resolved, {
-    tokensOf: (key) => {
-      priced.add(fs.realpathSync(key.endsWith(fmSuffix) ? key.slice(0, -fmSuffix.length) : key));
-      return 0;
-    },
-  });
-  return walkMd(resolved).filter((file) => priced.has(fs.realpathSync(file)));
+  if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
+  const files: string[] = [];
+  const frontmatter = new Set<string>();
+  const seen = new Set<string>();
+  for (const dir of findSkillDirs(resolved)) {
+    frontmatter.add(fs.realpathSync(path.join(dir, "SKILL.md")));
+    for (const file of walkMd(dir, { billedRoot: resolved, skipNestedSkills: true })) {
+      const real = fs.realpathSync(file);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      files.push(file);
+    }
+  }
+  return { files, frontmatter };
 }
 
 export interface ExactMeasurement {
@@ -829,9 +839,9 @@ export interface ExactMeasurement {
  */
 export async function measureExactTokens(
   root: string,
-  { files, model, apiKey, fetchImpl = fetch, onProgress, egressHome }: {
-    /** The send set from exactSendFiles(root), when the caller already computed it. */
-    files?: string[];
+  { sendSet, model, apiKey, fetchImpl = fetch, onProgress, egressHome }: {
+    /** The send set from exactSendSet(root), when the caller already computed it. */
+    sendSet?: ExactSendSet;
     model: string;
     apiKey: string;
     fetchImpl?: FetchLike;
@@ -852,10 +862,13 @@ export async function measureExactTokens(
   // the same file by every lexical path it is billed under; lexicalOf maps a
   // real file back to the one key that was measured.
   const lexicalOf = new Map<string, string>();
-  for (const file of files ?? exactSendFiles(root)) {
+  const { files, frontmatter } = sendSet ?? exactSendSet(root);
+  for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
+    const real = fs.realpathSync(file);
     texts.set(file, text);
-    lexicalOf.set(fs.realpathSync(file), file);
+    lexicalOf.set(real, file);
+    if (!frontmatter.has(real)) continue;
     const fm = parseFrontmatter(text);
     if (fm.block) texts.set(frontmatterKey(file), fm.block);
   }
@@ -1054,24 +1067,24 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
 
   // Exact mode is the only path that leaves the machine. Announce what is sent
   // before sending it, and degrade to the estimate rather than failing the run.
-  const sendSet = (tree: string) => (flags.exact ? exactSendFiles(tree) : []);
-  const exactFor = async (tree: string, walked: string[]): Promise<{
+  const sendSet = (tree: string) => (flags.exact ? exactSendSet(tree) : undefined);
+  const exactFor = async (tree: string, set: ExactSendSet | undefined): Promise<{
     tokensOf?: TokensOf;
     tokenSource?: string;
     calibration?: Calibration;
     onDone?: () => void;
   }> => {
-    if (!flags.exact) return {};
+    if (!set || set.files.length === 0) return {};
     const treeReal = fs.realpathSync(tree);
-    const outside = walked.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
+    const outside = set.files.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
     stderr.write(
-      `--exact: sending the content of ${walked.length} .md file(s) under ${tree}` +
+      `--exact: sending the content of ${set.files.length} .md file(s) under ${tree}` +
         (outside ? ` (${outside} of them through symlinks to files outside it)` : "") +
         ` to api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
     );
     try {
       const measured = await measureExactTokens(tree, {
-        files: walked,
+        sendSet: set,
         model: flags.exactModel,
         apiKey: options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "",
         fetchImpl: options.fetchImpl,
@@ -1105,10 +1118,10 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       }
       const treeA = path.resolve(cwd, positional[0]);
       const treeB = path.resolve(cwd, positional[1]);
-      const filesA = sendSet(treeA);
-      const filesB = sendSet(treeB);
-      const optsA = await exactFor(treeA, filesA);
-      const optsB = await exactFor(treeB, filesB);
+      const setA = sendSet(treeA);
+      const setB = sendSet(treeB);
+      const optsA = await exactFor(treeA, setA);
+      const optsB = await exactFor(treeB, setB);
       const diff = diffBills(buildBill(treeA, optsA), buildBill(treeB, optsB));
       optsA.onDone?.();
       optsB.onDone?.();

@@ -928,6 +928,69 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("walks for --exact only what the bill walks, so no file is keyed through a link no skill bills", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-send-walk-"));
+    const dev = path.join(tmp, "dev");
+    for (const name of ["m", "zz"]) {
+      fs.mkdirSync(path.join(dev, name), { recursive: true });
+      fs.writeFileSync(path.join(dev, name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\n# ${name}\n`);
+    }
+    fs.mkdirSync(path.join(dev, "other"));
+    fs.writeFileSync(path.join(dev, "other", "n1.md"), "n");
+    fs.symlinkSync(dev, path.join(dev, "m", "up"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(skills);
+    fs.symlinkSync(path.join(dev, "m"), path.join(skills, "m"));
+    fs.symlinkSync(path.join(dev, "zz"), path.join(skills, "zz"));
+    const calls: { body: string }[] = [];
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
+    const keys = [...measured.counts.keys()].map((k) => path.relative(skills, k)).sort();
+    expect(keys).toEqual([
+      path.join("m", "SKILL.md"),
+      path.join("m", "SKILL.md#frontmatter"),
+      path.join("zz", "SKILL.md"),
+      path.join("zz", "SKILL.md#frontmatter"),
+    ]);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("sends nothing and writes no receipt for an existing tree with no skills", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-no-skills-"));
+    fs.mkdirSync(path.join(tmp, "docs"));
+    fs.writeFileSync(path.join(tmp, "docs", "a.md"), "a");
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-no-skills-egress-"));
+    const out = capture();
+    const calls: { body: string }[] = [];
+    const code = await contextBillMain([tmp, "--exact"], {
+      stdout: out.stream,
+      stderr: out.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome: home,
+    });
+    const receipts = fs.readdirSync(home, { recursive: true });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+    expect(code).toBe(2);
+    expect(out.text()).toContain("No SKILL.md files found");
+    expect(out.text()).not.toContain("--exact: sending");
+    expect(calls.length).toBe(0);
+    expect(receipts).toEqual([]);
+  });
+
+  it("measures frontmatter only where the bill prices it", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fm-priced-"));
+    fs.mkdirSync(path.join(tmp, "qa", "references"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(tmp, "qa", "references", "r.md"), "---\ntitle: ref\n---\nbody\n");
+    const calls: { body: string }[] = [];
+    const measured = await measureExactTokens(tmp, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(measured.counts.has(path.join(tmp, "qa", "references", "r.md#frontmatter"))).toBe(false);
+    expect(calls.length).toBe(4);
+  });
+
   it("names a missing tree, without a raw ENOENT or any request", async () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-missing-"));
     const out = capture();
