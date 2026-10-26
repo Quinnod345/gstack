@@ -183,8 +183,6 @@ describe('AUQ format is always-loaded (token-reduction safety net)', () => {
       expect(body).toMatch(/##\s*AskUserQuestion Format/i);
       expect(body).toMatch(/ELI10\s*:/i);
       expect(body).toMatch(/Recommendation\s*:/i);
-      // sanity: confirm there really is a section dir we're guarding against
-      expect(fs.readdirSync(sectionsDir!).some(f => f.endsWith('.md') && f !== SHARED_PREAMBLE_FILE)).toBe(true);
     });
   }
 

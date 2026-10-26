@@ -2157,6 +2157,15 @@ describe('INVOKE_SKILL resolver', () => {
     expect(ceoContent).toContain('AskUserQuestion Format');
   });
 
+  test('loader skip lists name the shared-preamble pointer that the loaded skills carry', () => {
+    const entry = `- ${SHARED_POINTER_HEADING.replace(/^## /, '')}\n`;
+    expect(ceoContent).toContain(entry);
+    expect(fs.readFileSync(path.join(ROOT, 'autoplan', 'SKILL.md'), 'utf-8')).toContain(entry);
+    for (const skill of ['office-hours', 'plan-ceo-review', 'plan-design-review', 'plan-devex-review', 'plan-eng-review']) {
+      expect(fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8'), skill).toContain(`\n${SHARED_POINTER_HEADING}\n`);
+    }
+  });
+
   test('INVOKE_SKILL output includes error handling', () => {
     expect(ceoContent).toContain('If unreadable');
     expect(ceoContent).toContain('Could not load');
@@ -3405,7 +3414,7 @@ describe('Factory generation (--host factory)', () => {
 
 import { ALL_HOST_CONFIGS, getExternalHosts } from '../hosts/index';
 import { sliceBetween } from './helpers/skill-fixture';
-import { readSkillStartup } from './helpers/skill-startup';
+import { readSkillStartup, SHARED_POINTER_HEADING } from './helpers/skill-startup';
 
 describe('Parameterized host smoke tests', () => {
   // Every external host was rendered up front by the module-level
