@@ -21,6 +21,7 @@
 import { describe, test, expect } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SHARED_PREAMBLE_FILE } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 
@@ -77,7 +78,7 @@ describe('section manifest ↔ filesystem consistency', () => {
       });
 
       test('no generated orphan: every sections/X.md has a sections/X.md.tmpl → FAIL', () => {
-        const orphans = sectionMds.filter(md => !sectionTmpls.includes(`${md}.tmpl`));
+        const orphans = sectionMds.filter(md => md !== SHARED_PREAMBLE_FILE && !sectionTmpls.includes(`${md}.tmpl`));
         expect(orphans).toEqual([]);
       });
 
