@@ -8,7 +8,7 @@ import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
 import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
-import { ancestorMap, getAttr, innerOf, plainText } from '../html';
+import { ancestorsOf, getAttr, innerOf, plainText } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
 
@@ -361,14 +361,13 @@ const capsRatio = (s: string): number => {
 // sloplint check67Html (gate 67), the markup half: text typed in capitals at label size or tracked
 function check67Html(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
-    const anc = ancestorMap(doc);
     const seen = new Set<string>();
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
       if (t.close || t.selfClosing || !CAPS_TAGS.test(t.name)) continue;
       const cls = getAttr(t.attrs, 'class') || '';
       if (cls.split(/\s+/).some(exemptName67)) continue;
-      if ((anc.get(i) || []).some((n) => /^(svg|pre|code|abbr|kbd|samp)$/.test(n))) continue;
+      if (ancestorsOf(doc, i).some((n) => /^(svg|pre|code|abbr|kbd|samp)$/.test(n))) continue;
       const inner = innerOf(doc, i);
       if (!inner || /<(p|div|ul|ol|h[1-6]|table|section|article|svg|img|abbr|code|kbd)\b/i.test(inner.inner)) continue;
       const text = plainText(inner.inner);

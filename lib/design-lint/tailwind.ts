@@ -649,7 +649,7 @@ export function twEyebrow(it: TwItem): TwEyebrow | null {
   const t = doc.tags[it.idx];
   if (/role\s*=\s*["']?status|aria-live|aria-current|aria-hidden\s*=\s*["']?true/i.test(t.attrs)) return null;
   const c = closeIndex(doc, it.idx);
-  const nx = doc.tags[c + 1];
+  const nx = c > it.idx && !doc.tags[c].close ? doc.tags[c] : doc.tags[c + 1];
   if (!nx || nx.close || !/^h[1-3]$/.test(nx.name)) return null;
   const inner = c > it.idx ? doc.src.slice(t.end, doc.tags[c].pos) : '';
   if (EYEBROW_BLOCKY.test(inner) || /<br\b|<time\b/i.test(inner)) return null;

@@ -79,7 +79,7 @@ function flatBody(src: string, s: number, e: number): string {
 /** Expand a nested selector against its parent: `&` is replaced, a bare selector is descendant-joined. */
 function nestSelector(sel: string, parent: string): string {
   const p = parent.includes(',') ? `:is(${parent})` : parent;
-  return sel.split(/,(?![^(]*\))/).map((part) => part.includes('&') ? part.trim().replace(/&/g, p) : `${p} ${part.trim()}`).join(', ');
+  return splitTop(sel).map((part) => part.includes('&') ? part.trim().replace(/&/g, p) : `${p} ${part.trim()}`).join(', ');
 }
 
 /** Faces that read as monospace, whether they arrive as a token, a utility or a declaration; one list so every check classifies a face the same way. */

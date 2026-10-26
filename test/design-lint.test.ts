@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { buildTokens, parseCss, pxOf, resolveVars } from '../lib/design-lint/css';
 import { contrastRatio, parseColor, srgbToOklch } from '../lib/design-lint/color';
-import { ancestorMap, getAttr, parseDoc, plainText } from '../lib/design-lint/html';
+import { ancestorsOf, directChildren, getAttr, innerOf, jsxPseudo, parseDoc, plainText, treeOf } from '../lib/design-lint/html';
 import { lint, formatResult } from '../lib/design-lint/index';
 import { Reporter, exitCodeOf, finalize, formatFinding, formatSummary, summarize } from '../lib/design-lint/report';
 import { collectFiles, contextWaivers, lintStatic } from '../lib/design-lint/static';
@@ -468,15 +468,85 @@ describe('design-lint: hardening (ship review)', () => {
     }
   });
 
-  test('ancestorMap stays shallow when optional end tags are left open', () => {
+  test('the tree stays shallow when optional end tags are left open', () => {
     let h = '<html><body><main>';
     for (let i = 0; i < 3000; i++) h += '<section><ul><li>one<li>two<li>three</ul></section>';
     const doc = parseDoc('x.html', h + '</main></body></html>');
+    let deepest = 0;
+    for (let i = 0; i < doc.tags.length; i++) deepest = Math.max(deepest, ancestorsOf(doc, i).length);
+    expect(deepest).toBeLessThanOrEqual(5);
+  });
+
+  test('every tree reader agrees on an element whose end tag was left out', () => {
+    const doc = parseDoc('x.html', '<nav><ul><li><a href=a>One</a><li><a href=b>Two</a></ul></nav><main><h1>H</h1></main>');
+    const nav = doc.tags.findIndex((t) => t.name === 'nav' && !t.close);
+    const ul = doc.tags.findIndex((t) => t.name === 'ul' && !t.close);
+    expect(innerOf(doc, nav)!.inner).toBe('<ul><li><a href=a>One</a><li><a href=b>Two</a></ul>');
+    const kids = directChildren(doc, ul);
+    expect(kids.map((k) => k.html)).toEqual(['<li><a href=a>One</a>', '<li><a href=b>Two</a>']);
+    const li2 = kids[1].idx;
+    expect(innerOf(doc, li2)!.inner).toBe('<a href=b>Two</a>');
+    expect(ancestorsOf(doc, li2)).toEqual(['nav', 'ul']);
+    const h1 = doc.tags.findIndex((t) => t.name === 'h1');
+    expect(ancestorsOf(doc, h1)).toEqual(['main']);
+  });
+
+  test('a stray close tag and a mismatched close tag do not deepen what follows', () => {
+    const doc = parseDoc('x.html', '<div><span>a</div></em><p>b</p><b>c</b>');
+    const p = doc.tags.findIndex((t) => t.name === 'p');
+    const b = doc.tags.findIndex((t) => t.name === 'b');
+    expect(ancestorsOf(doc, p)).toEqual([]);
+    expect(ancestorsOf(doc, b)).toEqual([]);
+    const span = doc.tags.findIndex((t) => t.name === 'span');
+    expect(innerOf(doc, span)!.inner).toBe('a');
+  });
+
+  test('deep nesting costs its depth, not its square', () => {
+    const src = '<html><body>' + '<div>'.repeat(20000) + 'x' + '</div>'.repeat(20000) + '</body></html>';
+    const doc = parseDoc('a.html', src);
+    const before = process.memoryUsage().rss;
+    const { parent } = treeOf(doc);
+    expect(process.memoryUsage().rss - before).toBeLessThan(200e6);
+    expect(ancestorsOf(doc, 20001).length).toBe(20001);
+    expect(parent[2]).toBe(1);
+  });
+
+  test('commented-out style and script are not live markup', () => {
+    const d = parseDoc('a.html', '<!-- <style>h1{color:#000}</style><script>fetch(1)</script> -->\n<p>x</p>');
+    expect(d.styles).toHaveLength(0);
+    expect(d.scripts.trim()).toBe('');
+    expect(d.tags.map((t) => t.name)).toEqual(['p', 'p']);
+    expect(d.text.trim()).toBe('x');
+  });
+
+  test('an unclosed comment, script, style or tag parses in linear time', () => {
+    for (const frag of ['<a ', '<!--', '<script>', '<style>', '<a<a']) {
+      const t = performance.now();
+      const d = parseDoc('x.html', frag.repeat(60000));
+      expect(performance.now() - t).toBeLessThan(2000);
+      expect(d.styles).toEqual([]);
+    }
+    const d = parseDoc('x.html', '<style>a{color:red}</style><p class="x">t</p><!-- c --><script>var a</script>');
+    expect(d.styles.map((s) => s.css)).toEqual(['a{color:red}']);
+    expect(d.scripts.trim()).toBe('var a');
+    expect(d.tags.filter((t) => !t.close).map((t) => t.name)).toEqual(['style', 'p', 'script']);
+    expect(d.text.trim()).toBe('t');
+  });
+
+  test('quoted and odd attribute text still scan as one tag', () => {
+    const d = parseDoc('x.html', '<a title="x > y" data-s=\'<b>\' href="a<b">t</a><img src="data:image/png;base64,AAAA" alt="">');
+    expect(d.tags.filter((t) => !t.close).map((t) => [t.name, t.attrs.trim()])).toEqual([['a', 'title="x > y" data-s=\'<b>\' href="a<b"'], ['img', 'src="data:image/png;base64,AAAA" alt=""']]);
+    const e = parseDoc('x.html', '<div <span>a</span></div>');
+    expect(e.tags.filter((t) => !t.close).map((t) => t.name)).toEqual(['span']);
+  });
+
+  test('a run of unclosed JSX elements scans in polynomial time', () => {
+    let h = 'export default function A(){ return (';
+    for (let i = 0; i < 26; i++) h += `<div className="a${i}">t${i} `;
+    h += ');}\n';
     const t = performance.now();
-    const anc = ancestorMap(doc);
-    expect(performance.now() - t).toBeLessThan(1000);
-    const deepest = Math.max(...[...anc.values()].map((a) => a.length));
-    expect(deepest).toBeLessThanOrEqual(6);
+    jsxPseudo(h);
+    expect(performance.now() - t).toBeLessThan(2000);
   });
 
   test('a root-relative href that climbs out of the lint root attaches nothing', () => {

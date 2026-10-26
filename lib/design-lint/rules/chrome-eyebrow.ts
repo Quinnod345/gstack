@@ -7,7 +7,7 @@
  * somewhere real are not eyebrows.
  */
 import { fontPx, styleFor, trackingEm, valueOf, type LintContext } from '../context';
-import { escapeRe, ancestorMap, directChildren, getAttr, innerOf, plainText, type Child } from '../html';
+import { escapeRe, ancestorsOf, directChildren, getAttr, innerOf, plainText, type Child } from '../html';
 import { trunc, type Reporter } from '../report';
 
 const EYEBROW_CONTAINER = /^(div|header|footer|section|article|aside|hgroup|li|main|figure|a|body|blockquote)$/;
@@ -88,11 +88,10 @@ function eyebrowHit(ctx: LintContext, A: Child, B: Child, inOrderedList: boolean
 // sloplint check54 (gate 54)
 function checkEyebrow(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
-    const anc = ancestorMap(doc);
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
       if (t.close || t.selfClosing || !EYEBROW_CONTAINER.test(t.name)) continue;
-      const ancestors = anc.get(i) || [];
+      const ancestors = ancestorsOf(doc, i);
       if (ancestors.some((n) => EYEBROW_ANCESTOR_SKIP.test(n))) continue;
       const inOl = ancestors.includes('ol');
       const kids = directChildren(doc, i);

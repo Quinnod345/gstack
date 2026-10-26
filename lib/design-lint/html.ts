@@ -62,34 +62,143 @@ export const HTML_NAMES = new Set(('a abbr address area article aside audio b ba
 
 const pad = (t: string) => t.replace(/[^\n]/g, ' ');
 
-export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Doc {
-  const lineOf = lineIndex(src);
-  const styles: StyleBlock[] = [];
-  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = styleRe.exec(src))) styles.push({ css: m[1], lineOffset: lineOf(m.index) - 1 });
-  let scripts = '';
-  const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-  while ((m = scriptRe.exec(src))) scripts += m[1] + '\n';
-  const masked = src
-    .replace(/<!--[\s\S]*?-->/g, pad)
-    .replace(/(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi, (_m0, open: string, _tag: string, body: string, close: string) => open + pad(body) + close);
-  const tags: Tag[] = [];
-  const comps: Tag[] = [];
-  const tagRe = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
-  while ((m = tagRe.exec(masked))) {
-    const attrs = m[3] || '';
-    if (kind !== 'html' && !HTML_NAMES.has(m[2])) {
-      comps.push({ close: m[1] === '/', name: m[2], attrs, pos: m.index, end: m.index + m[0].length, selfClosing: /\/\s*$/.test(attrs), line: lineOf(m.index) });
+/** s lower-cased letter by letter (ASCII only, so every position still lines up with s). */
+const asciiLower = (s: string): string => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
+/** A span found by spansOf: the whole match and, for an element, the body between its open and close tags. */
+interface Span { start: number; bodyStart: number; bodyEnd: number; end: number }
+
+/**
+ * Every `open … close` span of lower in one linear pass, so a file of
+ * unclosed openers costs its length and not its square. An opener with no
+ * closer after it is left alone, which is what the lazy regex it replaces did.
+ * For an element, open is `<name`, which must end the name, and the span runs
+ * from that open tag through `</name>` (spaces before the `>` allowed).
+ */
+function spansOf(lower: string, open: string, close: string, element: boolean): Span[] {
+  const out: Span[] = [];
+  let i = 0;
+  for (;;) {
+    const start = lower.indexOf(open, i);
+    if (start < 0) break;
+    const after = start + open.length;
+    if (!element) {
+      const c = lower.indexOf(close, after);
+      if (c < 0) break;
+      out.push({ start, bodyStart: after, bodyEnd: c, end: c + close.length });
+      i = c + close.length;
       continue;
     }
-    const name = m[2].toLowerCase();
-    tags.push({ close: m[1] === '/', name, attrs, pos: m.index, end: m.index + m[0].length, selfClosing: /\/\s*$/.test(attrs) || VOID_TAGS.has(name), line: lineOf(m.index) });
+    if (/[\w-]/.test(lower[after] || '')) { i = after; continue; }
+    const gt = lower.indexOf('>', after);
+    if (gt < 0) break;
+    let c = lower.indexOf(close, gt + 1), end = -1;
+    while (c >= 0) {
+      let k = c + close.length;
+      while (k < lower.length && /\s/.test(lower[k])) k++;
+      if (lower[k] === '>') { end = k + 1; break; }
+      c = lower.indexOf(close, c + 1);
+    }
+    if (end < 0) break;
+    out.push({ start, bodyStart: gt + 1, bodyEnd: c, end });
+    i = end;
   }
-  const noScript = src.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
-  const text = noScript.replace(/<[^>]*>/g, ' ')
+  return out;
+}
+
+/** s with each [a, b) range padded to spaces (positions kept) or, with cut set, replaced by one space. */
+function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): string {
+  if (!ranges.length) return s;
+  let out = '', at = 0;
+  for (const [a, b] of ranges) {
+    if (a < at) continue;
+    out += s.slice(at, a) + (cut ? ' ' : pad(s.slice(a, b)));
+    at = b;
+  }
+  return out + s.slice(at);
+}
+
+/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. */
+export function stripTags(s: string, keep = false): string {
+  let out = '', i = 0;
+  for (;;) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) break;
+    const gt = s.indexOf('>', lt + 1);
+    if (gt < 0) break;
+    out += s.slice(i, lt) + (keep ? pad(s.slice(lt, gt + 1)) : ' ');
+    i = gt + 1;
+  }
+  return out + s.slice(i);
+}
+
+/** Unquoted attribute text longer than this cannot be a tag; the scan gives the `<` up instead of reading on to the end of the file. */
+const MAX_UNQUOTED_ATTRS = 8192;
+
+/**
+ * Every tag in s, in document order and in one linear pass: `<name attrs>` and
+ * `</name>`, with quoted attribute values skipped whole. A `<` that never
+ * reaches a `>`, or a quote that never closes, is text; a `<` that opens a
+ * tag inside unquoted attribute text starts the next tag instead, as a
+ * browser reads `<a <b>`.
+ */
+function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string, pos: number, end: number) => void): void {
+  const n = s.length;
+  const noQuoteFrom: Record<string, number> = { '"': n, "'": n };
+  let i = 0;
+  while (i < n) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) break;
+    let j = lt + 1;
+    const close = s[j] === '/';
+    if (close) j++;
+    if (!/[a-zA-Z]/.test(s[j] || '')) { i = lt + 1; continue; }
+    let k = j + 1;
+    while (k < n && /[a-zA-Z0-9-]/.test(s[k])) k++;
+    let p = k, unquoted = 0, next = lt + 1, gt = -1;
+    while (p < n) {
+      const c = s[p];
+      if (c === '>') { gt = p; break; }
+      if (c === '"' || c === "'") {
+        if (p + 1 >= noQuoteFrom[c]) break;
+        const q = s.indexOf(c, p + 1);
+        if (q < 0) { noQuoteFrom[c] = p + 1; break; }
+        p = q + 1;
+        continue;
+      }
+      if (c === '<' && /[a-zA-Z/]/.test(s[p + 1] || '')) { next = p; break; }
+      if (++unquoted > MAX_UNQUOTED_ATTRS) break;
+      p++;
+    }
+    if (gt < 0) { i = next; continue; }
+    onTag(close, s.slice(j, k), s.slice(k, gt), lt, gt + 1);
+    i = gt + 1;
+  }
+}
+
+export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Doc {
+  const lineOf = lineIndex(src);
+  const comments = spansOf(asciiLower(src), '<!--', '-->', false).map((s): [number, number] => [s.start, s.end]);
+  const live = blankRanges(src, comments);
+  const lower = asciiLower(live);
+  const scriptSpans = spansOf(lower, '<script', '</script', true);
+  const styleSpans = spansOf(lower, '<style', '</style', true);
+  const styles: StyleBlock[] = styleSpans.map((s) => ({ css: live.slice(s.bodyStart, s.bodyEnd), lineOffset: lineOf(s.start) - 1 }));
+  const scripts = scriptSpans.map((s) => live.slice(s.bodyStart, s.bodyEnd) + '\n').join('');
+  const bodies = [...scriptSpans, ...styleSpans].map((s): [number, number] => [s.bodyStart, s.bodyEnd]).sort((a, b) => a[0] - b[0]);
+  const masked = blankRanges(live, bodies);
+  const tags: Tag[] = [];
+  const comps: Tag[] = [];
+  scanTags(masked, (close, rawName, attrs, pos, end) => {
+    if (kind !== 'html' && !HTML_NAMES.has(rawName)) {
+      comps.push({ close, name: rawName, attrs, pos, end, selfClosing: /\/\s*$/.test(attrs), line: lineOf(pos) });
+      return;
+    }
+    const name = rawName.toLowerCase();
+    tags.push({ close, name, attrs, pos, end, selfClosing: /\/\s*$/.test(attrs) || VOID_TAGS.has(name), line: lineOf(pos) });
+  });
+  const whole = [...scriptSpans, ...styleSpans].map((s): [number, number] => [s.start, s.end]).sort((a, b) => a[0] - b[0]);
+  const text = stripTags(blankRanges(live, whole, true))
     .replace(/&quot;|&#0?34;/g, '"').replace(/&#0?39;|&apos;/g, "'")
     .replace(/&hellip;|&#8230;/g, '\u2026').replace(/&mdash;|&#8212;|&#x2014;/gi, '\u2014').replace(/&ndash;|&#8211;|&#x2013;/gi, '\u2013')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -319,13 +428,15 @@ class JsxScanner {
     }
     return n;
   }
+  /** Starts that did not open an element: a retry from the same start fails the same way, so a run of unclosed elements costs its length, not two to its depth. */
+  private failed = new Set<number>();
   private el(start: number): number {
-    if (this.depth > 200) return -1;
+    if (this.depth > 200 || this.failed.has(start)) return -1;
     const mc = this.classes.length, mk = this.calls.length;
     this.depth++;
     const e = this.tag(start);
     this.depth--;
-    if (e < 0) { this.blank(start, Math.max(this.hi, start + 1)); this.hi = start; this.classes.length = mc; this.calls.length = mk; }
+    if (e < 0) { this.failed.add(start); this.blank(start, Math.max(this.hi, start + 1)); this.hi = start; this.classes.length = mc; this.calls.length = mk; }
     return e;
   }
   /** One attribute from i; returns the index after it, or -1 when the tag is not JSX after all. */
@@ -492,62 +603,92 @@ export function hasAttr(attrStr: string, name: string): boolean {
   return new RegExp(`(?:^|\\s)${name}(?=[\\s=/]|$)`, 'i').test(attrStr);
 }
 
+/** Elements whose end tag is optional: a new one closes the open one, so a list of unclosed <li> does not read as nested. */
+const IMPLICIT_CLOSE = new Set(['li', 'p', 'dt', 'dd', 'option', 'tr', 'td', 'th']);
+
+export interface Tree {
+  /** For an open tag, the index of the tag that ends it: its own close tag, the sibling that implicitly closed it, or the close tag of an ancestor; -1 when it runs to the end of the document. */
+  close: Int32Array;
+  /** For every tag, the index of the nearest open ancestor, or -1 at the top. */
+  parent: Int32Array;
+}
+
+/**
+ * Open and close tags paired once per document. A close tag pops to its own
+ * open tag, so a stray or missing end tag does not deepen everything after
+ * it, and an element with an optional end tag ends where its next sibling
+ * starts. Every tree reader (ancestors, innerOf, closeIndex, directChildren)
+ * answers from this one pairing, so they agree on every element's extent.
+ */
+export function treeOf(doc: Doc): Tree {
+  const cached = doc.cache.tree as Tree | undefined;
+  if (cached) return cached;
+  const n = doc.tags.length;
+  const close = new Int32Array(n).fill(-1);
+  const parent = new Int32Array(n).fill(-1);
+  const stack: number[] = [];
+  const openByName = new Map<string, Array<{ idx: number; depth: number }>>();
+  for (let i = 0; i < n; i++) {
+    const t = doc.tags[i];
+    if (t.close) {
+      const opens = openByName.get(t.name);
+      if (!opens) continue;
+      while (opens.length && stack[opens[opens.length - 1].depth] !== opens[opens.length - 1].idx) opens.pop();
+      if (!opens.length) continue;
+      const { depth } = opens.pop()!;
+      for (let k = stack.length - 1; k >= depth; k--) close[stack[k]] = i;
+      stack.length = depth;
+      continue;
+    }
+    if (IMPLICIT_CLOSE.has(t.name) && stack.length && doc.tags[stack[stack.length - 1]].name === t.name) close[stack.pop()!] = i;
+    parent[i] = stack.length ? stack[stack.length - 1] : -1;
+    if (t.selfClosing) continue;
+    let opens = openByName.get(t.name);
+    if (!opens) openByName.set(t.name, opens = []);
+    opens.push({ idx: i, depth: stack.length });
+    stack.push(i);
+  }
+  const tree = { close, parent };
+  doc.cache.tree = tree;
+  return tree;
+}
+
+/** The names of the open ancestors of the tag at idx, outermost first. */
+export function ancestorsOf(doc: Doc, idx: number): string[] {
+  const { parent } = treeOf(doc);
+  const out: string[] = [];
+  for (let p = parent[idx]; p >= 0; p = parent[p]) out.push(doc.tags[p].name);
+  return out.reverse();
+}
+
 export interface Child { name: string; open: string; html: string; idx: number }
+
+/** Where the element opened at idx ends in the source: after its own close tag, or where the tag that implicitly ended it starts. */
+function outerEnd(doc: Doc, idx: number, closeAt: number): number {
+  if (closeAt < 0) return doc.src.length;
+  const c = doc.tags[closeAt];
+  return c.close && c.name === doc.tags[idx].name ? c.end : c.pos;
+}
 
 /** The direct element children of the tag at idx, each with its open tag, outer HTML and tag index. */
 export function directChildren(doc: Doc, idx: number): Child[] {
   const open = doc.tags[idx];
   if (open.close || open.selfClosing) return [];
+  const { close, parent } = treeOf(doc);
+  const end = close[idx] < 0 ? doc.tags.length : close[idx];
   const children: Child[] = [];
-  let depth = 1;
-  let childStart = -1, childOpen: Tag | null = null, childIdx = -1;
-  for (let i = idx + 1; i < doc.tags.length; i++) {
+  for (let i = idx + 1; i < end; i++) {
     const t = doc.tags[i];
-    if (t.close) {
-      depth--;
-      if (depth === 0) break;
-      if (depth === 1 && childOpen) {
-        children.push({ name: childOpen.name, open: doc.src.slice(childOpen.pos, childOpen.end), html: doc.src.slice(childStart, t.end), idx: childIdx });
-        childOpen = null;
-      }
-      continue;
-    }
-    if (depth === 1) {
-      if (t.selfClosing) children.push({ name: t.name, open: doc.src.slice(t.pos, t.end), html: doc.src.slice(t.pos, t.end), idx: i });
-      else { childStart = t.pos; childOpen = t; childIdx = i; }
-    }
-    if (!t.selfClosing) depth++;
+    if (t.close || parent[i] !== idx) continue;
+    const openHtml = doc.src.slice(t.pos, t.end);
+    children.push({ name: t.name, open: openHtml, html: t.selfClosing ? openHtml : doc.src.slice(t.pos, outerEnd(doc, i, close[i])), idx: i });
   }
   return children;
 }
 
-/** Elements whose end tag is optional: a new one closes the open one, so a list of unclosed <li> does not read as nested. */
-const IMPLICIT_CLOSE = new Set(['li', 'p', 'dt', 'dd', 'option', 'tr', 'td', 'th']);
-
-/** For every open tag index, the names of its open ancestors, outermost first. A close tag pops to its own open tag, so a stray or missing end tag does not deepen everything after it. */
-export function ancestorMap(doc: Doc): Map<number, string[]> {
-  const cached = doc.cache.ancestors as Map<number, string[]> | undefined;
-  if (cached) return cached;
-  const map = new Map<number, string[]>();
-  const stack: string[] = [];
-  for (let i = 0; i < doc.tags.length; i++) {
-    const t = doc.tags[i];
-    if (t.close) {
-      const at = stack.lastIndexOf(t.name);
-      if (at >= 0) stack.length = at;
-      continue;
-    }
-    if (IMPLICIT_CLOSE.has(t.name) && stack[stack.length - 1] === t.name) stack.pop();
-    map.set(i, stack.slice());
-    if (!t.selfClosing) stack.push(t.name);
-  }
-  doc.cache.ancestors = map;
-  return map;
-}
-
 /** Visible text of an HTML fragment with the common entities decoded and whitespace folded. */
 export function plainText(html: string): string {
-  return html.replace(/<[^>]*>/g, ' ')
+  return stripTags(html)
     .replace(/&middot;|&#0?183;|&#x0?b7;/gi, '·').replace(/&bull;|&#8226;|&#x2022;/gi, '•').replace(/&mdash;|&#8212;|&#x2014;/gi, '\u2014').replace(/&ndash;|&#8211;|&#x2013;/gi, '\u2013')
     .replace(/&rarr;|&#8594;|&#x2192;|&xrarr;|&#10230;/gi, '\u2192').replace(/&raquo;|&#187;|&#xbb;/gi, '\u00bb').replace(/&rsaquo;|&#8250;|&#x203a;/gi, '\u203a')
     .replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -560,25 +701,15 @@ export function plainText(html: string): string {
 export function innerOf(doc: Doc, idx: number): { inner: string; endPos: number } | null {
   const open = doc.tags[idx];
   if (open.close || open.selfClosing) return null;
-  let depth = 1;
-  for (let i = idx + 1; i < doc.tags.length; i++) {
-    const t = doc.tags[i];
-    if (t.selfClosing) continue;
-    if (t.close) { depth--; if (depth === 0) return { inner: doc.src.slice(open.end, t.pos), endPos: t.pos }; }
-    else depth++;
-  }
-  return { inner: doc.src.slice(open.end), endPos: doc.src.length };
+  const c = treeOf(doc).close[idx];
+  const endPos = c < 0 ? doc.src.length : doc.tags[c].pos;
+  return { inner: doc.src.slice(open.end, endPos), endPos };
 }
 
-/** The index of the tag that closes the element opened at idx (or the last tag). */
+/** The index of the tag that ends the element opened at idx: its close tag, or the tag that implicitly closed it (or the last tag when nothing does). */
 export function closeIndex(doc: Doc, idx: number): number {
-  let depth = 1;
-  for (let i = idx + 1; i < doc.tags.length; i++) {
-    const t = doc.tags[i];
-    if (t.selfClosing) continue;
-    if (t.close) { depth--; if (depth === 0) return i; } else depth++;
-  }
-  return doc.tags.length - 1;
+  const c = treeOf(doc).close[idx];
+  return c < 0 ? doc.tags.length - 1 : c;
 }
 
 // sloplint proseRun
@@ -588,16 +719,17 @@ const proseRun = (run: string): string => {
   return /[;=(){}]|\breturn\b/.test(r) ? pad(r) : r;
 };
 
+const CODE_ELEMENTS = ['script', 'style', 'pre', 'code', 'kbd', 'samp', 'textarea'];
+
 /** The document's prose: tags, comments, scripts, styles and code blanked with positions preserved; component text runs that read as code are blanked too. */
 // sloplint maskedProse
 export function maskedProse(doc: Doc): string {
   const cached = doc.cache.prose as string | undefined;
   if (cached != null) return cached;
-  const src = doc.kind !== 'html' ? doc.src.replace(/(^|>)([^<>]*)(?=<|$)/g, (_m0, a: string, run: string) => a + proseRun(run)) : doc.src;
-  const prose = src
-    .replace(/<(script|style|pre|code|kbd|samp|textarea)\b[^>]*>[\s\S]*?<\/\1>/gi, pad)
-    .replace(/<!--[\s\S]*?-->/g, pad)
-    .replace(/<[^>]*>/g, pad);
+  let prose = doc.kind !== 'html' ? doc.src.replace(/(^|>)([^<>]*)(?=<|$)/g, (_m0, a: string, run: string) => a + proseRun(run)) : doc.src;
+  for (const name of CODE_ELEMENTS) prose = blankRanges(prose, spansOf(asciiLower(prose), '<' + name, '</' + name, true).map((s): [number, number] => [s.start, s.end]));
+  prose = blankRanges(prose, spansOf(asciiLower(prose), '<!--', '-->', false).map((s): [number, number] => [s.start, s.end]));
+  prose = stripTags(prose, true);
   doc.cache.prose = prose;
   return prose;
 }

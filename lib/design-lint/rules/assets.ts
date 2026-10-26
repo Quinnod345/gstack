@@ -9,7 +9,7 @@
 import { contrastRatio, oklchOf, parseColor, type Color } from '../color';
 import { mergedRules, type LintContext } from '../context';
 import { isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
-import { ancestorMap, getAttr, hasAttr, innerOf, plainText } from '../html';
+import { ancestorsOf, getAttr, hasAttr, innerOf, plainText, treeOf } from '../html';
 import { trunc, type Reporter } from '../report';
 
 const EMOJI = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
@@ -80,20 +80,19 @@ function checkUnlabeledDecoration(ctx: LintContext, r: Reporter): void {
     || getAttr(a, 'aria-labelledby') != null
     || ['img', 'presentation', 'none'].includes((getAttr(a, 'role') || '').toLowerCase());
   for (const doc of ctx.docs) {
-    const stack: Array<{ name: string; labeled: boolean }> = [];
+    const { parent } = treeOf(doc);
+    const labeledAt: boolean[] = [];
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
-      if (t.close) {
-        for (let k = stack.length - 1; k >= 0; k--) if (stack[k].name === t.name) { stack.splice(k); break; }
-        continue;
+      if (t.close) continue;
+      labeledAt[i] = labeled(t.attrs);
+      if (t.name !== 'svg' && t.name !== 'canvas') continue;
+      const titled = t.name === 'svg' && !t.selfClosing && /<title\b[^>]*>\s*\S/i.test(innerOf(doc, i)?.inner || '');
+      let inLabeled = false;
+      for (let p = parent[i]; p >= 0 && !inLabeled; p = parent[p]) inLabeled = labeledAt[p];
+      if (!labeledAt[i] && !inLabeled && !titled) {
+        r.report('unlabeled-decoration', doc.file, t.line, '<' + t.name + '> with neither aria-hidden="true" nor a label');
       }
-      if (t.name === 'svg' || t.name === 'canvas') {
-        const titled = t.name === 'svg' && !t.selfClosing && /<title\b[^>]*>\s*\S/i.test(innerOf(doc, i)?.inner || '');
-        if (!labeled(t.attrs) && !stack.some((s) => s.labeled) && !titled) {
-          r.report('unlabeled-decoration', doc.file, t.line, '<' + t.name + '> with neither aria-hidden="true" nor a label');
-        }
-      }
-      if (!t.selfClosing) stack.push({ name: t.name, labeled: labeled(t.attrs) });
     }
   }
 }
@@ -179,14 +178,13 @@ function checkWrappingLabels(ctx: LintContext, r: Reporter): void {
   const covered = (cls: string, tag: string): boolean => nowrapRules.some((rule) =>
     cls.split(/\s+/).some((c) => c && rule.selector.includes('.' + c)) || new RegExp('(^|[\\s,>+~])' + tag + '\\b').test(rule.selector));
   for (const doc of ctx.docs) {
-    const anc = ancestorMap(doc);
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
       if (t.close || t.selfClosing) continue;
       const cls = getAttr(t.attrs, 'class') || '';
       const button = t.name === 'button' || (t.name === 'a' && /btn|cta|button|nav/i.test(cls))
         || (/(^|\s)(btn|button)(\s|$|__|--)/i.test(cls) && !/^(section|header|footer|main|article|aside|nav|form|ul|ol)$/.test(t.name));
-      const link = !button && t.name === 'a' && (/tab|crumb/i.test(cls) || (anc.get(i) || []).includes('footer'));
+      const link = !button && t.name === 'a' && (/tab|crumb/i.test(cls) || ancestorsOf(doc, i).includes('footer'));
       if (!button && !link) continue;
       const inner = innerOf(doc, i);
       if (!inner) continue;

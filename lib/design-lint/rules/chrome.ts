@@ -7,7 +7,7 @@
  */
 import type { LintContext } from '../context';
 import { lineIndex } from '../css';
-import { getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
+import { getAttr, innerOf, maskedProse, plainText, treeOf, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 import { runChromeCopy } from './chrome-copy';
 import { runEyebrow } from './chrome-eyebrow';
@@ -225,25 +225,26 @@ function checkRepeatedFact(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     if (doc.kind !== 'html') continue;
     const bodyAt = doc.tags.findIndex((t) => !t.close && t.name === 'body');
-    const stack: Array<{ name: string; id: number | string }> = [];
+    const { parent } = treeOf(doc);
     const seen = new Map<string, Set<number | string>>();
-    let uid = 0;
-    const regionOf = (): number | string => {
-      const region = stack.find((e) => REGION.test(e.name));
-      if (region) return region.id;
-      const band = stack.find((e, i) => i > 0 && (stack[i - 1].name === 'body' || stack[i - 1].name === 'main') && e.name !== 'main');
-      return band ? band.id : 'root';
+    const regionOf = (i: number): number | string => {
+      const t = doc.tags[i];
+      const chain: number[] = [];
+      for (let p = t.close || t.selfClosing ? parent[i] : i; p >= 0; p = parent[p]) chain.push(p);
+      chain.reverse();
+      const region = chain.find((p) => REGION.test(doc.tags[p].name));
+      if (region != null) return region;
+      const band = chain.find((p, k) => k > 0 && /^(body|main)$/.test(doc.tags[chain[k - 1]].name) && doc.tags[p].name !== 'main');
+      return band ?? 'root';
     };
     for (let i = Math.max(bodyAt, 0); i < doc.tags.length; i++) {
       const t = doc.tags[i];
-      if (t.close) { const at = stack.map((e) => e.name).lastIndexOf(t.name); if (at >= 0) stack.length = at; }
-      else if (!t.selfClosing) stack.push({ name: t.name, id: uid++ });
       const next = doc.tags[i + 1];
       if (/^(script|style|template|noscript)$/.test(t.name) && !t.close) continue;
       const chunk = doc.masked.slice(t.end, next ? next.pos : doc.masked.length)
         .replace(/&pound;/g, '£').replace(/&euro;/g, '€').replace(/&nbsp;|&#160;/g, ' ');
       if (!chunk.trim()) continue;
-      const region = regionOf();
+      const region = regionOf(i);
       for (const f of chunk.match(FACT) || []) {
         const k = f.replace(/\s+/g, '').toLowerCase();
         if (!seen.has(k)) seen.set(k, new Set());

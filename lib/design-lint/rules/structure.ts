@@ -7,7 +7,7 @@
  */
 import { isTokenRule, pxOf, resolveVars } from '../css';
 import { mergedRules, type LintContext } from '../context';
-import { getAttr, innerOf, plainText, wordsOf, type Doc } from '../html';
+import { getAttr, innerOf, plainText, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
 import { heroIndexOf } from './chrome-copy';
@@ -72,17 +72,19 @@ const CONTAINERISH = /(grid|list|rail|row|wrap|deck|group|stack|container|sectio
 // sloplint check4 (gate 4)
 function nestedCards(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
-    const stack: Array<{ name: string; isCard: boolean }> = [];
-    for (const t of doc.tags) {
-      if (t.close) {
-        for (let i = stack.length - 1; i >= 0; i--) if (stack[i].name === t.name) { stack.splice(i); break; }
-        continue;
-      }
-      if (t.selfClosing) continue;
+    const { parent } = treeOf(doc);
+    const cardAt: boolean[] = [];
+    for (let i = 0; i < doc.tags.length; i++) {
+      const t = doc.tags[i];
+      if (t.close || t.selfClosing) continue;
       const cls = getAttr(t.attrs, 'class') || '';
-      const isCard = cls.split(/\s+/).some((c) => { const base = c.split('--')[0]; return !!base && CARD_WORD.test(base) && !CONTAINERISH.test(base); });
-      if (isCard && stack.some((s) => s.isCard)) r.report('nested-cards', doc.file, t.line, `a card inside a card: class="${trunc(cls, 40)}"`);
-      stack.push({ name: t.name, isCard });
+      cardAt[i] = cls.split(/\s+/).some((c) => { const base = c.split('--')[0]; return !!base && CARD_WORD.test(base) && !CONTAINERISH.test(base); });
+      if (!cardAt[i]) continue;
+      for (let p = parent[i]; p >= 0; p = parent[p]) {
+        if (!cardAt[p]) continue;
+        r.report('nested-cards', doc.file, t.line, `a card inside a card: class="${trunc(cls, 40)}"`);
+        break;
+      }
     }
   }
 }

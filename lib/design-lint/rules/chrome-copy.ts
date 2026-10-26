@@ -9,7 +9,7 @@
  */
 import { styleFor, type LintContext } from '../context';
 import { resolveVars } from '../css';
-import { ancestorMap, getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
+import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 
 
@@ -120,14 +120,13 @@ function checkHeroActions(ctx: LintContext, r: Reporter): void {
     const heroIdx = heroIndexOf(doc, h1);
     const hero = heroIdx >= 0 ? innerOf(doc, heroIdx) : null;
     if (!hero) continue;
-    const anc = ancestorMap(doc);
     const controls: HeroControl[] = [];
     for (let i = heroIdx + 1; i < doc.tags.length && doc.tags[i].pos < hero.endPos; i++) {
       const t = doc.tags[i];
       if (t.close || t.selfClosing || !(t.name === 'button' || t.name === 'a')) continue;
       const cls = getAttr(t.attrs, 'class') || '';
       if (t.name === 'a' && !/btn|cta|button/i.test(cls)) continue;
-      if ((anc.get(i) || []).includes('nav')) continue;
+      if (ancestorsOf(doc, i).includes('nav')) continue;
       controls.push({ t, cls, label: plainText(innerOf(doc, i)?.inner || '').trim() });
     }
     if (controls.length < 2) continue;
