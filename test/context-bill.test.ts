@@ -1406,6 +1406,33 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(rows).toBe(depth + 1);
   });
 
+  it("prices a second skill's links into a chain deeper than the kernel's limit from the one measurement", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-exact-shared-deep-"));
+    const levels = path.join(tmp, "levels");
+    const depth = 50;
+    for (let i = 0; i < depth; i++) {
+      fs.mkdirSync(path.join(levels, `L${i}`), { recursive: true });
+      fs.writeFileSync(path.join(levels, `L${i}`, `f${i}.md`), `F${i}-${"x".repeat(30)}`);
+    }
+    for (let i = 0; i < depth - 1; i++) fs.symlinkSync(path.join(levels, `L${i + 1}`), path.join(levels, `L${i}`, "next"));
+    markCheckout(levels);
+    const root = path.join(tmp, "skills");
+    for (const name of ["qa", "qb"]) {
+      fs.mkdirSync(path.join(root, name), { recursive: true });
+      fs.writeFileSync(path.join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\n# ${name}\n`);
+      fs.symlinkSync(path.join(levels, "L0"), path.join(root, name, "next"));
+    }
+    fs.symlinkSync(levels, path.join(root, "gstack"));
+    const measured = await measureExactTokens(root, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(), egressHome });
+    const bill = buildBill(root, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect([...measured.missedKeys]).toEqual([]);
+    const [qa, qb] = ["qa", "qb"].map((n) => bill.skills.find((s) => s.name === n)!);
+    expect(qb.totalMdBytes).toBe(qa.totalMdBytes);
+    expect(qb.totalMdTokens).toBe(qa.totalMdTokens);
+  });
+
   it("names a missing tree, without a raw ENOENT or any request", async () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-missing-"));
     const out = capture();

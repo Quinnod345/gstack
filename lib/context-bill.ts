@@ -243,6 +243,21 @@ function entryKind(p: string, e: fs.Dirent): "file" | "dir" | null {
  * followed directory symlink that contains the tree being walked (`..`, `/`,
  * `$HOME`) would climb out of that tree, so walkers refuse it.
  */
+/**
+ * The realpath of `p`, resolved one component at a time the way the walk
+ * reads directories, so a lexical path that crosses more links than the
+ * kernel's limit still resolves.
+ */
+function realpathStepwise(p: string): string {
+  const abs = path.resolve(p);
+  const { root } = path.parse(abs);
+  let real = fs.realpathSync(root);
+  for (const segment of abs.slice(root.length).split(path.sep)) {
+    if (segment) real = fs.realpathSync(path.join(real, segment));
+  }
+  return real;
+}
+
 function encloses(outer: string, inner: string): boolean {
   const rel = path.relative(outer, inner);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
@@ -1019,7 +1034,7 @@ export async function measureExactTokens(
     const isFm = key.endsWith(fmSuffix);
     let real: string;
     try {
-      real = fs.realpathSync(isFm ? key.slice(0, -fmSuffix.length) : key);
+      real = realpathStepwise(isFm ? key.slice(0, -fmSuffix.length) : key);
     } catch {
       return undefined;
     }
