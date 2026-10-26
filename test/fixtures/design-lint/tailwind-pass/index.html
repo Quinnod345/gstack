@@ -11,16 +11,17 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="overflow-x-clip bg-paper font-body text-ink selection:bg-accent selection:text-accent-ink">
+  <a href="#main" class="sr-only focus-visible:not-sr-only focus-visible:outline-2 focus-visible:outline-accent">Skip to content</a>
 
   <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-    <a href="/" class="font-display text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Fieldnote</a>
+    <a href="/" aria-current="page" class="font-display text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Fieldnote</a>
     <nav aria-label="Main" class="flex gap-6">
       <a href="/pricing" class="text-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">Pricing</a>
       <a href="/docs" class="text-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">Docs</a>
     </nav>
   </header>
 
-  <main>
+  <main id="main">
     <section class="mx-auto grid min-h-dvh max-w-6xl items-center gap-12 px-6 md:grid-cols-2">
       <div>
         <h1 class="font-display text-5xl">Logbooks your crew will keep</h1>
