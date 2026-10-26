@@ -112,10 +112,10 @@ export const RULES: Record<string, RuleMeta> = {
   'missing-states': { tier: 'ask', gate: '26b', title: 'no :active or :disabled state', fix: 'all the states a control can be in' },
   'missing-reduced-motion': { tier: 'blocks', gate: '27', title: 'a keyframe or transform transition without a prefers-reduced-motion fallback', fix: 'add @media (prefers-reduced-motion: reduce)' },
   'autoplay-unmuted': { tier: 'blocks', gate: '28a', title: 'a video autoplaying without muted', fix: 'autoplay muted loop playsinline' },
-  'lazy-lcp': { tier: 'blocks', gate: '28a', title: 'loading="lazy" on the first image', fix: 'fetchpriority="high" on the LCP image' },
+  'lazy-lcp': { tier: 'blocks', gate: '28a', title: 'loading="lazy" on the first image or the hero video', fix: 'fetchpriority="high" on the LCP image' },
   'video-without-poster': { tier: 'ask', gate: '28b', title: 'a video without poster or a priority hint', fix: 'add them' },
   'input-state-shift': { tier: 'blocks', gate: '39a', title: 'input states that break: a border that changes width, a focus ring built from border, disabled by opacity alone', fix: 'constant border, outline, shared height, three disabled channels' },
-  'control-height': { tier: 'ask', gate: '39b', title: 'control height outside 44 to 52px on a marketing page', fix: 'the number' },
+  'control-height': { tier: 'ask', gate: '39b', title: 'control height outside 44 to 52px on a marketing page', fix: 'the number', pageOnly: true },
   'content-hidden-at-rest': { tier: 'blocks', gate: '62', title: 'a reveal class hiding content until JavaScript runs', fix: 'visible by default; hide only under a .js class, or animate from visible with @starting-style' },
   // ── Assets and access ──
   'emoji-decoration': { tier: 'blocks', gate: '30a', title: 'an emoji standing in for an icon', fix: 'one icon library, custom SVG, or typography' },

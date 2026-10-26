@@ -38,10 +38,8 @@ function lintPage(html: string, name = 'index.html'): { html: string; findings: 
 
 const byRule = (findings: Finding[], rule: string): Finding[] => findings.filter((f) => f.rule === rule);
 const lines = (findings: Finding[]): string[] => findings.map(formatFinding);
-import { buildContext } from '../lib/design-lint/static';
 import { Reporter } from '../lib/design-lint/report';
 import { run as runColor } from '../lib/design-lint/rules/color';
-import type { TwItem } from '../lib/design-lint/tailwind';
 
 describe('design-lint colour: purple-blue-gradient (2a, blocks)', () => {
   test('a single-hue ramp and a repeating pattern are not findings', () => {

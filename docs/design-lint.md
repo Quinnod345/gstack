@@ -176,7 +176,7 @@ as `house-style`.
 | `missing-states` | ask | 26b | no :active or :disabled state | all the states a control can be in |
 | `missing-reduced-motion` | blocks | 27 | a keyframe or transform transition without a prefers-reduced-motion fallback | add @media (prefers-reduced-motion: reduce) |
 | `autoplay-unmuted` | blocks | 28a | a video autoplaying without muted | autoplay muted loop playsinline |
-| `lazy-lcp` | blocks | 28a | loading="lazy" on the first image | fetchpriority="high" on the LCP image |
+| `lazy-lcp` | blocks | 28a | loading="lazy" on the first image or the hero video | fetchpriority="high" on the LCP image |
 | `video-without-poster` | ask | 28b | a video without poster or a priority hint | add them |
 | `input-state-shift` | blocks | 39a | input states that break: a border that changes width, a focus ring built from border, disabled by opacity alone | constant border, outline, shared height, three disabled channels |
 | `control-height` | ask | 39b | control height outside 44 to 52px on a marketing page | the number |
