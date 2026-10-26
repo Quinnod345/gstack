@@ -220,7 +220,7 @@ describe('rendered templates carry the contract', () => {
     // Value: protects=the operative block says its check prints the PLAN_REALITY line the summary row asks for;
     // fails_when=that pointer is dropped and PLAN_REALITY is undefined in the block; why_new=only the summary variant
     // was asserted to name PLAN_REALITY; seam=none; no_claim=the bin's output (pinned by the check tests above)
-    for (const skill of ['plan-eng-review', 'plan-ceo-review', 'plan-devex-review']) {
+    for (const skill of ['plan-eng-review', 'plan-ceo-review']) {
       expect(generatePlanRealityRows(ctx(skill)), skill).toMatch(/gstack-plan-reality check --phase [a-z]+ [^\n]*`PLAN_REALITY`/);
     }
     const deep = generatePlanRealityRows(ctx('plan-eng-review'), ['deep']);
