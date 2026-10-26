@@ -18,6 +18,7 @@
 import { afterEach, beforeAll } from 'bun:test';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { CAPY_LAUNCH_MARKERS } from './scripts/lib/shard-engine';
 
 // State-root hermeticity (docs/state-root.md). Tests isolate state with
 // GSTACK_HOME, but GSTACK_STATE_ROOT and GSTACK_STATE_DIR outrank or join it
@@ -33,6 +34,11 @@ for (const name of ['GSTACK_STATE_ROOT', 'GSTACK_STATE_DIR']) {
   delete process.env[name];
   process.stderr.write(`test-setup: stripped inherited ${name}; tests isolate state via GSTACK_HOME\n`);
 }
+// The Capy installer's launch markers (GSTA-99, GSTA-104): a focused `bun test`
+// run from a shell that sourced the launch file would hand every product child
+// an unattended Capy session it never set up. The shard engine strips the same
+// list for the lanes; this reaches direct runs too.
+for (const name of CAPY_LAUNCH_MARKERS) delete process.env[name];
 process.env.GSTACK_TEST_LEGACY_ROOT = path.join(os.tmpdir(), `gstack-test-legacy-root-${process.pid}-${Date.now()}-unused`);
 // Workflow leases (bin/gstack-lease) default to the installation's git dir;
 // for the dev checkout under test that is this repo's .git, and a live test

@@ -1,6 +1,6 @@
 {
   "name": "gstack",
-  "version": "1.91.238",
+  "version": "1.91.247",
   "description": "Garry's Stack — Claude Code skills + fast headless browser. One repo, one install, entire AI engineering workflow.",
   "license": "MIT",
   "type": "module",
@@ -103,12 +103,12 @@
     "typescript": "7.0.2"
   },
   "overrides": {
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "adm-zip": "^0.6.1",
-    "fast-uri": "3.1.8",
+    "fast-uri": "3.1.9",
     "hono": "4.13.13",
     "image-size": "2.0.4",
-    "ip-address": "10.7.3",
+    "ip-address": "10.7.4",
     "proxy-addr": "2.0.8",
     "sharp": "0.35.5"
   },

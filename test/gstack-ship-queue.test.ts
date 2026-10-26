@@ -441,11 +441,83 @@ describe('ready reads all of CI at the head (review #3235 P1-5)', () => {
     expect(line(pending.r.out, 'ci: ')).toBe(`ci: pending at ${pending.at} (passed=1 failed=0 pending=1 skipped=0)`);
   }, 120_000);
 
+  test('a superseded run of a check is judged by its latest run, as GitHub\'s rollup counts (gbrain: a cancelled contributor-gate beside later passes)', () => {
+    const older = { id: 1, name: 'contributor-gate', status: 'completed', conclusion: 'cancelled', completed_at: '2026-10-26T01:00:00Z' };
+    const newer = { id: 2, name: 'contributor-gate', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:10:00Z' };
+    const other = { id: 3, name: 'free-tests', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:05:00Z' };
+    const ok = readyWith({ check_runs: [older, newer, other] });
+    expect(ok.r.status).toBe(EXIT.ok);
+    expect(line(ok.r.out, 'ci: ')).toBe(`ci: green at ${ok.at} (passed=2 failed=0 pending=0 skipped=0)`);
+    const reversed = readyWith({ check_runs: [newer, older, other] });
+    expect(line(reversed.r.out, 'ci: ')).toBe(`ci: green at ${reversed.at} (passed=2 failed=0 pending=0 skipped=0)`);
+    const latestFailed = readyWith({ check_runs: [{ ...older, conclusion: 'success' }, { ...newer, conclusion: 'failure' }, other] });
+    expect(latestFailed.r.status).toBe(EXIT.refused);
+    expect(line(latestFailed.r.out, 'ci: ')).toBe(`ci: red at ${latestFailed.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const rerunning = readyWith({ check_runs: [{ ...older, conclusion: 'failure' }, { id: 4, name: 'contributor-gate', status: 'in_progress' }, other] });
+    expect(line(rerunning.r.out, 'ci: ')).toBe(`ci: pending at ${rerunning.at} (passed=1 failed=0 pending=1 skipped=0)`);
+    const sameTime = readyWith({ check_runs: [{ ...older, id: 9, completed_at: newer.completed_at }, newer, other] });
+    expect(line(sameTime.r.out, 'ci: ')).toBe(`ci: red at ${sameTime.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const unnamed = readyWith({ check_runs: [{ status: 'completed', conclusion: 'cancelled' }, { status: 'completed', conclusion: 'success' }] });
+    expect(line(unnamed.r.out, 'ci: ')).toBe(`ci: red at ${unnamed.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const twoApps = readyWith({ check_runs: [{ ...older, conclusion: 'failure', app: { id: 1 } }, { ...newer, app: { id: 2 } }, other] });
+    expect(line(twoApps.r.out, 'ci: ')).toBe(`ci: red at ${twoApps.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const undated = readyWith({ check_runs: [{ id: 5, name: 'contributor-gate', status: 'completed', conclusion: 'failure' }, newer, other] });
+    expect(line(undated.r.out, 'ci: ')).toBe(`ci: red at ${undated.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const queued = readyWith({ check_runs: [{ ...older, conclusion: 'failure' }, { id: 6, name: 'contributor-gate', status: 'queued' }, other] });
+    expect(line(queued.r.out, 'ci: ')).toBe(`ci: pending at ${queued.at} (passed=1 failed=0 pending=1 skipped=0)`);
+    const nullConclusion = readyWith({ check_runs: [{ ...newer, conclusion: null }, other] });
+    expect(line(nullConclusion.r.out, 'ci: ')).toBe(`ci: red at ${nullConclusion.at} (passed=1 failed=1 pending=0 skipped=0)`);
+  }, 240_000);
+
+  test('a commit-status context is never collapsed with a check run of the same name', () => {
+    const r = readyWith({ check_runs: [{ id: 1, name: 'deploy', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' }] }, { state: 'failure', statuses: [{ context: 'deploy', state: 'failure' }] });
+    expect(line(r.r.out, 'ci: ')).toBe(`ci: red at ${r.at} (passed=1 failed=1 pending=0 skipped=0)`);
+  }, 120_000);
+
   test('incomplete pagination is unknown, never green', () => {
     const { r, at } = readyWith({ total_count: 101, check_runs: hundred });
     expect(r.status).toBe(EXIT.refused);
     expect(line(r.out, 'ci: ')).toBe(`ci: unknown at ${at} (check_runs: read 100 of total_count=101)`);
   }, 120_000);
+});
+
+describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, rule 14)', () => {
+  const pass = { id: 1, name: 'Free Tests', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' };
+  function readyWith(mergeable: string, checks: unknown, pr: Record<string, unknown> = {}) {
+    const repo = fixture();
+    const head = makePr(repo, 'pr-a');
+    const tree = runBin(repo, 'gstack-wtree', []).out.trim();
+    const pregate = path.join(repo.root, 'pregate.json');
+    fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
+    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: shippedBody('1', head), mergeable, headRefName: 'pr-a', ...pr } }, checks: { [head]: checks } });
+    return { r: queue(repo, ['ready', '--pr', '1', '--pregate', pregate], gh), at: head.slice(0, 12) };
+  }
+
+  test('no CI at the head and a conflict: the refusal names the workflow_dispatch procedure', () => {
+    const { r, at } = readyWith('CONFLICTING', { check_runs: [] });
+    expect(r.status).toBe(EXIT.refused);
+    expect(line(r.out, 'ci: ')).toBe(`ci: none at ${at} (passed=0 failed=0 pending=0 skipped=0)`);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${at}); dispatch the free workflows on the branch (gh workflow run free-tests.yml --ref pr-a && gh workflow run windows-free-tests.yml --ref pr-a), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready (advisory)`);
+    for (const name of ['x;$(curl evil)', '--field']) {
+      const odd = readyWith('CONFLICTING', { check_runs: [] }, { headRefName: name });
+      expect(line(odd.r.out, 'ci-hint: ')).toContain('gh workflow run free-tests.yml --ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>');
+    }
+    const fork = readyWith('CONFLICTING', { check_runs: [] }, { isCrossRepository: true });
+    expect(line(fork.r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${fork.at}) and its head is on a fork, so the free workflows cannot be dispatched here; the coordinator decides (advisory)`);
+  }, 240_000);
+
+  test('dispatched runs green at the head and a conflict: READY, with the hint saying the dispatched runs count', () => {
+    const { r, at } = readyWith('CONFLICTING', { check_runs: [pass] });
+    expect(r.status).toBe(EXIT.ok);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were not pull_request runs (dispatched on the branch, or push-triggered), and they count (advisory)`);
+  }, 120_000);
+
+  test('no hint without a conflict, and none while the dispatched runs are red or pending', () => {
+    expect(readyWith('MERGEABLE', { check_runs: [] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('MERGEABLE', { check_runs: [pass] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('CONFLICTING', { check_runs: [{ ...pass, conclusion: 'failure' }] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('CONFLICTING', { check_runs: [{ ...pass, status: 'in_progress' }] }).r.out).not.toContain('ci-hint:');
+  }, 240_000);
 });
 
 describe('printed gate-ahead command (review #3235 P2-1)', () => {
