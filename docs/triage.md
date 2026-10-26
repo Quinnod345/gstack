@@ -42,12 +42,14 @@ the labels match:
 | Reason | Comment says | Close reason | Label |
 |--------|--------------|--------------|-------|
 | **Fixed** | the version, commit or PR that fixed it, and what changed | completed | — |
-| **Duplicate** | the issue that tracks it (and that issue is open or parked, not closed) | not planned | `duplicate` |
+| **Duplicate** | the issue that tracks it (and that issue is open or parked; if it was already fixed, close this one as fixed too, with the same version) | duplicate (`gh issue close <n> --duplicate-of <m>`) | `duplicate` |
 | **Won't fix** | why: out of scope, a different design was chosen, the premise no longer holds | not planned | `wontfix` |
 
 A duplicate of a parked issue is still a duplicate: close it with the link,
 and the parked issue's comment or TODOS.md entry credits both reporters. A
-report that does not reproduce on current main closes as won't fix with the
+report that no longer reproduces on current main closes as fixed when a commit,
+PR or version explains why (cite it, as `/investigate --backlog` does with
+`already_fixed <commit>`); when nothing does, it closes as won't fix with the
 version it was checked against and an invitation to reopen with a repro.
 
 ## Labels this page uses
