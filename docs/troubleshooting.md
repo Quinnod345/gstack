@@ -2239,7 +2239,11 @@ entry that no longer applies; rotate a credential that is real.
 <a id="redact-version-as-ip"></a>
 ### `pii.ip_public` MEDIUM on a four-part version number
 
-**Meaning.** The line does not declare the value as a version.
+**Meaning.** The line does not declare the value as a version. When the
+text goes through `gstack-post` from inside the repository, four-part versions
+equal to the root `VERSION` or to a `## [x.y.z.w]` / `## vx.y.z.w` CHANGELOG.md heading are
+exempt wherever they appear, so there the finding means the quad is not a
+release of this repository (or the post ran outside the checkout).
 
 **Fix.** Write it as `version: 1.2.3.4`, `"version": "..."` or `v1.2.3.4`.
 MEDIUM findings do not block pushes.
