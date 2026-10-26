@@ -271,8 +271,9 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 #                           #   asks once). false keeps the old order.
 #                           #   Invalid values are REJECTED (value kept).
 # pr_wait_gating_bots: greptile,macroscope  # review bots gstack-pr-wait
-#                           #   --until ready waits for (comma-separated
-#                           #   substrings of a bot login or check name).
+#                           #   --until ready waits for (comma-separated; a
+#                           #   bot owns logins starting with its name and
+#                           #   checks mentioning it).
 # pr_wait_advisory_bots: coderabbit  # review bots gstack-pr-wait reports but
 #                           #   never waits for. Both lists: lowercase names,
 #                           #   letters, digits, . _ - only; none empties a list.

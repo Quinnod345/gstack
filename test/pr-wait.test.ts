@@ -10,9 +10,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { GhResult } from '../lib/ci-gate';
-import { PR_WAIT_EXIT, Watcher, botLists, parsePrTarget, parsePrWaitArgs, prWaitMain, stateDir, type PrWaitEnv, type PrWaitOptions } from '../lib/pr-wait';
+import { DEFAULT_ADVISORY_BOTS, DEFAULT_GATING_BOTS, PR_WAIT_EXIT, Watcher, botLists, parsePrTarget, parsePrWaitArgs, prWaitMain, stateDir, type PrWaitEnv, type PrWaitOptions } from '../lib/pr-wait';
+import { GhError, runGh } from '../lib/pr-wait-github';
 import { RESULT_CODES } from '../lib/result-codes';
 
 const ROOT = join(import.meta.dir, '..');
@@ -178,7 +179,7 @@ describe('events: one stdout line each, progress on stderr', () => {
       '#42 review from reviewer (changes requested): nope https://github.com/owner/project/pull/42#pullrequestreview-r1',
       '#42 new thread from reviewer on lib/x.ts:12: rename this https://github.com/owner/project/pull/42#issuecomment-t1',
     ]);
-    expect(stderr.join('')).toContain('watching owner/project#42 until any-change; required checks: none set, so every CI check gates');
+    expect(stderr.join('')).toContain('watching owner/project#42 until any-change; required checks: none set; every check on the head gates');
     expect(stderr.join('')).toContain('baseline recorded for owner/project#42');
   });
 
@@ -220,7 +221,7 @@ describe('required checks and the green condition', () => {
     expect(lines()).toEqual(['#42 green on aaaaaaa: 3 pass; required 2/2 green; no greptile or macroscope yet; 0 unresolved threads; merge state CLEAN; 2 commits behind main']);
   });
 
-  test('with no required checks every CI check gates except the review bots\' own, and a gating bot\'s review on the head makes it ready', () => {
+  test('every check on the head gates except advisory bots\' own, and a gating bot\'s review on the head makes it ready', () => {
     const pr = prJson({ reviews: [review('g1', { login: 'greptile-apps', bot: true }, 'COMMENTED', 'Confidence score: 4/5')] });
     const w = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'pass'], ['coderabbit', 'pending', 'Review in progress'])) });
     expect(pollUntilDone(w)).toBe(PR_WAIT_EXIT.met);
@@ -234,7 +235,7 @@ describe('required checks and the green condition', () => {
     expect(lines()[0]).toBe('#42 blocked by 1 unresolved threads on aaaaaaa: https://github.com/owner/project/pull/42#issuecomment-t1');
     stdout = [];
     expect(pollUntilDone(watcher({ ...base, pr: prJson({ reviews: [reviewed], mergeState: 'BEHIND' }) }))).toBe(1);
-    expect(lines()).toContain('#42 merge state is BEHIND: update the branch from main before merging');
+    expect(lines()).toContain('#42 merge state is BEHIND on aaaaaaa: update the branch from main before merging');
   });
 });
 
@@ -272,14 +273,18 @@ describe('base branch and merge state', () => {
     expect(lines()).toEqual(['#42 main moved to ccccccc and touches files in this PR: x']);
   });
 
-  test('BEHIND is an event once per head; DIRTY ends the watch as blocked', () => {
-    const behind = watcher({ pr: [prJson({ mergeState: 'CLEAN' }), prJson({ mergeState: 'BEHIND' })], checks: ok(checksJson(['build', 'pending'])) }, 'green');
-    expect(pollUntilDone(behind, 4)).toBeNull();
-    expect(lines()).toEqual(['#42 merge state is BEHIND: update the branch from main before merging']);
+  test('BEHIND is an event once per head, again after a push that stays BEHIND; DIRTY ends the watch as blocked', () => {
+    const D = 'd'.repeat(40);
+    const behind = watcher({ pr: [prJson({ mergeState: 'CLEAN' }), prJson({ mergeState: 'BEHIND' }), prJson({ mergeState: 'BEHIND' }), prJson({ mergeState: 'UNKNOWN', head: D }), prJson({ mergeState: 'BEHIND', head: D })], checks: ok(checksJson(['build', 'pending'])) }, 'green');
+    expect(pollUntilDone(behind, 5)).toBeNull();
+    expect(lines()).toEqual([
+      '#42 merge state is BEHIND on aaaaaaa: update the branch from main before merging',
+      '#42 merge state is BEHIND on ddddddd: update the branch from main before merging',
+    ]);
     stdout = [];
     const dirty = watcher({ pr: prJson({ mergeState: 'DIRTY' }) }, 'green');
     expect(dirty.poll()).toBe(PR_WAIT_EXIT.blocked);
-    expect(lines()[0]).toBe('#42 merge state is DIRTY: the branch conflicts with main, rebase it');
+    expect(lines()[0]).toBe('#42 merge state is DIRTY on aaaaaaa: the branch conflicts with main, rebase it');
   });
 });
 
@@ -352,7 +357,9 @@ describe('arguments and the gh layer', () => {
     expect(parsePrTarget('abc')).toMatchObject({ error: "'abc' is not a PR number or PR URL" });
     expect(parsePrTarget('0')).toMatchObject({ error: "'0' is not a valid PR number" });
     expect(parsePrTarget('42', 'nope')).toMatchObject({ error: "'nope' is not owner/name" });
-    expect(parsePrWaitArgs(['42', '--until', 'green', '--interval', '2'])).toEqual({ target: '42', until: 'green', interval: 5 });
+    expect(parsePrWaitArgs(['42', '--until', 'green', '--interval', '2'])).toEqual({ target: '42', until: 'green', interval: 5, timeout: 60 });
+    expect(parsePrWaitArgs(['42', '--timeout', '0'])).toMatchObject({ timeout: 0 });
+    expect(parsePrWaitArgs(['42', '--timeout', 'soon'])).toMatchObject({ error: expect.stringContaining('--timeout needs') });
     expect(parsePrWaitArgs(['--until', 'soon'])).toMatchObject({ error: expect.stringContaining('--until needs') });
     expect(parsePrWaitArgs(['--bogus'])).toMatchObject({ error: 'unknown argument --bogus' });
     expect(parsePrWaitArgs(['--help'])).toEqual({ help: true });
@@ -394,3 +401,242 @@ describe('arguments and the gh layer', () => {
     expect(readFileSync(join(ROOT, 'bin', 'gstack-pr-wait'), 'utf8').startsWith('#!/usr/bin/env -S bun --no-env-file --config=/dev/null\n')).toBe(true);
   });
 });
+
+describe('pass-1 review fixes: gates agree, bounded waits, bot identity, local faults', () => {
+  function withConfig(yaml: string) {
+    mkdirSync(join(dir, 'state'), { recursive: true });
+    writeFileSync(join(dir, 'state', 'config.yaml'), yaml);
+  }
+  const GREPTILE = review('g1', { login: 'greptile-apps', bot: true }, 'COMMENTED', '');
+
+  test('green gates on every check on the head, as gstack-ci-gate does: a pending non-required check holds it and a red one blocks it', () => {
+    const pending = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'pending'])) }, 'green');
+    expect(pollUntilDone(pending, 4)).toBeNull();
+    expect(lines()).toEqual([]);
+    const red = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'fail'])) }, 'green');
+    expect(red.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()).toEqual(['#42 check failed: quality-gate https://ci.example/quality-gate', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
+  });
+
+  test('a failed gating-bot check is a failed check, never a completed review; a failed advisory check is reported and not waited on', () => {
+    const gating = watcher({ pr: prJson({ reviews: [] }), checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'fail'])) });
+    expect(pollUntilDone(gating)).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 check failed: greptile-review https://ci.example/greptile-review');
+    stdout = [];
+    const advisory = watcher({ pr: prJson({ reviews: [GREPTILE] }), checks: ok(checksJson(['build', 'pass'], ['coderabbit', 'fail'])) });
+    expect(pollUntilDone(advisory)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual([
+      '#42 greptile finished on aaaaaaa',
+      '#42 coderabbit finished on aaaaaaa: failed: coderabbit (advisory, not waited on)',
+      expect.stringContaining('ready on aaaaaaa: 1 pass; greptile done, coderabbit fail (advisory)'),
+    ]);
+  });
+
+  test('a bot owns logins that start with its name, so a person called notgreptile is a reviewer, not the gating bot', () => {
+    const human = review('h1', { login: 'notgreptile' }, 'COMMENTED', 'looks fine');
+    const w = watcher({ pr: [prJson({}), prJson({ reviews: [human] })], checks: ok(checksJson(['build', 'pass'])) });
+    expect(pollUntilDone(w, 4)).toBeNull();
+    expect(lines()).toEqual(['#42 review from notgreptile (commented): looks fine https://github.com/owner/project/pull/42#pullrequestreview-h1']);
+  });
+
+  test('ready with no gating bot configured is green plus the thread and merge-state checks', () => {
+    withConfig('pr_wait_gating_bots: none\n');
+    const w = watcher({ checks: ok(checksJson(['build', 'pass'])) });
+    expect(w.bots.gating).toEqual([]);
+    expect(pollUntilDone(w, 4)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()[0]).toContain('ready on aaaaaaa: 1 pass; no review bot yet');
+  });
+
+  test('ready waits while the merge state is UNKNOWN and is met once GitHub knows it', () => {
+    const w = watcher({ pr: [prJson({ mergeState: 'UNKNOWN', reviews: [GREPTILE] }), prJson({ mergeState: 'UNKNOWN', reviews: [GREPTILE] }), prJson({ mergeState: 'UNKNOWN', reviews: [GREPTILE] }), prJson({ mergeState: 'CLEAN', reviews: [GREPTILE] })], checks: ok(checksJson(['build', 'pass'])) });
+    expect(w.poll()).toBeNull();
+    w.baseline = false;
+    expect(w.poll()).toBeNull();
+    expect(w.poll()).toBeNull();
+    expect(lines()).toEqual([]);
+    expect(w.poll()).toBe(PR_WAIT_EXIT.met);
+    expect(lines()[0]).toContain('merge state CLEAN');
+  });
+
+  test('--timeout ends a watch that met nothing as PR_WAIT_BLOCKED, naming what is still pending; 0 waits without limit', () => {
+    function timed(timeout: number) {
+      const e = env(fakeGh({ checks: ok(checksJson(['build', 'pending'], ['docs', 'pass'])) }));
+      e.sleep = ms => { clock += ms; };
+      return new Watcher(e, REPO, 42, 'green', 20, botLists(e.vars), timeout);
+    }
+    expect(timed(1).run()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()).toEqual(['#42 gstack-pr-wait stopped: no green after 1 minutes; still pending: build', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
+    stdout = [];
+    const forever = timed(0);
+    let polls = 0;
+    const poll = forever.poll.bind(forever);
+    forever.poll = () => { polls += 1; return polls < 50 ? poll() : PR_WAIT_EXIT.met; };
+    expect(forever.run()).toBe(PR_WAIT_EXIT.met);
+    expect(polls).toBe(50);
+  });
+
+  test('run() ends as blocked after ten transient failures, and at once on a non-transient gh error', () => {
+    const down = (args: string[]): GhResult => (args[1] === 'graphql' ? err('gh: Something went wrong (HTTP 502)') : ok(''));
+    const e = env(down);
+    expect(new Watcher(e, REPO, 42, 'green', 20, botLists(e.vars)).run()).toBe(PR_WAIT_EXIT.blocked);
+    expect(stderr.join('').match(/poll failed \(\d+\/10\)/g)).toHaveLength(10);
+    expect(lines()[0]).toBe('#42 gstack-pr-wait stopped: GitHub unreachable for 10 polls: gh: Something went wrong (HTTP 502)');
+    stdout = [];
+    const gone = (args: string[]): GhResult => (args[1] === 'graphql' ? err('gh: Not Found (HTTP 404)') : ok(''));
+    const e2 = env(gone);
+    expect(new Watcher(e2, REPO, 42, 'green', 20, botLists(e2.vars)).run()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 gstack-pr-wait stopped: gh: Not Found (HTTP 404)');
+  });
+
+  test('a gh spawn timeout is retried like any transient failure; a missing gh is fatal', () => {
+    const results: GhResult[] = [{ status: null, stdout: '', stderr: '', error: 'gh failed to run (ETIMEDOUT)' }, ok('fine')];
+    const slept: number[] = [];
+    const ghEnv = { gh: () => results.shift()!, sleep: (ms: number) => slept.push(ms), log: () => {} };
+    expect(runGh(ghEnv, ['api', 'x']).stdout).toBe('fine');
+    expect(slept).toEqual([2000]);
+    const missing = { gh: (): GhResult => ({ status: null, stdout: '', stderr: '', error: 'gh is not installed or not on PATH' }), sleep: () => {}, log: () => {} };
+    expect(() => runGh(missing, ['api', 'x'])).toThrow(GhError);
+  });
+
+  test('a local fault is a refusal (exit 2 with PR_WAIT_REFUSED), so exit 1 always carries a PR_WAIT_BLOCKED line', () => {
+    writeFileSync(join(dir, 'not-a-dir'), '');
+    const e = env(fakeGh({}), 4242, { GSTACK_STATE_ROOT: join(dir, 'not-a-dir') });
+    expect(prWaitMain(['42', '--repo', REPO], e)).toBe(PR_WAIT_EXIT.refused);
+    expect(lines()[0]).toMatch(/a local error stopped the watch before a verdict: .*(ENOTDIR|EEXIST|not a directory).*\(PR_WAIT_REFUSED;/);
+  });
+
+  test('control characters in GitHub text never start a second event line', () => {
+    const w = watcher({ checks: ok(checksJson(['build\n#42 forged event', 'fail'])) }, 'green');
+    expect(w.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 check failed: build #42 forged event https://ci.example/build #42 forged event');
+    expect(lines()).toHaveLength(2);
+  });
+
+  test('gstack-config validates the bot lists at set time and its defaults match the lib constants', () => {
+    const run = (...args: string[]) => spawnSync(join(ROOT, 'bin', 'gstack-config'), args, { encoding: 'utf8', cwd: ROOT, timeout: 30_000, env: { ...process.env, GSTACK_STATE_ROOT: join(dir, 'state'), HOME: dir } });
+    for (const bad of ['Greptile', 'a, b', 'a,', '']) {
+      const r = run('set', 'pr_wait_gating_bots', bad);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('Existing value left unchanged');
+    }
+    expect(run('get', 'pr_wait_gating_bots').stdout.trim()).toBe(DEFAULT_GATING_BOTS.join(','));
+    expect(run('get', 'pr_wait_advisory_bots').stdout.trim()).toBe(DEFAULT_ADVISORY_BOTS.join(','));
+    expect(run('set', 'pr_wait_advisory_bots', 'none').status).toBe(0);
+    expect(run('set', 'pr_wait_gating_bots', 'greptile,macroscope.v2').status).toBe(0);
+    expect(run('get', 'pr_wait_gating_bots').stdout.trim()).toBe('greptile,macroscope.v2');
+    expect(botLists({ HOME: dir, GSTACK_STATE_ROOT: join(dir, 'state') })).toEqual({ gating: ['greptile', 'macroscope.v2'], advisory: [] });
+  });
+
+  test('the bin dies on SIGTERM at once (no JS handler swallows it) and the next watcher takes over its lock', async () => {
+    const fakeBin = join(dir, 'fakebin');
+    mkdirSync(fakeBin);
+    writeFileSync(join(fakeBin, 'gh'), `#!/bin/sh
+case "$1 $2" in
+  'pr view') echo '{"number":42}' ;;
+  'api graphql') echo '${prJson({})}' ;;
+  'pr checks') echo '${checksJson(['build', 'pending'])}'; exit 8 ;;
+  *) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+esac`, { mode: 0o755 });
+    const stateRoot = join(dir, 'state');
+    const child = spawn(join(ROOT, 'bin', 'gstack-pr-wait'), ['42', '--repo', REPO, '--interval', '5'], { cwd: ROOT, env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, GSTACK_STATE_ROOT: stateRoot, HOME: dir } });
+    const lockFile = join(stateRoot, 'pr-wait', 'owner__project__42.lock');
+    const started = Date.now();
+    while (!existsSync(lockFile) && Date.now() - started < 15_000) await Bun.sleep(100);
+    expect(existsSync(lockFile)).toBe(true);
+    child.kill('SIGTERM');
+    const ended = await Promise.race([
+      new Promise<string>(resolve => child.on('exit', (code, signal) => resolve(`exit ${code} ${signal}`))),
+      Bun.sleep(5_000).then(() => 'alive'),
+    ]);
+    expect(ended).toBe('exit null SIGTERM');
+    expect(readFileSync(lockFile, 'utf8')).toBe(String(child.pid));
+    const next = watcher({});
+    expect(next.lock()).toBeNull();
+    expect(readFileSync(lockFile, 'utf8')).toBe('4242');
+  }, 30_000);
+});
+
+describe('state matrix cells (gstack-state-matrix: --until × bucket, merge state × --until, lock, baseline × event)', () => {
+  const GREPTILE = review('g1', { login: 'greptile-apps', bot: true }, 'COMMENTED', '');
+
+  test('ready × fail: exit 1 with the failed-check line and PR_WAIT_BLOCKED', () => {
+    const w = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'fail'], ['windows-free-tests', 'pass'])) });
+    expect(w.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()).toEqual(['#42 required check failed: free-tests https://ci.example/free-tests', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
+  });
+
+  test('any-change × pass: silent while nothing is new; one "checks finished" line once the set turns stable, then exit 0', () => {
+    const w = watcher({ checks: [ok(checksJson(['build', 'pending'])), ok(checksJson(['build', 'pass']))] }, 'any-change');
+    expect(w.poll()).toBeNull();
+    w.baseline = false;
+    expect(w.poll()).toBeNull();
+    expect(lines()).toEqual([]);
+    expect(w.poll()).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual([expect.stringMatching(/^#42 checks finished on aaaaaaa: 1 pass; no greptile or macroscope yet; 0 unresolved threads; merge state CLEAN$/)]);
+  });
+
+  test('any-change × pending: silent, keeps polling', () => {
+    expect(pollUntilDone(watcher({ checks: ok(checksJson(['build', 'pending'])) }, 'any-change'), 4)).toBeNull();
+    expect(lines()).toEqual([]);
+  });
+
+  test('any-change × fail: the failed check is an event and the watch ends with exit 0, not blocked', () => {
+    const w = watcher({ checks: [ok(checksJson(['build', 'pending'])), ok(checksJson(['build', 'fail']))] }, 'any-change');
+    expect(pollUntilDone(w)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 check failed: build https://ci.example/build']);
+  });
+
+  test('BEHIND × any-change and DIRTY × any-change: one merge-state line each, exit 0, no PR_WAIT_BLOCKED', () => {
+    const behind = watcher({ pr: [prJson({ mergeState: 'CLEAN' }), prJson({ mergeState: 'BEHIND' })], checks: ok(checksJson(['build', 'pending'])) }, 'any-change');
+    expect(pollUntilDone(behind)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 merge state is BEHIND on aaaaaaa: update the branch from main before merging']);
+    stdout = [];
+    const dirty = watcher({ pr: [prJson({ mergeState: 'CLEAN' }), prJson({ mergeState: 'DIRTY' })], checks: ok(checksJson(['build', 'pending'])) }, 'any-change');
+    expect(pollUntilDone(dirty)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 merge state is DIRTY on aaaaaaa: the branch conflicts with main, rebase it']);
+  });
+
+  test('DIRTY × ready: exit 1 with the DIRTY line and PR_WAIT_BLOCKED', () => {
+    const w = watcher({ pr: prJson({ mergeState: 'DIRTY', reviews: [GREPTILE] }), checks: ok(checksJson(['build', 'pass'])) });
+    expect(w.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()).toEqual(['#42 merge state is DIRTY on aaaaaaa: the branch conflicts with main, rebase it', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
+  });
+
+  test('UNKNOWN × green, UNKNOWN × any-change: no merge-state event; green is decided by the checks alone', () => {
+    const green = watcher({ pr: prJson({ mergeState: 'UNKNOWN' }), checks: ok(checksJson(['build', 'pass'])) }, 'green');
+    expect(pollUntilDone(green)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual([expect.stringMatching(/^#42 green on aaaaaaa: 1 pass; no greptile or macroscope yet; 0 unresolved threads; merge state UNKNOWN; 0 commits behind main$/)]);
+    expect(JSON.parse(readFileSync(green.stateFile, 'utf8')).merge_state).toBeNull();
+    stdout = [];
+    expect(pollUntilDone(watcher({ pr: prJson({ mergeState: 'UNKNOWN' }), checks: ok(checksJson(['build', 'pending'])) }, 'any-change'), 4)).toBeNull();
+    expect(lines()).toEqual([]);
+  });
+
+  test('lock: free × unlock is a no-op; dead-pid × unlock leaves the stale file for the next lock() to take over', () => {
+    const w = watcher({});
+    expect(() => w.unlock()).not.toThrow();
+    expect(existsSync(w.lockFile)).toBe(false);
+    mkdirSync(join(w.lockFile, '..'), { recursive: true });
+    writeFileSync(w.lockFile, '999999');
+    w.unlock();
+    expect(readFileSync(w.lockFile, 'utf8')).toBe('999999');
+    expect(w.lock()).toBeNull();
+    expect(readFileSync(w.lockFile, 'utf8')).toBe('4242');
+  });
+
+  test('restarted × required-check-failed and restarted × merged: the verdict line is printed again by the new process', () => {
+    const first = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'fail'], ['windows-free-tests', 'pass'])) }, 'green');
+    expect(first.poll()).toBe(PR_WAIT_EXIT.blocked);
+    stdout = [];
+    const again = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'fail'], ['windows-free-tests', 'pass'])) }, 'green');
+    expect(again.baseline).toBe(false);
+    expect(again.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 required check failed: free-tests https://ci.example/free-tests');
+    stdout = [];
+    const merged = watcher({ pr: prJson({ state: 'MERGED' }) }, 'green');
+    expect(merged.baseline).toBe(false);
+    expect(merged.poll()).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 merged: https://github.com/owner/project/pull/42']);
+  });
+});
+

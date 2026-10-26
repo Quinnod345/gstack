@@ -90,12 +90,12 @@ export function runGh(env: GhEnv, args: string[], allow: number[] = [0]): GhResu
   let delay = 2_000;
   for (let attempt = 1; ; attempt++) {
     const result = env.gh(args);
-    if (result.error) throw new GhError(result.error, false);
-    // A null status is gh killed by a signal (the watcher itself being stopped): retry, never a verdict.
+    // gh missing is fatal; any other spawn failure (its 60 s timeout, a signal) is a slow API, so retry.
+    if (result.error && /not installed/.test(result.error)) throw new GhError(result.error, false);
     const status = result.status ?? -1;
-    const transient = status !== 0 && (result.status === null || TRANSIENT.test(result.stderr));
+    const transient = status !== 0 && (result.error !== undefined || result.status === null || TRANSIENT.test(result.stderr));
     if (!transient && allow.includes(status)) return result;
-    const message = lastLine(result.stderr) || `gh exited ${status}`;
+    const message = result.error ?? (lastLine(result.stderr) || `gh exited ${status}`);
     if (!transient || attempt === RETRIES) throw new GhError(message, transient);
     env.log(`gh ${args.slice(0, 2).join(' ')}: ${message}; retry in ${delay / 1000}s`);
     env.sleep(delay);

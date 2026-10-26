@@ -4363,48 +4363,60 @@ the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 ## gstack-pr-wait
 
 `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change]
-[--interval SECONDS]` watches one pull request and prints one stdout line per
-real event, prefixed `#<pr>`; progress and recoverable errors go to stderr.
-`/land-and-deploy` Step 3 runs it with `--until green`. Exit 0 means the
-`--until` condition is met or the PR merged; exit 1 and 2 end with one of the
-two codes below. Required checks come from the base branch's rulesets and
-classic branch protection; a 403 on the classic protection read (a token
-without admin scope) is logged and skipped, and the rulesets read still names
-the required checks. The review-bot lists are configuration:
-`gstack-config set pr_wait_gating_bots greptile,macroscope` and
-`pr_wait_advisory_bots coderabbit` (`none` empties a list).
+[--interval SECONDS] [--timeout MINUTES]` watches one pull request and prints
+one stdout line per real event, prefixed `#<pr>`; progress and recoverable
+errors go to stderr. `/land-and-deploy` Step 3 runs it with `--until green`.
+Exit 0 means the `--until` condition is met or the PR merged; exit 1 and 2
+end with one of the two codes below. `green` gates on every check on the
+head, as `gstack-ci-gate` does, so the two never disagree; a check the base
+branch requires (rulesets and classic branch protection) counts as pending
+until it appears, and advisory bots' checks never gate. A 403 on the classic
+protection read (a token without admin scope) is logged and skipped, and the
+rulesets read still names the required checks. The review-bot lists are
+configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`
+and `pr_wait_advisory_bots coderabbit` (`none` empties a list); a bot owns
+the logins that start with its name and the checks that mention it. The loop
+is synchronous, so Ctrl-C and `kill` stop it at once; the lock it leaves is
+taken over by the next watcher for that PR once the pid is gone.
 
 <a id="pr-wait-blocked"></a>
 ### `#<pr> stopped: action needed (PR_WAIT_BLOCKED)`
 
 **Meaning.** Exit 1. The condition cannot be met without a change to the PR:
-the lines above it say which. A required check failed (name and link; with no
-required checks configured, every non-bot check gates); the merge state is
-DIRTY (the branch conflicts with its base); the PR was closed without merging;
-`--until ready` is blocked by unresolved review threads or a BEHIND branch; or
-GitHub stayed unreachable for ten polls, or answered with a non-transient
-error (`gstack-pr-wait stopped: <gh message>`).
+the lines above it say which. A check failed (name and link; `required check
+failed` when the base branch requires it); the merge state is DIRTY (the branch
+conflicts with its base); the PR was closed without merging; `--until ready` is
+blocked by unresolved review threads or a BEHIND branch; GitHub stayed
+unreachable for ten polls, or answered with a non-transient error
+(`gstack-pr-wait stopped: <gh message>`); or `--timeout` passed (default 60
+minutes) with the condition unmet (`gstack-pr-wait stopped: no green after 60
+minutes; still pending: <checks>`).
 
 **Fix.** Act on the named line: fix the failing check and push, rebase or
-update the branch, resolve the threads, or read the gh message. Then start
-`gstack-pr-wait` again; its state file remembers what it already reported, so
-only new events print. A watcher that stopped on a gh error restarts cleanly
-once `gh auth status` passes.
+update the branch, resolve the threads, or read the gh message. After a
+timeout, decide whether the pending checks are worth waiting for and start
+again, with `--timeout 0` to wait without limit. Then start `gstack-pr-wait`
+again; its state file remembers what it already reported, so only new events
+print. A watcher that stopped on a gh error restarts cleanly once `gh auth
+status` passes.
 
 <a id="pr-wait-refused"></a>
 ### `gstack-pr-wait: the watcher did not start — ... (PR_WAIT_REFUSED)`
 
-**Meaning.** Exit 2, before any poll. The target is not a PR number or URL,
-`--repo` is not `owner/name`, no repository could be read from the checkout,
-the PR cannot be read with the current `gh` login, an option is unknown, or
-another `gstack-pr-wait` process (the line names its pid) already watches
-this PR from the same state root, so a second one would print duplicate
-events.
+**Meaning.** Exit 2, never a verdict on the PR. The target is not a PR number
+or URL, `--repo` is not `owner/name`, no repository could be read from the
+checkout, the PR cannot be read with the current `gh` login, an option is
+unknown, another `gstack-pr-wait` process (the line names its pid) already
+watches this PR from the same state root, so a second one would print
+duplicate events, or a local error (`a local error stopped the watch before a
+verdict: <message>`, an unwritable state root for example) ended the process.
+Exit 1 is reserved for `PR_WAIT_BLOCKED`, so a local fault never reads as a
+PR that needs action.
 
 **Fix.** Pass the number or URL and `--repo owner/name`, check `gh auth
-status`, or let the running watcher finish. If no events reach you from the
-named pid, `kill <pid>` and start again; a lock whose pid is no longer alive
-is taken over without that step.
+status`, fix the named local error, or let the running watcher finish. If no
+events reach you from the named pid, `kill <pid>` and start again; a lock
+whose pid is no longer alive is taken over without that step.
 
 ## gstack-error-capture
 

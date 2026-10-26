@@ -32,6 +32,8 @@ const STATUS_BOTS = ['github-actions', 'vercel', 'netlify', 'railway', 'cloudfla
 export const STALE_STATE_MS = 6 * 3600 * 1000;
 const MAX_FAILED_POLLS = 10;
 const MIN_INTERVAL_SECONDS = 5;
+/** Minutes before a watch that met nothing ends as PR_WAIT_BLOCKED, naming what is still pending; 0 waits without limit. */
+export const DEFAULT_TIMEOUT_MINUTES = 60;
 
 export interface PrWaitEnv {
   gh: GhRunner;
@@ -44,12 +46,12 @@ export interface PrWaitEnv {
   pidAlive(pid: number): boolean;
 }
 
-export interface PrWaitOptions { target?: string; repo?: string; until: Until; interval: number }
+export interface PrWaitOptions { target?: string; repo?: string; until: Until; interval: number; timeout: number }
 export interface BotLists { gating: string[]; advisory: string[] }
 
 interface State { reported: string[]; summaries: Record<string, string>; base_oid: string | null; merge_state: string | null }
 
-export const PR_WAIT_USAGE = `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS]
+export const PR_WAIT_USAGE = `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS] [--timeout MINUTES]
 
 Watches one pull request and prints one line per real event on stdout (prefixed
 #<pr>), so a monitor wakes the agent once per event. Progress and recoverable
@@ -57,13 +59,18 @@ errors go to stderr. <pr> is a PR number or URL; without --repo the repository
 comes from the URL or the current checkout.
 
 --until
-  green       required checks passed on the current head (every CI check when
-              the base branch requires none), confirmed by two identical polls
-  ready       green, a gating review bot reviewed the current head, and no
-              review thread is unresolved (default)
+  green       every CI check on the current head passed, confirmed by two
+              identical polls; a check the base branch requires counts as
+              pending until it appears, and advisory bots' checks never gate
+  ready       green, a gating review bot reviewed the current head (none
+              configured: green alone), no review thread is unresolved and the
+              merge state is known (default)
   any-change  stop after the first poll that prints an event
 
-Events: a required check failed (name and link); all checks finished on the
+--timeout   minutes before a watch that met nothing ends as PR_WAIT_BLOCKED,
+            naming what is still pending (default 60; 0 waits without limit)
+
+Events: a check failed (name and link); all checks finished on the
 head (one summary line); a comment, review, thread or thread reply from someone
 other than the PR author or the gh user; a review bot finished on the head, or
 a gating bot's summary changed afterwards; the base branch moved and the new
@@ -73,23 +80,28 @@ CI and deploy bots are skipped because checks carry that news.
 
 Review bots: gstack-config set pr_wait_gating_bots greptile,macroscope
              gstack-config set pr_wait_advisory_bots coderabbit
-Advisory bots are reported but never waited on; the value none empties a list.
+A bot owns the logins that start with its name (greptile-apps[bot]) and the
+checks that mention it. Advisory bots are reported but never waited on; the
+value none empties a list.
 
 Exit codes
   0  the --until condition is met, or the PR merged
-  1  the condition needs action (PR_WAIT_BLOCKED): a required check failed,
-     the branch conflicts with its base, the PR closed, ready is blocked by
-     unresolved threads or a BEHIND branch, or GitHub stayed unreachable
-  2  bad arguments, an unknown PR, or another watcher holds this PR
-     (PR_WAIT_REFUSED)
+  1  the condition needs action (PR_WAIT_BLOCKED): a check failed, the
+     branch conflicts with its base, the PR closed, ready is blocked by
+     unresolved threads or a BEHIND branch, GitHub stayed unreachable, or
+     --timeout passed
+  2  bad arguments, an unknown PR, another watcher holds this PR, or a local
+     error stopped the watch before a verdict (PR_WAIT_REFUSED)
 
 Required checks come from rulesets and classic branch protection, so a
 required check that has not started yet is pending, never green by omission.
 State: <state root>/pr-wait/<owner>__<name>__<pr>.json and .lock; a baseline
-older than 6 hours is discarded. Docs: docs/troubleshooting.md#gstack-pr-wait`;
+older than 6 hours is discarded. Stopping the watcher (Ctrl-C, kill) leaves its
+lock, which the next watcher for the PR takes over once the pid is gone.
+Docs: docs/troubleshooting.md#gstack-pr-wait`;
 
 export function parsePrWaitArgs(argv: string[]): PrWaitOptions | { help: true } | { error: string } {
-  const opts: PrWaitOptions = { until: 'ready', interval: 20 };
+  const opts: PrWaitOptions = { until: 'ready', interval: 20, timeout: DEFAULT_TIMEOUT_MINUTES };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--help' || flag === '-h') return { help: true };
@@ -104,6 +116,12 @@ export function parsePrWaitArgs(argv: string[]): PrWaitOptions | { help: true } 
       const value = argv[++i] ?? '';
       if (!/^[0-9]+$/.test(value)) return { error: `--interval needs a whole number of seconds, not '${value}'` };
       opts.interval = Math.max(Number(value), MIN_INTERVAL_SECONDS);
+      continue;
+    }
+    if (flag === '--timeout') {
+      const value = argv[++i] ?? '';
+      if (!/^[0-9]+$/.test(value)) return { error: `--timeout needs a whole number of minutes, not '${value}'` };
+      opts.timeout = Number(value);
       continue;
     }
     if (flag.startsWith('-') && !/^-?\d+$/.test(flag)) return { error: `unknown argument ${flag}` };
@@ -169,9 +187,10 @@ export class Watcher {
   private required: Set<string> | null = null;
   private prevSnapshot: string | null = null;
   private prFiles = new Map<string, Set<string>>();
+  private pending: string[] = [];
   private readonly gh: GhEnv;
 
-  constructor(readonly env: PrWaitEnv, readonly repo: string, readonly pr: number, readonly until: Until, readonly interval: number, readonly bots: BotLists) {
+  constructor(readonly env: PrWaitEnv, readonly repo: string, readonly pr: number, readonly until: Until, readonly interval: number, readonly bots: BotLists, readonly timeoutMinutes = DEFAULT_TIMEOUT_MINUTES) {
     const stem = path.join(stateDir(env.vars), `${repo.replace('/', '__')}__${pr}`);
     this.stateFile = `${stem}.json`;
     this.lockFile = `${stem}.lock`;
@@ -224,10 +243,11 @@ export class Watcher {
     } catch { /* already gone */ }
   }
 
+  /** One event is one line: control characters from GitHub text can never start a second one. */
   private say(line: string): void {
     if (this.printed.has(line)) return;
     this.printed.add(line);
-    this.env.out(`#${this.pr} ${line}\n`);
+    this.env.out(`#${this.pr} ${line.replace(/[\x00-\x1f\x7f]+/g, ' ')}\n`);
   }
 
   /** Print an event once per PR, across restarts. */
@@ -246,9 +266,10 @@ export class Watcher {
     return code;
   }
 
-  private botOf(text: string): string | null {
+  /** The configured bot a check name mentions, or (for a login) that the login starts with: greptile-apps[bot] is greptile, notgreptile is nobody. */
+  private botOf(text: string, login = false): string | null {
     const lowered = text.toLowerCase();
-    return [...this.bots.gating, ...this.bots.advisory].find(bot => lowered.includes(bot)) ?? null;
+    return [...this.bots.gating, ...this.bots.advisory].find(bot => login ? lowered.startsWith(bot) : lowered.includes(bot)) ?? null;
   }
 
   private isAdvisory(name: string): boolean {
@@ -275,32 +296,33 @@ export class Watcher {
 
   private evaluateChecks(checks: Map<string, Check>, head: string) {
     const required = this.required ?? new Set<string>();
-    const gate = required.size > 0 ? required : new Set([...checks.keys()].filter(name => !this.botOf(name)));
-    const label = required.size > 0 ? 'required check' : 'check';
+    // Every check on the head gates, as gstack-ci-gate does, so the two never disagree; a required
+    // check gates even before it appears, and advisory bots' checks never do.
+    const watched = new Map([...checks].filter(([name]) => !this.isAdvisory(name)));
+    const gate = new Set([...required, ...watched.keys()]);
     const bucketOf = (name: string) => checks.get(name)?.bucket ?? 'pending';
     const failLines: string[] = [];
     for (const name of [...gate].sort()) {
       if (bucketClass(bucketOf(name)) !== 'fail') continue;
-      const line = `${label} failed: ${name} ${checks.get(name)?.link ?? ''}`.trimEnd();
+      const line = `${required.has(name) ? 'required check' : 'check'} failed: ${name} ${checks.get(name)?.link ?? ''}`.trimEnd();
       failLines.push(line);
       this.emit(`fail:${head}:${name}:${checks.get(name)?.link ?? ''}`, line);
     }
-    const watched = new Map([...checks].filter(([name]) => !this.isAdvisory(name)));
-    const gateDone = gate.size > 0 && [...gate].every(name => bucketClass(bucketOf(name)) !== 'pending');
-    const allDone = gateDone && [...watched.values()].every(check => bucketClass(check.bucket) !== 'pending');
+    this.pending = [...gate].filter(name => bucketClass(bucketOf(name)) === 'pending').sort();
+    const allDone = gate.size > 0 && this.pending.length === 0;
     // Checks appear a few seconds after a push: two identical polls in a row
     // guard against calling a half-registered set of checks finished.
     const snapshot = JSON.stringify([...watched].map(([name, check]) => [name, check.bucket]).sort());
     const stable = snapshot === this.prevSnapshot;
     this.prevSnapshot = snapshot;
-    return { watched, failLines, allDone, stable, green: gateDone && stable && failLines.length === 0, requiredGreen: [...required].filter(name => bucketClass(bucketOf(name)) === 'pass').length };
+    return { watched, failLines, allDone, stable, green: allDone && stable && failLines.length === 0, requiredGreen: [...required].filter(name => bucketClass(bucketOf(name)) === 'pass').length };
   }
 
   /** People talking. Edits are never events. Returns the unresolved threads' first-comment URLs. */
   private emitConversation(pr: PullRequest, mine: Set<string>): string[] {
     for (const c of pr.comments) {
       const { login, bot } = c.author;
-      if (mine.has(login) || this.botOf(login) || (bot && STATUS_BOTS.some(b => login.includes(b)))) continue;
+      if (mine.has(login) || this.botOf(login, true) || (bot && STATUS_BOTS.some(b => login.includes(b)))) continue;
       this.emit(`c:${c.id}`, `comment from ${login}: ${snippet(c.body)} ${c.url}`);
     }
     for (const r of pr.reviews) {
@@ -332,10 +354,13 @@ export class Watcher {
     for (const bot of [...this.bots.gating, ...this.bots.advisory]) {
       const advisory = this.bots.advisory.includes(bot);
       const ownChecks = [...checks.values()].filter(c => this.botOf(c.name) === bot);
-      const summaries = pr.comments.filter(c => this.botOf(c.author.login) === bot);
-      const ownReviews = pr.reviews.filter(r => this.botOf(r.author.login) === bot);
+      const summaries = pr.comments.filter(c => this.botOf(c.author.login, true) === bot);
+      const ownReviews = pr.reviews.filter(r => this.botOf(r.author.login, true) === bot);
       const onHead = ownReviews.some(r => r.commitOid === head);
-      const done = ownChecks.length > 0 ? ownChecks.every(c => bucketClass(c.bucket) !== 'pending') : onHead || summaries.some(s => s.body.includes(short));
+      // A bot that reports through checks is done when they pass; a failed gating check is a failed check, never a review.
+      const done = ownChecks.length > 0
+        ? ownChecks.every(c => bucketClass(c.bucket) === 'pass' || (advisory && bucketClass(c.bucket) !== 'pending'))
+        : onHead || summaries.some(s => s.body.includes(short));
       const seen = ownChecks.length > 0 || summaries.length > 0 || ownReviews.length > 0;
       if (advisory && ownChecks.length > 0) status.push(`${bot} ${ownChecks[0].description || ownChecks[0].bucket} (advisory)`);
       else if (seen) status.push(`${bot} ${done ? 'done' : 'pending'}${advisory ? ' (advisory)' : ''}`);
@@ -372,14 +397,15 @@ export class Watcher {
     if (pr.baseOid) this.state.base_oid = pr.baseOid;
     const mergeState = pr.mergeStateStatus;
     if (mergeState === 'UNKNOWN') return;
-    if ((mergeState === 'BEHIND' || mergeState === 'DIRTY') && this.state.merge_state !== mergeState) {
-      this.emit(`merge:${mergeState}:${head}:${pr.baseOid ?? ''}`, mergeState === 'DIRTY' ? this.dirtyLine(base) : this.behindLine(base));
+    // The key holds the head and base, so each state is announced once per head, not once per transition.
+    if (mergeState === 'BEHIND' || mergeState === 'DIRTY') {
+      this.emit(`merge:${mergeState}:${head}:${pr.baseOid ?? ''}`, mergeState === 'DIRTY' ? this.dirtyLine(base, head) : this.behindLine(base, head));
     }
     this.state.merge_state = mergeState;
   }
 
-  private dirtyLine(base: string): string { return `merge state is DIRTY: the branch conflicts with ${base}, rebase it`; }
-  private behindLine(base: string): string { return `merge state is BEHIND: update the branch from ${base} before merging`; }
+  private dirtyLine(base: string, head: string): string { return `merge state is DIRTY on ${head.slice(0, 7)}: the branch conflicts with ${base}, rebase it`; }
+  private behindLine(base: string, head: string): string { return `merge state is BEHIND on ${head.slice(0, 7)}: update the branch from ${base} before merging`; }
 
   /** One poll. Returns an exit code when the watch ends, null to keep polling. Throws GhError. */
   poll(): number | null {
@@ -389,8 +415,8 @@ export class Watcher {
     const base = pr.baseRefName;
     if (this.required === null) {
       this.required = requiredChecks(this.gh, this.repo, base);
-      const gate = [...this.required].sort().join(', ') || 'none set, so every CI check gates';
-      this.log(`watching ${this.repo}#${this.pr} until ${this.until}; required checks: ${gate}`);
+      const gate = [...this.required].sort().join(', ') || 'none set';
+      this.log(`watching ${this.repo}#${this.pr} until ${this.until}; required checks: ${gate}; every check on the head gates`);
     }
     const checks = fetchChecks(this.gh, this.repo, this.pr);
     const head = pr.headRefOid;
@@ -417,16 +443,18 @@ export class Watcher {
 
     // A green or ready line carries the same summary as the checks line, so it marks that event as reported.
     if (this.until !== 'any-change') {
-      if (mergeState === 'DIRTY') return this.finish(PR_WAIT_EXIT.blocked, [this.dirtyLine(base)]);
+      if (mergeState === 'DIRTY') return this.finish(PR_WAIT_EXIT.blocked, [this.dirtyLine(base, head)]);
       if (ci.failLines.length > 0) return this.finish(PR_WAIT_EXIT.blocked, ci.failLines);
       if (ci.green && this.until === 'green') {
         this.reported.add(checksKey);
         return this.finish(PR_WAIT_EXIT.met, [`green on ${short}: ${summary}${this.behindSuffix(base, pr.baseOid, head)}`]);
       }
-      // ready waits for a gating bot, never for an advisory one.
-      if (ci.green && bots.reviewed.length > 0) {
+      // ready waits for a gating bot, never for an advisory one; with no gating bot configured, green is the review.
+      if (ci.green && (bots.reviewed.length > 0 || this.bots.gating.length === 0)) {
         if (unresolved.length > 0) return this.finish(PR_WAIT_EXIT.blocked, [`blocked by ${unresolved.length} unresolved threads on ${short}: ${unresolved.join(' ')}`]);
-        if (mergeState === 'BEHIND') return this.finish(PR_WAIT_EXIT.blocked, [this.behindLine(base)]);
+        if (mergeState === 'BEHIND') return this.finish(PR_WAIT_EXIT.blocked, [this.behindLine(base, head)]);
+        // GitHub reports UNKNOWN while it recomputes mergeability after a push: not ready until it knows.
+        if (mergeState === 'UNKNOWN') return null;
         this.reported.add(checksKey);
         return this.finish(PR_WAIT_EXIT.met, [`ready on ${short}: ${summary}${this.behindSuffix(base, pr.baseOid, head)}`]);
       }
@@ -439,6 +467,7 @@ export class Watcher {
   /** Poll until the watch ends; returns the exit code. */
   run(): number {
     let failures = 0;
+    const deadline = this.timeoutMinutes > 0 ? this.env.now() + this.timeoutMinutes * 60_000 : Infinity;
     for (;;) {
       try {
         const code = this.poll();
@@ -447,6 +476,10 @@ export class Watcher {
         this.save();
         if (this.baseline) this.log(`baseline recorded for ${this.repo}#${this.pr}; reporting only new events`);
         this.baseline = false;
+        if (this.env.now() >= deadline) {
+          const still = this.pending.length > 0 ? `still pending: ${this.pending.join(', ')}` : 'nothing pending, the condition was not met';
+          return this.finish(PR_WAIT_EXIT.blocked, [`gstack-pr-wait stopped: no ${this.until} after ${this.timeoutMinutes} minutes; ${still}`]);
+        }
       } catch (error) {
         if (!(error instanceof GhError)) throw error;
         if (!error.transient) return this.finish(PR_WAIT_EXIT.blocked, [`gstack-pr-wait stopped: ${error.message}`]);
@@ -484,7 +517,7 @@ export function resolveTarget(env: PrWaitEnv, opts: PrWaitOptions): { repo: stri
   return { repo, pr: target.pr };
 }
 
-export function prWaitMain(argv: string[], env: PrWaitEnv, onLocked?: (release: () => void) => void): number {
+export function prWaitMain(argv: string[], env: PrWaitEnv): number {
   const parsed = parsePrWaitArgs(argv);
   if ('help' in parsed) {
     env.out(`${PR_WAIT_USAGE}\n`);
@@ -493,14 +526,16 @@ export function prWaitMain(argv: string[], env: PrWaitEnv, onLocked?: (release: 
   if ('error' in parsed) return refuse(env, parsed.error);
   const target = resolveTarget(env, parsed);
   if ('error' in target) return refuse(env, target.error);
-  const watcher = new Watcher(env, target.repo, target.pr, parsed.until, parsed.interval, botLists(env.vars));
-  const lock = watcher.lock();
-  if (lock) {
-    return refuse(env, `pid ${lock.held} already watches ${target.repo}#${target.pr}, so this watcher exits to avoid duplicate events. If no events reach you from it, run \`kill ${lock.held}\` and start again`);
-  }
-  onLocked?.(() => watcher.unlock());
+  const watcher = new Watcher(env, target.repo, target.pr, parsed.until, parsed.interval, botLists(env.vars), parsed.timeout);
+  // Exit 1 always carries a PR_WAIT_BLOCKED line, so a local fault (an unwritable state root, a full disk) is a refusal, never a verdict.
   try {
+    const lock = watcher.lock();
+    if (lock) {
+      return refuse(env, `pid ${lock.held} already watches ${target.repo}#${target.pr}, so this watcher exits to avoid duplicate events. If no events reach you from it, run \`kill ${lock.held}\` and start again`);
+    }
     return watcher.run();
+  } catch (error) {
+    return refuse(env, `a local error stopped the watch before a verdict: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     watcher.unlock();
   }
