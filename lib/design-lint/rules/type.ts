@@ -1,10 +1,375 @@
 /**
  * Type rules of the design lint (sloplint gates 1 25 37 38i 38ii 38iii 55a 55b 64 67; Nutlope/hallmark,
  * MIT, see NOTICE.md), rewritten in gstack's voice. Rule ids: overused-font, line-length, font-family-count, italic-word-in-heading, italic-serif-display, accented-word, caps-leading, caps-lockup-leading, monospace-costume, wide-tracking.
+ *
+ * Gate 75 (tiny text) is render-only and lives in the render tier.
  */
 import type { LintContext } from '../context';
+import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
+import { famKey, firstFamily, GENERIC_FAMILIES, HEADING_SEL, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
+import { ancestorMap, getAttr, innerOf, plainText } from '../html';
 import type { Reporter } from '../report';
+import { trunc } from '../report';
+
+/** A selector without its pseudo-classes and pseudo-elements, whitespace folded. */
+const baseSelector = (sel: string): string => sel.replace(/::?[a-z-]+(\([^)]*\))?/gi, '').replace(/\s+/g, ' ').trim();
+
+const em3 = (em: number): string => String(Math.round(em * 1000) / 1000);
+
+/** The token-block rule that declares a custom property, for the finding's file and line. */
+function tokenSite(ctx: LintContext, prop: string): { file: string; line: number } {
+  const tr = ctx.rules.find((r) => isTokenRule(r) && r.decls.some((d) => d.prop === prop));
+  const d = tr?.decls.find((x) => x.prop === prop);
+  return { file: tr?.file ?? ctx.rules[0]?.file ?? ctx.key, line: d?.line ?? 1 };
+}
+
+const OVERUSED = ['inter', 'roboto', 'open sans', 'poppins', 'lato', 'system-ui', '-apple-system', 'arial', 'helvetica', 'helvetica neue', 'segoe ui'].map(famKey);
+
+// sloplint check1 (gate 1)
+function check1(ctx: LintContext, r: Reporter): void {
+  const seen = new Set<string>();
+  const flag = (fam: string, file: string, line: number, where: string) => {
+    if (!OVERUSED.includes(famKey(fam)) || seen.has(fam + where)) return;
+    seen.add(fam + where);
+    r.report('overused-font', file, line, `"${fam}" as the display face (${where})`);
+  };
+  for (const [prop, val] of Object.entries(ctx.tokens)) {
+    if (!/^--font-(display|heading|title|hero)/.test(prop)) continue;
+    const site = tokenSite(ctx, prop);
+    flag(firstFamily(resolveVars(val, ctx.tokens)), site.file, site.line, prop);
+  }
+  for (const rule of ctx.rules) {
+    if (isTokenRule(rule) || !HEADING_SEL.test(rule.selector)) continue;
+    for (const d of rule.decls) if (d.prop === 'font-family') flag(firstFamily(resolveVars(d.value, ctx.tokens)), rule.file, d.line, rule.selector);
+  }
+}
+
+// sloplint shortProse (gate 25): every paragraph under the selector is one or two short sentences
+function shortProse(ctx: LintContext, sel: string): boolean {
+  const cls = [...sel.matchAll(/\.([\w-]+)/g)].map((m) => m[1]).pop();
+  if (!cls) return false;
+  const texts: string[] = [];
+  for (const doc of ctx.docs) {
+    for (const m of doc.src.matchAll(new RegExp(`<(\\w+)[^>]*class="[^"]*\\b${cls}\\b[^"]*"[^>]*>([\\s\\S]*?)</\\1>`, 'g'))) {
+      for (const p of (/^p$/i.test(m[1]) ? [m[2]] : m[2].match(/<p\b[^>]*>[\s\S]*?<\/p>/g) || [])) texts.push(p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+  }
+  return texts.length > 0 && texts.every((t) => t.length <= 200 && (t.match(/[.!?](?:\s|$)/g) || []).length <= 2);
+}
+
+// sloplint check25 (gate 25), the static half: the measure declared in ch
+function check25(ctx: LintContext, r: Reporter): void {
+  const proseish = /(^|[\s,>+~(])p\b|lede|prose|copy|__body|__text|__desc|paragraph/i;
+  for (const rule of ctx.rules) {
+    if (!proseish.test(rule.selector) || HEADING_SEL.test(rule.selector)) continue;
+    for (const d of rule.decls) {
+      if (d.prop !== 'max-width') continue;
+      const m = /^([\d.]+)ch$/.exec(resolveVars(d.value, ctx.tokens).trim());
+      if (!m) continue;
+      const ch = parseFloat(m[1]);
+      const floor = /lede|hero|caption|figcaption|__line|__sub|subhead|tagline/i.test(rule.selector) || shortProse(ctx, rule.selector) ? 28 : 45;
+      if (ch < floor || ch > 75) {
+        r.report('line-length', rule.file, d.line, `a measure of ${ch}ch on ${rule.selector} (${floor} to 75ch reads well)`,
+          { fix: `max-width between ${floor === 28 ? '28' : '45'} and 75ch${floor === 28 ? ' for a one-sentence lede or caption' : ''}` });
+      }
+    }
+  }
+}
+
+// sloplint check37 (gate 37)
+function check37(ctx: LintContext, r: Reporter): void {
+  const families = new Map<string, { file: string; line: number }>();
+  for (const rule of ctx.rules) {
+    if (rule.selector === '@font-face') continue;
+    for (const d of rule.decls) {
+      if (d.prop !== 'font-family' && !/^--font-/.test(d.prop)) continue;
+      if (/^--font-/.test(d.prop) && !isTokenRule(rule)) continue;
+      const fam = firstFamily(resolveVars(d.value, ctx.tokens));
+      if (!fam || GENERIC_FAMILIES.has(fam) || fam.startsWith('var(')) continue;
+      if (![...families.keys()].some((k) => famKey(k) === famKey(fam))) families.set(fam, { file: rule.file, line: d.line });
+    }
+  }
+  if (families.size <= 3) return;
+  const fourth = [...families.values()][3];
+  r.report('font-family-count', fourth.file, fourth.line, `${families.size} font families: ${trunc([...families.keys()].join(', '), 56)}`);
+}
+
+// sloplint check38a (gates 38i, 38ii)
+function check38a(ctx: LintContext, r: Reporter): void {
+  for (const rule of ctx.rules) {
+    if (!HEADING_SEL.test(rule.selector)) continue;
+    for (const d of rule.decls) {
+      if (d.prop === 'font-style' && /italic|oblique/.test(d.value)) r.report('italic-serif-display', rule.file, d.line, `italic display type on ${rule.selector}`);
+    }
+  }
+  const normSel = ctx.rules.filter((rule) => /(^|[\s,>+~])(em|i)\b/.test(rule.selector)
+    && rule.decls.some((d) => d.prop === 'font-style' && /normal/.test(d.value))).flatMap((rule) => rule.selector.split(',').map((x) => x.trim()));
+  const normalised = (level: string, classes: string[]) => normSel.some((sel) => /^(em|i)$/.test(sel) || new RegExp(`(^|[\\s,>+~])h${level}\\b`).test(sel) || classes.some((c) => sel.includes('.' + c)));
+  for (const doc of ctx.docs) {
+    for (const m of doc.src.matchAll(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi)) {
+      const classes = ((/class\s*=\s*["']([^"']*)["']/i.exec(m[2]) || [])[1] || '').split(/\s+/).filter(Boolean);
+      const tag = /<(em|i)\b/i.exec(m[3]);
+      if (tag && !normalised(m[1], classes)) r.report('italic-word-in-heading', doc.file, doc.lineOf(m.index!), `an <${tag[1].toLowerCase()}> inside an otherwise roman <h${m[1]}>`);
+    }
+  }
+}
+
+const ACCENT38 = /(?:^|[\s,])((?:h[1-3]|\.display|\.headline|\.title|[.\w-]*__(?:title|display|headline))[^\s,>+~]*)\s*(?:>|\s)\s*(em|i|b|strong|span|mark|\.[\w-]+)(?::nth-child\([^)]*\))?(?:::?[\w-]+)?\s*$/i;
+const INHERITED38 = /^(inherit|currentcolor|unset|initial|normal)$/i;
+const MARK38 = /^(color|background|background-color|-webkit-text-stroke|font-weight|text-decoration|text-decoration-color|border-bottom|box-shadow|font-style)$/;
+const marks38 = (rule: CssRule): CssDecl[] => rule.decls.filter((d) => MARK38.test(d.prop) && !INHERITED38.test(d.value.trim()));
+
+/** The rules that mark one word of a heading apart from the rest: by selector shape, or by a classed span inside an h1 to h3 that covers under 80% of the head. */
+// sloplint accentedHeads (gate 38iii)
+function accentedHeads(ctx: LintContext): CssRule[] {
+  const out: CssRule[] = [];
+  const seen = new Set<string>();
+  for (const rule of ctx.rules) {
+    if (rule.keyframes || isTokenRule(rule) || !ACCENT38.test(rule.selector)) continue;
+    if (!marks38(rule).length || seen.has(rule.selector)) continue;
+    seen.add(rule.selector);
+    out.push(rule);
+  }
+  const norm = (v: string | null) => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  for (const doc of ctx.docs) {
+    for (let i = 0; i < doc.tags.length; i++) {
+      const t = doc.tags[i];
+      if (t.close || !/^h[1-3]$/.test(t.name)) continue;
+      const inner = innerOf(doc, i);
+      if (!inner) continue;
+      const headLen = plainText(inner.inner).replace(/\s+/g, '').length || 1;
+      const spans = [...inner.inner.matchAll(/<(span|em|strong|b|i|mark)\b[^>]*\bclass\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/\1>/gi)];
+      const cover = (cls: string) => spans.filter((x) => x[2].split(/\s+/).includes(cls)).reduce((n, x) => n + plainText(x[3]).replace(/\s+/g, '').length, 0) / headLen;
+      const headDecls = styleFor(ctx, getAttr(t.attrs, 'class'), t.name, true);
+      const own = (prop: string) => valueOf(ctx, headDecls, prop) ?? (prop === 'color' ? resolveVars('var(--color-ink)', ctx.tokens) : null);
+      for (const m of spans) {
+        if (!/[A-Za-z0-9]/.test(plainText(m[3]))) continue;
+        for (const cls of m[2].split(/\s+/).filter(Boolean)) {
+          if (cover(cls) >= 0.8) continue;
+          for (const rule of ctx.rules) {
+            if (rule.keyframes || isTokenRule(rule) || seen.has(rule.selector)) continue;
+            if (!rule.selector.split(',').some((part) => !/::?(before|after)\b/.test(part) && baseSelector(part) === `.${cls}`)) continue;
+            if (rule.decls.some((d) => (d.prop === 'display' && /^(block|flex|grid|table)/.test(d.value.trim())) || (d.prop === 'position' && /absolute|fixed/.test(d.value)))) continue;
+            const marking = marks38(rule);
+            if (!marking.length) continue;
+            if (marking.every((d) => /^(color|font-weight)$/.test(d.prop) && own(d.prop) != null && norm(resolveVars(d.value, ctx.tokens)) === norm(own(d.prop)))) continue;
+            seen.add(rule.selector);
+            out.push(rule);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// sloplint check38c (gate 38iii); hallmark's hero-signature exemption read the stamp, so every accented word reports here
+function check38c(ctx: LintContext, r: Reporter): void {
+  for (const rule of accentedHeads(ctx)) r.report('accented-word', rule.file, rule.line, `one word of a heading set apart (${rule.selector})`);
+}
+
+// sloplint check55 (gates 55a, 55b)
+function check55(ctx: LintContext, r: Reporter): void {
+  for (const rule of mergedRules(ctx)) {
+    if (!rule.decls.some((d) => d.prop === 'text-transform' && /uppercase/.test(d.value))) continue;
+    const lhD = rule.decls.find((d) => d.prop === 'line-height');
+    if (!lhD) continue;
+    const lh = parseFloat(resolveVars(lhD.value, ctx.tokens));
+    if (Number.isNaN(lh) || lh >= 1.02) continue;
+    const bigType = rule.decls.some((d) => d.prop === 'font-size' && (pxOf(resolveVars(d.value, ctx.tokens)) ?? 0) >= 28);
+    if (!HEADING_SEL.test(rule.selector) && !bigType) continue;
+    const nowrap = rule.decls.some((d) => d.prop === 'white-space' && /nowrap/.test(d.value));
+    if (!nowrap && lh >= 1.0) continue;
+    r.report(nowrap ? 'caps-lockup-leading' : 'caps-leading', rule.file, lhD.line, `uppercase at line-height ${lh} on ${rule.selector}: the caps collide`);
+  }
+}
+
+const MONO_FACE = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
+
+// sloplint monoIsMaterial (gate 64): a monospace face declared as the display, body or outlier is the page's material, not a costume
+function monoIsMaterial(ctx: LintContext): boolean {
+  const mono = (v: string | undefined) => !!v && MONO_FACE.test(firstFamily(resolveVars(v, ctx.tokens)));
+  return mono(ctx.tokens['--font-display']) || mono(ctx.tokens['--font-body']) || mono(ctx.tokens['--font-outlier']);
+}
+
+// sloplint check64 (gate 64)
+function check64(ctx: LintContext, r: Reporter): void {
+  if (monoIsMaterial(ctx)) return;
+  const monoFam = (v: string) => /mono|courier|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|silkscreen/i.test(firstFamily(resolveVars(v, ctx.tokens)));
+  const LABELISH = /label|caption|meta|eyebrow|kicker|tag\b|badge|chip|small|folio|footnote|legend|\bth\b|thead|figcaption|overline|dateline|byline|credit|note\b/i;
+  const DATAISH = /code|pre\b|kbd|samp|num|figure|stat|price|value|data|tabular|counter|timer|clock|coord|amount|total|score|version|hash|\bid\b|sku|time|date|hour|utc|eta|lot\b|edition|ref\b|dimension|measure|reading|plate-?no|tag-?no|url|uri\b|path|endpoint|command|cmd|snippet|install/i;
+  const seen = new Set<string>();
+  for (const rule of ctx.rules) {
+    if (rule.keyframes || rule.selector === '@font-face' || isTokenRule(rule)) continue;
+    if (!LABELISH.test(rule.selector) || DATAISH.test(rule.selector)) continue;
+    const fam = rule.decls.find((d) => d.prop === 'font-family' || (d.prop === 'font' && /var\(--font|mono/i.test(d.value)));
+    if (!fam) continue;
+    const raw = fam.prop === 'font' ? (/var\(--font-[\w-]+\)/.exec(fam.value) || [fam.value])[0] : fam.value;
+    if (!monoFam(raw)) continue;
+    const key = baseSelector(rule.selector);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    r.report('monospace-costume', rule.file, fam.line, `monospace as the label voice on ${rule.selector}`);
+  }
+}
+
+// sloplint fontSizePxOf (gate 67)
+function fontSizePxOf(rule: MergedRule, ctx: LintContext): number | null {
+  const fs = rule.decls.find((d) => d.prop === 'font-size');
+  if (fs) return pxOf(resolveVars(fs.value, ctx.tokens));
+  const f = rule.decls.find((d) => d.prop === 'font');
+  if (!f) return null;
+  const m = /(?:^|\s)(\d+(?:\.\d+)?(?:px|rem|em))(?:\/[\d.]+(?:px|rem|em)?)?\s/.exec(resolveVars(f.value, ctx.tokens) + ' ');
+  return m ? pxOf(m[1]) : null;
+}
+
+const LABEL67 = /label|caption|meta|eyebrow|kicker|tag\b|badge|chip|small|folio|footnote|legend|\bth\b|thead|figcaption|overline|dateline|byline|credit|note\b|\bnav\b|menu|link|pill|status|unit|smallcaps|count|placard/i;
+const CONTROL67 = /btn|button|cta|\.sign\b|plate|control/i;
+const EXEMPT67_NAME = /^(wordmark|marquee|ticker|logo|brand|abbr|logo-?(mark|type|text)|brand-?(mark|name|type))$/i;
+const EXEMPT67_PART = /(^|[-_])(wordmark|marquee|ticker|logotype|logo|brand)([-_]|$)|(^|[-_])(slab|nav|site|head|header|masthead|bar)[-_]+mark([-_]|$)/i;
+const exemptName67 = (n: string): boolean => !!n && (EXEMPT67_NAME.test(n.split('--')[0].split('__').pop() || '') || EXEMPT67_PART.test(n));
+const SCROLLER67 = /(^|[-_])(marquee|ticker)([-_]|$)/i;
+
+// sloplint exempt67 (gate 67): wordmarks, logos, marquees and tickers may be set in capitals
+function exempt67(sel: string): boolean {
+  return sel.split(',').some((part) => {
+    const comps = baseSelector(part).split(/[\s>+~]+/).filter(Boolean);
+    const comp = comps[comps.length - 1] || '';
+    const names = (comp.match(/\.[a-zA-Z_][\w-]*/g) || []).map((c) => c.slice(1));
+    names.push((/^[a-zA-Z][\w-]*/.exec(comp) || [''])[0]);
+    if (names.some(exemptName67)) return true;
+    return comps.slice(0, -1).some((c) => (c.match(/\.[a-zA-Z_][\w-]*/g) || []).some((x) => SCROLLER67.test(x.slice(1))));
+  });
+}
+
+// sloplint inherited67 (gate 67): the nearest ancestor selector's value for a property
+function inherited67(bySel: MergedRule[], sel: string, prop: string): string | null {
+  const base = baseSelector(sel);
+  let best: string | null = null, bestLen = 0;
+  for (const o of bySel) {
+    if (/:hover|:focus|:active/.test(o.selector) || (o.media && /max-width/i.test(o.media))) continue;
+    for (const part of o.selector.split(',')) {
+      const ob = baseSelector(part);
+      if (!ob || ob === base || ob.length <= bestLen || !base.startsWith(ob) || !/[\s>+~]/.test(base[ob.length] || '')) continue;
+      const d = o.decls.filter((x) => x.prop === prop).pop();
+      if (d) { best = d.value; bestLen = ob.length; }
+    }
+  }
+  return best;
+}
+
+const isSmallCaps67 = (prop: string, v: string): boolean => (/^font-variant(-caps)?$/.test(prop) && /\b(all-)?(small|petite)-caps\b/.test(v))
+  || (prop === 'font-feature-settings' && /\b(smcp|c2sc)\b/.test(v));
+
+interface Caps67 { upper: boolean; smallCaps: boolean; em: number | null; px: number | null }
+
+/** What a rule says about case and tracking, its own declarations first and the nearest ancestor's where it is silent. */
+function caps67(ctx: LintContext, bySel: MergedRule[], rule: MergedRule): Caps67 | null {
+  const isUpper = (v: string | null) => v != null && /uppercase/.test(resolveVars(v, ctx.tokens));
+  const ownTT = rule.decls.filter((d) => d.prop === 'text-transform').pop();
+  const ownUpper = ownTT ? isUpper(ownTT.value) : null;
+  const ownSmallCaps = rule.decls.some((d) => isSmallCaps67(d.prop, resolveVars(d.value, ctx.tokens)));
+  const px = fontSizePxOf(rule, ctx);
+  const ownEm = trackingEm(ctx, rule.decls, px || 16);
+  if (!(ownUpper === true || ownSmallCaps || (ownEm != null && ownEm > 0.03))) return null;
+  const upper = ownUpper != null ? ownUpper : isUpper(inherited67(bySel, rule.selector, 'text-transform'));
+  const smallCaps = ownSmallCaps || ['font-variant', 'font-variant-caps', 'font-feature-settings'].some((prop) => {
+    const v = inherited67(bySel, rule.selector, prop);
+    return v != null && isSmallCaps67(prop, resolveVars(v, ctx.tokens));
+  });
+  let em = ownEm;
+  if (em == null) {
+    const v = inherited67(bySel, rule.selector, 'letter-spacing');
+    if (v != null) em = trackingEm(ctx, [{ prop: 'letter-spacing', value: v, line: 0 }], px || 16);
+  }
+  return { upper, smallCaps, em, px };
+}
+
+// sloplint check67 (gate 67), the CSS half
+function check67(ctx: LintContext, r: Reporter): void {
+  const bySel = mergedRules(ctx);
+  const displayish = (rule: MergedRule) => HEADING_SEL.test(rule.selector) || /display|title|headline|bill|poster|banner/i.test(rule.selector)
+    || rule.decls.some((d) => (d.prop === 'font-family' || d.prop === 'font') && /--font-display/.test(d.value)) || (fontSizePxOf(rule, ctx) || 0) >= 28;
+  const upperDisplay = bySel.some((rule) => displayish(rule) && !LABEL67.test(rule.selector) && rule.decls.some((d) => d.prop === 'text-transform' && /uppercase/.test(d.value)));
+  const seen = new Set<string>();
+  for (const rule of bySel) {
+    if (isTokenRule({ ...rule, keyframes: null }) || exempt67(rule.selector) || /::first-letter\s*(,|$)/.test(rule.selector)) continue;
+    const caps = caps67(ctx, bySel, rule);
+    if (!caps) continue;
+    const { upper, smallCaps, em, px } = caps;
+    const tracked = em != null && em > 0.03;
+    const subject = rule.selector.split(',').map((p) => baseSelector(p).split(/[\s>+~]+/).filter(Boolean).pop() || '');
+    const bigToken = rule.decls.some((d) => d.prop === 'font-size' && /--text-(display|section|title)|clamp\(\s*(?:[2-9]|\d{2,})(?:\.\d+)?rem/.test(d.value));
+    const labelish = subject.some((s) => LABEL67.test(s)) ? !((px != null && px >= 28) || bigToken)
+      : LABEL67.test(rule.selector) && !subject.every((s) => /^h[1-6]\b/i.test(s)) && (px == null || px < 20);
+    const control = CONTROL67.test(rule.selector);
+    if (HEADING_SEL.test(rule.selector) && !labelish && !control) continue;
+    const key = baseSelector(rule.selector);
+    if (seen.has(key)) continue;
+    const small = px != null && px <= 15;
+    const at = px != null ? ` at ${Math.round(px)}px` : '';
+    const tracking = tracked ? ` tracked ${em3(em)}em` : '';
+    if (control && !labelish) {
+      if (!upper && !smallCaps) { if (!(tracked && small)) continue; }
+      else if (upperDisplay && (em == null || em <= 0.045)) continue;
+      seen.add(key);
+      r.report('wide-tracking', rule.file, rule.line, upperDisplay ? `${rule.selector}: an uppercase control tracked ${em3(em!)}em` : `${rule.selector}: an uppercase control on a page whose display is not uppercase`,
+        { fix: 'controls follow the display voice: sentence case here, or tracking 0.04em at most where the display itself is uppercase' });
+      continue;
+    }
+    const isCaps = upper || smallCaps;
+    if ((isCaps && (labelish || smallCaps || tracked || small)) || (tracked && (labelish || small))) {
+      seen.add(key);
+      const what = smallCaps ? 'small caps' : upper ? 'uppercase' : 'letter-spaced';
+      r.report('wide-tracking', rule.file, rule.line, `${rule.selector}: ${what}${tracking}${at} in a label role`);
+    }
+  }
+}
+
+const CAPS_TAGS = /^(p|span|small|a|li|div|figcaption|td|th|dt|dd|label|time|cite|strong|b|em|button|summary)$/;
+const capsRatio = (s: string): number => {
+  const letters = s.replace(/[^A-Za-z]/g, '');
+  return letters ? (letters.match(/[A-Z]/g) || []).length / letters.length : 0;
+};
+
+// sloplint check67Html (gate 67), the markup half: text typed in capitals at label size or tracked
+function check67Html(ctx: LintContext, r: Reporter): void {
+  for (const doc of ctx.docs) {
+    const anc = ancestorMap(doc);
+    const seen = new Set<string>();
+    for (let i = 0; i < doc.tags.length; i++) {
+      const t = doc.tags[i];
+      if (t.close || t.selfClosing || !CAPS_TAGS.test(t.name)) continue;
+      const cls = getAttr(t.attrs, 'class') || '';
+      if (cls.split(/\s+/).some(exemptName67)) continue;
+      if ((anc.get(i) || []).some((n) => /^(svg|pre|code|abbr|kbd|samp)$/.test(n))) continue;
+      const inner = innerOf(doc, i);
+      if (!inner || /<(p|div|ul|ol|h[1-6]|table|section|article|svg|img|abbr|code|kbd)\b/i.test(inner.inner)) continue;
+      const text = plainText(inner.inner);
+      const letters = text.replace(/[^A-Za-z]/g, '');
+      if (letters.length < 5 || capsRatio(text) < 0.95 || /^[A-Z]{2,5}$/.test(text) || /^\(?\s*(CC0|CC BY(-SA|-NC|-ND)*( [0-9.]+)?|PD|GFDL)\b/.test(text)) continue;
+      const decls = styleFor(ctx, cls, t.name);
+      const px = fontPx(ctx, decls);
+      const em = trackingEm(ctx, decls, px || 16);
+      const tracked = em != null && em > 0.03;
+      if (!((px != null && px <= 15) || tracked)) continue;
+      const key = cls || t.name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      r.report('wide-tracking', doc.file, t.line, `"${trunc(text, 32)}" typed in capitals${px != null ? ` at ${Math.round(px)}px` : ''}${tracked ? ` tracked ${em3(em)}em` : ''} (<${t.name}${cls ? ` class="${trunc(cls, 24)}"` : ''}>)`,
+        { fix: 'sentence case in the body face; capitals survive only as a wordmark or as the display voice' });
+    }
+  }
+}
 
 export function run(ctx: LintContext, r: Reporter): void {
-  void ctx; void r;
+  check1(ctx, r);
+  check25(ctx, r);
+  check37(ctx, r);
+  check38a(ctx, r);
+  check38c(ctx, r);
+  check55(ctx, r);
+  check64(ctx, r);
+  check67(ctx, r);
+  check67Html(ctx, r);
 }
