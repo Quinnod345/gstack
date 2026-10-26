@@ -257,8 +257,8 @@ gstack-factory-scorecard --repo owner/name --since-days 7 \
   [--pass-cap 3] [--out-dir .context/factory-scorecard]
 ```
 
-`--repo` defaults to the origin remote's GitHub owner/name and is required
-without one. Each run writes this window's `scorecard.md` and `scorecard.csv`
+`--repo` defaults to the origin remote's owner/name on github.com (or
+`GH_HOST`) and is required without one. Each run writes this window's `scorecard.md` and `scorecard.csv`
 to `--out-dir` and appends the same rows to `trend.csv` there, so a weekly
 retro accumulates its own trend without renaming files.
 
@@ -301,9 +301,10 @@ gate runs, artifacts read for the newest 60):
 Read the gap honestly: lead time and throughput are where they should be, the
 gate is green and its cost is mostly known, and flakiness is the line that is
 not. The daily pass exists for exactly that line; the scorecard's job is to
-show next week whether it moved. The inventory lane's baseline CSV, when it
-lands in the Captain's Drive, supersedes these numbers for trend tracking;
-from then on `trend.csv` in `--out-dir` carries the weeks.
+show next week whether it moved. The inventory lane's per-PR baseline CSV in
+the Captain's Drive (142 merged PRs over the eleven days before this window
+closed) holds the longer history behind these numbers; from here on
+`trend.csv` in `--out-dir` carries the weeks.
 
 ## What is Capy-specific and what is not
 

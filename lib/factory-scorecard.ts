@@ -167,8 +167,10 @@ export function readMergedPrs(source: ScorecardSource, o: ScorecardOptions, sinc
 export function passCount(text: string, marker: RegExp): number | null {
   let max: number | null = null;
   for (const m of text.matchAll(new RegExp(marker.source, marker.flags.includes('g') ? marker.flags : marker.flags + 'g'))) {
-    const n = Number(m.slice(1).find(g => g !== undefined));
-    if (Number.isFinite(n) && (max === null || n > max)) max = n;
+    const digits = m.slice(1).find(g => g !== undefined && /^\d+$/.test(g));
+    if (digits === undefined) continue;
+    const n = Number(digits);
+    if (max === null || n > max) max = n;
   }
   return max;
 }

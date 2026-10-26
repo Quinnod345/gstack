@@ -248,6 +248,7 @@ describe('factory-scorecard: pieces', () => {
     expect(readComments(source, 'acme/widgets', 102, markers(/READY #\d+/m, '2026-10-25T12:00:00Z')).readyAt).toBeNull();
     expect(readComments(source, 'acme/widgets', 102, markers(/READY #\d+/m)).readyAt).toBe('2026-10-26T01:00:00Z');
     expect(passCount('"passes": 4 then passes=1 then REVIEW_PASSES: 2', new RegExp(DEFAULTS.passMarker, 'm'))).toBe(4);
+    expect(passCount('reviews: 3 and passes=2', /(passes|reviews)[=: ]+(\d+)/m)).toBe(3);
     expect(passCount('no count here', new RegExp(DEFAULTS.passMarker, 'm'))).toBeNull();
   });
 
@@ -312,7 +313,10 @@ describe('factory-scorecard: the bin', () => {
     expect(trend.length).toBe(1 + Object.keys(BENCHMARKS).length);
     const again = run(['--repo', 'acme/widgets', '--fixtures', FIXTURE, '--now', '2026-10-27T12:00:00Z'], cwd);
     expect(again.status, again.stderr).toBe(0);
-    expect(fs.readFileSync(path.join(cwd, '.context', 'factory-scorecard', 'trend.csv'), 'utf8').split('\n').filter(Boolean).length).toBe(1 + 2 * Object.keys(BENCHMARKS).length);
+    const trendLines = () => fs.readFileSync(path.join(cwd, '.context', 'factory-scorecard', 'trend.csv'), 'utf8').split('\n').filter(Boolean).length;
+    expect(trendLines()).toBe(1 + 2 * Object.keys(BENCHMARKS).length);
+    expect(run(['--repo', 'acme/widgets', '--fixtures', FIXTURE, '--now', '2026-10-27T12:00:00Z'], cwd).status).toBe(0);
+    expect(trendLines()).toBe(1 + 2 * Object.keys(BENCHMARKS).length);
     expect(nested.stdout).toContain(`SCORECARD_TREND: ${path.join('.context', 'factory-scorecard', 'trend.csv')}`);
   });
 
@@ -333,12 +337,22 @@ describe('factory-scorecard: the bin', () => {
     const noRepo = run(['--fixtures', FIXTURE], cwd);
     expect(noRepo.status).toBe(2);
     expect(noRepo.stderr).toContain('--repo owner/name is required');
+    const local = scratch();
+    spawnSync('git', ['init', '-q', local]);
+    spawnSync('git', ['-C', local, 'remote', 'add', 'origin', '/srv/git/repo.git']);
+    expect(run(['--fixtures', FIXTURE], local).stderr).toContain('--repo owner/name is required');
+    spawnSync('git', ['-C', local, 'remote', 'set-url', 'origin', 'git@ghe.example.test:acme/widgets.git']);
+    const ghe = spawnSync(BIN, ['--fixtures', FIXTURE, '--now', '2026-10-26T12:00:00Z'], { cwd: local, encoding: 'utf8', timeout: 60_000, env: { ...process.env, HOME: local, GH_HOST: 'ghe.example.test' } });
+    expect(ghe.status, ghe.stderr).toBe(0);
+    expect(ghe.stdout).toContain('| Merged PRs | 3 (crew 2, outside 1) |');
+    expect(run(['--pass-marker', 'passes', '--fixtures', FIXTURE], cwd).stderr).toContain('--pass-marker needs a capture group');
     const stray = run(['stray'], cwd);
     expect(stray.status).toBe(2);
     expect(stray.stderr).toContain('unexpected argument: stray');
     const help = run(['--help'], cwd);
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain('gstack-factory-scorecard');
+    expect(help.stdout).toContain('gstack-factory-scorecard [--repo owner/name]');
+    expect(help.stdout).not.toContain(' * ');
   });
 
   test('the retro template runs the bin from the runtime root and reads its table', () => {
