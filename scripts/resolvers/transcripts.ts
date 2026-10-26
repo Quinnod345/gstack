@@ -14,9 +14,12 @@
  *                              Capy, on a host with no declared store, or when
  *                              the store is missing.
  *
- * The host table in hosts/*.ts is the single source of the paths; the prose
- * never hand-writes them. test/context-restore-transcripts.test.ts runs the
- * discovery block against fixture transcripts.
+ * hosts/*.ts declares which hosts have a store (`transcripts.root` and
+ * `layout` feed the table); the per-host discovery body lives here, keyed by
+ * host name, and a host with no declaration gets the none branch. The prose
+ * never hand-writes a path. test/context-restore-transcripts.test.ts checks
+ * that the table and the block agree for every host and runs the block
+ * against fixture transcripts.
  */
 import { getHostConfig } from '../../hosts/index';
 import type { TemplateContext } from './types';
@@ -48,7 +51,13 @@ export function generateTranscriptDiscovery(ctx: TemplateContext): string {
     `  echo "${CAPY_NO_TRANSCRIPTS}"`,
   ];
   let body: string[];
-  if (ctx.host === 'claude') {
+  if (!host.transcripts) {
+    body = [
+      'else',
+      `  echo "TRANSCRIPTS: none (${host.displayName} declares no transcript store gstack may read; use the shared record and git)"`,
+      'fi',
+    ];
+  } else if (ctx.host === 'claude') {
     body = [
       'else',
       '  TRANSCRIPT_DIR="$HOME/.claude/projects/$(printf \'%s\' "$PROJECT_ROOT" | sed \'s/[^A-Za-z0-9]/-/g\')"',
@@ -78,11 +87,7 @@ export function generateTranscriptDiscovery(ctx: TemplateContext): string {
       'fi',
     ];
   } else {
-    body = [
-      'else',
-      `  echo "TRANSCRIPTS: none (${host.displayName} declares no transcript store gstack may read; use the shared record and git)"`,
-      'fi',
-    ];
+    throw new Error(`hosts/${ctx.host}.ts declares a transcript store but scripts/resolvers/transcripts.ts has no discovery body for it`);
   }
   return ['```bash', ...head, ...body, '```'].join('\n');
 }

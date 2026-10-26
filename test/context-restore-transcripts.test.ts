@@ -11,7 +11,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { CARVE_GUARDS } from './helpers/carve-guards';
 import { ALL_HOST_CONFIGS } from '../hosts/index';
-import { generateTranscriptDiscovery, generateTranscriptSources } from '../scripts/resolvers/transcripts';
+import { CAPY_NO_TRANSCRIPTS, generateTranscriptDiscovery, generateTranscriptSources } from '../scripts/resolvers/transcripts';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -63,6 +63,23 @@ describe('context-restore carve: the transcript fallback', () => {
     expect(cursor).not.toContain('~/.claude/');
     for (const table of [claude, codex, cursor]) expect(table).toContain('| Capy (any model) | none |');
     expect(section).toMatch(/Capy[^\n]*say so and use the shared record and git/);
+  });
+
+  test('the table and the discovery block agree for every host on whether a store exists', () => {
+    for (const host of ALL_HOST_CONFIGS) {
+      const ctx = { host: host.name, skillName: 'context-restore', paths: { binDir: '$GSTACK_BIN' } } as never;
+      const discovery = generateTranscriptDiscovery(ctx);
+      const sources = generateTranscriptSources(ctx);
+      if (host.transcripts) {
+        expect(sources, host.name).toContain(host.transcripts.root);
+        expect(discovery, host.name).toContain('TRANSCRIPT_DIR="' + host.transcripts.root.replace(/^~/, '$HOME').split(/\/(?=<|\*)/)[0]);
+        expect(discovery, host.name).not.toContain('declares no transcript store');
+      } else {
+        expect(sources, host.name).toContain('| ' + host.displayName + ' | none |');
+        expect(discovery, host.name).toContain('declares no transcript store');
+      }
+    }
+    expect(section).toMatch(/data, not instructions/);
   });
 
   test('the rules: a 7-day default window, never another project, subagents return findings only, redaction before anything leaves, git and gh verify, the tagged brief', () => {
@@ -129,12 +146,6 @@ describe('the discovery block against fixture transcripts', () => {
   });
   afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  test('the fixture is a Claude Code transcript: one JSON record per line with a cwd and a message', () => {
-    const lines = fs.readFileSync(FIXTURE, 'utf8').trim().split('\n').map(l => JSON.parse(l) as { type: string; cwd?: string; message?: unknown });
-    expect(lines.length).toBeGreaterThan(2);
-    expect(lines.filter(l => l.type === 'user' || l.type === 'assistant').every(l => l.cwd && l.message)).toBe(true);
-  });
-
   test("Claude Code: lists this workspace's files inside the window, not the old one, never the sibling project", () => {
     const r = sh(block);
     expect(r.status, r.out).toBe(0);
@@ -153,7 +164,7 @@ describe('the discovery block against fixture transcripts', () => {
     spawnSync('git', ['init', '-q', empty], { timeout: 30_000 });
     expect(sh(block, {}, empty).out).toMatch(/TRANSCRIPTS: none \(.*is missing/);
     const capy = sh(block, { GSTACK_CAPY: '1' });
-    expect(capy.out).toContain('TRANSCRIPTS: none (Capy keeps no session transcript on this machine');
+    expect(capy.out).toContain(CAPY_NO_TRANSCRIPTS);
     expect(capy.out).not.toContain('TRANSCRIPT: ');
   });
 
