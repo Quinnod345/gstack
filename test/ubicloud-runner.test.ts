@@ -284,6 +284,16 @@ esac
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   });
 
+  test('bin/gstack-ubi is a thin entry point: it execs the runner beside it and forwards every argument', () => {
+    const wrapper = read('bin/gstack-ubi');
+    expect(wrapper).toContain('exec bash "$here/../scripts/ubicloud/ubi-runner.sh" "$@"');
+    const help = Bun.spawnSync(['bash', join(ROOT, 'bin/gstack-ubi'), 'help'], { env: { ...process.env, UBI_RUNNER_STATE: mkdtempSync(join(tmpdir(), 'ubi-help-')) }, timeout: 10_000 });
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout.toString()).toContain('usage: ubi-runner.sh <command> [args]');
+    const owner = Bun.spawnSync(['bash', join(ROOT, 'bin/gstack-ubi'), 'owner'], { env: { ...process.env, UBI_OWNER: 'lane7', UBI_RUNNER_STATE: mkdtempSync(join(tmpdir(), 'ubi-owner-')) }, timeout: 10_000 });
+    expect(owner.stdout.toString().trim()).toBe('lane7');
+  });
+
   test('up records the VM in the scratch file before the create request is sent', () => {
     const runner = read('scripts/ubicloud/ubi-runner.sh');
     const create = runner.indexOf('cli "${args[@]}" >/dev/null 2>"$dir/create.err"');
