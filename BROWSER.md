@@ -1304,28 +1304,32 @@ the CRLSet revocation updates Chrome pushes to running browsers. Headed mode and
 `handoff` do fetch them, but only about a minute after each launch, so the
 first pages they open, including the page `handoff` reopens, are checked
 against the compiled root store alone. `BROWSE_EXTENSIONS_DIR` makes the
-headless browser launch like headed mode, and `GSTACK_CHROMIUM_PATH` replaces
-the bundled build, so its trust is whatever that binary trusts. The bundled
+headless browser launch like headed mode. `GSTACK_CHROMIUM_PATH` replaces the
+bundled build for headless and headed launches, so their trust is whatever that
+binary trusts, but `handoff` always reopens in the bundled build. The bundled
 build does not enforce Certificate Transparency. That matters most for the
 commands that put real sessions and credentials into the browser:
 `cookie-import-browser`, `cookie-import`, `cookie`, `header`,
-`fill`/`type` and `handoff`, and a paired agent driving any of them. Aside
+`fill`/`type` and `handoff`, and a paired agent using `fill`/`type`. Aside
 uses your own browser's trust store and updates.
 
 **Known gap: the compromised eMudhra intermediates
 ([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked them
 by CRLSet on 2026-10-17, the day the compromise was reported, and scheduled the
 removal of their root, emSign ECC Root CA - G3, from the Chrome Root Store for
-2026-10-27. gstack's pinned Playwright 1.62.1 (Chromium 151), the latest release
-1.64.1 (Chromium 156) and the 1.65 alphas (Chromium 157) still trust them, so
+2026-10-27. As of 2026-10-24, gstack's pinned Playwright 1.62.1 (Chromium 151),
+the latest release 1.64.1 (Chromium 156) and the 1.65 alphas (Chromium 157)
+still trust them, so
 `$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
 "That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
 fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
 the first Playwright release whose Chromium carries the removal. Until then,
-don't import cookies or type credentials in this engine on a network you do not
-trust, and prefer Aside for signed-in work where you have it. To check a build,
-run the same `goto`: only `ERR_CERT_AUTHORITY_INVALID` or `ERR_CERT_REVOKED`
-means it no longer trusts them. A DNS, network or other error proves nothing.
+don't do signed-in work in this engine on a network you do not trust (cookies
+imported earlier stay in the headed profile), and prefer Aside for signed-in
+work where you have it. To check a build, run the same `goto` in the default
+headless mode: only `ERR_CERT_AUTHORITY_INVALID` means its root store no longer
+trusts them. `ERR_CERT_REVOKED` only shows that the session has a CRLSet, and a
+DNS, network or other error proves nothing.
 
 ---
 
