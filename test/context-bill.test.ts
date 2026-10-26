@@ -284,6 +284,25 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("flags a symlinked foreign-host file, but not a dangling link or a directory with that name", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-foreign-"));
+    const checkout = path.join(tmp, "checkout", "qa");
+    fs.mkdirSync(checkout, { recursive: true });
+    fs.writeFileSync(path.join(checkout, "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(checkout, "agents.md"), "a".repeat(100));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.symlinkSync(path.join(checkout, "SKILL.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.symlinkSync(path.join(checkout, "agents.md"), path.join(skills, "qa", "agents.md"));
+    fs.symlinkSync(path.join(tmp, "missing"), path.join(skills, "qa", ".cursorrules"));
+    fs.mkdirSync(path.join(skills, "qa", "skill.json"));
+
+    const qa = buildBill(skills).skills.find((s) => s.name === "qa")!;
+    expect(qa.foreignFiles.map((f) => [f.path, f.bytes])).toEqual([["agents.md", 100]]);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it("never follows a link that loops or climbs out of the root", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-escape-"));
@@ -647,6 +666,32 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
       expect(s.totalMdBytes / s.totalMdTokens).toBeLessThan(3.2);
     }
     expect(measured.missedKeys.size).toBe(0);
+  });
+
+  it("on an installed layout, measures every billed file and sends nothing behind gstack/ or a .md-named link to another file", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-exact-installed-"));
+    const checkout = path.join(tmp, "checkout");
+    fs.mkdirSync(path.join(checkout, ".git"), { recursive: true });
+    fs.mkdirSync(path.join(checkout, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(checkout, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(checkout, "README.md"), "checkout only");
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "not markdown");
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.symlinkSync(path.join(checkout, "qa", "SKILL.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.symlinkSync(path.join(tmp, "notes.txt"), path.join(skills, "qa", "notes.md"));
+    fs.symlinkSync(checkout, path.join(skills, "gstack"));
+
+    const calls: { body: string }[] = [];
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
+    const sent = calls.map((c) => JSON.parse(c.body).messages[0].content);
+    expect(sent).not.toContain("checkout only");
+    expect(sent).not.toContain("not markdown");
+    const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
+    expect(bill.skills.map((s) => s.name)).toEqual(["qa"]);
+    expect([...measured.missedKeys]).toEqual([]);
+    fs.rmSync(tmp, { recursive: true, force: true });
   });
 
   it("counts anything it could not measure instead of passing it off as measured", async () => {

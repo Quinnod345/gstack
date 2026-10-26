@@ -235,7 +235,9 @@ function encloses(outer: string, inner: string): boolean {
  * the lexical path under `dir`, so buildBill and --exact key the same files.
  * Two links to one directory are both walked (each is real scanner load), so
  * the result never depends on readdir order. A directory that is already on
- * the current walk (a loop) or that encloses `dir` is never entered.
+ * the current walk (a loop) or that encloses `dir` is never entered. A link
+ * named *.md counts only when its target is a .md file too, so --exact never
+ * sends a non-markdown file through a markdown-named link.
  */
 export function walkMd(dir: string): string[] {
   const out: string[] = [];
@@ -257,7 +259,15 @@ export function walkMd(dir: string): string[] {
       const p = path.join(current, e.name);
       const kind = entryKind(p, e);
       if (kind === "file") {
-        if (e.name.endsWith(".md")) out.push(p);
+        if (!e.name.endsWith(".md")) continue;
+        if (e.isSymbolicLink()) {
+          try {
+            if (!fs.realpathSync(p).endsWith(".md")) continue;
+          } catch {
+            continue;
+          }
+        }
+        out.push(p);
         continue;
       }
       if (kind !== "dir" || fs.existsSync(path.join(p, ".git"))) continue;
