@@ -58,6 +58,31 @@ describe("gstack-decision-trail append", () => {
     expect(rows()[2]![1]).toBe("'+1");
   });
 
+  test("a cell equal to -h or --help is data, a trail without a final newline or with CRLF rows is repaired on append, and a repeated header is never a row", () => {
+    const r = run(file, "phase", "--help", "why", "evidence", "-h");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(`appended row 1 to ${file}\n`);
+    expect(rows()[1]!.slice(1)).toEqual(["phase", "'--help", "why", "evidence", "'-h"]);
+    fs.appendFileSync(file, "x\ty\tz");
+    run(file, "p2", "d2", "w", "e", "r");
+    const all = rows();
+    expect(all[2]).toEqual(["x", "y", "z"]);
+    expect(all[3]!.slice(1)).toEqual(["p2", "d2", "w", "e", "r"]);
+    const crlf = path.join(tmp, "crlf.tsv");
+    fs.writeFileSync(crlf, "ts\tphase\tdecision\twhy\tevidence\tresult\r\n2026-01-01T00:00:00Z\ta\tb\tc\td\te\r\nts\tphase\tdecision\twhy\tevidence\tresult\r\n");
+    const start = run("start", crlf, "run-1");
+    expect(start.stdout).toBe(`appended start row 2 for run run-1 to ${crlf}\n`);
+    expect(fs.readFileSync(crlf, "utf8").split("\n").filter(Boolean).pop()!.split("\t")[3]).toBe("1 earlier row (2026-01-01T00:00:00Z..2026-01-01T00:00:00Z) written by other runs");
+  });
+
+  test("a run id with whitespace or quotes is a usage error on start and on --run", () => {
+    expect(run("start", file, "a\tb").status).toBe(2);
+    expect(run("start", file, "a b").status).toBe(2);
+    expect(run("--run", "x'y", file, "a", "b", "c", "d", "e").status).toBe(2);
+    expect(run("start", file, "jam_01ABC.turn-2:x/y@z").status).toBe(0);
+    expect(fs.readFileSync(file, "utf8").split("\n")).toHaveLength(3);
+  });
+
   test("wrong arity, an unknown option and a bare call are usage errors; --help exits 0", () => {
     expect(run(file, "only", "four", "cells", "here").status).toBe(2);
     expect(run("--bogus", file, "a", "b", "c", "d", "e").status).toBe(2);

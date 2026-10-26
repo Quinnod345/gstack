@@ -49,7 +49,8 @@ spreadsheet cannot run it as a formula. Nothing is ever rewritten or removed.
 
 start <file> <run-id> appends this run's start row (phase 'start', evidence
 'run:<run-id>') naming the rows earlier runs wrote. Running it again for the
-same run is a no-op while that start row is still the newest one.
+same run is a no-op while that start row is still the newest one. A run id is
+letters, digits and . _ : @ / - (a Capy jam_ id, a session id, a PR number).
 
 --run <id> on an append refuses with DECISION_TRAIL_START_REQUIRED (exit 3)
 when the trail has rows and the newest start row is another run's.
@@ -66,8 +67,10 @@ function readRows(file: string): Row[] {
   if (!fs.existsSync(file)) return [];
   const lines = fs.readFileSync(file, "utf8").split("\n");
   const rows: Row[] = [];
-  lines.forEach((text, i) => {
-    if (text === "" || (i === 0 && text === HEADER.trimEnd())) return;
+  lines.forEach((raw, i) => {
+    const text = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    // A repeated header (the append-on-flaky-mount case) is never a row.
+    if (text === "" || text === HEADER.trimEnd()) return;
     rows.push({ line: i + 1, cells: text.split("\t") });
   });
   return rows;
@@ -78,11 +81,28 @@ function appendRow(file: string, cells: readonly string[]): number {
   if (dir && dir !== "." && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   // Append the header too, never truncate: on a flaky mount the worst case is
   // one stray header line, not lost rows.
-  const needsHeader = !fs.existsSync(file) || fs.statSync(file).size === 0;
-  if (needsHeader) fs.appendFileSync(file, HEADER);
+  const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+  if (size === 0) fs.appendFileSync(file, HEADER);
+  else if (!endsWithNewline(file, size)) fs.appendFileSync(file, "\n");
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   fs.appendFileSync(file, [ts, ...cells.map(clean)].join("\t") + "\n");
   return readRows(file).length;
+}
+
+function endsWithNewline(file: string, size: number): boolean {
+  const fd = fs.openSync(file, "r");
+  try {
+    const last = Buffer.alloc(1);
+    fs.readSync(fd, last, 0, 1, size - 1);
+    return last[0] === 0x0a;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const RUN_ID = /^[A-Za-z0-9._:@/-]+$/;
+function checkRunId(runId: string): void {
+  if (!RUN_ID.test(runId)) fail(`run id must match ${RUN_ID} (letters, digits, . _ : @ / -), got ${JSON.stringify(runId)}`, 2);
 }
 
 function newestStart(rows: Row[]): Row | undefined {
@@ -96,7 +116,8 @@ function fail(message: string, code: number): never {
 }
 
 const argv = process.argv.slice(2);
-if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
+// Only a leading --help asks for help: a cell whose text is "-h" is data and gets appended (quoted).
+if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
   process.stdout.write(USAGE);
   process.exit(argv.length === 0 ? 2 : 0);
 }
@@ -104,6 +125,7 @@ if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
 if (argv[0] === "start") {
   const [, file, runId, ...extra] = argv;
   if (!file || !runId || extra.length > 0) fail(`start takes <file> <run-id>\n${USAGE}`, 2);
+  checkRunId(runId);
   const rows = readRows(file);
   const newest = newestStart(rows);
   if (newest && newest.cells[4] === `run:${runId}`) {
@@ -125,6 +147,7 @@ while (positional[0]?.startsWith("--")) {
   if (flag === "--run") {
     runId = positional.shift();
     if (!runId) fail("--run needs an id", 2);
+    checkRunId(runId);
   } else fail(`unknown option ${flag}\n${USAGE}`, 2);
 }
 if (positional.length !== 6) fail(`expected <file> and five cells, got ${positional.length} argument${positional.length === 1 ? "" : "s"}\n${USAGE}`, 2);

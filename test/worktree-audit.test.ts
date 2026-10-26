@@ -94,7 +94,25 @@ beforeAll(() => {
 
   fakeBin = path.join(tmp, "fakebin");
   fs.mkdirSync(fakeBin);
+  // The fake gh prints the TSV the real one's --jq would.
   fs.writeFileSync(path.join(fakeBin, "gh"), "#!/usr/bin/env bash\nprintf 'feat/wip\\t41\\topen\\nfeat/closed\\t40\\tclosed\\n'\n", { mode: 0o755 });
+
+  // spaced: a worktree whose path has a space, merged into main, clean → safe.
+  wts.spaced = path.join(tmp, "wt with space");
+  git(repo, "worktree", "add", "-q", "-b", "feat/spaced", wts.spaced);
+  commit(wts.spaced, "spaced.txt", "s\n", "spaced work");
+  git(repo, "merge", "-q", "--ff-only", "feat/spaced");
+  git(repo, "push", "-q", "origin", "main");
+
+  // fresh: head is in main but an untracked file exists only here → review, not safe.
+  wts.fresh = path.join(tmp, "wt-fresh");
+  git(repo, "worktree", "add", "-q", "-b", "feat/fresh", wts.fresh);
+  fs.writeFileSync(path.join(wts.fresh, "newfeature.ts"), "export const x = 1;\n");
+
+  // gone: registered, directory deleted → prunable.
+  wts.gone = path.join(tmp, "wt-gone");
+  git(repo, "worktree", "add", "-q", "-b", "feat/gone", wts.gone);
+  fs.rmSync(wts.gone, { recursive: true, force: true });
 });
 afterAll(() => {
   if (repo) spawnSync("git", ["worktree", "prune"], { cwd: repo, timeout: 30_000 });
@@ -103,14 +121,19 @@ afterAll(() => {
 
 describe("gstack-worktree-audit", () => {
   test("classifies every worktree, reads the PR column through gh, the chat through CLAUDE_CONFIG_DIR, and changes nothing", () => {
-    const before = Object.values(wts).map(snapshot).join("\n") + snapshot(repo);
+    const live = Object.values(wts).filter(w => fs.existsSync(w));
+    const before = live.map(snapshot).join("\n") + snapshot(repo);
     const r = audit();
     expect(r.status).toBe(0);
     expect(r.stderr).toContain("warn: no -b given; MERGED checks against origin/main");
     expect(r.base).toBe("# base: origin/main");
     expect(r.header).toEqual(["SIZE", "AGE", "MERGED", "DIRTY", "REMOTE", "PR", "LAST_CHAT", "BUCKET", "WORKTREE"]);
-    expect(r.rows).toHaveLength(5);
+    expect(r.rows).toHaveLength(8);
     expect(r.byPath[repo]).toBeUndefined();
+    expect(r.byPath[wts.spaced]).toMatchObject({ MERGED: "YES", DIRTY: "clean", BUCKET: "safe" });
+    expect(r.byPath[wts.fresh]).toMatchObject({ MERGED: "YES", DIRTY: "scratch:1", REMOTE: "no-remote", BUCKET: "review" });
+    expect(r.byPath[wts.gone]).toMatchObject({ SIZE: "0", DIRTY: "missing", BUCKET: "prunable" });
+    expect(r.rows[r.rows.length - 1]!.WORKTREE).toBe(wts.gone);
 
     const merged = r.byPath[wts.merged]!;
     expect(merged).toMatchObject({ MERGED: "YES", DIRTY: "clean", REMOTE: "no-remote", PR: "-", LAST_CHAT: "-", BUCKET: "safe", AGE: "0d" });
@@ -123,30 +146,42 @@ describe("gstack-worktree-audit", () => {
     expect(r.byPath[wts.stale]).toMatchObject({ MERGED: "no", DIRTY: "clean", REMOTE: "no-remote", PR: "-", LAST_CHAT: "-", BUCKET: "review" });
     expect(r.byPath[wts.closed]).toMatchObject({ MERGED: "no", DIRTY: "clean", REMOTE: "pushed", PR: "#40/closed", BUCKET: "safe" });
 
-    const after = Object.values(wts).map(snapshot).join("\n") + snapshot(repo);
+    const after = live.map(snapshot).join("\n") + snapshot(repo);
     expect(after).toBe(before);
   });
 
-  test("an open PR holds a clean worktree, an unpushed commit reads ahead<n>, and -b picks the base", () => {
+  test("an unpushed commit on a branch with a closed PR is review, an open PR on the same name wins and holds it, and -b picks the base", () => {
     git(wts.closed, "commit", "-q", "--allow-empty", "-m", "one more");
-    fs.writeFileSync(path.join(fakeBin, "gh"), "#!/usr/bin/env bash\nprintf 'feat/closed\\t40\\topen\\n'\n", { mode: 0o755 });
-    const r = audit("-b", "origin/main", "--no-fetch", repo);
-    expect(r.stderr).not.toContain("warn: no -b given");
-    expect(r.byPath[wts.closed]).toMatchObject({ REMOTE: "ahead1", PR: "#40/open", BUCKET: "hold-open-pr" });
+    const r1 = audit("-b", "origin/main", "--no-fetch", repo);
+    expect(r1.stderr).not.toContain("warn: no -b given");
+    expect(r1.byPath[wts.closed]).toMatchObject({ REMOTE: "ahead1", PR: "#40/closed", BUCKET: "review" });
+    fs.writeFileSync(path.join(fakeBin, "gh"), "#!/usr/bin/env bash\nprintf 'feat/closed\\t40\\tclosed\\nfeat/closed\\t42\\topen\\n'\n", { mode: 0o755 });
+    const r2 = audit("-b", "origin/main", "--no-fetch", repo);
+    expect(r2.byPath[wts.closed]).toMatchObject({ REMOTE: "ahead1", PR: "#42/open", BUCKET: "hold-open-pr" });
   });
 
   test("without gh the PR column is - with a warning, and a missing base ref or repo is an error", () => {
-    // Shadow every gh on PATH with a directory the audit cannot execute from: `command -v` skips a non-executable file.
+    // A PATH with every tool the audit uses except gh. git goes in as the real binary from its
+    // exec path, since a distribution's /usr/bin/git may be a wrapper script that looks git up on PATH.
     const noGh = path.join(tmp, "nogh");
     fs.mkdirSync(noGh);
-    for (const tool of ["git", "bash", "du", "awk", "sed", "sort", "head", "find", "xargs", "stat", "date", "mktemp", "grep", "rm"]) {
-      const found = (process.env.PATH ?? "").split(path.delimiter).map(d => path.join(d, tool)).find(p => fs.existsSync(p));
-      if (found) fs.symlinkSync(found, path.join(noGh, tool));
+    const onPath = (tool: string) => (process.env.PATH ?? "").split(path.delimiter).map(d => path.join(d, tool)).find(p => fs.existsSync(p));
+    const execPath = spawnSync("git", ["--exec-path"], { encoding: "utf8", timeout: 30_000 }).stdout.trim();
+    const realGit = [path.join(execPath, "git"), onPath("git")].find(p => p && fs.existsSync(p))!;
+    fs.symlinkSync(fs.realpathSync(realGit), path.join(noGh, "git"));
+    for (const tool of ["bash", "sh", "env", "du", "awk", "sed", "sort", "head", "find", "xargs", "stat", "date", "mktemp", "grep", "rm", "cat", "dirname", "basename", "uname", "tr", "cut", "wc"]) {
+      const found = onPath(tool);
+      if (found) fs.symlinkSync(fs.realpathSync(found), path.join(noGh, tool));
     }
     const r = spawnSync("bash", [BIN, "--no-fetch"], { cwd: repo, encoding: "utf8", timeout: 60_000, env: { ...process.env, PATH: noGh, CLAUDE_CONFIG_DIR: claudeDir, HOME: tmp } });
     expect(r.status).toBe(0);
     expect(r.stderr).toContain("PR column is -");
     expect(r.stdout.split("\n").filter(Boolean).slice(2).every(l => l.split("\t")[5] === "-")).toBe(true);
+    fs.writeFileSync(path.join(fakeBin, "gh"), "#!/usr/bin/env bash\necho 'gh: not logged in' >&2; exit 4\n", { mode: 0o755 });
+    const failing = audit("--no-fetch");
+    expect(failing.status).toBe(0);
+    expect(failing.stderr).toContain("gh could not list this repository's PRs; PR column is -");
+    expect(failing.rows.every(row => row.PR === "-")).toBe(true);
     expect(audit("-b", "origin/nope", "--no-fetch").status).toBe(1);
     expect(audit("--no-fetch", path.join(tmp, "not-a-repo")).status).toBe(1);
     expect(audit("--bogus").status).toBe(2);
