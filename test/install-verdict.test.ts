@@ -121,6 +121,13 @@ describe('install verdict keyed by (checkout, project): both twins', () => {
     const fix = `fix: run the Capy skill installer (scripts/install.sh --for ship) from ${proj}: the verdict is keyed by the project directory the installer runs in, so a run from the skill's own folder does not cover ${proj}; then launch with the GSTACK_LAUNCH line it prints (INSTALL_UNVERIFIED)`;
     expect(r.line).toContain(fix);
     expect(bashAdmit('ship', proj, { _GH: sr, ...env }).line).toContain(fix);
+    const file = installVerdictPath(REAL, sr, proj);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{not json\n');
+    const corrupt = both('ship', proj, env);
+    expect(corrupt).toMatchObject({ refuse: true, status: 'verdict', code: 'INSTALL_UNVERIFIED' });
+    expect(corrupt.detail).toBe(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
+    expect(bashAdmit('ship', proj, { _GH: sr, ...env }).line).toContain(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
   });
 
   test('a running Bun other than the recorded one refuses with BUN_RESOLUTION_DRIFT and names both', () => {

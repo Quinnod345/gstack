@@ -136,7 +136,9 @@ gstack_install_admission() {
       trailer=$(gstack_install_verdict_field "$file" trailer)
       v_head=$(gstack_install_verdict_field "$file" head)
       head=$(git -C "$src" rev-parse HEAD 2>/dev/null)
-      if [ "$(gstack_install_verdict_field "$file" ok)" != true ]; then
+      if [ -z "$(gstack_install_verdict_field "$file" ok)" ] && [ -z "$(gstack_install_verdict_field "$file" schema_version)" ]; then
+        detail="the install verdict at $file is unreadable or has an unsupported schema_version; rerun the installer"
+      elif [ "$(gstack_install_verdict_field "$file" ok)" != true ]; then
         detail="the install verdict says: $trailer"
       elif [ "$(gstack_install_verdict_field "$file" checkout)" != "$src" ]; then
         detail="the install verdict is for checkout $(gstack_install_verdict_field "$file" checkout), not $src"

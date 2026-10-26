@@ -226,6 +226,13 @@ describe('ready under a train policy: the screen choice', () => {
     expect(unfetchable.err).toMatch(/could not fetch refs\/pull\/1\/merge from origin: .*\(QUEUE_SCREEN_STALE_REF\)/);
     expect(line(unfetchable.out, 'NEXT:')).toBe('NEXT: check the remote, then gstack-ship-queue ready --pr 1 --screen');
     repo.git('config', '--unset', 'fetch.fsckObjects');
+    const originUrl = repo.git('remote', 'get-url', 'origin');
+    repo.git('remote', 'set-url', 'origin', path.join(repo.root, 'no-such-origin.git'));
+    const unlisted = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    repo.git('remote', 'set-url', 'origin', originUrl);
+    expect(unlisted.status).toBe(EXIT.refused);
+    expect(unlisted.err).toMatch(/could not list origin's refs: .*\(QUEUE_SCREEN_STALE_REF\)/);
+    expect(unlisted.err.split('\n').filter(Boolean).length).toBe(1);
     expect(dispatches(fx)).toEqual([]);
     expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
     repo.git('push', '-q', '-f', 'origin', `${mergeRefCommit(fx, moved)}:refs/pull/1/merge`);
@@ -277,6 +284,9 @@ describe('ready under a train policy: the screen choice', () => {
     fx.write(d => { (d as any).expired = {}; d.runs = d.runs.filter(r => (r as any).databaseId !== 103); });
     const gone = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
     expect([gone.status, line(gone.out, 'ORDER:'), line(gone.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 run 103 is unreadable; counted as screened, unverified']);
+    fx.write(d => { (d as any).repo = ''; });
+    const noSlug = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([noSlug.status, line(noSlug.out, 'ORDER:'), line(noSlug.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 the repository slug is unreadable; counted as screened, unverified']);
   }, 120_000);
 });
 

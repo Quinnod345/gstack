@@ -378,7 +378,7 @@ no cases and reports success. A finished screen that planned no cases (no
 with nothing planned) is never followed as a screen: `ready --screen`
 dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
 no cases …; counted as not-run` and seats the slot unscreened. A plan the
-queue cannot read keeps the slot screened, with `SCREEN: #<n> run <id> …;
+queue cannot read keeps the slot screened, with `SCREEN: #<n> <reason>;
 counted as screened, unverified`.
 
 **2. Coordinator: build.** Name the pins exactly as READY reported them:

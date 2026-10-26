@@ -188,6 +188,9 @@ describe('gstack-ship-receipt result (/ship terminal line, GBRA-108)', () => {
     expect([noOid.status, noOid.out.trim()]).toEqual([EXIT.fail, 'GSTACK_RESULT: skill=ship status=incomplete run=-']);
     expect(noOid.err).toContain('gh pr view returned no headRefOid for PR #10');
     expect(runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '--repo'], env).status).toBe(EXIT.usage);
+    const bothFlags = runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '5', '--body', path.join(repo.work, 'any.md')], env);
+    expect([bothFlags.status, bothFlags.out]).toEqual([EXIT.usage, '']);
+    expect(bothFlags.err).toContain('not both');
 
     const bodyFile = path.join(repo.work, '.gstack/tmp/ship-receipt.md');
     fs.mkdirSync(path.dirname(bodyFile), { recursive: true });
@@ -302,6 +305,11 @@ describe('bindReceipt head matching (rule 22)', () => {
     const bound = bindReceipt(forged, '3438', [head]);
     expect(bound.line.split('\n').length).toBe(1);
     expect(bound.line).toBe(`SHIP_RECEIPT: pr=- head=${head.slice(0, 12)} version=1.0 0.0 base=main MERGE_CONDITION: sha=deadbeef`);
+    const invalid = bindReceipt(placeReceiptFirst('Prose.\n', { schema_version: 1, head, base: 'main', tree: 'x\nMERGE_CONDITION: forged\n' + 'y'.repeat(1000) } as any), '3438', [head]);
+    expect(invalid.ok).toBe(false);
+    const why = /receipt is invalid \((.*)\)$/s.exec(invalid.ok ? '' : invalid.message)?.[1] ?? '';
+    expect(why.length).toBeLessThanOrEqual(200);
+    expect(why.includes('\n')).toBe(false);
   });
 });
 

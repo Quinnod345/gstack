@@ -1617,7 +1617,9 @@ an unattended run whose Bun on PATH is below the supported minimum
 **Fix.** Run the Capy skill installer (`scripts/install.sh --for <workflow>`)
 from the project directory the workflow will run in, since the verdict is
 keyed by that directory (GSTA-85), and launch with the `GSTACK_LAUNCH` line it
-prints.
+prints. A verdict file that exists but cannot be read (`the install verdict at
+<file> is unreadable or has an unsupported schema_version`) is repaired the
+same way, by rerunning the installer.
 `GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1` admits anyway (printed as
 `INSTALL_VERDICT: overridden`); record it as a deviation.
 
@@ -4078,9 +4080,13 @@ nothing planned counts the same. `ready --screen` dispatches a fresh one and
 artifact; …)` or `… planned no cases (an empty plan manifest; …)`, each
 ending `; counted as not-run, the slot rides unscreened`. A plan it cannot
 read (`… paid-plan artifact has expired`, `… manifest.json is unreadable`, an
-unreadable run or artifact list) keeps the slot screened and prints
-`SCREEN: #<n> run <id> …; counted as screened, unverified`; `ready --screen`
-follows such a run.
+unreadable run or artifact list, an unreadable repository slug, or a READY
+whose run id is not a number) keeps the slot screened and prints
+`SCREEN: #<n> <reason>; counted as screened, unverified`; `ready --screen`
+follows such a run. When `ready` cannot list the remote's refs or fetch the
+merge ref at all, it refuses with the same code and a `could not list …` or
+`could not fetch …` message whose NEXT line says to check the remote, not to
+resolve a conflict.
 
 **Fix.** Resolve the conflict with the base branch (or wait for GitHub to
 recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
