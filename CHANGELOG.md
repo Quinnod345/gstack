@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.235.0] - 2026-10-26
 
 **An issue we intend to fix later now stays open under the `parked` label instead of being closed.** The Oct 11 triage closed 75 feature requests with a "not rejected" note, and GitHub showed them as closed with no fix. Those 75 are open again under the new `parked` label on garrytan/gstack ("Not fixed yet, not rejected: stays open; a comment says where it is tracked and what fixes it"), each with one comment saying where the work is tracked and what fixes it. The rule is written down: an issue closes only as fixed, duplicate or won't fix, each with its reason; a report that main already fixed closes as fixed, not won't fix; and a duplicate uses GitHub's own duplicate close reason.
 
