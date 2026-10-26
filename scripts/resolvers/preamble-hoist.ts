@@ -7,8 +7,9 @@
  * tier 2+ SKILL.md. The SKILL.md keeps a pointer to that file and every
  * preamble section whose text is this skill's own: the start command, any
  * section that names the skill or has a skill-specific variant, and tier 3's
- * additions. The pointer asks for a Read only when the file's marker is not
- * already in the conversation, so a session loads it once.
+ * additions. The pointer asks for a Read unless this skill's own earlier Read
+ * of that file, headed by its id, is still in context, so a session loads it
+ * once and text that merely carries the id never stands in for it.
  *
  * A section is hoisted only when this skill's render of it is byte-identical
  * to the shared render, so no skill's instructions change; they move.
