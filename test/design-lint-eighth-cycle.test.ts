@@ -167,9 +167,31 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(only(big, 'internal-error').map((f) => [f.file, f.grade])).toEqual([['big.css', 'ask']]);
   });
 
-  test('a long gradient className line costs the asset scan its length', () => {
+  test('a long gradient className line, or an import word before a long whitespace run, costs the asset scan its length; ES imports still name their libraries', () => {
     const dir = tree({ 'Hero.tsx': 'export default function Hero(){ return (<div className="' + 'bg-gradient-to-r from-indigo-500 to-violet-500 '.repeat(20_000) + '">x</div>); }' });
     expect(timed(() => lintStatic([dir], { cwd: dir, ...quiet }))).toBeLessThan(5000);
+    const spaced = tree({ 'Hero.tsx': 'export function Hero() { return <div>x</div>; }\n// import' + ' '.repeat(300_000) + 'x' });
+    expect(timed(() => lintStatic([spaced], { cwd: spaced, ...quiet }))).toBeLessThan(3000);
+    const nav = tree({ 'Nav.tsx': "import { Check } from 'lucide-react';\nimport { StarIcon } from '@heroicons/react/24/solid';\nexport const Nav = () => <nav><Check /><StarIcon /></nav>;\n" });
+    expect(only(lintStatic([nav], { cwd: nav, ...quiet }).findings, 'two-icon-libraries').map((f) => f.evidence)).toEqual(['icon libraries mixed on one page: heroicons and lucide']);
+  });
+
+  test('thousands of distinct families, narrow prose classes, nowrap rules, wrapping rules or em rules beside thousands of elements cost their length', () => {
+    const fams = tree({ 'style.css': Array.from({ length: 40_000 }, (_, i) => `.f${i}{font-family:"Fam${i}"}`).join('\n') });
+    expect(timed(() => lintStatic([fams], { cwd: fams, ...quiet })), 'families').toBeLessThan(5000);
+    const prose = tree({ 'index.html': HEAD + '<link rel="stylesheet" href="style.css"></head><body><main>' + '<p class="x">hi</p>\n'.repeat(40_000) + '</main></body></html>', 'style.css': Array.from({ length: 20_000 }, (_, i) => `.copy${i}{max-width:30ch}`).join('\n') });
+    expect(timed(() => lintStatic([prose], { cwd: prose, ...quiet })), 'prose').toBeLessThan(5000);
+    const nowrap = tree({ 'index.html': HEAD + '<link rel="stylesheet" href="style.css"></head><body><main>' + '<button class="btn">A long label that certainly wraps around</button>\n'.repeat(8_000) + '</main></body></html>', 'style.css': Array.from({ length: 20_000 }, (_, i) => `.nw${i}{white-space:nowrap}`).join('\n') });
+    expect(timed(() => lintStatic([nowrap], { cwd: nowrap, ...quiet })), 'nowrap').toBeLessThan(5000);
+    const wrap = tree({ 'index.html': HEAD + '<link rel="stylesheet" href="style.css"></head><body>' + '<main><h1>Supercalifragilisticexpialidocious here</h1></main>\n'.repeat(8_000) + '</body></html>', 'style.css': Array.from({ length: 60_000 }, (_, i) => `.a${i}{color:red}`).join('\n') });
+    expect(timed(() => lintStatic([wrap], { cwd: wrap, ...quiet })), 'wrap').toBeLessThan(5000);
+    const em = tree({ 'index.html': HEAD + '<link rel="stylesheet" href="style.css"></head><body><main>' + '<h2>Hello <em>there</em> friend</h2>\n'.repeat(10_000) + '</main></body></html>', 'style.css': Array.from({ length: 10_000 }, (_, i) => `.n${i} em{font-style:normal}`).join('\n') });
+    expect(timed(() => lintStatic([em], { cwd: em, ...quiet })), 'em').toBeLessThan(4000);
+  });
+
+  test('an unclosed JSX expression at the end of a deep element costs the file its length', () => {
+    const src = 'export default function A(){ return (' + '<div>'.repeat(200) + '{ ' + 'x '.repeat(1_000_000) + ')';
+    expect(timed(() => parseDoc('/x/App.tsx', src))).toBeLessThan(2000);
   });
 
   test('the render locator costs the page its length when a class value holds a >, and refuses a tag that is not one', () => {
@@ -178,6 +200,7 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     const tail = parseHtml('x.html', '<p>hi</p>' + '<1'.repeat(160_000)).src;
     expect(timed(() => expect(lineOf(tail, { tag: '1', cls: '', text: 'zz' })).toBe(1))).toBeLessThan(500);
     expect(lineOf('<x>\n<p class="lede big">Hello</p>', { tag: 'p', cls: 'big', text: 'hello' })).toBe(2);
+    expect(lineOf('<x>\n<p data-class="x" class="lede big">Hello</p>', { tag: 'p', cls: 'big', text: 'hello' })).toBe(2);
     expect(lineOf('<x>\n<p class="lede big">Hello</p>', { tag: 'p', cls: 'x'.repeat(401), text: 'hello' })).toBe(2);
   });
 
@@ -198,7 +221,10 @@ describe('design-lint eighth cycle: rule judgements', () => {
   test('tooltip-focus-delay reads a delay, not a 0.2s fade', () => {
     const tip = (t: string) => lintDir({ 'index.html': HEAD + '<style>' + TOKENS + ' .tooltip:hover .tip { transition: ' + t + '; opacity: 1 } .tooltip:focus-within .tip { transition: ' + t + '; opacity: 1 }</style></head><body><main><h1>Hello there</h1><span class="tooltip" tabindex="0">?<span class="tip">Help</span></span></main></body></html>' }).findings;
     expect(only(tip('opacity 0.2s'), 'tooltip-focus-delay')).toEqual([]);
+    expect(only(tip('opacity 200ms'), 'tooltip-focus-delay')).toEqual([]);
     expect(only(tip('opacity .5s ease'), 'tooltip-focus-delay')).toEqual([]);
+    expect(only(tip('opacity 1s'), 'tooltip-focus-delay')).toEqual([]);
+    expect(only(tip('opacity 0.2s 0.1s'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
     expect(only(tip('opacity 0.2s 1s'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
     expect(only(tip('opacity 200ms 600ms'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
   });

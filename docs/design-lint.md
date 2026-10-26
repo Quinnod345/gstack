@@ -334,9 +334,9 @@ reports at the document's first line with a count, because
 patterns into the lint with lines. It reads the page with every open
 `<script>`, `<style>`, `<template>` or `<nav>` that nothing closes after it
 dropped, so a page of unclosed openers costs its length there too.
-`tooltip-focus-delay` reads a delay of 100ms or 1s and more in a tooltip's
-`transition` or `transition-delay`; a `0.2s` fade is a duration, not a
-delay. Where a rule id is shared with
+`tooltip-focus-delay` reads the delay slot of a tooltip's `transition`
+(the second time in each comma part) or its `transition-delay`, 100ms and
+over; a `0.2s` or `200ms` fade is a duration, not a delay. Where a rule id is shared with
 `lib/design-catalog.ts`, the tier here follows hallmark's gate (several
 catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
 catalog row is marked `detect: lint`. Also outside the lint: `system-ui` or
