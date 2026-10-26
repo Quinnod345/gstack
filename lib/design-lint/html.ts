@@ -53,6 +53,7 @@ export const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'i
 export const HTML_NAMES = new Set(('a abbr address area article aside audio b base bdi bdo blockquote body br button canvas caption cite code col colgroup data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label legend li link main map mark menu meta meter nav noscript object ol optgroup option output p param picture pre progress q rp rt ruby s samp script search section select slot small source span strong style sub summary sup svg table tbody td template textarea tfoot th thead time title tr track u ul var video wbr').split(' '));
 
 const pad = (t: string) => t.replace(/[^\n]/g, ' ');
+const VISIBLE = /\S/g;
 
 /** s lower-cased letter by letter (ASCII only, so every position still lines up with s). */
 const asciiLower = (s: string): string => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
@@ -107,13 +108,13 @@ function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): s
   return out + s.slice(at);
 }
 
-/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. With a limit, the read stops once more than that many non-space characters are out, or once the walk has read 64 × limit + 4096 characters of the current text run without reaching the limit (a whitespace run, which the limit cannot stop), so a caller that only needs to know whether the text is short does not pay for an element that runs to the end of the file. */
+/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. With a limit, the read stops once more than that many non-space characters are out, so a caller that only needs to know whether the text is short does not pay for an element that runs to the end of the file; a long whitespace run (a comment blanked to spaces) is skipped natively, so it costs its length once and the read still agrees with the unlimited one. */
 export function stripTags(s: string, keep = false, limit = Infinity): string {
   let out = '', i = 0, seen = 0;
   for (;;) {
     if (limit < Infinity) for (let k = i, c = 0; k < s.length && s[k] !== '<'; k++) {
-      if (k - i > 64 * limit + 4096) return out + s.slice(i, k);
       if ((c = s.charCodeAt(k)) > 32 && (c < 128 || !/\s/.test(s[k])) && ++seen > limit) return out + s.slice(i, k + (c >= 0xd800 && c < 0xdc00 ? 2 : 1));
+      if (k - i > 64 * limit + 4096) { VISIBLE.lastIndex = k + 1; const hit = VISIBLE.exec(s); if (!hit) return out + s.slice(i); k = hit.index - 1; }
     }
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
