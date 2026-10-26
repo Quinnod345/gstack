@@ -118,7 +118,9 @@ export async function trainMain(ctx: QueueContext, args: string[]): Promise<numb
   if (sub === 'watch') {
     const timeoutSec = positive(flag(rest, '--timeout'), 7200);
     if (Number.isNaN(timeoutSec)) return usage('--timeout needs seconds');
-    return guarded('train watch', () => trainWatch(ctx, { train: nonce, timeoutSec, pollMs: Number(process.env.GSTACK_SHIP_QUEUE_POLL_MS) || 30_000, freeTimeoutSec: positive(flag(rest, '--free-timeout'), 2700) || 2700 }));
+    const freeTimeoutSec = positive(flag(rest, '--free-timeout'), 2700);
+    if (Number.isNaN(freeTimeoutSec)) return usage('--free-timeout needs seconds');
+    return guarded('train watch', () => trainWatch(ctx, { train: nonce, timeoutSec, pollMs: Number(process.env.GSTACK_SHIP_QUEUE_POLL_MS) || 30_000, freeTimeoutSec }));
   }
   if (sub === 'verdict') return guarded('train verdict', () => trainVerdict(ctx, { train: nonce }));
   if (sub === 'rebuild') return guarded('train rebuild', () => trainRebuild(ctx, { train: nonce, infra: rest.includes('--infra') }));

@@ -275,7 +275,7 @@ describe('train prune --stale and train watch', () => {
   }, 120_000);
 
   // Value: protects=a restarted controller re-arms with one command: watch continues from the record (free tests, gate dispatch, the pending run, the verdict) and prints NEXT;
-  // fails_when=watch dispatches twice, blocks past --timeout, or does not reach the verdict after a restart; why_new=no resumable follow existed (hand-run gh run watch chains died with the machine); seam=GSTACK_SHIP_QUEUE_POLL_MS; no_claim=real GitHub run timing
+  // fails_when=watch dispatches twice, blocks past --timeout, silently replaces a malformed --free-timeout with the default, or does not reach the verdict after a restart; why_new=no resumable follow existed (hand-run gh run watch chains died with the machine); seam=GSTACK_SHIP_QUEUE_POLL_MS; no_claim=real GitHub run timing
   test('watch resumes from free-pending through the gate dispatch to the verdict, times out with its own NEXT, and never dispatches twice', () => {
     const fx = make();
     fx.write(d => { d.rules['free-tests.yml'] = { status: 'in_progress', conclusion: null }; });
@@ -307,6 +307,7 @@ describe('train prune --stale and train watch', () => {
     expect([idle.status, line(idle.out, 'WATCH: nothing')]).toEqual([EXIT.ok, 'WATCH: nothing to wait for in state green']);
     expect(next(idle.out)).toBe(`NEXT: gstack-ship-queue verify --pr 1 --train ${nonce}`);
     expect(queue(fx, ['train', 'watch']).status).toBe(EXIT.usage);
+    expect(queue(fx, ['train', 'watch', '--train', nonce, '--free-timeout', 'abc']).status).toBe(EXIT.usage);
     expect(queue(fx, ['train', 'watch', '--train', 'no-such-train']).err).toMatch(/no train record no-such-train.*\(QUEUE_PROOF_MISSING\)/);
   }, 120_000);
 });
