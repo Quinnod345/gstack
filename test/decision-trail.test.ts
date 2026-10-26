@@ -75,6 +75,19 @@ describe("gstack-decision-trail append", () => {
     expect(fs.readFileSync(crlf, "utf8").split("\n").filter(Boolean).pop()!.split("\t")[3]).toBe("1 earlier row (2026-01-01T00:00:00Z..2026-01-01T00:00:00Z) written by other runs");
   });
 
+  test("a blank file gets a header, and a BOM before the header does not make it a row", () => {
+    const blank = path.join(tmp, "blank.tsv");
+    fs.writeFileSync(blank, "\n");
+    expect(run(blank, "p", "d", "w", "e", "r").status).toBe(0);
+    const lines = fs.readFileSync(blank, "utf8").split("\n");
+    expect(lines[1]).toBe("ts\tphase\tdecision\twhy\tevidence\tresult");
+    expect(lines[2]!.split("\t").slice(1)).toEqual(["p", "d", "w", "e", "r"]);
+    const bom = path.join(tmp, "bom.tsv");
+    fs.writeFileSync(bom, "\uFEFFts\tphase\tdecision\twhy\tevidence\tresult\n");
+    expect(run("--run", "r1", bom, "p", "d", "w", "e", "r").status).toBe(0);
+    expect(fs.readFileSync(bom, "utf8").split("\n").filter(Boolean)).toHaveLength(2);
+  });
+
   test("a run id with whitespace or quotes is a usage error on start and on --run", () => {
     expect(run("start", file, "a\tb").status).toBe(2);
     expect(run("start", file, "a b").status).toBe(2);

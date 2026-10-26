@@ -5,7 +5,8 @@
 # newest Claude Code chat that ran in it, and a suggested bucket. One TSV row
 # per worktree, largest first. It never deletes, prunes, checks out or edits a
 # worktree or a branch; its one write is the best-effort fetch of the base ref
-# (skip it with --no-fetch). Removing a worktree stays a step a person takes
+# (skip it with --no-fetch). In a fork workflow, where origin is your fork and
+# gh resolves the upstream, every PR is cross-repository and the PR column is -. Removing a worktree stays a step a person takes
 # after reading the table.
 #
 # Ported from pstack's poteto-mode/scripts/worktree-audit.sh (Copyright Lauren
@@ -29,14 +30,20 @@
 # Columns: SIZE AGE MERGED DIRTY REMOTE PR LAST_CHAT BUCKET WORKTREE
 #   MERGED    YES when the worktree's head is an ancestor of the base. A
 #             squash-merged branch is never an ancestor, so read PR with it.
-#   DIRTY     clean | wip:<n> (tracked edits) | scratch:<n> (untracked only) |
-#             missing (registered, directory gone: `git worktree prune` territory)
-#   REMOTE    pushed | ahead<n> | no-remote | detached
+#   DIRTY     clean | clean,ignored:<n> (only gitignored entries: .env, build
+#             output; the bucket ignores them, removing the worktree would not) |
+#             wip:<n> (tracked edits) | scratch:<n> (untracked only) |
+#             missing (registered, directory gone) | broken (the worktree's own
+#             .git link is gone, so git reads describe another repository) |
+#             unknown (git status failed)
+#   REMOTE    pushed | ahead<n> | no-remote | detached, against the local
+#             origin/<branch> tracking ref as last fetched
 #   PR        #<n>/<state> from gh (open, merged, closed; an open PR wins when a
 #             branch name has several, fork PRs are ignored), or - without gh
 #   LAST_CHAT date of the newest Claude Code transcript under
 #             ${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<worktree slug>/, or -
-#   BUCKET    prunable (directory gone) > hold-wip (tracked edits) >
+#   BUCKET    prunable (directory gone and not locked) > review for a locked or
+#             broken entry > hold-wip (tracked edits) >
 #             hold-open-pr > verify-recent-chat (a chat in the last 4 days) >
 #             safe (clean tree, and either merged into the base or its PR is
 #             closed or merged with every commit pushed) > review (anything
@@ -75,7 +82,7 @@ fi
 # explicit refspec creates the remote ref even in a single-branch clone.
 if [ "$fetch" = 1 ]; then
   case "$base" in
-  origin/*) GIT_TERMINAL_PROMPT=0 git fetch origin "+refs/heads/${base#origin/}:refs/remotes/$base" --quiet 2>/dev/null \
+  origin/*) GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" git fetch origin "+refs/heads/${base#origin/}:refs/remotes/$base" --quiet 2>/dev/null \
     || echo "warn: could not fetch $base; MERGED may be stale" >&2 ;;
   esac
 fi
@@ -109,10 +116,29 @@ now=$(date +%s)
 echo "# base: $base"
 printf 'SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE\n'
 
-git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r wt; do
+# One porcelain block per worktree: the path, then flag lines (locked, prunable).
+# IFS is a tab so a path keeps its leading and trailing spaces; a path with a
+# newline in it cannot be read from this format and is not supported.
+git worktree list --porcelain | awk 'BEGIN { RS=""; FS="\n" } {
+  flags = "-"
+  for (i = 2; i <= NF; i++) { if ($i ~ /^locked/) flags = flags "L"; if ($i ~ /^prunable/) flags = flags "P" }
+  print flags "\t" substr($1, 10)
+}' | while IFS=$'\t' read -r flags wt; do
   [ "$wt" = "$main_wt" ] && continue
+  # Directory gone: prunable, unless git holds the entry locked (an unmounted
+  # volume, say), in which case prune would not touch it and the branch's
+  # unpushed work may still exist elsewhere.
   if [ ! -d "$wt" ]; then
-    printf '0\t?\t?\tmissing\t?\t-\t-\tprunable\t%s\n' "$wt"
+    case "$flags" in *L*) bucket=review ;; *) bucket=prunable ;; esac
+    printf '0\t?\t?\tmissing\t?\t-\t-\t%s\t%s\n' "$bucket" "$wt"
+    continue
+  fi
+  # A worktree whose .git file is gone (git marks it prunable) makes every
+  # git -C read describe whichever repository contains the directory, so its
+  # own files would be invisible: report it broken, never safe.
+  case "$flags" in *P*) printf '%s\t?\t?\tbroken\t?\t-\t-\treview\t%s\n' "$(du -sh "$wt" 2>/dev/null | awk '{print $1}')" "$wt"; continue ;; esac
+  if [ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" != "$(cd "$wt" && pwd -P)" ]; then
+    printf '%s\t?\t?\tbroken\t?\t-\t-\treview\t%s\n' "$(du -sh "$wt" 2>/dev/null | awk '{print $1}')" "$wt"
     continue
   fi
 
@@ -123,14 +149,21 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r wt; do
 
   git merge-base --is-ancestor "$head" "$base" 2>/dev/null && merged=YES || merged=no
 
-  # Tracked edits are work in progress; untracked files alone are scratch.
-  porcelain=$(git -C "$wt" status --porcelain 2>/dev/null)
-  if [ -z "$porcelain" ]; then dirty=clean
-  elif printf '%s\n' "$porcelain" | grep -qv '^??'; then
-    dirty="wip:$(printf '%s\n' "$porcelain" | grep -cv '^??')"
-  else dirty="scratch:$(printf '%s\n' "$porcelain" | grep -c '^??')"; fi
+  # Tracked edits are work in progress; untracked files alone are scratch. A
+  # clean tree still names its ignored entries (.env, build output): they do
+  # not change the bucket, but they are what removing the worktree would lose.
+  if porcelain=$(git -C "$wt" status --porcelain 2>/dev/null); then
+    if [ -z "$porcelain" ]; then
+      ignored=$(git -C "$wt" ls-files --others --ignored --exclude-standard --directory 2>/dev/null | grep -c .)
+      [ "$ignored" -gt 0 ] && dirty="clean,ignored:$ignored" || dirty=clean
+    elif printf '%s\n' "$porcelain" | grep -qv '^??'; then
+      dirty="wip:$(printf '%s\n' "$porcelain" | grep -cv '^??')"
+    else dirty="scratch:$(printf '%s\n' "$porcelain" | grep -c '^??')"; fi
+  else dirty=unknown; fi
 
-  branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+  # refs/heads/ is stripped by hand: --short prints heads/<name> when a tag
+  # shares the branch's name, and then nothing downstream would match.
+  branch=$(git -C "$wt" symbolic-ref --quiet HEAD 2>/dev/null | sed 's#^refs/heads/##')
   if [ -z "$branch" ]; then remote=detached
   elif git -C "$wt" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
     [ "$(git -C "$wt" rev-parse "origin/$branch" 2>/dev/null)" = "$head" ] \
@@ -161,7 +194,7 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r wt; do
   case "$dirty" in wip:*) bucket=hold-wip ;; *)
     case "$pr" in */open|*/draft) bucket=hold-open-pr ;; *)
       if [ "$recent" = yes ]; then bucket=verify-recent-chat
-      elif [ "$dirty" = clean ] && { [ "$merged" = YES ] || { [ "$pr" != "-" ] && [ "$remote" = pushed ]; }; }; then bucket=safe
+      elif [ "${dirty%%,*}" = clean ] && { [ "$merged" = YES ] || { [ "$pr" != "-" ] && [ "$remote" = pushed ]; }; }; then bucket=safe
       else bucket=review; fi ;;
     esac ;;
   esac

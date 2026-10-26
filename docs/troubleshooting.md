@@ -4556,4 +4556,7 @@ is normal and the bucket is still `safe` while the tree is clean and every
 commit is pushed; an unpushed commit or an untracked file on that branch makes
 it `review`, because deleting the worktree would lose it. The audit only reads;
 a worktree it calls `safe` is still yours to remove, and a `prunable` row names
-a registered worktree whose directory is already gone (`git worktree prune`).
+a registered, unlocked worktree whose directory is already gone (`git worktree
+prune`); a locked one, or a `broken` row whose `.git` link is missing, reads
+`review` instead. `clean,ignored:<n>` means the tree is clean but holds
+gitignored entries (`.env`, build output) that go with the worktree.

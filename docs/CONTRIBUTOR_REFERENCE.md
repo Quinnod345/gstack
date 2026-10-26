@@ -179,18 +179,24 @@ Conductor workspaces are git worktrees, so after a few weeks of parallel
 lanes the checkout carries worktrees nobody remembers. `bin/gstack-worktree-audit
 [-b origin/<base>] [--no-fetch] [repo-path]` prints one TSV row per worktree
 beside the main one, largest first: size, age of the last commit, whether its
-head is merged into the base, `clean` / `wip:<n>` (tracked edits) /
+head is merged into the base, `clean` / `clean,ignored:<n>` (only gitignored
+entries such as `.env` or build output) / `wip:<n>` (tracked edits) /
 `scratch:<n>` (untracked only), `pushed` / `ahead<n>` / `no-remote` /
-`detached`, the PR on its branch through `gh` (`#n/open|merged|closed`, or
-`-`; a fork's PR on a same-named branch is ignored, and an open PR wins over
-an older closed one on a reused branch name), the date of the newest Claude
-Code chat that ran in it, and a bucket: `prunable` (registered, directory
-gone), then `hold-wip`, then `hold-open-pr`, then `verify-recent-chat` (a chat
-in the last four days), then `safe`, else `review`. `safe` means nothing
-exists only in that worktree: a clean tree whose head is merged into the base,
-or whose PR is closed or merged with every commit pushed; an unpushed commit or
-an untracked file on a merged branch is `review`. A squash-merged branch is
-never an ancestor of the base, so read `MERGED` together with `PR`. The audit
-only reads; removing a worktree (`git worktree remove <path>`) stays your call
-after the table. `/landing-report` points at it when the sibling table shows
+`detached` (against the local `origin/<branch>` tracking ref as last fetched),
+the PR on its branch through `gh` (`#n/open|merged|closed`, or `-`; a fork's
+PR on a same-named branch is ignored, so in a fork workflow where `origin` is
+your fork the column is `-`, and an open PR wins over an older closed one on a
+reused branch name), the date of the newest Claude Code chat that ran in it,
+and a bucket: `prunable` (registered, directory gone, not locked), then
+`review` for a locked entry whose directory is gone or a `broken` worktree
+whose own `.git` link is missing, then `hold-wip`, then `hold-open-pr`, then
+`verify-recent-chat` (a chat in the last four days), then `safe`, else
+`review`. `safe` means nothing tracked or untracked exists only in that
+worktree: a clean tree whose head is merged into the base, or whose PR is
+closed or merged with every commit pushed; an unpushed commit or an untracked
+file on a merged branch is `review`. Ignored entries do not change the bucket,
+but removing the worktree removes them too, so read the `ignored:<n>` count
+before you do. A squash-merged branch is never an ancestor of the base, so read
+`MERGED` together with `PR`. The audit only reads; removing a worktree
+(`git worktree remove <path>`) stays your call after the table. `/landing-report` points at it when the sibling table shows
 stale worktrees.
