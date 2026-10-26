@@ -83,7 +83,7 @@ export function collectFiles(paths: string[], warn: (l: string) => void = () => 
  * relative to the lint root the page was found under. Schemes and
  * protocol-relative URLs are not local.
  */
-export function resolveRef(href: string | null, from: string, root: string | null): string | null {
+export function resolveRef(href: string | null, from: string, root: string | null, bound: string | null = null): string | null {
   if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
   const ref = href.split(/[?#]/)[0];
   if (!ref) return null;
@@ -98,24 +98,24 @@ export function resolveRef(href: string | null, from: string, root: string | nul
     return inside(abs, root) ? abs : null;
   }
   const abs = path.resolve(from, ref);
-  const project = projectRoot(from);
-  return project && !inside(abs, project) ? null : abs;
+  const top = projectRoot(from) ?? bound;
+  return top && !inside(abs, top) ? null : abs;
 }
 
-export function importsOf(css: string, from: string, root: string | null = null): string[] {
+export function importsOf(css: string, from: string, root: string | null = null, bound: string | null = null): string[] {
   const out: string[] = [];
   for (const m of stripComments(css).matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?/gi)) {
-    const ref = resolveRef(m[1], from, root);
+    const ref = resolveRef(m[1], from, root, bound);
     if (ref) out.push(ref);
   }
   return out;
 }
 
-export function linksOf(doc: Doc, from: string, root: string | null = null): string[] {
+export function linksOf(doc: Doc, from: string, root: string | null = null, bound: string | null = null): string[] {
   const out: string[] = [];
   for (const t of doc.tags) {
     if (t.close || t.name !== 'link' || !/stylesheet/i.test(getAttr(t.attrs, 'rel') || '')) continue;
-    const ref = resolveRef(getAttr(t.attrs, 'href'), from, root);
+    const ref = resolveRef(getAttr(t.attrs, 'href'), from, root, bound);
     if (ref) out.push(ref);
   }
   return out;
@@ -130,7 +130,7 @@ interface CssRead { raw: string; rules: CssRule[]; imports: string[] }
 /** Stylesheets read once per run: a bundle shared by forty pages is parsed once, not forty times. */
 class CssCache {
   private readonly files = new Map<string, CssRead | null>();
-  constructor(readonly roots: string[], readonly warn: (l: string) => void, readonly skipped: Skipped[] = []) {}
+  constructor(readonly roots: string[], readonly warn: (l: string) => void, readonly skipped: Skipped[] = [], readonly bound: string | null = null) {}
   read(f: string): CssRead | null {
     if (this.files.has(f)) return this.files.get(f)!;
     let out: CssRead | null = null;
@@ -138,7 +138,7 @@ class CssCache {
       const size = fs.statSync(f).size;
       if (size > MAX_FILE_BYTES) { const why = `${Math.round(size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit`; this.warn(`design-lint: skipped ${f} (${why})`); this.skipped.push({ file: f, kind: 'oversize', why }); this.files.set(f, null); return null; }
       const raw = fs.readFileSync(f, 'utf8');
-      out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
+      out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots), this.bound) };
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') this.warn(`design-lint: skipped ${f}, not found`);
@@ -177,9 +177,9 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
     const root = rootOf(doc.file, cache.roots);
     for (const st of doc.styles) {
       try { for (const rule of parseCss(st.css, doc.file, st.lineOffset)) rules.push(rule); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); cache.skipped.push({ file: doc.file, kind: 'unparseable', why: `a <style> block could not be parsed (${(e as Error).message})` }); continue; }
-      pending.push(...importsOf(st.css, path.dirname(doc.file), root));
+      pending.push(...importsOf(st.css, path.dirname(doc.file), root, cache.bound));
     }
-    pending.push(...linksOf(doc, path.dirname(doc.file), root));
+    pending.push(...linksOf(doc, path.dirname(doc.file), root, cache.bound));
   }
   attachStylesheets(cssFiles, rules, pending, inGroup, cache);
   const allCss = cssFiles.map((c) => c.raw).join('\n') + '\n' + docList.map((d) => d.styles.map((st) => st.css).join('\n')).join('\n');
@@ -195,7 +195,7 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
 function linkedCss(page: Doc, cache: CssCache): Set<string> {
   const linked = new Set<string>();
   const root = rootOf(page.file, cache.roots);
-  const queue = [...linksOf(page, path.dirname(page.file), root), ...page.styles.flatMap((st) => importsOf(st.css, path.dirname(page.file), root))];
+  const queue = [...linksOf(page, path.dirname(page.file), root, cache.bound), ...page.styles.flatMap((st) => importsOf(st.css, path.dirname(page.file), root, cache.bound))];
   while (queue.length) {
     const q = queue.shift()!;
     if (linked.has(q) || path.extname(q).toLowerCase() !== '.css') continue;
@@ -213,7 +213,7 @@ function linkedCss(page: Doc, cache: CssCache): Set<string> {
  * directory, belongs to that page and is not linted again on its own.
  */
 export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void, roots: string[] = [], skipped: Skipped[] = []): LintContext[] {
-  const cache = new CssCache(roots, warn, skipped);
+  const cache = new CssCache(roots, warn, skipped, realDir(opts.cwd ?? process.cwd()));
   const groups = new Map<string, { css: string[]; pages: Doc[]; parts: Doc[] }>();
   for (const f of files) {
     const dir = path.dirname(f);
@@ -254,7 +254,7 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
   return contexts;
 }
 
-/** The nearest directory above dir holding a package.json or a .git entry: the project a relative stylesheet href may not climb out of. Null outside any project, where a relative href is bounded only by the disk (only .css files are read, and only their declarations are printed). */
+/** The nearest directory above dir holding a package.json or a .git entry: the project a relative stylesheet href may not climb out of. Null outside any project, where a relative href is bounded by the working directory the lint runs in instead (only .css files are read, and only their declarations are printed). */
 function projectRoot(dir: string): string | null {
   for (let d = dir; ; d = path.dirname(d)) {
     if (fs.existsSync(path.join(d, 'package.json')) || fs.existsSync(path.join(d, '.git'))) return d;

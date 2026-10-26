@@ -58,13 +58,37 @@ export function lineIndex(src: string, lineOffset = 0): (pos: number) => number 
   };
 }
 
+/** The index just past the string literal opening at i, escape-aware (`"\""` is one string); end when it never closes. One skipper for the block scanner, the body flattener and the declaration split, so an escaped quote cannot rewrite the rest of a sheet. */
+function skipString(src: string, i: number, end: number): number {
+  const q = src[i];
+  let k = i + 1;
+  while (k < end && src[k] !== q) { if (src[k] === '\\') k++; k++; }
+  return k >= end ? end : k + 1;
+}
+
+/** A body split on the `;` outside string literals. */
+function splitDecls(body: string): string[] {
+  const parts: string[] = [];
+  let at = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '"' || body[i] === "'") i = skipString(body, i, body.length) - 1;
+    else if (body[i] === ';') { parts.push(body.slice(at, i)); at = i + 1; }
+  }
+  parts.push(body.slice(at));
+  return parts;
+}
+
 /** Replace nested blocks inside [s, e) with spaces so the remaining text holds only this rule's own declarations. */
 function flatBody(src: string, s: number, e: number): string {
-  const out = src.slice(s, e).split('');
+  const body = src.slice(s, e), out = body.split('');
   let depth = 0, edge = -1;
   for (let i = 0; i < out.length; i++) {
     const c = out[i];
-    if (c === '{') {
+    if (c === '"' || c === "'") {
+      const j = skipString(body, i, body.length);
+      if (depth > 0) for (let k = i; k < j; k++) if (out[k] !== '\n') out[k] = ' ';
+      i = j - 1;
+    } else if (c === '{') {
       if (depth === 0) for (let k = edge + 1; k < i; k++) if (out[k] !== '\n') out[k] = ' ';
       depth++; out[i] = ' ';
     } else if (c === '}') {
@@ -126,7 +150,7 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
     const body = flatBody(src, s, e);
     const decls: CssDecl[] = [];
     let off = 0;
-    for (const part of body.split(';')) {
+    for (const part of splitDecls(body)) {
       const idx = part.indexOf(':');
       if (idx > 0) {
         const prop = part.slice(0, idx).trim().toLowerCase();
@@ -151,7 +175,7 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
       let depth = 1, k = blockStart;
       while (k < end && depth > 0) {
         const ch = src[k];
-        if (ch === '"' || ch === "'") { const q = src.indexOf(ch, k + 1); k = q < 0 || q >= end ? end : q + 1; continue; }
+        if (ch === '"' || ch === "'") { k = skipString(src, k, end); continue; }
         if (ch === '{') depth++;
         else if (ch === '}') depth--;
         k++;

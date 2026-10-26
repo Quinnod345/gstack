@@ -95,7 +95,7 @@ function checkIconLibraries(ctx: LintContext, r: Reporter): void {
 
 // sloplint check33 (gate 33)
 function checkUnlabeledDecoration(ctx: LintContext, r: Reporter): void {
-  const labeled = (a: string): boolean => hasAttr(a, 'aria-hidden') || getAttr(a, 'aria-label') != null
+  const labeled = (a: string): boolean => (getAttr(a, 'aria-hidden') || '').trim().toLowerCase() === 'true' || getAttr(a, 'aria-label') != null
     || getAttr(a, 'aria-labelledby') != null
     || ['img', 'presentation', 'none'].includes((getAttr(a, 'role') || '').toLowerCase());
   for (const doc of ctx.docs) {

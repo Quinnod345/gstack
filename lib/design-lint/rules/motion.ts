@@ -332,24 +332,26 @@ function controlHeight(ctx: LintContext, r: Reporter): void {
 const HIDE_OK = /tooltip|popover|menu|dropdown|modal|dialog|toast|overlay|backdrop|sheet|drawer|panel|:hover|:focus|:checked|:target|\[open|\[aria-(?:expanded|selected|current|pressed)|::before|::after|\.is-|\[hidden|\[aria-hidden|sr-only|visually-hidden|skip|placeholder|::marker|\[data-slot/i;
 const REVEALISH = /reveal|fade|animate|aos|in-view|inview|appear|enter|rise|slide|stagger|observe|lazy/i;
 
-// sloplint startingStyleText (gate 62): every @starting-style block with the selector it sits under; a block inside one already taken is part of it, so an unclosed block costs the rest of the sheet once
-function startingStyleText(css: string): string {
-  let out = '', taken = 0;
+// sloplint startingStyleText (gate 62): the selectors every @starting-style block declares, plus the selector it sits under, as whole comma parts (a substring test let `.reveal-wrap` in one block silence `.reveal`); a block inside one already taken is part of it, so an unclosed block costs the rest of the sheet once
+function startingSelectors(css: string): Set<string> {
+  const out = new Set<string>();
+  const add = (text: string) => { for (const part of splitTop(text)) if (part.trim()) out.add(part.trim().replace(/\s+/g, ' ')); };
+  let taken = 0;
   for (const m of css.matchAll(/@starting-style\s*\{/gi)) {
     if (m.index! < taken) continue;
     let depth = 1, k = m.index! + m[0].length;
     while (k < css.length && depth > 0) { if (css[k] === '{') depth++; else if (css[k] === '}') depth--; k++; }
     taken = k;
-    out += css.slice(m.index!, k) + ' ';
+    for (const s of css.slice(m.index! + m[0].length, k).matchAll(/([^{};]+)\{/g)) add(s[1]);
     const open = css.lastIndexOf('{', m.index! - 1), close = css.lastIndexOf('}', m.index! - 1);
-    if (open > close) out += css.slice(Math.max(close + 1, 0), open) + ' ';
+    if (open > close) add(css.slice(Math.max(close + 1, 0), open));
   }
   return out;
 }
 
 // sloplint check62 (gate 62)
 function hiddenAtRest(ctx: LintContext, r: Reporter): void {
-  const starting = startingStyleText(ctx.allCss);
+  const starting = startingSelectors(ctx.allCss);
   const jsScoped = (sel: string) => /(^|[\s,])(html|body)?\.js\b|\[data-js|\.no-js|html\.has-js/i.test(sel);
   const animated = new Map<string, Array<{ selector: string; decls: Array<{ prop: string; value: string }> }>>();
   for (const rule of ctx.rules) if (rule.keyframes) {
@@ -362,7 +364,7 @@ function hiddenAtRest(ctx: LintContext, r: Reporter): void {
     if (rule.keyframes || (rule.media && /\bprint\b/i.test(rule.media)) || rule.selector === '@font-face') continue;
     const hidden = rule.decls.find((d) => (d.prop === 'opacity' && parseFloat(resolveVars(d.value, ctx.tokens)) === 0) || (d.prop === 'visibility' && /hidden/.test(d.value)));
     if (!hidden) continue;
-    if (HIDE_OK.test(rule.selector.replace(/:not\([^)]*\)/g, '')) || jsScoped(rule.selector) || (starting && starting.includes(rule.selector))) continue;
+    if (HIDE_OK.test(rule.selector.replace(/:not\([^)]*\)/g, '')) || jsScoped(rule.selector) || (starting.size > 0 && splitTop(rule.selector).some((part) => starting.has(part.trim().replace(/\s+/g, ' '))))) continue;
     const revealish = REVEALISH.test(rule.selector) || rule.decls.some((d) => d.prop === 'transform' && /translate|scale/.test(d.value));
     if (!revealish) continue;
     const anim = rule.decls.find((d) => d.prop === 'animation' || d.prop === 'animation-name');
