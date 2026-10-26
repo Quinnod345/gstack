@@ -1,7 +1,9 @@
 /**
  * redact-engine — pure scanning + auto-redaction over the shared taxonomy.
  *
- * No I/O. Deterministic. The CLI shim (`bin/gstack-redact`), the pre-push hook
+ * No I/O. Deterministic given its one ambient input: `scan()` reads the
+ * credential-named variables of `process.env` by value unless `processEnv` is
+ * passed (GSTA-104). The CLI shim (`bin/gstack-redact`), the pre-push hook
  * (`bin/gstack-redact-prepush`), and tests all import from here.
  *
  * Key behaviors (locked in /plan-eng-review + two Codex passes):
@@ -76,8 +78,9 @@ export interface ScanOptions {
    */
   sourcePath?: string;
   /**
-   * The environment whose credential-named variables (`*_KEY`, `*_TOKEN`,
-   * `*_SECRET`, `*_PASSWORD`) are scanned for BY VALUE: wherever one of those
+   * The environment whose credential-named variables (a name whose last
+   * `_`-separated word is KEY, TOKEN, SECRET, PASSWORD or PASSWD, any case,
+   * and that carries no PUBLIC word) are scanned for BY VALUE: wherever one of those
    * values appears in the text it is an `env.value` HIGH finding, whatever its
    * shape, so a value that reached the text (a dumped environment in a tool
    * output, GSTA-96) never reaches a PR body, receipt, report or Drive file.
@@ -478,7 +481,9 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
     while ((normOffset = normalized.indexOf(value, from)) !== -1) {
       from = normOffset + value.length;
       const origOffset = map[Math.min(normOffset, map.length - 1)] ?? 0;
-      const key = `env.value:${origOffset}`;
+      // Keyed on the span, not the offset alone: when one credential's value is
+      // a prefix of another's, both findings exist and their spans coalesce.
+      const key = `env.value:${origOffset}:${value.length}`;
       if (seen.has(key)) continue;
       seen.add(key);
       starts ??= lineStarts(input);
@@ -491,7 +496,8 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
         description: `Value of the ${name} environment variable`,
         line,
         col,
-        preview: maskPreview(value),
+        // A live credential: the name already says what leaked; show no bytes.
+        preview: "********",
         autoRedactable: false,
         repoVisibility,
       };
@@ -513,18 +519,23 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
 }
 
 const CREDENTIAL_ENV_NAME = /(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD)$/i;
+/** Framework-public keys (NEXT_PUBLIC_*_KEY, VITE_PUBLIC_*, *_PUBLIC_KEY) are committed on purpose. */
+const PUBLIC_ENV_NAME = /(^|_)PUBLIC(_|$)/i;
 const MIN_ENV_VALUE_LENGTH = 8;
 
 /**
  * The (name, value) pairs of `env` worth scanning for by value: credential-named
- * variables whose value is long enough to be a credential and is not a
- * placeholder. A short or placeholder value would match ordinary prose.
+ * variables whose trimmed value is long enough to be a credential and is not a
+ * placeholder. A short or placeholder value would match ordinary prose. The
+ * value is trimmed, so a key read from a file with a trailing newline still
+ * matches its leaked form.
  */
 export function credentialEnvValues(env: Record<string, string | undefined>): Array<{ name: string; value: string }> {
   const out: Array<{ name: string; value: string }> = [];
-  for (const [name, value] of Object.entries(env)) {
-    if (!CREDENTIAL_ENV_NAME.test(name)) continue;
-    if (!value || value.trim().length < MIN_ENV_VALUE_LENGTH) continue;
+  for (const [name, raw] of Object.entries(env)) {
+    if (!CREDENTIAL_ENV_NAME.test(name) || PUBLIC_ENV_NAME.test(name)) continue;
+    const value = raw?.trim() ?? "";
+    if (value.length < MIN_ENV_VALUE_LENGTH) continue;
     if (isPlaceholderSpan(value)) continue;
     out.push({ name, value });
   }

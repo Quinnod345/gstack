@@ -343,9 +343,10 @@ back empty, the bare `export` printed the whole environment, and three API key
 values landed in its tool output. Never `export $(...)`, `env`, `printenv`, a
 bare `set` or a bare `export` in a tool fence (`test/launch-env-echo-ratchet.test.ts`
 keeps them out of every skill fence and shell helper), and the redaction
-engine now refuses the VALUE of any `*_KEY`, `*_TOKEN`, `*_SECRET` or
-`*_PASSWORD` variable in the writer's environment (`env.value`, HIGH), so a
-leaked value cannot reach a PR body, receipt, report or Drive file.
+engine now refuses the VALUE of any `*_KEY`, `*_TOKEN`, `*_SECRET`,
+`*_PASSWORD` or `*_PASSWD` variable in the writer's environment (any case;
+names carrying a `PUBLIC` word are framework-public and exempt) (`env.value`,
+HIGH), so a leaked value cannot reach a PR body, receipt, report or Drive file.
 
 `PATH=<dir>:$PATH` and `GSTACK_LAUNCH_PATH` appear only when the certified Bun,
 or the project's resolved Node, is not first on PATH (older Capy images ship
