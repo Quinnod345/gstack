@@ -106,7 +106,7 @@ function parsed<T>(text: string | undefined): Parsed<T> {
 
 /** The source line of the element a finding names: its tag, first class, a distinguishing attribute and its opening text. Best effort; 1 when nothing matches. */
 export function lineOf(src: string | null, at?: ProbeAt): number {
-  if (!src || !at) return 1;
+  if (!src || !at || typeof at.tag !== 'string' || typeof at.text !== 'string') return 1;
   const cls = at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${escapeRe(at.cls)}(?:\\s[^"']*)?["']`, 'i') : null;
   const want = at.text.toLowerCase();
   let fallback = -1;
@@ -146,7 +146,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   if (!res.ok) { report({ rule: 'render', grade: 'fail', evidence: `the page did not render: ${res.error ?? 'unknown error'}` }, null); return; }
 
   const setup = parsed<SetupReport>(res.evals[opening.length - 1]);
-  if ('error' in setup) report({ rule: 'render', grade: 'fail', evidence: `the page could not be prepared for measurement: ${setup.error}` }, null);
+  if ('error' in setup || !Array.isArray(setup.value?.lost)) report({ rule: 'render', grade: 'fail', evidence: `the page could not be prepared for measurement: ${'error' in setup ? setup.error : 'the setup answer has no list of lost assets'}` }, null);
   else if (setup.value.lost.length) report({ rule: 'render', grade: 'warn', evidence: `fonts or stylesheets did not load (${setup.value.lost.slice(0, 2).join(', ')}): the measurements show a fallback face`, fix: 'fix the path or wait for the host, then measure again; never sign off a fallback face' }, null);
   const errs = parsed<string[]>(res.stdout.match(/^PAGE_ERRORS=(.+)$/m)?.[1]);
   const uncaught = 'value' in errs && Array.isArray(errs.value) ? errs.value.find((e) => e.startsWith('uncaught: ')) : undefined;
@@ -157,9 +157,12 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   const seen = new Set<string>();
   plan.forEach((m, i) => {
     const p = parsed<ProbeFinding[] | RingProbe[]>(res.evals[opening.length + i]);
-    if ('error' in p) { report({ rule: 'render', grade: 'fail', evidence: `the ${m.call.replace(/^P\.(\w+).*/, '$1')} measurement at ${m.label} failed: ${p.error}` }, null); return; }
-    if (m.call === 'P.focus(P)') { rings = p.value as RingProbe[]; return; }
-    for (const f of p.value as ProbeFinding[]) {
+    const list = 'error' in p ? null : (p.value as unknown);
+    const bad = 'error' in p ? p.error : !Array.isArray(list) ? 'the answer is not a list' : (list as unknown[]).some((f) => !f || typeof f !== 'object') ? 'the list holds a non-object entry' : null;
+    if (bad != null) { report({ rule: 'render', grade: 'fail', evidence: `the ${m.call.replace(/^P\.(\w+).*/, '$1')} measurement at ${m.label} failed: ${bad}` }, null); return; }
+    if (m.call === 'P.focus(P)') { rings = (list as RingProbe[]).filter((x) => typeof x.key === 'string'); return; }
+    for (const f of list as ProbeFinding[]) {
+      if (typeof f.rule !== 'string' || typeof f.evidence !== 'string' || (f.grade !== 'fail' && f.grade !== 'warn') || !ruleMeta(f.rule)) { report({ rule: String(f.rule ?? '?'), grade: 'malformed' as ProbeFinding['grade'], evidence: '' }, null); continue; }
       const key = f.rule + '|' + f.evidence;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -170,7 +173,8 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   if (scrolls.length > 1) {
     const keep = scrolls.find((f) => f.grade === 'fail') ?? scrolls[0];
     const rest = scrolls.filter((f) => f !== keep);
-    keep.evidence += ` (also at ${rest.map((f) => f.label.replace(/px$/, '')).join(', ')}px)`;
+    const widths = [...new Set(rest.map((f) => f.label.replace(/px$/, '')))].filter((w) => w !== keep.label.replace(/px$/, ''));
+    if (widths.length) keep.evidence += ` (also at ${widths.join(', ')}px)`;
     for (const f of rest) found.splice(found.indexOf(f), 1);
   }
   const bare = rings.filter((x) => x.bare);

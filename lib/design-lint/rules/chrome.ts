@@ -7,7 +7,7 @@
  */
 import type { LintContext } from '../context';
 import { lineIndex } from '../css';
-import { getAttr, innerOf, maskedProse, plainText, treeOf, type Doc, type Tag } from '../html';
+import { closeIndex, getAttr, innerOf, maskedProse, openTags, plainText, textOf, treeOf, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 import { runChromeCopy } from './chrome-copy';
 import { runEyebrow } from './chrome-eyebrow';
@@ -43,13 +43,10 @@ function checkFooterShape(ctx: LintContext, r: Reporter): void {
       d.prop === 'grid-template-columns'
       && (/repeat\(\s*4\s*,/.test(d.value) || /^(1fr|minmax\([^)]*\))(\s+(1fr|minmax\([^)]*\))){3,}$/.test(d.value.trim()))));
     let linkGroups = 0;
-    const colRe = /<(ul|div|p|nav)\b[^>]*class\s*=\s*"[^"]*(col|column|links|group)[^"]*"[^>]*>([\s\S]*?)<\/\1>/gi;
-    let cm: RegExpExecArray | null;
-    while ((cm = colRe.exec(inner.inner))) {
-      if ((cm[3].match(/<a\b/gi) || []).length >= 3) linkGroups++;
-    }
-    for (const um of inner.inner.matchAll(/<ul\b[^>]*>([\s\S]*?)<\/ul>/gi)) {
-      if ((um[1].match(/<a\b/gi) || []).length >= 3) linkGroups++;
+    const end = closeIndex(doc, idx);
+    for (const el of openTags(doc, /^(ul|div|p|nav)$/, idx + 1, end)) {
+      const column = el.tag.name === 'ul' || /col|column|links|group/.test(getAttr(el.tag.attrs, 'class') || '');
+      if (column && openTags(doc, /^a$/, el.idx + 1, closeIndex(doc, el.idx)).length >= 3) linkGroups++;
     }
     if (uls >= 4 || (fourEqualCol && linkGroups >= 3)) {
       r.report('template-footer', doc.file, doc.tags[idx].line, 'the reflex footer shape: ' + (uls >= 4 ? uls + ' link columns' : 'four equal columns of links'));
@@ -142,7 +139,7 @@ function checkTemplatePunctuation(ctx: LintContext, r: Reporter): void {
       if (TICKER.test(cls) || tickerRanges.some(([a, b]) => t.pos > a && t.pos < b)) continue;
       const inner = innerOf(doc, i);
       if (!inner || /<(p|div|li|section|article|ul|ol|table)\b/i.test(inner.inner)) continue;
-      const text = plainText(inner.inner);
+      const text = textOf(doc, i);
       if (!text) continue;
       const dots = (text.match(/\s[·•]\s/g) || []).length;
       if (dots >= 2 && !dotLines.has(t.line)) {
@@ -164,31 +161,18 @@ function checkTemplatePunctuation(ctx: LintContext, r: Reporter): void {
       const cls = getAttr(t.attrs, 'class') || '';
       if (!/(^|\s)(dot|status-dot|indicator|bullet|pip|blip)(\s|$|__|-)/i.test(cls)) continue;
       if (/aria-live|role\s*=\s*"status"/i.test(t.attrs)) continue;
-      const inner = innerOf(doc, i);
-      if (inner && plainText(inner.inner)) continue;
+      if (textOf(doc, i)) continue;
       dotCount++;
       if (dotCount === 3) r.report('template-punctuation', doc.file, t.line, 'decorative status dots (' + cls.trim() + ') repeated across the page', { fix: 'delete them; a dot means live state, and only where it is one' });
     }
   }
 }
 
-/** The tag index of the nearest open ancestor of the tag at from, or -1. */
-function parentIndex(doc: Doc, from: number): number {
-  let depth = 0;
-  for (let k = from - 1; k >= 0; k--) {
-    const t = doc.tags[k];
-    if (t.selfClosing) continue;
-    if (t.close) depth++;
-    else if (depth === 0) return k;
-    else depth--;
-  }
-  return -1;
-}
-
 // sloplint check68 (gate 68); the no-slot-script half (F18) is render-only and not ported
 function checkWireframeSlots(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     if (doc.kind !== 'html') continue;
+    const { parent } = treeOf(doc);
     const slots: Array<{ i: number; t: Tag }> = [];
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
@@ -197,17 +181,17 @@ function checkWireframeSlots(ctx: LintContext, r: Reporter): void {
       if (inner && /<img\b[^>]*\bsrc\s*=\s*["'][^"']+["']/i.test(inner.inner)) continue;
       if (inner && (inner.inner.match(/<[a-z][\w-]*\b[^>]*>\s*[^<\s]/gi) || []).length >= 6) continue;
       let hiddenUp = false;
-      for (let k = parentIndex(doc, i); k >= 0 && !hiddenUp; k = parentIndex(doc, k)) if (/(?:^|\s)hidden(?:\s|=|$)/.test(doc.tags[k].attrs)) hiddenUp = true;
+      for (let k = parent[i]; k >= 0 && !hiddenUp; k = parent[k]) if (/(?:^|\s)hidden(?:\s|=|$)/.test(doc.tags[k].attrs)) hiddenUp = true;
       if (hiddenUp) continue;
       slots.push({ i, t });
     }
     if (slots.length > 5) r.report('wireframe-slots', doc.file, slots[5].t.line, slots.length + ' empty slots on one page', { fix: 'two to four slots carry a page; set the rest in type, with names and facts in a list or table' });
     const byRun = new Map<number, number>();
     for (const sl of slots) {
-      const parent = parentIndex(doc, sl.i);
-      const gp = parent >= 0 ? parentIndex(doc, parent) : -1;
-      const ggp = gp >= 0 ? parentIndex(doc, gp) : -1;
-      for (const key of new Set([parent, gp, ggp])) { if (key < 0) continue; byRun.set(key, (byRun.get(key) || 0) + 1); }
+      const p = parent[sl.i];
+      const gp = p >= 0 ? parent[p] : -1;
+      const ggp = gp >= 0 ? parent[gp] : -1;
+      for (const key of new Set([p, gp, ggp])) { if (key < 0) continue; byRun.set(key, (byRun.get(key) || 0) + 1); }
     }
     for (const [key, n] of byRun) {
       if (n < 4) continue;
@@ -287,8 +271,9 @@ function isEmailSignup(doc: Doc, idx: number): boolean {
   const inner = innerOf(doc, idx);
   if (!inner) return false;
   const html = inner.inner;
-  const buttons = [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>|<input\b([^>]*\btype\s*=\s*["']submit["'][^>]*)>/gi)]
-    .map((m) => (m[1] != null ? plainText(m[1]) : getAttr(m[2], 'value') || '')).join(' ');
+  const end = closeIndex(doc, idx);
+  const buttons = [...openTags(doc, /^button$/, idx + 1, end).map((b) => plainText(b.inner)),
+    ...doc.tags.slice(idx + 1, end).filter((t) => !t.close && t.name === 'input' && /^submit$/i.test(getAttr(t.attrs, 'type') || '')).map((t) => getAttr(t.attrs, 'value') || '')].join(' ');
   if (ASKS.test(buttons) && !LIST_WORDS.test(buttons)) return false;
   const fields: string[] = [];
   for (const m of html.matchAll(/<(input|textarea|select)\b([^>]*)>/gi)) {

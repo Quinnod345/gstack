@@ -140,15 +140,15 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
         if (/^@(media|supports|layer|container|scope)/i.test(selector)) {
           const q = /^@media/i.test(selector) ? selector.replace(/^@media/i, '').trim() : media;
           if (parent) rules.push(makeRule(parent, blockStart, blockEnd, q, keyframes));
-          walk(blockStart, blockEnd, q, keyframes, parent, depthLeft - 1);
+          if (depthLeft > 0) walk(blockStart, blockEnd, q, keyframes, parent, depthLeft - 1);
         } else if (/^@(-webkit-)?keyframes/i.test(selector)) {
           const name = selector.replace(/^@(-webkit-)?keyframes/i, '').trim();
-          walk(blockStart, blockEnd, media, name || 'anon', null, depthLeft - 1);
+          if (depthLeft > 0) walk(blockStart, blockEnd, media, name || 'anon', null, depthLeft - 1);
         } else if (/^@font-face/i.test(selector)) {
           rules.push(makeRule('@font-face', blockStart, blockEnd, media, null));
         } else if (/^@theme\b/i.test(selector)) {
           rules.push(makeRule('@theme', blockStart, blockEnd, media, null));
-          walk(blockStart, blockEnd, media, keyframes, null, depthLeft - 1);
+          if (depthLeft > 0) walk(blockStart, blockEnd, media, keyframes, null, depthLeft - 1);
         }
       } else {
         const sel = parent && !keyframes ? nestSelector(selector, parent) : selector;
@@ -183,16 +183,22 @@ export function buildTokens(rules: CssRule[]): Tokens {
 }
 
 /** Substitute var() references from the tokens (a local scope first), honouring fallbacks, five levels deep. */
-export function resolveVars(value: string, tokens: Tokens, local: Tokens | null = null, depth = 0): string {
-  if (!value || depth > 5 || !value.includes('var(')) return value;
+/** A resolved value longer than this is a token that refers to itself, not a stylesheet value; expansion stops there. */
+const MAX_RESOLVED = 8192;
+
+/** value with every var() replaced by its token (or fallback), five levels deep; a token that re-enters its own chain, or a value past MAX_RESOLVED, is left as it stands, so a cyclic stylesheet costs its size and not its powers. */
+export function resolveVars(value: string, tokens: Tokens, local: Tokens | null = null, depth = 0, chain: ReadonlySet<string> = new Set()): string {
+  if (!value || depth > 5 || value.length > MAX_RESOLVED || !value.includes('var(')) return value;
+  const seen = new Set<string>();
   const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (m0, name: string, fb: string | undefined) => {
+    if (chain.has(name)) return m0;
     const v = local && local[name] != null ? local[name] : tokens[name];
-    if (v != null) return v;
+    if (v != null) { seen.add(name); return v; }
     if (fb != null) return fb.trim();
     return m0;
   });
-  if (out === value) return out;
-  return resolveVars(out, tokens, local, depth + 1);
+  if (out === value || out.length > MAX_RESOLVED) return out.length > MAX_RESOLVED ? value : out;
+  return resolveVars(out, tokens, local, depth + 1, new Set([...chain, ...seen]));
 }
 
 /** A family's identity ignores spaces, hyphens and underscores, so "GeistSans" and "Geist Sans" are one face. */
@@ -204,7 +210,7 @@ export function firstFamily(value: string): string {
 
 /** px, rem or em lengths to px at a 16px root; anything else is null. */
 export function pxOf(value: string): number | null {
-  const m = /^(-?\d+(?:\.\d+)?)(px|rem|em)$/.exec(value.trim());
+  const m = /^(-?\d*\.?\d+)(px|rem|em)$/.exec(value.trim());
   if (!m) return null;
   const n = parseFloat(m[1]);
   return m[2] === 'px' ? n : n * 16;

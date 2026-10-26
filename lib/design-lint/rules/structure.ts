@@ -8,7 +8,7 @@
 import { COLOR_LITERAL, oklchOf, parseColor } from '../color';
 import { isTokenRule, pxOf, resolveVars, type MergedRule } from '../css';
 import { memo, mergedRules, type LintContext } from '../context';
-import { getAttr, innerOf, plainText, treeOf, wordsOf, type Doc } from '../html';
+import { getAttr, innerOf, plainText, textOf, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
 import { heroIndexOf } from './chrome-copy';
@@ -167,7 +167,7 @@ function rawSpacing(ctx: LintContext, r: Reporter): void {
     for (const d of rule.decls) {
       if (!SPACING_PROP.test(d.prop)) continue;
       const raw = d.value.replace(/var\([^)]*\)/g, ' ');
-      for (const m of raw.matchAll(/(?<![\w.-])(-?\d+(?:\.\d+)?)(px|rem)\b/g)) {
+      for (const m of raw.matchAll(/(?<![\w.-])(-?\d*\.?\d+)(px|rem)\b/g)) {
         const px = Math.abs(pxOf(m[1] + m[2]) ?? 0);
         const token = spaceVals.get(px);
         if (!px || !token) continue;
@@ -183,8 +183,8 @@ function rawSpacing(ctx: LintContext, r: Reporter): void {
 
 /** An HTML file that is only an app shell: no styles, a module script, no local stylesheet. */
 const isShell = (d: Doc): boolean => d.kind === 'html' && !d.styles.length
-  && /<script\b[^>]*type\s*=\s*["']module["'][^>]*\bsrc\s*=\s*["'][^"']+\.(?:tsx?|jsx?|mjs|vue|svelte)["']/i.test(d.raw)
-  && ![...d.raw.matchAll(/<link\b[^>]*>/gi)].some((m) => /rel\s*=\s*["']stylesheet/i.test(m[0]) && !/href\s*=\s*["']https?:/i.test(m[0]));
+  && /<script\b[^>]*type\s*=\s*["']module["'][^>]*\bsrc\s*=\s*["'][^"']+\.(?:tsx?|jsx?|mjs|vue|svelte)["']/i.test(d.src)
+  && ![...d.src.matchAll(/<link\b[^>]*>/gi)].some((m) => /rel\s*=\s*["']stylesheet/i.test(m[0]) && !/href\s*=\s*["']https?:/i.test(m[0]));
 
 // sloplint check34, static half (gate 34); the render tier owns horizontal-scroll
 function overflowX(ctx: LintContext, r: Reporter): void {
@@ -310,7 +310,7 @@ function hiddenWordCount(doc: Doc): number {
     if (!hiddenish) continue;
     const inner = innerOf(doc, i);
     if (!inner) continue;
-    words += countWords(plainText(inner.inner));
+    words += countWords(textOf(doc, i));
     hiddenEnd = inner.endPos;
   }
   return words;
@@ -366,7 +366,8 @@ function columnCount(value: string): number | null {
 /** Whether some container is capped: a max-width paired with auto margins, a max-width of 900px or more, or a Tailwind container or max-w utility. */
 function containerCapped(ctx: LintContext): boolean {
   for (const m of mergedRules(ctx)) {
-    const cap = m.decls.find((d) => d.prop === 'max-width' || d.prop === 'max-inline-size');
+    const cap = m.decls.find((d) => d.prop === 'max-width' || d.prop === 'max-inline-size')
+      ?? m.decls.find((d) => (d.prop === 'width' || d.prop === 'inline-size') && /^(min|clamp)\(/.test(resolveVars(d.value, ctx.tokens).trim()) && /\d(px|rem|em|ch)\b/.test(d.value));
     if (!cap || /^(none|100%|100vw)$/.test(cap.value.trim())) continue;
     const px = pxOf(resolveVars(cap.value, ctx.tokens));
     const centred = m.decls.some((d) => /^margin(-inline|-left|-right)?$/.test(d.prop) && /\bauto\b/.test(d.value));

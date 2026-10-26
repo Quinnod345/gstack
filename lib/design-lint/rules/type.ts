@@ -8,7 +8,7 @@ import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
 import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
-import { ancestorsOf, getAttr, innerOf, plainText } from '../html';
+import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
 
@@ -25,13 +25,18 @@ function tokenSite(ctx: LintContext, prop: string): { file: string; line: number
 }
 
 /** gstack's own catalog of training-data display faces, plus the system stacks sloplint names. */
-const OVERUSED = [...OVERUSED_FONTS_DISPLAY, 'system-ui', '-apple-system', 'helvetica neue', 'segoe ui'].map((f) => famKey(f.toLowerCase()));
+const OVERUSED = [...OVERUSED_FONTS_DISPLAY, 'system-ui', '-apple-system', 'helvetica neue', 'segoe ui'].map((f) => f.toLowerCase());
 
 /** gstack's catalog of faces banned in any role (Papyrus, Comic Sans, Impact and kin). */
-const BANNED = BANNED_FONTS.map((f) => famKey(f.toLowerCase()));
+const BANNED_WORDS = BANNED_FONTS.map((f) => f.toLowerCase());
 
-/** The catalog names "Comic Sans" and "Brush Script"; a declaration says "Comic Sans MS" or "Brush Script MT". */
-const isBanned = (fam: string): boolean => { const k = famKey(fam); return BANNED.some((b) => k === b || k.startsWith(b)); };
+/** The catalog names a family by its stem ("Comic Sans", "Cormorant", "DM Serif"); a declaration says "Comic Sans MS", "Cormorant Garamond" or "DM Serif Display". A stem matches the whole name or its first words, never a longer word ("Inter" is not "Interstate"). */
+function namesFace(fam: string, stems: readonly string[]): boolean {
+  const k = famKey(fam);
+  const words = fam.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  return stems.some((s) => k === famKey(s) || words.startsWith(s + ' '));
+}
+const isBanned = (fam: string): boolean => namesFace(fam, BANNED_WORDS);
 
 // gstack's own: a banned face anywhere, display or body (lib/design-catalog.ts BANNED_FONTS)
 function bannedFont(ctx: LintContext, r: Reporter): void {
@@ -56,7 +61,7 @@ function bannedFont(ctx: LintContext, r: Reporter): void {
 function check1(ctx: LintContext, r: Reporter): void {
   const seen = new Set<string>();
   const flag = (fam: string, file: string, line: number, where: string) => {
-    if (!OVERUSED.includes(famKey(fam)) || seen.has(fam + where)) return;
+    if (!namesFace(fam, OVERUSED) || seen.has(fam + where)) return;
     seen.add(fam + where);
     r.report('overused-font', file, line, `"${fam}" as the display face (${where})`);
   };
@@ -77,8 +82,9 @@ function shortProse(ctx: LintContext, sel: string): boolean {
   if (!cls) return false;
   const texts: string[] = [];
   for (const doc of ctx.docs) {
-    for (const m of doc.src.matchAll(new RegExp(`<(\\w+)[^>]*class="[^"]*\\b${cls}\\b[^"]*"[^>]*>([\\s\\S]*?)</\\1>`, 'g'))) {
-      for (const p of (/^p$/i.test(m[1]) ? [m[2]] : m[2].match(/<p\b[^>]*>[\s\S]*?<\/p>/g) || [])) texts.push(p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    for (const el of openTags(doc, /./, 0, doc.tags.length, (t) => (getAttr(t.attrs, 'class') || '').split(/\s+/).includes(cls))) {
+      const paras = el.tag.name === 'p' ? [el.inner] : openTags(doc, /^p$/, el.idx + 1, closeIndex(doc, el.idx)).map((p) => p.inner);
+      for (const p of paras) texts.push(stripTags(p).replace(/\s+/g, ' ').trim());
     }
   }
   return texts.length > 0 && texts.every((t) => t.length <= 200 && (t.match(/[.!?](?:\s|$)/g) || []).length <= 2);
@@ -133,13 +139,14 @@ function check38a(ctx: LintContext, r: Reporter): void {
     && rule.decls.some((d) => d.prop === 'font-style' && /normal/.test(d.value))).flatMap((rule) => rule.selector.split(',').map((x) => x.trim()));
   const normalised = (level: string, classes: string[]) => normSel.some((sel) => /^(em|i)$/.test(sel) || new RegExp(`(^|[\\s,>+~])h${level}\\b`).test(sel) || classes.some((c) => sel.includes('.' + c)));
   for (const doc of ctx.docs) {
-    for (const m of doc.src.matchAll(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi)) {
-      const classes = ((/class\s*=\s*["']([^"']*)["']/i.exec(m[2]) || [])[1] || '').split(/\s+/).filter(Boolean);
-      const tag = /<(em|i)\b[^>]*>([\s\S]*?)<\/\1\s*>/i.exec(m[3]);
-      if (!tag || normalised(m[1], classes)) continue;
-      const italic = plainText(tag[2]);
-      if (!italic || italic.length >= 0.8 * plainText(m[3]).length) continue;
-      r.report('italic-word-in-heading', doc.file, doc.lineOf(m.index!), `an <${tag[1].toLowerCase()}> inside an otherwise roman <h${m[1]}>`);
+    for (const head of openTags(doc, /^h[1-6]$/)) {
+      const level = head.tag.name.slice(1);
+      const classes = (getAttr(head.tag.attrs, 'class') || '').split(/\s+/).filter(Boolean);
+      const tag = openTags(doc, /^(em|i)$/, head.idx + 1, closeIndex(doc, head.idx), () => true, 1)[0];
+      if (!tag || normalised(level, classes)) continue;
+      const italic = textOf(doc, tag.idx);
+      if (!italic || italic.length >= 0.8 * textOf(doc, head.idx).length) continue;
+      r.report('italic-word-in-heading', doc.file, head.tag.line, `an <${tag.tag.name}> inside an otherwise roman <h${level}>`);
     }
   }
 }
@@ -167,14 +174,15 @@ function accentedHeads(ctx: LintContext): CssRule[] {
       if (t.close || !/^h[1-3]$/.test(t.name)) continue;
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const headLen = plainText(inner.inner).replace(/\s+/g, '').length || 1;
-      const spans = [...inner.inner.matchAll(/<(span|em|strong|b|i|mark)\b[^>]*\bclass\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/\1>/gi)];
-      const cover = (cls: string) => spans.filter((x) => x[2].split(/\s+/).includes(cls)).reduce((n, x) => n + plainText(x[3]).replace(/\s+/g, '').length, 0) / headLen;
+      const headLen = textOf(doc, i).replace(/\s+/g, '').length || 1;
+      const spans = openTags(doc, /^(span|em|strong|b|i|mark)$/, i + 1, closeIndex(doc, i), (s) => !!(getAttr(s.attrs, 'class') || '').trim())
+        .map((el) => ({ classes: getAttr(el.tag.attrs, 'class') || '', inner: el.inner }));
+      const cover = (cls: string) => spans.filter((x) => x.classes.split(/\s+/).includes(cls)).reduce((n, x) => n + plainText(x.inner).replace(/\s+/g, '').length, 0) / headLen;
       const headDecls = styleFor(ctx, getAttr(t.attrs, 'class'), t.name, true);
       const own = (prop: string) => valueOf(ctx, headDecls, prop) ?? (prop === 'color' ? resolveVars('var(--color-ink)', ctx.tokens) : null);
       for (const m of spans) {
-        if (!/[A-Za-z0-9]/.test(plainText(m[3]))) continue;
-        for (const cls of m[2].split(/\s+/).filter(Boolean)) {
+        if (!/[A-Za-z0-9]/.test(plainText(m.inner))) continue;
+        for (const cls of m.classes.split(/\s+/).filter(Boolean)) {
           if (cover(cls) >= 0.8) continue;
           for (const rule of ctx.rules) {
             if (rule.keyframes || isTokenRule(rule) || seen.has(rule.selector)) continue;
@@ -271,19 +279,25 @@ function exempt67(sel: string): boolean {
   });
 }
 
+/** The merged rules that can pass a value down, each with its selector parts' bases computed once, so a stylesheet of many label rules is walked without re-splitting every selector per lookup. */
+interface Ancestors67 { rules: MergedRule[]; bases: string[][] }
+
+function ancestors67(bySel: MergedRule[]): Ancestors67 {
+  const rules = bySel.filter((o) => !/:hover|:focus|:active/.test(o.selector) && !(o.media && /max-width/i.test(o.media)));
+  return { rules, bases: rules.map((o) => o.selector.split(',').map(baseSelector)) };
+}
+
 // sloplint inherited67 (gate 67): the nearest ancestor selector's value for a property
-function inherited67(bySel: MergedRule[], sel: string, prop: string): string | null {
+function inherited67(up: Ancestors67, sel: string, prop: string): string | null {
   const base = baseSelector(sel);
   let best: string | null = null, bestLen = 0;
-  for (const o of bySel) {
-    if (/:hover|:focus|:active/.test(o.selector) || (o.media && /max-width/i.test(o.media))) continue;
-    for (const part of o.selector.split(',')) {
-      const ob = baseSelector(part);
+  up.rules.forEach((o, i) => {
+    for (const ob of up.bases[i]) {
       if (!ob || ob === base || ob.length <= bestLen || !base.startsWith(ob) || !/[\s>+~]/.test(base[ob.length] || '')) continue;
       const d = o.decls.filter((x) => x.prop === prop).pop();
       if (d) { best = d.value; bestLen = ob.length; }
     }
-  }
+  });
   return best;
 }
 
@@ -293,7 +307,7 @@ const isSmallCaps67 = (prop: string, v: string): boolean => (/^font-variant(-cap
 interface Caps67 { upper: boolean; smallCaps: boolean; em: number | null; px: number | null }
 
 /** What a rule says about case and tracking, its own declarations first and the nearest ancestor's where it is silent. */
-function caps67(ctx: LintContext, bySel: MergedRule[], rule: MergedRule): Caps67 | null {
+function caps67(ctx: LintContext, bySel: Ancestors67, rule: MergedRule): Caps67 | null {
   const isUpper = (v: string | null) => v != null && /uppercase/.test(resolveVars(v, ctx.tokens));
   const ownTT = rule.decls.filter((d) => d.prop === 'text-transform').pop();
   const ownUpper = ownTT ? isUpper(ownTT.value) : null;
@@ -321,9 +335,10 @@ function check67(ctx: LintContext, r: Reporter): void {
     || rule.decls.some((d) => (d.prop === 'font-family' || d.prop === 'font') && /--font-display/.test(d.value)) || (fontSizePxOf(rule, ctx) || 0) >= 28;
   const upperDisplay = bySel.some((rule) => displayish(rule) && !LABEL67.test(rule.selector) && rule.decls.some((d) => d.prop === 'text-transform' && /uppercase/.test(d.value)));
   const seen = new Set<string>();
+  const up = ancestors67(bySel);
   for (const rule of bySel) {
     if (isTokenRule(rule) || exempt67(rule.selector) || /::first-letter\s*(,|$)/.test(rule.selector)) continue;
-    const caps = caps67(ctx, bySel, rule);
+    const caps = caps67(ctx, up, rule);
     if (!caps) continue;
     const { upper, smallCaps, em, px } = caps;
     const tracked = em != null && em > TRACKED_EM;
@@ -373,7 +388,7 @@ function check67Html(ctx: LintContext, r: Reporter): void {
       if (ancestorsOf(doc, i).some((n) => /^(svg|pre|code|abbr|kbd|samp)$/.test(n))) continue;
       const inner = innerOf(doc, i);
       if (!inner || /<(p|div|ul|ol|h[1-6]|table|section|article|svg|img|abbr|code|kbd)\b/i.test(inner.inner)) continue;
-      const text = plainText(inner.inner);
+      const text = textOf(doc, i);
       const letters = text.replace(/[^A-Za-z]/g, '');
       if (letters.length < 5 || capsRatio(text) < 0.95 || /^[A-Z]{2,5}$/.test(text) || /^\(?\s*(CC0|CC BY(-SA|-NC|-ND)*( [0-9.]+)?|PD|GFDL)\b/.test(text)) continue;
       const decls = styleFor(ctx, cls, t.name);

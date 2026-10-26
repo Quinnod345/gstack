@@ -6,7 +6,7 @@
  */
 import { mergedRules, type LintContext } from '../context';
 import { HEADING_SEL, isTokenRule, lineIndex, pxOf, resolveVars, type MergedRule } from '../css';
-import { getAttr, maskedProse } from '../html';
+import { getAttr, maskedProse, openTags, plainText } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twVariants } from '../tailwind';
 
@@ -269,10 +269,10 @@ function checkHeadingLevels(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     if (doc.kind !== 'html') continue;
     let prev = 0;
-    for (const m of doc.src.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)) {
-      const level = Number(m[1]);
+    for (const head of openTags(doc, /^h[1-6]$/)) {
+      const level = Number(head.tag.name.slice(1));
       if (prev && level > prev + 1) {
-        r.report('skipped-heading', doc.file, doc.lineOf(m.index!), 'h' + prev + ' is followed by h' + level + ' ("' + trunc(m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), 32) + '")', { fix: 'step the levels one at a time; size a head with CSS, never with its level' });
+        r.report('skipped-heading', doc.file, head.tag.line, 'h' + prev + ' is followed by h' + level + ' ("' + trunc(plainText(head.inner), 32) + '")', { fix: 'step the levels one at a time; size a head with CSS, never with its level' });
         break;
       }
       prev = level;
@@ -316,7 +316,7 @@ function checkHairlineUnderShadow(ctx: LintContext, r: Reporter): void {
     if (edge) { r.report('hairline-under-shadow', rule.file, sh.line, 'a hairline border under a wide soft shadow on ' + rule.selector); return; }
   }
   for (const doc of ctx.docs) {
-    const m = /class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])border(?![\w-])[^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])|class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])[^"']*(?<![\w:-])border(?![\w-])/.exec(doc.raw);
+    const m = /class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])border(?![\w-])[^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])|class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])[^"']*(?<![\w:-])border(?![\w-])/.exec(doc.src);
     if (m) { r.report('hairline-under-shadow', doc.file, doc.lineOf(m.index), 'a hairline border under a wide soft shadow (border with shadow-xl or shadow-2xl)'); return; }
   }
 }

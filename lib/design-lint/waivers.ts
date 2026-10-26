@@ -133,7 +133,7 @@ export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = pr
     const words = c.reason.toLowerCase().match(/[a-z]{4,}/g) || [];
     const sheet = /\.css$/i.test(c.file);
     if (pageWords.size && !sheet && !words.some((w) => pageWords.has(w))) { refuse(c, 'reason shares no word with the page'); continue; }
-    accepted.set(c.rule, { reason: c.reason, sheet: sheet ? relPath(c.file, cwd) : null });
+    accepted.set(c.rule, { reason: c.reason, sheet: sheet ? oneLine(relPath(c.file, cwd)) : null });
   }
   if (accepted.size > WAIVER_MAX) {
     const first = claims[0];

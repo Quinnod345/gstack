@@ -9,7 +9,7 @@
 import { contrastRatio, oklchOf, parseColor, type Color } from '../color';
 import { mergedRules, type LintContext } from '../context';
 import { isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
-import { ancestorsOf, getAttr, hasAttr, innerOf, plainText, treeOf } from '../html';
+import { ancestorsOf, getAttr, hasAttr, innerOf, plainText, textOf, treeOf } from '../html';
 import { trunc, type Reporter } from '../report';
 
 const EMOJI = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
@@ -40,7 +40,7 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
         continue;
       }
       if (!/^(h[1-6]|button|a|label|th|summary|option|legend|dt)$/.test(t.name) || /<(p|div|ul|ol|table|section)\b/i.test(inner.inner)) continue;
-      const text = plainText(inner.inner);
+      const text = textOf(doc, i);
       const at = inner.inner.search(GLYPH);
       if (!text || at < 0) continue;
       flag(doc.lineOf(t.end + at), 'an emoji in <' + t.name + '> "' + trunc(text, 32) + '"');

@@ -17,7 +17,7 @@ const STATIC_OWNS = new Set(['transition-all', 'vh-height']);
 export function run(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     if (doc.kind !== 'html') continue;
-    for (const f of checkCraft(doc.raw)) {
+    for (const f of checkCraft(doc.src)) {
       if (STATIC_OWNS.has(f.id) || !ruleMeta(f.id)) continue;
       const title = ruleMeta(f.id)!.title;
       r.report(f.id, doc.file, 1, f.count === 1 ? title : `${title}, ${f.count} times`, { fix: f.fix, source: 'copy' });

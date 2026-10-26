@@ -35,7 +35,7 @@ export interface ClassCall { pos: number; name: string; toks: string[] }
 export interface Doc {
   file: string;
   kind: DocKind;
-  /** The text the tags were scanned from: the raw HTML, or the pseudo-HTML of a component. */
+  /** The text the tags were scanned from: the HTML, or the pseudo-HTML of a component, with comments blanked (positions kept), so no rule reads markup the browser never renders. */
   src: string;
   /** The original file text. */
   raw: string;
@@ -203,7 +203,7 @@ export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Do
     .replace(/&hellip;|&#8230;/g, '\u2026').replace(/&mdash;|&#8212;|&#x2014;/gi, '\u2014').replace(/&ndash;|&#8211;|&#x2013;/gi, '\u2013')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ');
-  return { file, kind, src, raw: src, masked, styles, scripts, tags, comps, text, lineOf, classAt: new Map(), virtuals: [], cache: {} };
+  return { file, kind, src: live, raw: src, masked, styles, scripts, tags, comps, text, lineOf, classAt: new Map(), virtuals: [], cache: {} };
 }
 
 /** The index of the brace that closes the one at j (strings skipped), or the string's length. */
@@ -554,13 +554,13 @@ export function classCalls(src: string, sites: number[]): ClassCall[] {
 
 /** Positions of class-helper calls inside <script> blocks (and Astro frontmatter). */
 export function scriptSites(src: string, kind: DocKind): number[] {
-  const ranges: Array<[number, number]> = [];
-  for (const m of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) ranges.push([m.index! + m[0].length - m[1].length - 9, m.index! + m[0].length - 9]);
-  const fm = kind === 'astro' ? FRONTMATTER.exec(src) : null;
+  const live = blankRanges(src, spansOf(asciiLower(src), '<!--', '-->', false).map((s): [number, number] => [s.start, s.end]));
+  const ranges = spansOf(asciiLower(live), '<script', '</script', true).map((s): [number, number] => [s.bodyStart, s.bodyEnd]);
+  const fm = kind === 'astro' ? FRONTMATTER.exec(live) : null;
   if (fm) ranges.push([0, fm[0].length]);
   const sites: number[] = [];
   for (const [a, b] of ranges) {
-    for (const m of src.slice(a, b).matchAll(CLASS_FN_CALL)) sites.push(a + m.index!);
+    for (const m of live.slice(a, b).matchAll(CLASS_FN_CALL)) sites.push(a + m.index!);
   }
   return sites;
 }
@@ -603,8 +603,13 @@ export function hasAttr(attrStr: string, name: string): boolean {
   return new RegExp(`(?:^|\\s)${name}(?=[\\s=/]|$)`, 'i').test(attrStr);
 }
 
-/** Elements whose end tag is optional: a new one closes the open one, so a list of unclosed <li> does not read as nested. */
-const IMPLICIT_CLOSE = new Set(['li', 'p', 'dt', 'dd', 'option', 'tr', 'td', 'th']);
+/** Elements a browser closes when the same element opens again (optional end tags, and the elements that cannot nest in themselves), so a list of unclosed <li> or a run of unclosed <h2> does not read as nested. */
+const IMPLICIT_CLOSE = new Set(['li', 'p', 'dt', 'dd', 'option', 'tr', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'button', 'a', 'form', 'label', 'select']);
+/** A heading start tag closes any open heading, and a block start tag closes an open <p>, as the browser does. */
+const HEADING = /^h[1-6]$/;
+const CLOSES_P = new Set(['address', 'article', 'aside', 'blockquote', 'details', 'dialog', 'div', 'dl', 'fieldset', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'main', 'menu', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'ul']);
+/** Past this depth an open tag is read as empty: a real page nests tens deep, and a file that nests thousands deep must cost its length, not its square. */
+const MAX_DEPTH = 512;
 
 export interface Tree {
   /** For an open tag, the index of the tag that ends it: its own close tag, the sibling that implicitly closed it, or the close tag of an ancestor; -1 when it runs to the end of the document. */
@@ -640,9 +645,13 @@ export function treeOf(doc: Doc): Tree {
       stack.length = depth;
       continue;
     }
-    if (IMPLICIT_CLOSE.has(t.name) && stack.length && doc.tags[stack[stack.length - 1]].name === t.name) close[stack.pop()!] = i;
+    if (stack.length) {
+      const top = doc.tags[stack[stack.length - 1]].name;
+      if ((IMPLICIT_CLOSE.has(t.name) && top === t.name) || (HEADING.test(t.name) && HEADING.test(top)) || (top === 'p' && CLOSES_P.has(t.name))) close[stack.pop()!] = i;
+    }
     parent[i] = stack.length ? stack[stack.length - 1] : -1;
     if (t.selfClosing) continue;
+    if (stack.length >= MAX_DEPTH) { close[i] = i; continue; }
     let opens = openByName.get(t.name);
     if (!opens) openByName.set(t.name, opens = []);
     opens.push({ idx: i, depth: stack.length });
@@ -704,6 +713,30 @@ export function innerOf(doc: Doc, idx: number): { inner: string; endPos: number 
   const c = treeOf(doc).close[idx];
   const endPos = c < 0 ? doc.src.length : doc.tags[c].pos;
   return { inner: doc.src.slice(open.end, endPos), endPos };
+}
+
+/** The visible text of the element opened at idx, computed once per element however many rules read it; '' for a close or void tag. */
+export function textOf(doc: Doc, idx: number): string {
+  const cache = (doc.cache.text ??= new Map<number, string>()) as Map<number, string>;
+  const hit = cache.get(idx);
+  if (hit != null) return hit;
+  const text = plainText(innerOf(doc, idx)?.inner || '');
+  cache.set(idx, text);
+  return text;
+}
+
+export interface Element { idx: number; tag: Tag; inner: string }
+
+/** The elements opened by a tag named by `name` between tag indices from and to, each with its inner HTML from the shared pairing; a tag walk, so an unclosed element costs its own extent and nothing scans to the end of the file for it. */
+export function openTags(doc: Doc, name: RegExp, from = 0, to = doc.tags.length, pick: (t: Tag) => boolean = () => true, limit = Infinity): Element[] {
+  const out: Element[] = [];
+  for (let i = from; i < to && out.length < limit; i++) {
+    const t = doc.tags[i];
+    if (t.close || t.selfClosing || !name.test(t.name) || !pick(t)) continue;
+    const inner = innerOf(doc, i);
+    if (inner) out.push({ idx: i, tag: t, inner: inner.inner });
+  }
+  return out;
 }
 
 /** The index of the tag that ends the element opened at idx: its close tag, or the tag that implicitly closed it (or the last tag when nothing does). */

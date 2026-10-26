@@ -9,7 +9,7 @@
  */
 import { styleFor, type LintContext } from '../context';
 import { resolveVars } from '../css';
-import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, treeOf, type Doc, type Tag } from '../html';
+import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, textOf, treeOf, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 
 
@@ -34,13 +34,14 @@ function checkHeroCopy(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     const prose = maskedProse(doc);
     const lines = new Set<number>();
-    const tell = (rule: string, idx: number, what: string, text: string): void => {
+    const hero = heroRange(doc);
+    const tell = (rule: string, idx: number, what: string, text: string, heading = false): void => {
       const line = doc.lineOf(idx);
       if (lines.has(line)) return;
       lines.add(line);
-      r.report(rule, doc.file, line, `${what}: "${trunc(text, 40)}"`);
+      const inHero = !heading || (hero != null && idx >= hero[0] && idx < hero[1]);
+      r.report(rule, doc.file, line, `${what}: "${trunc(text, 40)}"`, inHero ? {} : { suspected: true, fix: 'a heading in the product\'s own voice; below the hero this is a suspicion, so a waiver can answer it' });
     };
-    const hero = heroRange(doc);
     for (const [re, what] of HERO_TELLS) {
       const all = [...prose.matchAll(new RegExp(re.source, re.flags + 'g'))];
       const inHero = all.find((m) => hero && m.index! >= hero[0] && m.index! < hero[1]);
@@ -58,14 +59,14 @@ function checkHeroCopy(ctx: LintContext, r: Reporter): void {
       const t = doc.tags[i];
       if (t.close) continue;
       if (t.name === 'a') {
-        const label = plainText(innerOf(doc, i)?.inner || '').replace(/[\u2192\u203a\u00bb]|->/g, '').trim();
+        const label = textOf(doc, i).replace(/[\u2192\u203a\u00bb]|->/g, '').trim();
         if (STOCK_LINK.test(label)) stock.push({ t, label });
         continue;
       }
       if (!/^h[1-6]$/.test(t.name)) continue;
-      const text = plainText(innerOf(doc, i)?.inner || '');
-      if (/^Meet\s+[A-Z][\w-]*[.!]?$/.test(text)) tell('generic-hero-copy', t.pos, 'the "Meet <Name>" heading', text);
-      else if (/^[A-Z][a-z]+\.\s+[A-Z][a-z]+\.\s+[A-Z][a-z]+\.$/.test(text)) tell('generic-hero-copy', t.pos, 'the three-word triad heading', text);
+      const text = textOf(doc, i);
+      if (/^Meet\s+[A-Z][\w-]*[.!]?$/.test(text)) tell('generic-hero-copy', t.pos, 'the "Meet <Name>" heading', text, true);
+      else if (/^[A-Z][a-z]+\.\s+[A-Z][a-z]+\.\s+[A-Z][a-z]+\.$/.test(text)) tell('generic-hero-copy', t.pos, 'the three-word triad heading', text, true);
     }
     if (stock.length >= 2) {
       r.report('generic-cta-copy', doc.file, stock[0].t.line, `the stock link label "${stock[0].label}" on ${stock.length} links`, { fix: 'say where each link goes: the thing it opens, in its own noun' });
@@ -145,7 +146,7 @@ function checkHeroActions(ctx: LintContext, r: Reporter): void {
       const cls = getAttr(t.attrs, 'class') || '';
       if (t.name === 'a' && !/btn|cta|button/i.test(cls)) continue;
       if (ancestorsOf(doc, i).includes('nav')) continue;
-      controls.push({ t, cls, label: plainText(innerOf(doc, i)?.inner || '').trim() });
+      controls.push({ t, cls, label: textOf(doc, i).trim() });
     }
     if (controls.length < 2) continue;
     const firstFilled = isFilled(ctx, controls[0]);

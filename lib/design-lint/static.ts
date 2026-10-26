@@ -13,9 +13,8 @@ import { buildTokens, isTokenRule, parseCss, stripComments, type CssRule, type T
 import { docKindOf, getAttr, parseDoc, type Doc } from './html';
 import { Reporter, type Finding } from './report';
 import { FAMILIES } from './rules';
-import { twVariants } from './tailwind';
+import { setTwTokens, twVariants } from './tailwind';
 import { applyWaivers, findWaivers, resolveWaivers, suspectedRules, type WaiverSet } from './waivers';
-import { setTwTokens } from './tailwind';
 
 export interface StaticOptions {
   scope?: 'page' | 'component';
@@ -32,10 +31,15 @@ export interface StaticResult {
 }
 
 /** The static tier before waivers: every context with the findings its rule families reported, so a caller can add the render tier's findings and settle the page's waivers once over both. */
+/** A source file the lint did not read, and why; it is reported, because a page the lint could not read is not a pass. */
+export interface Skipped { file: string; why: string }
+
 export interface RawStaticResult {
   files: string[];
   contexts: LintContext[];
   raw: Finding[][];
+  /** One internal-error finding per skipped source file. */
+  skipped: Finding[];
 }
 
 const BUILD_DIRS = new Set(['dist', 'build', 'coverage']);
@@ -44,13 +48,13 @@ const BUILD_DIRS = new Set(['dist', 'build', 'coverage']);
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /** Every .css page and component file under the paths; node_modules, dot folders and (below the top) build output are skipped, a link cycle is walked once, and a file over MAX_FILE_BYTES is skipped with a warning. */
-export function collectFiles(paths: string[], warn: (l: string) => void = () => {}): string[] {
+export function collectFiles(paths: string[], warn: (l: string) => void = () => {}, skipped: Skipped[] = []): string[] {
   const files: string[] = [];
   const seen = new Set<string>();
   const visit = (p: string, top: boolean) => {
     let abs = path.resolve(p);
     let st: fs.Stats;
-    try { abs = fs.realpathSync(abs); st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); return; }
+    try { abs = fs.realpathSync(abs); st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); if (top) skipped.push({ file: abs, why: 'it cannot be read' }); return; }
     if (seen.has(abs)) return;
     if (st.isDirectory()) {
       seen.add(abs);
@@ -61,7 +65,12 @@ export function collectFiles(paths: string[], warn: (l: string) => void = () => 
     }
     if (path.extname(abs).toLowerCase() !== '.css' && !docKindOf(abs)) return;
     seen.add(abs);
-    if (st.size > MAX_FILE_BYTES) { warn(`design-lint: skipped ${p} (${Math.round(st.size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit)`); return; }
+    if (st.size > MAX_FILE_BYTES) {
+      const why = `${Math.round(st.size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit`;
+      warn(`design-lint: skipped ${p} (${why})`);
+      skipped.push({ file: abs, why });
+      return;
+    }
     files.push(abs);
   };
   for (const p of paths) visit(p, true);
@@ -78,12 +87,15 @@ export function resolveRef(href: string | null, from: string, root: string | nul
   if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
   const ref = href.split(/[?#]/)[0];
   if (!ref) return null;
+  const within = (abs: string, top: string) => abs === top || abs.startsWith(top + path.sep);
   if (ref.startsWith('/')) {
     if (!root) return null;
     const abs = path.join(root, ref);
-    return abs === root || abs.startsWith(root + path.sep) ? abs : null;
+    return within(abs, root) ? abs : null;
   }
-  return path.resolve(from, ref);
+  const abs = path.resolve(from, ref);
+  const project = projectRoot(from);
+  return project && !within(abs, project) ? null : abs;
 }
 
 export function importsOf(css: string, from: string, root: string | null = null): string[] {
@@ -114,11 +126,13 @@ interface CssRead { raw: string; rules: CssRule[]; imports: string[] }
 /** Stylesheets read once per run: a bundle shared by forty pages is parsed once, not forty times. */
 class CssCache {
   private readonly files = new Map<string, CssRead | null>();
-  constructor(readonly roots: string[], private readonly warn: (l: string) => void) {}
+  constructor(readonly roots: string[], readonly warn: (l: string) => void) {}
   read(f: string): CssRead | null {
     if (this.files.has(f)) return this.files.get(f)!;
     let out: CssRead | null = null;
     try {
+      const size = fs.statSync(f).size;
+      if (size > MAX_FILE_BYTES) { this.warn(`design-lint: skipped ${f} (${Math.round(size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit)`); this.files.set(f, null); return null; }
       const raw = fs.readFileSync(f, 'utf8');
       out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
     } catch (e) {
@@ -156,7 +170,7 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
   for (const doc of docList) {
     const root = rootOf(doc.file, cache.roots);
     for (const st of doc.styles) {
-      rules.push(...parseCss(st.css, doc.file, st.lineOffset));
+      try { rules.push(...parseCss(st.css, doc.file, st.lineOffset)); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); continue; }
       pending.push(...importsOf(st.css, path.dirname(doc.file), root));
     }
     pending.push(...linksOf(doc, path.dirname(doc.file), root));
@@ -192,7 +206,7 @@ function linkedCss(page: Doc, cache: CssCache): Set<string> {
  * components and unlinked CSS. A stylesheet some page links, from any
  * directory, belongs to that page and is not linted again on its own.
  */
-export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void, roots: string[] = []): LintContext[] {
+export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void, roots: string[] = [], skipped: Skipped[] = []): LintContext[] {
   const cache = new CssCache(roots, warn);
   const groups = new Map<string, { css: string[]; pages: Doc[]; parts: Doc[] }>();
   for (const f of files) {
@@ -203,7 +217,7 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
     try {
       const doc = parseDoc(f, fs.readFileSync(f, 'utf8'));
       (doc.kind === 'html' ? g.pages : g.parts).push(doc);
-    } catch (e) { warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`); }
+    } catch (e) { warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`); skipped.push({ file: f, why: `it could not be parsed (${(e as Error).message})` }); }
   }
   const linkedBy = new Map<Doc, Set<string>>();
   const owned = new Set<string>();
@@ -285,10 +299,11 @@ export function settleContext(ctx: LintContext, findings: Finding[], cwd: string
 /** Run every rule family over every context, without waivers. */
 export function lintStaticRaw(paths: string[], opts: StaticOptions = {}): RawStaticResult {
   const warn = opts.warn ?? ((l: string) => console.error(l));
-  const cwd = opts.cwd ?? process.cwd();
-  const files = collectFiles(paths, warn);
-  const roots = paths.map((p) => path.resolve(p)).map((p) => { try { return fs.statSync(p).isDirectory() ? p : path.dirname(p); } catch { return null; } }).filter((p): p is string => p !== null);
-  const contexts = groupContexts(files, opts, warn, roots);
+  const cwd = realDir(opts.cwd ?? process.cwd());
+  const skippedFiles: Skipped[] = [];
+  const files = collectFiles(paths, warn, skippedFiles);
+  const roots = paths.map((p) => { try { const real = fs.realpathSync(p); return fs.statSync(real).isDirectory() ? real : path.dirname(real); } catch { return null; } }).filter((p): p is string => p !== null);
+  const contexts = groupContexts(files, opts, warn, roots, skippedFiles);
   shareProjects(contexts);
   const raw: Finding[][] = [];
   for (const ctx of contexts) {
@@ -301,11 +316,16 @@ export function lintStaticRaw(paths: string[], opts: StaticOptions = {}): RawSta
     }
     raw.push(reporter.findings);
   }
-  return { files, contexts, raw };
+  const skippedReporter = new Reporter(opts.scope ?? 'page', cwd);
+  for (const s of skippedFiles) skippedReporter.report('internal-error', s.file, 1, `skipped: ${s.why}; a page the lint could not read is not a pass`, { fix: 'split the file, or lint the page that links it' });
+  return { files, contexts, raw, skipped: skippedReporter.findings };
 }
 
+/** A directory's real path, so a cwd or lint root reached through a symlink still matches the files collected under it. */
+export const realDir = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+
 export function lintStatic(paths: string[], opts: StaticOptions = {}): StaticResult {
-  const cwd = opts.cwd ?? process.cwd();
-  const { files, contexts, raw } = lintStaticRaw(paths, opts);
-  return { files, contexts, findings: contexts.flatMap((ctx, i) => settleContext(ctx, raw[i], cwd)) };
+  const cwd = realDir(opts.cwd ?? process.cwd());
+  const { files, contexts, raw, skipped } = lintStaticRaw(paths, opts);
+  return { files, contexts, findings: [...contexts.flatMap((ctx, i) => settleContext(ctx, raw[i], cwd)), ...skipped] };
 }

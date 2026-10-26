@@ -13,7 +13,7 @@ import type { LintContext } from './context';
 import { memo } from './context';
 import { bannedGradient, COLOR_LITERAL, oklchOf, parseColor, type Color } from './color';
 import { GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
-import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, type Doc, type Tag } from './html';
+import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, treeOf, type Doc, type Tag } from './html';
 import { trunc } from './report';
 
 export const TW_SIZE: Record<string, number> = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 30, '4xl': 36, '5xl': 48, '6xl': 60, '7xl': 72, '8xl': 96, '9xl': 128 };
@@ -307,7 +307,6 @@ function twReadSurface(ctx: LintContext, b: string, tok: string, p: TwParsed, f:
   if (/^rounded(?:-|$)/.test(b)) { if (b !== 'rounded-none') f.rounded = true; return; }
   if (b === 'grid-cols-3') { f.cols3 = true; return; }
   if (/^p[xytrblse]?-/.test(b)) { f.padded = true; return; }
-  if (b.startsWith('caret-')) return;
 }
 
 /** Read one class string into its facts; the variants it uses land in the shared set as well as on the info. */
@@ -463,16 +462,16 @@ export function twGroup(ctx: LintContext): TwGroup {
       if (/^h[12]$/.test(it.tag) && it.info.upper) tw.upperDisplay = true;
     };
     for (const doc of ctx.docs) {
-      const stack: TwFrame[] = [];
+      const { parent } = treeOf(doc);
+      const frames: TwFrame[] = [];
       for (let i = 0; i < doc.tags.length; i++) {
         const t = doc.tags[i];
-        if (t.close) { stack.pop(); continue; }
-        const parent = stack.length ? stack[stack.length - 1] : TW_ROOT;
+        if (t.close) continue;
         const toks = twTokensOf(doc, t);
         const info = toks.length ? twInfo(ctx, toks, tw.variants) : null;
-        const frame = twFrame(parent, t, info, toks);
+        const frame = twFrame(parent[i] >= 0 ? frames[parent[i]] : TW_ROOT, t, info, toks);
+        frames[i] = frame;
         if (info) add({ file: doc.file, line: t.line, idx: i, tag: t.name, info, doc, comp: null, virtual: false, attrs: t.attrs, toks, frame, text: null });
-        if (!t.selfClosing) stack.push(frame);
       }
       for (let c = 0; c < doc.comps.length; c++) {
         const t = doc.comps[c];

@@ -284,7 +284,7 @@ function inputStates(ctx: LintContext, r: Reporter): void {
       const w = widthOf(d.value);
       if (w != null && baseW != null && w !== baseW) r.report('input-state-shift', rule.file, d.line, `the border goes from ${baseW}px to ${w}px on ${rule.selector}, so the field shifts`, { fix: 'keep the border width constant; move the state to outline' });
     }
-    if (/:focus/.test(rule.selector) && rule.decls.some((d) => /^border(-color)?$/.test(d.prop)) && !rule.decls.some((d) => /^outline/.test(d.prop))) {
+    if (/:focus/.test(rule.selector) && rule.decls.some((d) => /^border(-color)?$/.test(d.prop)) && !rule.decls.some((d) => /^outline/.test(d.prop) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim())))) {
       r.report('input-state-shift', rule.file, rule.line, `the focus state is drawn with border on ${rule.selector}`, { fix: 'a focus ring with outline, not border' });
     }
   }

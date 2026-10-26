@@ -13,7 +13,7 @@
 import { docKindOf } from './html';
 import { lintRender, type RenderOptions } from './render';
 import { exitCodeOf, finalize, formatFinding, formatSummary, oneLine, relPath, summarize, type Finding, type Summary } from './report';
-import { lintStaticRaw, settleContext, type StaticOptions } from './static';
+import { lintStaticRaw, realDir, settleContext, type StaticOptions } from './static';
 
 export interface LintOptions extends StaticOptions {
   render?: boolean;
@@ -38,13 +38,13 @@ export interface LintResult {
  * every measurement is in.
  */
 export async function lint(paths: string[], opts: LintOptions = {}): Promise<LintResult> {
-  const cwd = opts.cwd ?? process.cwd();
+  const cwd = realDir(opts.cwd ?? process.cwd());
   const stat = lintStaticRaw(paths, opts);
   let render = 'skipped: not requested';
   const byPage = new Map<string, Finding[]>();
   if (opts.render || opts.urls?.length) {
     const pages = stat.files.filter((f) => docKindOf(f) === 'html');
-    const r = await lintRender([...pages, ...(opts.urls ?? [])], { cwd: opts.cwd, scope: opts.scope, engine: opts.engine, run: opts.run });
+    const r = await lintRender([...pages, ...(opts.urls ?? [])], { cwd, scope: opts.scope, engine: opts.engine, run: opts.run });
     render = r.status;
     for (const f of r.findings) byPage.set(f.file, [...(byPage.get(f.file) ?? []), f]);
   }
@@ -56,6 +56,7 @@ export async function lint(paths: string[], opts: LintOptions = {}): Promise<Lin
     findings.push(...settleContext(ctx, [...stat.raw[i], ...measured], cwd));
   });
   for (const rest of byPage.values()) findings.push(...rest);
+  findings.push(...stat.skipped);
   const final = finalize(findings);
   const summary = summarize(final, render);
   return { files: stat.files, findings: final, summary, exitCode: exitCodeOf(summary) };
