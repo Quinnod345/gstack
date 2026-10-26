@@ -343,6 +343,114 @@ describe('gstack-lease', () => {
     expect(fs.readdirSync(leases)).toEqual([]);
   });
 
+  // Value: protects=a .lock.break held by a live breaker (owner, or claim on an ownerless dir) is never cleared; an ownerless one with no claimant is;
+  //   fails_when=break_lock's liveness check on .lock.break is dropped, or orphaned() ignores a live claim;
+  //   why_new=the existing .lock.break test plants only a dead breaker's owner, never a live breaker or an ownerless one;
+  //   seam=none; no_claim=two live breakers racing for real (sleeping children stand in as the live holders)
+  test('a .lock.break whose breaker lives (owner or claim) is never cleared; an ownerless one with no live claimant is', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const breaker = sleeper();
+    const lockPath = path.join(leases, '.lock');
+    const breakPath = path.join(leases, '.lock.break');
+    plantLock(lockPath, `${deadPid()} `);
+    plantLock(breakPath, `${breaker} `);
+    const owned = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(owned.status, owned.stdout + owned.stderr).toBe(3);
+    expect(ownerOf(breakPath)).toBe(String(breaker));
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(false);
+
+    fs.rmSync(breakPath, { recursive: true });
+    fs.mkdirSync(breakPath);
+    fs.writeFileSync(path.join(leases, `.lock.break.claim.${breaker}`), `${breaker} \n`);
+    const claimed = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(claimed.status, claimed.stdout + claimed.stderr).toBe(3);
+    expect(fs.readdirSync(breakPath)).toEqual([]);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(false);
+
+    fs.rmSync(path.join(leases, `.lock.break.claim.${breaker}`));
+    const orphaned = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '5' });
+    expect(orphaned.status, orphaned.stdout + orphaned.stderr).toBe(0);
+    expect(fs.readdirSync(leases)).toEqual([String(holder)]);
+  });
+
+  // Value: protects=a lock dir whose owner rename failed is removed, never left ownerless; touch exits 3 saying it cannot take the lock;
+  //   fails_when=take() stops removing the lock dir after a failed owner rename;
+  //   why_new=the ownerless-lock test plants the dir by hand; none fails take() between its mkdir and its owner rename;
+  //   seam=none; no_claim=real mv failure modes (a BASH_ENV shim fails the claim-to-owner rename)
+  test('a lock whose owner cannot be published is removed, not left ownerless, and touch fails at once', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const shim = bashEnv(dir, 'mv() { case "$*" in *".lock.claim."*) return 1 ;; esac; command mv "$@"; }\n');
+    const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: shim });
+    expect(r.status, r.stdout + r.stderr).toBe(3);
+    expect(r.stderr).toContain('cannot take the lease directory lock');
+    expect(r.stderr).not.toContain('locked by live process');
+    expect(fs.readdirSync(leases)).toEqual([]);
+  });
+
+  // Value: protects=a lock that vanishes between a failed take and its check is retaken at once: touch writes its lease, no sleep, no lock left;
+  //   fails_when=the vanished-lock retry limit drops to 1, so one release race exits 3;
+  //   why_new=the fails-at-once test pins only the upper bound (every take fails); no test fails a single take;
+  //   seam=none; no_claim=a real release race (a BASH_ENV shim fails the first mkdir of the lock)
+  test('a lock released between a failed take and its check is retaken without waiting', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const waits = path.join(dir, 'waits.log');
+    const once = path.join(dir, 'failed-once');
+    const shim = bashEnv(dir, `mkdir() { case "$*" in *"/.lock") if [ ! -e "${once}" ]; then : > "${once}"; return 1; fi ;; esac; command mkdir "$@"; }\nsleep() { echo "$*" >> "${waits}"; command sleep "$@"; }\n`);
+    const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: shim });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(once), 'the shim never failed a take').toBe(true);
+    expect(fs.existsSync(waits), 'lock() slept between tries').toBe(false);
+    expect(fs.readdirSync(leases)).toEqual([String(holder)]);
+  });
+
+  // Value: protects=unlock removes the caller's own lock even when renaming it aside fails: touch exits 0, lease written, no .lock left behind;
+  //   fails_when=the rm -rf fallback after drop in unlock() is removed;
+  //   why_new=no test fails the rename-aside step of drop(), so unlock's fallback never runs;
+  //   seam=none; no_claim=real mv failure modes such as a Windows file in use (a BASH_ENV shim fails the .lock.gone rename)
+  test('unlock still removes its own lock when renaming it aside fails', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const shim = bashEnv(dir, 'mv() { case "$*" in *".lock.gone."*) return 1 ;; esac; command mv "$@"; }\n');
+    const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: shim });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(fs.readdirSync(leases)).toEqual([String(holder)]);
+  });
+
+  // Value: protects=a dead holder's lock that cannot be renamed aside is removed in place, and one that cannot be removed at all ends touch
+  //   with exit 3 within the tries limit instead of spinning, without calling the dead holder live;
+  //   fails_when=break_lock reports success after a failed drop and lock() loops without sleeping or counting tries;
+  //   why_new=the dead-holder tests always let the rename-aside succeed; the tries limit is only reached through the live-holder path;
+  //   seam=none; no_claim=real mv/rm failure modes such as a Windows file in use (a BASH_ENV shim fails the .lock.gone rename and the rm)
+  test('a dead holder\'s lock that cannot be renamed aside ends touch with a verdict instead of spinning', () => {
+    const { dir, leases } = checkout();
+    const holder = sleeper();
+    const dead = deadPid();
+    const touch = (shim: string) => spawnSync('bash', [LEASE, 'touch', '--root', dir, '--pid', String(holder)], {
+      encoding: 'utf8', env: { ...baseEnv, BASH_ENV: shim, GSTACK_LEASE_LOCK_TRIES: '3' }, timeout: 8_000,
+    });
+    const noRename = 'mv() { case "$*" in *".lock.gone."*) return 1 ;; esac; command mv "$@"; }\n';
+    plantLock(path.join(leases, '.lock'), `${dead} `);
+    const removed = touch(bashEnv(dir, noRename));
+    expect(removed.error?.message ?? '', 'touch did not end within 8 s').not.toContain('ETIMEDOUT');
+    expect(removed.status, removed.stdout + removed.stderr).toBe(0);
+    expect(fs.readdirSync(leases)).toEqual([String(holder)]);
+
+    fs.rmSync(path.join(leases, String(holder)));
+    plantLock(path.join(leases, '.lock'), `${dead} `);
+    const stuck = touch(bashEnv(dir, noRename + 'rm() { case "$*" in *"/.lock") return 1 ;; esac; command rm "$@"; }\n'));
+    expect(stuck.error?.message ?? '', 'touch did not end within 8 s').not.toContain('ETIMEDOUT');
+    expect(stuck.status, stuck.stdout + stuck.stderr).toBe(3);
+    expect(stuck.stderr).toContain('cannot take the lease directory lock');
+    expect(stuck.stderr).not.toContain('locked by live process');
+    expect(ownerOf(path.join(leases, '.lock'))).toBe(String(dead));
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(false);
+  }, 20_000);
+
   test('a lease without a recorded identity (older gstack) counts while fresh and is stale past the 120-minute window', () => {
     const { dir, leases } = checkout();
     const holder = sleeper();

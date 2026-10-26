@@ -167,10 +167,13 @@ holder_gone() { case "$(state "${1%% *}" "${1#* }" 0)" in dead|stale) return 0 ;
 # break_lock OWNER — remove the lock only if it still names OWNER (empty: is
 # still orphaned). Breakers take a second lock, .lock.break, and reread the
 # lock under it, so a lock taken since the verdict is never removed; a
-# .lock.break whose holder is gone is cleared. Returns 1 when another breaker
-# holds .lock.break. Known limit: that clear is not atomic, so two
-# gstack-lease processes killed in a row (one holding .lock, the next inside
-# this function) can let a reclaim delete a renewal; one crash is always safe.
+# .lock.break whose holder is gone is cleared. A lock that cannot be renamed
+# aside is removed in place (other breakers wait on .lock.break meanwhile).
+# Returns 1 when another breaker holds .lock.break or the lock could not be
+# removed, so lock() counts the try instead of spinning. Known limit: that
+# clear is not atomic, so two gstack-lease processes killed in a row (one
+# holding .lock, the next inside this function) can let a reclaim delete a
+# renewal; one crash is always safe.
 break_lock() {
   if ! take "$LOCK.break"; then
     _b=$(owner_of "$LOCK.break")
@@ -181,13 +184,14 @@ break_lock() {
     fi
     return 1
   fi
+  _kept=0
   if [ -n "$1" ]; then
-    [ "$(owner_of "$LOCK")" = "$1" ] && drop "$LOCK"
+    [ "$(owner_of "$LOCK")" = "$1" ] && { drop "$LOCK" || rm -rf "$LOCK" || _kept=1; }
   else
-    orphaned "$LOCK" && drop "$LOCK"
+    orphaned "$LOCK" && { drop "$LOCK" || rm -rf "$LOCK" || _kept=1; }
   fi
   drop "$LOCK.break"
-  return 0
+  return $_kept
 }
 unlock() { [ "$(owner_of "$LOCK")" = "$TOKEN" ] && { drop "$LOCK" || rm -rf "$LOCK"; }; return 0; }
 # reclaim FILE RECORD — delete a stale lease only if, under the lock, it still
@@ -208,7 +212,7 @@ case "$VERB" in
     [ -n "$PID" ] || PID=$(gstack_harness_pid "${FROM:-$PPID}")
     mkdir -p "$DIR" || exit 2
     lock || {
-      if [ -n "${LOCK_OWNER:-}" ]; then echo "gstack-lease: the lease directory is locked by live process ${LOCK_OWNER%% *}; lease $PID not renewed" >&2
+      if [ -n "${LOCK_OWNER:-}" ] && ! holder_gone "$LOCK_OWNER"; then echo "gstack-lease: the lease directory is locked by live process ${LOCK_OWNER%% *}; lease $PID not renewed" >&2
       else echo "gstack-lease: cannot take the lease directory lock $LOCK; lease $PID not renewed" >&2
       fi
       exit 3
