@@ -45,7 +45,8 @@ export interface ApprovalRow {
   scope: string; pending: string; outcome: Outcome; source: string; branch: string; recorded_at: string;
 }
 export type MirrorSource = 'GSTACK_APPROVALS_DIR' | 'captain drive' | 'project-user drive';
-export interface StoreLocation { file: string; mirror?: string; mirror_source?: MirrorSource; branch: string; slug: string; ephemeral: boolean }
+/** `mirror` is written and read; `read_also` are the other mirror roots' copies, read so a row mirrored under an earlier rule stays visible. */
+export interface StoreLocation { file: string; mirror?: string; mirror_source?: MirrorSource; read_also?: string[]; branch: string; slug: string; ephemeral: boolean }
 export interface RecordError { code: ResultCodeName; message: string }
 export type Env = NodeJS.ProcessEnv;
 
@@ -75,21 +76,24 @@ export function locate(o: { cwd: string; env: Env; branch?: string }): StoreLoca
   const dir = path.join(stateRoot, 'projects', slug, 'approvals');
   const file = path.join(dir, `${branchKey(branch)}.jsonl`);
   if (!contained(stateRoot, file)) return { code: 'APPROVAL_RECORD_INVALID', message: `record path escapes the state root: ${file}` };
-  let mirrorRoot: string | undefined;
-  let mirror_source: MirrorSource | undefined;
-  if (o.env.GSTACK_APPROVALS_DIR) { mirrorRoot = o.env.GSTACK_APPROVALS_DIR; mirror_source = 'GSTACK_APPROVALS_DIR'; }
-  else if (o.env.GSTACK_CAPY === '1' && o.env.GSTACK_APPROVALS_MIRROR !== '0') {
+  // Every mirror root this machine can see, best first; the first is written, the rest are read so a
+  // row mirrored before the Captain created approvals/ (or under an explicit directory) stays visible.
+  const roots: Array<[MirrorSource, string]> = [];
+  if (o.env.GSTACK_APPROVALS_DIR) roots.push(['GSTACK_APPROVALS_DIR', o.env.GSTACK_APPROVALS_DIR]);
+  if (o.env.GSTACK_CAPY === '1' && o.env.GSTACK_APPROVALS_MIRROR !== '0') {
     const captain = captainApprovalsDir(o.env);
-    if (captain) { mirrorRoot = captain; mirror_source = 'captain drive'; }
-    else {
-      const top = git(o.cwd, ['rev-parse', '--show-toplevel']);
-      const folder = capyDriveFolder(o.env, top.status === 0 ? path.basename(top.stdout.trim()) : undefined);
-      if (folder) { mirrorRoot = path.join(path.dirname(folder), 'approvals'); mirror_source = 'project-user drive'; }
-    }
+    if (captain) roots.push(['captain drive', captain]);
+    const top = git(o.cwd, ['rev-parse', '--show-toplevel']);
+    const folder = capyDriveFolder(o.env, top.status === 0 ? path.basename(top.stdout.trim()) : undefined);
+    if (folder) roots.push(['project-user drive', path.join(path.dirname(folder), 'approvals')]);
   }
-  const mirror = mirrorRoot ? path.join(mirrorRoot, slug, `${branchKey(branch)}.jsonl`) : undefined;
-  if (mirror && !contained(mirrorRoot!, mirror)) return { code: 'APPROVAL_RECORD_INVALID', message: `mirror path escapes ${mirrorRoot}` };
-  return { file, mirror, ...(mirror ? { mirror_source } : {}), branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1' };
+  const rel = path.join(slug, `${branchKey(branch)}.jsonl`);
+  for (const [, root] of roots) if (!contained(root, path.join(root, rel))) return { code: 'APPROVAL_RECORD_INVALID', message: `mirror path escapes ${root}` };
+  const [chosen, ...rest] = roots;
+  return {
+    file, mirror: chosen ? path.join(chosen[1], rel) : undefined, mirror_source: chosen?.[0], read_also: rest.map(([, root]) => path.join(root, rel)),
+    branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1',
+  };
 }
 
 /**
@@ -107,21 +111,24 @@ export function captainApprovalsDir(env: Env): string | undefined {
   return found.length === 1 ? found[0] : undefined;
 }
 
-/** Standing approvals an agent may cite to answer an autoplan gate with `rec` (plan E21). */
-export const STANDING_REC_SCOPE_RE = /\bautoplan\b/i;
-export const STANDING_REC_WORDS_RE = /\b(rec|recommendations?|recommended)\b/i;
+/**
+ * A standing approval an agent may cite to answer an autoplan gate with `rec` (plan E21): outcome
+ * standing, the ask or scope naming autoplan, and the owner's own words naming the recommendations
+ * without a negation (`never take the recommendations` is a standing refusal, not an approval).
+ */
 export const coversAutoplanRec = (r: ApprovalRow): boolean =>
-  r.outcome === 'standing' && STANDING_REC_SCOPE_RE.test(`${r.ask} ${r.scope}`) && STANDING_REC_WORDS_RE.test(`${r.words} ${r.scope}`);
+  r.outcome === 'standing' && /\bautoplan\b/i.test(`${r.ask} ${r.scope}`)
+  && /\b(rec|recommendations?|recommended)\b/i.test(r.words) && !/\b(never|not|no|don'?t|do not|without|except)\b/i.test(r.words);
 
 /**
  * The newest standing approval covering autoplan recommendations, from this branch's record
- * and every other branch's record of the same project (local and mirror): a Captain records
- * the owner's standing words once, on whatever branch it had checked out, and every lane cites it.
+ * and every other branch's record of the same project (local, mirror and the other mirror roots):
+ * a Captain records the owner's standing words once, on whatever branch it had checked out, and
+ * every lane cites it.
  */
 export function standingRecApproval(loc: StoreLocation): ApprovalRow | undefined {
   const rows: ApprovalRow[] = [];
-  for (const dir of [path.dirname(loc.file), loc.mirror ? path.dirname(loc.mirror) : undefined]) {
-    if (!dir) continue;
+  for (const dir of [loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : [])) {
     let names: string[] = [];
     try { names = fs.readdirSync(dir).filter(n => n.endsWith('.jsonl')); } catch { continue; }
     for (const n of names) rows.push(...readRows(path.join(dir, n)));
@@ -147,7 +154,7 @@ export function readRecord(loc: StoreLocation): ReadResult {
   const local = readRows(loc.file);
   const mirrored = readRows(loc.mirror);
   const byId = new Map<string, ApprovalRow>();
-  for (const r of [...mirrored, ...local]) byId.set(r.id, r);
+  for (const r of [...(loc.read_also ?? []).flatMap(readRows), ...mirrored, ...local]) byId.set(r.id, r);
   const rows = [...byId.values()].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
   const known = fs.existsSync(loc.file) || (loc.mirror !== undefined && fs.existsSync(loc.mirror));
   const state = rows.length ? 'present' : known || !loc.ephemeral || loc.mirror ? 'empty' : 'unavailable';

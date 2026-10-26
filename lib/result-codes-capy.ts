@@ -42,12 +42,12 @@ export const CAPY_RESULT_CODES = {
   STANDING_APPROVAL_ABSENT: {
     anchor: 'standing-approval-absent',
     summary: 'gstack-autoplan answer --owner-standing rec found no standing approval covering autoplan recommendations for this project, so the gate stays pending',
-    fix: 'relay the gate to the owner (or Captain) as usual, or have the Captain record the owner\'s standing words once with gstack-approvals add --outcome standing --scope "autoplan gates: take the recommendations" --words "<the owner\'s exact words>"',
+    fix: 'relay the gate to the owner (or Captain) as usual, or have the Captain record the owner\'s standing words once with gstack-approvals add --outcome standing --ask "autoplan gates" --words "<the owner\'s exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"',
   },
   STANDING_APPROVAL_INAPPLICABLE: {
     anchor: 'standing-approval-inapplicable',
-    summary: 'the gate carries an urgent or outside-plan finding, which a standing "take the recommendations" approval does not cover, so nothing was applied',
-    fix: 'relay the gate render (the RELAY line) to the owner and answer with their reply through --reply and --owner-reply; the standing row still applies to later gates without such findings',
+    summary: 'the gate is outside what a standing "take the recommendations" approval covers (an urgent or outside-plan finding, a recommendation set by `recommend`, or an unreadable findings.jsonl), so nothing was applied',
+    fix: 'relay the gate render (the RELAY line) to the owner and answer with their reply through --reply, --owner-reply and --rec-hash; the standing row still applies to later gates the reviewers alone recommended',
   },
   CAPTAIN_BRIEF_INCOMPLETE: {
     anchor: 'captain-brief-incomplete',

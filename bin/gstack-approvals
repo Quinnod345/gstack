@@ -111,7 +111,7 @@ function main(argv: string[]): number {
     return s.error ? fail(cmd, s.error) : EXIT.ok;
   }
   if (cmd === 'path') {
-    process.stdout.write(`RECORD: ${loc.file}\nMIRROR: ${loc.mirror ? `${loc.mirror} (${loc.mirror_source})` : 'none'}\nBRANCH: ${loc.branch}\n`);
+    process.stdout.write(`RECORD: ${loc.file}\nMIRROR: ${loc.mirror ? `${loc.mirror} (${loc.mirror_source})` : 'none'}\n${(loc.read_also ?? []).map(f => `READ_ALSO: ${f}\n`).join('')}BRANCH: ${loc.branch}\n`);
     return EXIT.ok;
   }
   process.stderr.write(`gstack-approvals: unknown command ${cmd}\n${HELP}\n`);

@@ -334,13 +334,21 @@ export interface AnswerOptions {
  */
 export function standingAnswer(state: RunState, gateRev: number, answeredBy: string | undefined, standing: NonNullable<AnswerOptions['standing']>): AnswerResult {
   if (!answeredBy?.startsWith('agent:')) throw new RunError('ANSWER_BY_REQUIRED', 'a standing approval is cited by an agent: pass --by agent:<id>', 3);
-  const findings = readJsonl(path.join(state.out, 'findings.jsonl')).rows as Array<Record<string, unknown>>;
-  const urgent = findings.filter(r => r.urgent === true || r.outside_plan === true);
-  if (urgent.length) throw new RunError('STANDING_APPROVAL_INAPPLICABLE', `${urgent.length} urgent or outside-plan finding(s) at this gate (${urgent.slice(0, 3).map(r => String(r.id ?? r.title ?? '?')).join(', ')}); the standing approval ${standing.id} covers the plan's recommendations, not these`, 3);
+  const inapplicable = (why: string) => new RunError('STANDING_APPROVAL_INAPPLICABLE', `${why}; the standing approval ${standing.id} covers the reviewers' recommendations on the plan, not this`, 3);
+  const findingsFile = path.join(state.out, 'findings.jsonl');
+  if (!fs.existsSync(findingsFile)) throw inapplicable('findings.jsonl is missing, so the urgent-finding check cannot run');
+  const findings = readJsonl(findingsFile);
+  if (findings.errors.length) throw inapplicable(`findings.jsonl has ${findings.errors.length} unreadable line(s), so the urgent-finding check cannot run`);
+  const urgent = (findings.rows as Array<Record<string, unknown>>).filter(r => r.urgent === true || r.outside_plan === true);
+  if (urgent.length) throw inapplicable(`${urgent.length} urgent or outside-plan finding(s) at this gate (${urgent.slice(0, 3).map(r => String(r.id ?? r.title ?? '?')).join(', ')})`);
   const gateFile = path.join(state.out, 'gate.json');
-  const list = fs.existsSync(gateFile) ? JSON.parse(fs.readFileSync(gateFile, 'utf8')) as GateList : undefined;
-  const r = answerGate(state, gateRev, 'rec', answeredBy, { recHash: list ? recHash(list) : undefined, ownerReply: standing.words, standing });
-  r.lines.unshift(`STANDING: ${standing.id} (${standing.date}, ${standing.by}; ${standing.source}) "${standing.words}" — scope: ${standing.scope}`);
+  if (state.status !== 'gate_pending' || !fs.existsSync(gateFile)) throw new RunError('PHASE_NOT_AWAITING', `run is ${state.status}, not gate_pending`, 3);
+  const list = JSON.parse(fs.readFileSync(gateFile, 'utf8')) as GateList;
+  const edited = list.items.filter(i => i.recommended_by);
+  if ((list.rec_rev ?? 0) > 0 || edited.length) throw inapplicable(`\`recommend\` changed this gate (rec_rev=${list.rec_rev ?? 0}${edited.length ? `; ${edited.map(i => `${i.id} by ${i.recommended_by}`).join(', ')}` : ''}), so its recommendations are no longer the reviewers' alone; relay the render and answer with --reply and --rec-hash`);
+  const r = answerGate(state, gateRev, 'rec', answeredBy, { recHash: recHash(list), ownerReply: standing.words, standing });
+  const flat = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ');
+  r.lines.unshift(`STANDING: ${standing.id} (${standing.date}, ${flat(standing.by)}; ${flat(standing.source)}) ${JSON.stringify(flat(standing.words))} — scope: ${flat(standing.scope)}`);
   return r;
 }
 

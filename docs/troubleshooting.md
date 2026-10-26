@@ -1685,7 +1685,9 @@ from "the record was lost with the old machine". `render` still prints the secti
 **Fix.** Run where the record lives, copy the rows back from the thread's report, or make
 a Drive mirror resolvable: `GSTACK_APPROVALS_DIR`, an `approvals/` directory in the one
 mounted Captain drive (`~/.capy/drive/captain-*/approvals`, readable by the whole crew), or one
-`~/.capy/drive/project-user-*` folder. `gstack-approvals path` prints which rule chose the mirror.
+`~/.capy/drive/project-user-*` folder. `gstack-approvals path` prints which rule chose the mirror
+and, as `READ_ALSO:`, the other roots it still reads (a row mirrored before the Captain created
+`approvals/` stays visible).
 
 <a id="approval-record-write-failed"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_WRITE_FAILED)`
@@ -1724,14 +1726,18 @@ finds it.
 <a id="standing-approval-inapplicable"></a>
 ### `gstack-autoplan answer: ... (STANDING_APPROVAL_INAPPLICABLE)`
 
-**Meaning.** The gate carries an urgent or outside-plan finding (`findings.jsonl` rows with
-`urgent` or `outside_plan`). Standing words that say "take the recommendations" cover the
-plan under review, not news beyond it, so the standing path refuses and nothing was applied.
-Exit 3.
+**Meaning.** The gate is outside what standing words that say "take the recommendations"
+cover: it carries an urgent or outside-plan finding (`findings.jsonl` rows with `urgent` or
+`outside_plan`), which is news beyond the plan; or `gstack-autoplan recommend` changed a
+recommendation (`rec_rev` > 0 or an item with `recommended_by`), so `rec` would take an
+option the relaying agent chose rather than the reviewers'; or `findings.jsonl` is missing or
+has an unreadable line, so the urgent check cannot run. The line says which. Nothing was
+applied. Exit 3.
 
 **Fix.** Relay the gate render (the `RELAY:` line) to the owner, including the
-`## URGENT, outside this plan` block, and answer with their reply through `--reply` and
-`--owner-reply`. The standing row still applies to later gates that carry no such finding.
+`## URGENT, outside this plan` block, and answer with their reply through `--reply`,
+`--owner-reply` and, after a `recommend`, `--rec-hash` from the render they saw. The standing
+row still applies to later gates the reviewers alone recommended.
 
 <a id="captain-brief-incomplete"></a>
 ### `gstack-owner-brief render --captain: ... (CAPTAIN_BRIEF_INCOMPLETE)`

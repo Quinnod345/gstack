@@ -23,6 +23,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT, exitTableHelp } from '../lib/headless-artifacts';
 import { renderCaptainBrief } from '../lib/captain-brief';
+import { gateCost, gateCostSentence } from '../lib/autoplan-gate-cost';
 import { BRIEF_FILE, closeDraftDirectionsFile, loadBriefInputs, renderBrief } from '../lib/owner-brief';
 import { resultLine } from '../lib/result-codes';
 
@@ -50,6 +51,8 @@ function main(argv: string[]): number {
 
   if (cmd === 'render' && rest.includes('--captain')) {
     const brief = renderCaptainBrief(loaded.inputs, { outDir: path.resolve(out) });
+    const run = loaded.inputs.run;
+    if (run) brief.text = brief.text.trimEnd() + `\n\n### Cost\n\n${gateCostSentence(gateCost(path.resolve(out), loaded.inputs.gate, { phase_order: run.phase_order ?? [], outside_enabled: run.outside_enabled !== false, spend_cap_usd: run.spend_cap_usd ?? null }))}\n`;
     if (rest.includes('--write')) fs.writeFileSync(path.join(path.resolve(out), 'captain-brief.md'), brief.text);
     if (json) process.stdout.write(JSON.stringify({ run: loaded.inputs.gate.run, gate_rev: loaded.inputs.gate.gate_rev, rec_hash: brief.recHash, pending: brief.pending, missing: brief.missing, brief: brief.text }) + '\n');
     else process.stdout.write(brief.text);
