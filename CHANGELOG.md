@@ -7,11 +7,11 @@
 - **Accepted craft exceptions persist.** /design-html's finalized.json records each accepted `CRAFT_CHECK` finding in `craft_exceptions` (`id`, `count`, `reason`) and carries forward earlier ones. A later run passes that file with `--accepted`, so a finding the user already accepted is reported as accepted instead of flagged again. A higher count is still flagged as a new issue.
 
 ### Added
-- **`gstack-design-craft --accepted <finalized.json>`**: a finding whose id an exception covers, at no more than the accepted count, prints `CRAFT_ACCEPTED: <id> <count> <reason>` and doesn't fail the check. `CRAFT_RESULT` adds the accepted count. Exit codes are unchanged: 0 when only accepted findings remain, 1 for unaccepted ones, and 2 for a missing, unreadable or malformed exceptions file or an unknown argument. A finalized.json with no `craft_exceptions` field, written before this change, means no exceptions.
+- **`gstack-design-craft --accepted <finalized.json>`**: a finding whose id an exception covers, at no more than the accepted count, prints `CRAFT_ACCEPTED: <id> <count> <reason>` and doesn't fail the check. `CRAFT_RESULT` adds the accepted count. Exit codes: 0 when only accepted findings remain, 1 for unaccepted ones, and 2 for an unknown argument or a missing, unreadable or malformed exceptions file. A bad exceptions file still gets the full check with nothing accepted, after a warning, so a broken record can't switch the craft check off. A finalized.json with no `craft_exceptions` field, written before this change, means no exceptions.
 
 ### Tests
 - `design-html-slop-gate` is now selected by changes to `lib/design-craft.ts` and `bin/gstack-design-craft` (`test/helpers/touchfiles-data.ts`), which it already exercised but did not list.
-- `test/design-craft.test.ts` also covers accepted exceptions: count coverage and overflow, the finalized.json block in design-html/SKILL.md parsed by the same reader the CLI uses, rejected malformed lists, CLI exit codes with `--accepted`, and the archetype handoff contract (the same four ids in /design-shotgun and the craft section, the approved.json step, Case A and the craft section's no-re-ask rule).
+- `test/design-craft.test.ts` also covers accepted exceptions: count coverage and overflow, duplicate ids carried forward (the highest count wins), a bad exceptions file still checked in full, the finalized.json block in design-html/SKILL.md parsed by the same reader the CLI uses, rejected malformed lists, CLI exit codes with `--accepted`, and the archetype handoff contract (the same four ids in /design-shotgun and the craft section, the approved.json step, Case A and the craft section's no-re-ask rule).
 
 ## [1.91.225.0] - 2026-10-26
 

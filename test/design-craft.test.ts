@@ -4,6 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { acceptFindings, BUZZWORDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
 import { catalogEntry } from '../lib/design-catalog';
+import { selectTests } from './helpers/test-selection';
+import { E2E_TOUCHFILES } from './helpers/touchfiles-data';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN = path.join(ROOT, 'bin', 'gstack-design-craft');
@@ -129,6 +131,10 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
     expect(issues.find(f => f.id === 'round-number')?.fix).toEndWith('(2 accepted earlier: supplied figures)');
     expect(issues).toHaveLength(findings.length - 2);
     expect(formatCraft([], accepted)).toBe('CRAFT_ACCEPTED: placeholder-brand 1 Acme is the real customer\nCRAFT_ACCEPTED: scroll-listener 1 unused\nCRAFT_RESULT: clean (2 accepted)');
+    const carried = [{ id: 'round-number', count: 1, reason: 'first run' }, { id: 'round-number', count: 3, reason: 'supplied figures' }];
+    for (const list of [carried, [...carried].reverse()]) {
+      expect(acceptFindings([{ id: 'round-number', count: 3, fix: 'use the supplied figure' }], list)).toEqual({ issues: [], accepted: [{ id: 'round-number', count: 3, reason: 'supplied figures' }] });
+    }
   });
 
   test('parseCraftExceptions reads the finalized.json design-html writes and rejects a malformed list', () => {
@@ -143,7 +149,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
     }
   });
 
-  test('the CLI reports accepted tells as CRAFT_ACCEPTED lines: exit 0 when only accepted ones remain, 1 for the rest, 2 on a bad exceptions file', () => {
+  test('the CLI reports accepted tells as CRAFT_ACCEPTED lines: exit 0 when only accepted ones remain, 1 for the rest, 2 on a bad exceptions file after a full check with none accepted', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-craft-accepted-'));
     try {
       const page = path.join(dir, 'finalized.html');
@@ -164,10 +170,12 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
       fs.writeFileSync(path.join(dir, 'old.json'), JSON.stringify({ mode: 'freeform' }));
       expect(run(page, '--accepted', path.join(dir, 'old.json')).out).toBe(run(page).out);
       fs.writeFileSync(path.join(dir, 'bad.json'), '{"craft_exceptions":[{"id":"oops"}]}');
-      expect(run(page, '--accepted', path.join(dir, 'bad.json'))).toMatchObject({ code: 2, out: '' });
       fs.writeFileSync(path.join(dir, 'broken.json'), '{');
-      expect(run(page, '--accepted', path.join(dir, 'broken.json')).code).toBe(2);
-      expect(run(page, '--accepted', path.join(dir, 'missing.json')).code).toBe(2);
+      for (const name of ['bad.json', 'broken.json', 'missing.json']) {
+        const bad = run(page, '--accepted', path.join(dir, name));
+        expect(bad).toMatchObject({ code: 2, out: run(page).out });
+        expect(bad.err).toContain('checked with none accepted');
+      }
       expect(run(page, '--accepted').code).toBe(2);
       expect(run(page, '--strict').code).toBe(2);
       expect(run(page, '--accepted', record, 'extra').code).toBe(2);
@@ -193,6 +201,12 @@ describe('design-shotgun to design-html handoff', () => {
     expect(save).toMatch(/add the chosen variant's `archetype` id and `sections`[^.]*to it with the Edit tool/);
     expect(html.slice(html.indexOf('### Case A'), html.indexOf('### Case B'))).toContain('any `archetype`\nand `sections`');
     expect(craft).toMatch(/When approved\.json carries an `archetype`[^.]*: take it and its `sections` outline as given[^.]*do not re-pick or re-ask/);
+  });
+
+  test('a change to the craft checker selects the design-html-slop-gate E2E that runs it', () => {
+    for (const file of ['lib/design-craft.ts', 'bin/gstack-design-craft']) {
+      expect(selectTests([file], E2E_TOUCHFILES).selected).toContain('design-html-slop-gate');
+    }
   });
 
   test('design-html persists accepted exceptions and passes them back with --accepted', () => {
