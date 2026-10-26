@@ -3,7 +3,7 @@
  * mismatch refusal. The daemon round trip is in proxy-env-daemon.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
-import { computeConfigHash, noProxyToChromiumRules, parseProxyConfig, resolveProxy, serverProxyEnv, withLoopbackBypass } from '../src/proxy-config';
+import { DIRECT_PROXY_ARG, computeConfigHash, directProxyLogLine, noProxyToChromiumRules, parseProxyConfig, resolveProxy, serverProxyEnv, withLoopbackBypass } from '../src/proxy-config';
 import { buildHeadedServerEnv, buildRestartEnv, extractGlobalFlags, proxyMismatchLines, withLoopbackNoProxy } from '../src/cli';
 
 describe('resolveProxy precedence', () => {
@@ -148,6 +148,17 @@ describe('server env carries the proxy source and bypass', () => {
     expect(buildHeadedServerEnv(flags)).toMatchObject(expected);
     expect(buildRestartEnv(extractGlobalFlags(['text'], {}), null).BROWSE_PROXY_URL).toBeUndefined();
   });
+
+  // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
+  // Value: protects=a headed connect with BROWSE_PROXY_URL=direct on macOS/Windows hands its daemon the opt-out, so the headed daemon hashes and launches direct;
+  //   fails_when=buildHeadedServerEnv spreads only proxyUrl/source/bypass and drops explicitDirect, or proxyServerEnv stops re-emitting it;
+  //   why_new=restart-env.test.ts covers buildRestartEnv only and the headed case above is a proxied session; seam=none;
+  //   no_claim=the headed daemon's launch itself (unit: only the env it is handed; on Linux the opt-out hashes like no proxy, so the env is empty by design)
+  test('a headed launch keeps BROWSE_PROXY_URL=direct where it bypasses the system proxy settings, and a --proxy still wins (#3440)', () => {
+    expect(buildHeadedServerEnv(extractGlobalFlags(['connect'], { BROWSE_PROXY_URL: 'direct' }, 'darwin')).BROWSE_PROXY_URL).toBe('direct');
+    expect(buildHeadedServerEnv(extractGlobalFlags(['connect'], { BROWSE_PROXY_URL: 'direct' }, 'linux')).BROWSE_PROXY_URL).toBeUndefined();
+    expect(buildHeadedServerEnv(extractGlobalFlags(['connect', '--proxy', 'http://p:1'], { BROWSE_PROXY_URL: 'direct' }, 'darwin')).BROWSE_PROXY_URL).toBe('http://p:1/');
+  });
 });
 
 describe('serverProxyEnv (the daemon side)', () => {
@@ -217,5 +228,20 @@ describe('BROWSER.md documents the proxy messages', () => {
     for (const needle of ['BROWSE_PROXY_URL=direct', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'is not a proxy URL browse can use', 'different proxy settings', 'browse stop']) {
       expect(section).toContain(needle);
     }
+  });
+
+  // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
+  // Value: protects=the section names the Chromium switch and the daemon-log line a user greps for, as the code emits them;
+  //   fails_when=DIRECT_PROXY_ARG or the '[proxy] none:' log prefix is renamed without BROWSER.md, or the direct-mode paragraph is dropped;
+  //   why_new=the #915 needles above predate the switch and the log line; seam=none;
+  //   no_claim=prose accuracy beyond those two literals (doc-contract check only)
+  test('the direct-mode paragraph names the switch Chromium gets and the daemon-log line that records it (#3440)', async () => {
+    const doc = await Bun.file(new URL('../../BROWSER.md', import.meta.url)).text();
+    const section = doc.slice(doc.indexOf('\n### Proxy from environment\n'));
+    expect(section).toContain(DIRECT_PROXY_ARG);
+    for (const needle of ['browse-daemon.log', '[proxy] using <url> from', '[proxy] none: direct connection (', '[proxy] none: system proxy settings']) {
+      expect(section).toContain(needle);
+    }
+    expect(directProxyLogLine({ HTTPS_PROXY: 'http://b:2' }, 'linux')).toContain('[proxy] none: direct connection (' + DIRECT_PROXY_ARG + '; ignoring HTTPS_PROXY)');
   });
 });
