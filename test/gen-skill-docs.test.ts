@@ -2933,7 +2933,8 @@ describe('Codex generation (--host codex)', () => {
   // A template's codex_default_prompt: key is the sentence Codex's picker
   // inserts for the skill; without the key the generic fallback keeps every
   // entry valid. The key is generator input only: no host render carries it.
-  const CODEX_PROMPT_SKILLS = ['ship', 'review', 'qa', 'autoplan', 'office-hours', 'land-and-deploy'];
+  // Value: protects=the new /modernize skill's picker prompt reaches its Codex render; fails_when=modernize's key is dropped, misquoted or unrendered; why_new=modernize-skill.test reads the template only; seam=none; no_claim=prompt wording quality
+  const CODEX_PROMPT_SKILLS = ['ship', 'review', 'qa', 'autoplan', 'office-hours', 'land-and-deploy', 'modernize'];
   test('codex_default_prompt: in a template becomes that skill\'s default_prompt', () => {
     for (const dir of CODEX_PROMPT_SKILLS) {
       const tmpl = fs.readFileSync(path.join(ROOT, dir, 'SKILL.md.tmpl'), 'utf-8');
