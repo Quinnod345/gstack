@@ -235,6 +235,27 @@ describe('carry follow-ups: git floor, named refusal, branch-touched walk, digit
     expect(changed.err).toContain('src.ts');
   });
 
+  test.skipIf(process.platform === 'win32')('a failing patch-id is a RECEIPT_CARRY_REFUSED naming git\'s error, never a carry', () => {
+    const repo = fixture();
+    makePr(repo, 'pr-patchid', { expects: '1.2.4.0' });
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, '## Summary\n');
+    expect(runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '5', '--base', 'main', '--session-kind', 'x', '--body', body]).status).toBe(EXIT.ok);
+    fs.writeFileSync(path.join(repo.work, 'src.test.ts'), 'export const t = 1;\n');
+    repo.git('add', 'src.test.ts');
+    repo.git('commit', '-qm', 'test-only change');
+    const shim = path.join(repo.root, 'shim');
+    fs.mkdirSync(shim);
+    fs.writeFileSync(path.join(shim, 'git'), '#!/bin/sh\nif [ "$1" = "patch-id" ]; then echo "fatal: patch-id exploded" >&2; exit 128; fi\nexec /usr/bin/git "$@"\n', { mode: 0o755 });
+    const before = fs.readFileSync(body, 'utf8');
+    const broken = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main'], { PATH: `${shim}:${process.env.PATH}` });
+    expect(broken.status).toBe(EXIT.refused);
+    expect(broken.err).toContain('RECEIPT_CARRY_REFUSED');
+    expect(broken.err).toContain('git patch-id --verbatim: fatal: patch-id exploded');
+    expect(fs.readFileSync(body, 'utf8')).toBe(before);
+    expect(runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main']).out).toContain('CARRY: carried');
+  });
+
   test('the carry walk names the branch product path and not a product path a base merge brought in', () => {
     const repo = fixture();
     makePr(repo, 'pr-walk', { expects: '1.2.4.0' });
