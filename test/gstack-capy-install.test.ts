@@ -382,13 +382,22 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     expect(f.calls().filter(l => l.startsWith('setup '))).toHaveLength(8);
   });
 
-  test('a setup that fails once leaves the trailer fail and records nothing; the next run sets up again and ends ok', () => {
+  test('a setup that fails once leaves the trailer fail, records ok:false and removes the earlier launch file; the next run sets up again and ends ok', () => {
     const f = fixture();
+    const first = run(f);
+    expect(first.status, first.stdout + first.stderr).toBe(0);
+    const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    expect(fs.existsSync(launchFile)).toBe(true);
+    sh('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m next', f.root);
     const failed = run(f, [], { STUB_SETUP_EXIT: '1' });
     expect(failed.status).toBe(1);
     expect(lastLine(failed.stdout)).toMatch(/^gstack: fail setup/);
+    expect(failed.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+    expect(fs.existsSync(launchFile)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(launchFile.replace(/\.env$/, '.json'), 'utf8'))).toMatchObject({ ok: false });
     expect(run(f).status).toBe(0);
-    expect(f.calls().filter(l => l.startsWith('setup '))).toHaveLength(3);
+    expect(fs.existsSync(launchFile)).toBe(true);
+    expect(f.calls().filter(l => l.startsWith('setup '))).toHaveLength(5);
   });
 
   test.skipIf(process.platform !== 'linux')('PATH Bun 1.4.3 and a CI pin of 1.4.2: the pinned verified Bun is installed alongside and launched with its PATH', () => {
