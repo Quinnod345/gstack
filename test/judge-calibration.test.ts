@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { callJudge, JudgeRefusalError, type CallJudgeOptions, type JudgeResponseMeta } from './helpers/llm-judge';
+import { COOKIE_WORKFLOW_JUDGE } from './helpers/cookie-workflow-judge-input';
 import {
   analyze, classifyError, loadCorpus, undispatched, PANEL_SAMPLES, PHASES, planCalls, priceManifest, runCalls, runSample,
   type CalibrationConfig, type CorpusItem, type JudgeCall, type SampleRecord,
@@ -246,6 +247,8 @@ describe('committed calibration configurations and corpora', () => {
     expect(byId['cookie-workflow']!.verdict([qa(5, 5, 4), qa(5, 5, 4), qa(3, 2, 3)])).toBe('pass');
     expect(byId['cookie-workflow']!.verdict([qa(4, 3, 4), qa(3, 3, 4), qa(3, 3, 4)])).toBe('fail');
     expect(byId['cookie-workflow']!.verdict([qa(5, 2, 5), qa(5, 2, 5), qa(5, 3, 5)])).toBe('fail');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 5, 4), qa(5, 5, 3), qa(5, 5, 3)])).toBe('fail');
+    expect(() => byId['cookie-workflow']!.validate({ ...qa(4, 3, 4), clarity: '4' })).toThrow();
     const arm = (over_engineering: number) => ({ over_engineering, construct: over_engineering ? 'helper' : 'none', reasoning: '' });
     expect(byId.arm!.verdict([arm(0), arm(1), arm(3)])).toBe('pass');
     expect(byId.arm!.verdict([arm(1), arm(2), arm(2)])).toBe('fail');
@@ -302,5 +305,9 @@ describe('landed schemas match the recorded calibration', () => {
       expect(body.includes('compactReasoning: true'), testName).toBe(testName === 'ship/SKILL.md workflow');
     }
     expect(registrations.filter(body => body.includes('schemaTransport: true'))).toHaveLength(cookie.landing.lands ? 16 : 15);
+    const cookieBody = registrations.find(body => body.includes("testName: 'setup-browser-cookies/SKILL.md workflow'"))!;
+    expect(cookieBody).toContain('...COOKIE_WORKFLOW_JUDGE');
+    expect(cookieBody).not.toMatch(/^\s+(?:agentCapability|model|thresholds|maxTokens|stream|effort):/m);
+    expect(Object.keys(COOKIE_WORKFLOW_JUDGE).sort()).toEqual(['judgeContext', 'judgeGoal', 'model', 'thresholds']);
   });
 });

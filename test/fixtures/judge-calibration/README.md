@@ -40,18 +40,21 @@ most 80% of `JUDGE_MS` (96 s).
 | `workflow-default` | 2/23 | 3/23 | 21 / 21 | 0 | 1 / 1 (refusal, f03) | 29.5 / 25.8 | 0/8, 8/8 | $19.66 | lands; UC3 prose step triggered by the errored sample |
 | `cookie-workflow` (2026-10-25, `claude-sonnet-5-5`) | 1/22 | 1/23 | 22 / 23 | 1 (a07) | 2 / 0 (parse, a05 and a07) | 13.6 / 9.6 | 1/7, 7/8 | $2.81 | held: one new false pass |
 
-No sample errored under either prompt except one refusal each on `workflow-default` item
+Among the 2026-10-03 configurations, no sample errored under either prompt except one refusal each on `workflow-default` item
 `f03` (a stubbed cookie-import workflow): the old prompt refused once in `old-b` and the new
 prompt once, so that item's panels are incomplete and it is excluded from the flip counts
 (23 compared). The refusal is content-driven rather than format-driven, but under the eng
 trigger any errored new sample calls for a calibrated prose step, which is deferred to
 TODOS. `workflow-default` was funded after the first pass with a $25 extension of the W2
 reservation; its 14 cases now send `WORKFLOW_JUDGE_RESPONSE_SCHEMA` without the
-compact-reasoning validator (still only on `ship`). The frontier (`review`) configuration has no corpus and stays on today's request.
+compact-reasoning validator (still only on `ship`). The frontier (`review`) configuration has no corpus and stays on today's request. A $0.12 two-call pilot sized
+output tokens before the manifest was priced. Total W2 spend: $90.47 of $115.
 
 `cookie-workflow` (GSTA-91, separately funded) is held and stays on today's request. Its one
 new false pass, a07, scored 4/4/4 on all three new samples and on all three `old-b` samples;
 `old-a`'s a07 panel is incomplete because one old sample returned invalid JSON (the defect the
 schema transport removes), so the comparison counts it against the new request only. The old
-request failed to parse 2 of 144 samples; the new one 0 of 72. A $0.12 two-call pilot sized
-output tokens before the manifest was priced. Total W2 spend: $90.47 of $115.
+request failed to parse 2 of 144 samples; the new one 0 of 72. The failed landing condition
+triggers the UC3 prose step, which is deferred to TODOS. Its `manifest.json` entry was priced
+separately (`priced_at`, `funding`) and is maintained by hand: the `manifest` command rewrites
+the whole file, so keep that entry when regenerating.
