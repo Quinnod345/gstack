@@ -54,6 +54,8 @@ export interface Supervised {
   start: number;
   end: number;
   lastFile: string | null;
+  /** Whether the progress adapter saw a test file start in the runner's own output (a single file is marked started by the supervisor, which proves nothing). */
+  observedStart: boolean;
   error?: string;
   ms: number;
 }
@@ -109,6 +111,7 @@ export function supervise(o: SuperviseOptions): Promise<Supervised> {
   let lastProgress = started;
   let current: { file: string; at: number; failed: boolean } | null = null;
   let lastFile: string | null = null;
+  let observedStart = false;
   const emit = (line: string) => { lastProgress = Date.now(); o.progress(line); };
   const startFile = (file: string) => { current = { file, at: Date.now(), failed: false }; lastFile = file; emit(`PREGATE_TEST: ${counter.done + 1}/${counter.total} ${file} start`); };
   const finishFile = (failed?: boolean) => {
@@ -125,7 +128,7 @@ export function supervise(o: SuperviseOptions): Promise<Supervised> {
     partial = lines.pop() ?? '';
     for (const line of lines) {
       const header = /^(?:::group::)?(\S.*):$/.exec(line);
-      if (header && files.has(header[1]!)) { finishFile(); startFile(header[1]!); continue; }
+      if (header && files.has(header[1]!)) { observedStart = true; finishFile(); startFile(header[1]!); continue; }
       if (/^\s*\d+\s+pass$/.test(line) || /^Ran \d+ tests? across/.test(line) || /^\s*\d+\s+tests? failed:?$/.test(line)) { finishFile(); continue; }
       if (current && /^\(fail\)\s/.test(line)) current.failed = true;
     }
@@ -134,11 +137,11 @@ export function supervise(o: SuperviseOptions): Promise<Supervised> {
   return new Promise(resolve => {
     let fd: number;
     try { fd = fs.openSync(o.log, 'a'); }
-    catch (e: any) { resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, error: e.message, ms: 0 }); return; }
+    catch (e: any) { resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, observedStart: false, error: e.message, ms: 0 }); return; }
     const inv = bashCommandInvocation(`set -o pipefail; ${o.command}`);
     if (!inv.ok) {
       fs.closeSync(fd);
-      resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, error: inv.error, ms: Date.now() - started });
+      resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, observedStart: false, error: inv.error, ms: Date.now() - started });
       return;
     }
     let child: ReturnType<typeof spawn>;
@@ -146,7 +149,7 @@ export function supervise(o: SuperviseOptions): Promise<Supervised> {
       child = spawn(inv.cmd, inv.argv, { cwd: o.cwd, env: o.env, stdio: ['ignore', fd, fd], detached: process.platform !== 'win32', windowsHide: true });
     } catch (e: any) {
       fs.closeSync(fd);
-      resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, error: e.message, ms: Date.now() - started });
+      resolve({ outcome: 'spawn-failed', exit: null, signal: null, start, end: start, lastFile: null, observedStart: false, error: e.message, ms: Date.now() - started });
       return;
     }
     fs.closeSync(fd);
@@ -170,7 +173,7 @@ export function supervise(o: SuperviseOptions): Promise<Supervised> {
       readNew();
       const done: Supervised['outcome'] = error ? 'spawn-failed' : (outcome ?? 'exited');
       if (current) finishFile(done !== 'exited' || exit !== 0 ? true : undefined);
-      resolve({ outcome: done, exit: done === 'exited' ? exit : null, signal, start, end: size, lastFile, error, ms: Date.now() - started });
+      resolve({ outcome: done, exit: done === 'exited' ? exit : null, signal, start, end: size, lastFile, observedStart, error, ms: Date.now() - started });
     };
     const timer = setInterval(() => {
       const now = Date.now();

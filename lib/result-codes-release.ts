@@ -159,6 +159,17 @@ export const RELEASE_RESULT_CODES = {
     summary: 'an added or changed test line compares an elapsed wall-clock or CPU time against a bound, or sleeps and then asserts (a warning, not a block)',
     fix: 'assert on the outcome, an injected clock or a forced deadline instead; when the bound is the contract, add `gstack-timing-ok: <reason>` in a comment on the line or the line above',
   },
+  // Lane D (GSTA-112): the no-policy warning and the environment-cause verdict.
+  PREGATE_NO_POLICY: {
+    anchor: 'pregate-no-policy',
+    summary: 'the repository has no pregate policy yet (no .gstack/pregate.json on the base branch and no user-owned file) and a touched file maps to no test lane; a warn, with a starter policy printed',
+    fix: 'review the printed starter, write it with `gstack-pregate init`, edit the TODO entries, then commit .gstack/pregate.json on the base branch; from then on an unmapped file is PREGATE_NO_LANE',
+  },
+  PREGATE_ENVIRONMENT: {
+    anchor: 'pregate-environment',
+    summary: 'a check could not run because of the machine, not the diff: a runner or guard binary missing from PATH, a network error or quota refusal before any test ran, a full disk, or an unverified runtime; incomplete, never pass',
+    fix: 'read the `environment:` line (kind and evidence), repair that on this machine or run the lane remotely (`--remote`, `gstack-pregate clear`), then rerun; a waiver cites the kind, never a test name',
+  },
   // Field list 2, W2 (approval classes) and W3 (state-machine round-trip matrix).
   APPROVAL_CLASSES_INVALID: {
     anchor: 'approval-classes-invalid',

@@ -82,7 +82,12 @@ export function classifyGate(raw: unknown, expect: { nonce: string; head: string
 }
 
 const gateAttempts = (t: TrainRecord) => attemptsOf(t).filter(a => a.purpose !== 'bisect');
-const attemptLine = (a: AttemptRecord) => `ATTEMPT: ${a.id} ${a.purpose} run ${a.run?.id ?? '-'} ${a.outcome ?? a.state}${a.red_cases.length ? ` red=${a.red_cases.join(',')}` : ''}${a.cost_usd !== null ? ` cost=$${a.cost_usd.toFixed(2)}` : ''}${a.detail ? ` (${a.detail})` : ''}`;
+const costText = (a: AttemptRecord) => {
+  if (a.cost_usd === null) return '';
+  const unknown = a.panels.filter(p => p.cost_usd === null).length;
+  return ` cost=$${a.cost_usd.toFixed(2)}${unknown ? ` known + ${unknown} of ${a.panels.length} case(s) cost unknown` : ''}`;
+};
+const attemptLine = (a: AttemptRecord) => `ATTEMPT: ${a.id} ${a.purpose} run ${a.run?.id ?? '-'} ${a.outcome ?? a.state}${a.red_cases.length ? ` red=${a.red_cases.join(',')}` : ''}${costText(a)}${a.detail ? ` (${a.detail})` : ''}`;
 
 function casePrice(env: TrainEnv, red: AttemptRecord, id: string): number {
   return red.panels.find(p => p.case === id)?.cost_usd ?? env.train.trial_reservation_usd;

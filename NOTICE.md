@@ -50,6 +50,24 @@ signature components are not carried over):
   ship-floor tells, turned into a free check.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
 
+## hallmark — Copyright (c) 2026 Hallmark contributors — MIT License
+
+https://github.com/Nutlope/hallmark (`skills/hallmark/scripts/sloplint.mjs`,
+`sloplint-render.mjs`, `references/gates.md`, `scripts/fixtures/`, at 7ec8682).
+License text: `licenses/MIT-hallmark.txt`.
+
+Derived, modified (every gate rewritten in TypeScript and in gstack's voice,
+mapped onto gstack's severity words; hallmark's theme stamp, genres, posture
+guards, photo index and judged gates are not carried over):
+
+- `lib/design-lint/` and `bin/gstack-design-lint`: the static tier's parsers
+  (CSS rules and tokens, HTML and component pseudo-HTML, Tailwind class
+  strings), the colour maths, the waiver record, and the rule families under
+  `lib/design-lint/rules/`; the render tier in `lib/design-lint/render*.ts`,
+  driving gstack's own browser instead of puppeteer.
+- `test/fixtures/design-lint/{slopped.html,eyebrow-pass,eyebrow-fail,tailwind-pass,tailwind-fail,waiver}`:
+  the fixtures, with their waiver comments rewritten to the lint's form.
+
 ## DESIGN.md specification — Copyright Google LLC — Apache License 2.0
 
 https://github.com/google-labs-code/design.md
