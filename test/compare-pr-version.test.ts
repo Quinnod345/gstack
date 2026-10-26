@@ -180,6 +180,27 @@ describe('version gate: unstamped heads under a train policy', () => {
       const res = run(r, commit(r, 'reword the digest'));
       expect(res.code).toBe(0);
       expect(res.out).toContain('is unstamped under the base');
+      expect(r.git('worktree', 'list').trim().split('\n')).toHaveLength(1);
+    });
+
+    test('the tool runs without the gate\'s tokens, and an output the tool never writes still counts as a stamp', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', "const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\nreworded body\\n'+(process.env.GH_TOKEN??''));\n");
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'tool that would echo a token');
+      const next = path.join(r.root, 'next.json');
+      fs.writeFileSync(next, JSON.stringify({ version: '1.2.4.0', base_version: '1.2.3.0', claimed: [] }));
+      const leak = Bun.spawnSync([process.execPath, 'run', SCRIPT, next, '3320'], {
+        cwd: r.work, env: { ...process.env, ...r.env, PR_VERSION: '1.2.3.0', BASE_REF: 'main', HEAD_SHA: head, GH_TOKEN: 'ghs_secret' }, timeout: 30_000, stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(leak.exitCode).toBe(0);
+      expect(leak.stdout.toString()).toContain('is unstamped under the base');
+      write(r, 'generated/extra.md', 'not generated\n');
+      const res = run(r, commit(r, 'second output by hand'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
     });
 
     test('an output that is not what the generator produces at the base VERSION still counts as a stamp', () => {

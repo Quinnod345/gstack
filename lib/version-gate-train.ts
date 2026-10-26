@@ -39,19 +39,29 @@ export function bumpVersion(version: string, level: string): string | null {
  * release_tool produces at the base's VERSION: the slot's restamp regenerates
  * it anyway. Runs the head's tool in a throwaway worktree with VERSION set to
  * the base's and compares each changed output byte for byte. A stamp (new
- * VERSION inside the output) differs, so it still classifies as stamped.
+ * VERSION inside the output) differs, so it still classifies as stamped, and
+ * so does an output the tool never writes (it is removed before the run).
+ * The tool is head code: it runs with a bare environment (no tokens), no
+ * node_modules link, and a short timeout, and its outputs are read only from
+ * the staging worktree.
  */
+const TOOL_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'BUN_INSTALL', 'SystemRoot', 'TEMP', 'TMP'];
 function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: string; tool: string; outputs: string[] }): { kind: 'same' } | { kind: 'differs'; files: string[] } | { kind: 'error'; reason: string } {
   if (!o.baseVersion.trim()) return { kind: 'error', reason: 'the base has no VERSION to regenerate the release outputs at' };
-  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'version-gate-regen-'));
+  let staging: string;
+  try { staging = fs.mkdtempSync(path.join(os.tmpdir(), 'version-gate-regen-')); } catch (e) { return { kind: 'error', reason: `cannot create a staging directory to regenerate the release outputs: ${e instanceof Error ? e.message : String(e)}` }; }
   try {
     const add = spawnSync('git', ['worktree', 'add', '--detach', '-q', staging, o.head], { cwd: o.repoRoot, encoding: 'utf8', timeout: 60_000 });
     if (add.status !== 0) return { kind: 'error', reason: `cannot stage ${o.head.slice(0, 12)} to regenerate its release outputs: ${(add.stderr || '').trim().slice(0, 200)}` };
     fs.writeFileSync(path.join(staging, 'VERSION'), o.baseVersion);
-    const nm = path.join(o.repoRoot, 'node_modules');
-    if (fs.existsSync(nm) && !fs.existsSync(path.join(staging, 'node_modules'))) { try { fs.symlinkSync(nm, path.join(staging, 'node_modules'), 'dir'); } catch {} }
-    const run = spawnSync('sh', ['-c', o.tool], { cwd: staging, encoding: 'utf8', timeout: 600_000, env: { ...process.env, GSTACK_RESTAMP_VERSION: o.baseVersion.trim() } });
-    if (run.status !== 0) return { kind: 'error', reason: `release_tool \`${o.tool}\` exited ${run.status} at ${o.head.slice(0, 12)} with the base's VERSION, so its release outputs cannot be told from a stamp: ${(run.stderr || run.stdout || '').trim().slice(0, 200)}` };
+    for (const f of o.outputs) fs.rmSync(path.join(staging, f), { force: true });
+    const env: NodeJS.ProcessEnv = { GSTACK_RESTAMP_VERSION: o.baseVersion.trim(), GSTACK_RESTAMP_STAGING: '1' };
+    for (const key of TOOL_ENV_KEYS) if (process.env[key] !== undefined) env[key] = process.env[key];
+    const run = spawnSync('sh', ['-c', o.tool], { cwd: staging, encoding: 'utf8', timeout: 120_000, env });
+    if (run.status !== 0) {
+      const how = run.status === null ? (run.error ? run.error.message : `was killed by ${run.signal ?? 'a signal'} (120s limit)`) : `exited ${run.status}`;
+      return { kind: 'error', reason: `release_tool \`${o.tool}\` ${how} at ${o.head.slice(0, 12)} with the base's VERSION, so its release outputs cannot be told from a stamp: ${(run.stderr || run.stdout || '').trim().slice(0, 200)}` };
+    }
     const files = o.outputs.filter(f => {
       const committed = spawnSync('git', ['show', `${o.head}:${f}`], { cwd: o.repoRoot, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
       let generated: Buffer | null = null;
@@ -62,6 +72,7 @@ function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: str
   } finally {
     spawnSync('git', ['worktree', 'remove', '--force', staging], { cwd: o.repoRoot, timeout: 60_000 });
     fs.rmSync(staging, { recursive: true, force: true });
+    spawnSync('git', ['worktree', 'prune'], { cwd: o.repoRoot, timeout: 60_000 });
   }
 }
 
@@ -77,6 +88,7 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
   const npmVersion = (rev: string) => { try { return JSON.parse(show(rev, 'package.json') ?? '{}').version ?? null; } catch { return null; } };
   const changed = (git(o.repoRoot, ['diff', '--name-only', mergeBase, o.head]) ?? '').split('\n').filter(Boolean);
   const releaseOutputs: string[] = Array.isArray(policy.release_outputs) ? policy.release_outputs : [];
+  // touched: what marks the head as stamped (the labels only feed the length check below)
   const touched: string[] = changed.filter(f => f === 'VERSION');
   if (npmVersion(mergeBase) !== npmVersion(o.head)) touched.push('package.json version');
   const outputs = changed.filter(f => matchesAny(releaseOutputs, f));
