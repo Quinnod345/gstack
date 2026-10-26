@@ -30,11 +30,13 @@ folding it into a tracking issue, or deciding it waits for other work are all
    when it is picked up.
 
 When the work ships, close the issue as fixed with the version or PR. Whatever
-the close reason, remove the `parked` label when the issue closes, so a
-`label:parked` search lists only open parked issues. When a lane picks a parked
-issue up, it removes the label while it works on it (the issue is open again,
-with the lane on it); an issue the lane later drops goes back to parked with an
-updated comment.
+the close reason, remove the `parked` label when the issue closes
+(`gh issue edit <n> --remove-label parked`), so a `label:parked` search lists
+only open parked issues. GitHub leaves labels alone when a merged PR's
+`Closes #<n>` closes the issue, so the lane that ships the fix removes the label
+itself. When a lane picks a parked issue up, it removes the label while it works
+on it (the issue is open again, with the lane on it); an issue the lane later
+drops goes back to parked with an updated comment.
 
 ## Closing an issue
 
@@ -46,6 +48,9 @@ the labels match:
 | **Fixed** | the version, commit or PR that fixed it, and what changed | completed | — |
 | **Duplicate** | the issue that tracks it (and that issue is open or parked; if it was already fixed, close this one as fixed too, with the same version) | duplicate (`gh issue close <n> --duplicate-of <m>`) | `duplicate` |
 | **Won't fix** | why: out of scope, a different design was chosen, the premise no longer holds | not planned | `wontfix` |
+
+`gh issue close` sets only the close reason; add the `duplicate` or `wontfix`
+label separately with `gh issue edit <n> --add-label <label>`.
 
 A duplicate of a parked issue is still a duplicate: close it with the link,
 and the parked issue's comment or TODOS.md entry credits both reporters. A
