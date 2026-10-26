@@ -311,7 +311,7 @@ $B connect                       # headed Chromium + Side Panel extension
 9. [Side Panel + sidebar agent](#side-panel--sidebar-agent)
 10. [Pair-agent — remote agents over an ngrok tunnel](#pair-agent)
 11. [Authentication + tokens](#authentication)
-12. [Prompt-injection security stack (L1–L6)](#security-stack)
+12. [Prompt-injection security stack (L1–L6)](#security-stack) — including [TLS trust: the bundled Chromium's root store](#tls-trust-the-bundled-chromiums-root-store)
 13. [Screenshots, PDFs, visual inspection](#screenshots-pdfs-visual)
 14. [Local HTML — `goto file://` vs `load-html`](#local-html)
 15. [Batch endpoint](#batch-endpoint)
@@ -1303,25 +1303,29 @@ into its bundled Playwright Chromium. The default headless browser never gets
 the CRLSet revocation updates Chrome pushes to running browsers. Headed mode and
 `handoff` do fetch them, but only about a minute after each launch, so the
 first pages they open, including the page `handoff` reopens, are checked
-against the compiled root store alone. The bundled build does not enforce
-Certificate Transparency. That matters most for the flows that put real
-sessions and credentials into the browser: `cookie-import-browser`,
-`fill`/`type`, and `handoff`. Aside uses your own browser's trust store and
-updates.
+against the compiled root store alone. `BROWSE_EXTENSIONS_DIR` makes the
+headless browser launch like headed mode, and `GSTACK_CHROMIUM_PATH` replaces
+the bundled build, so its trust is whatever that binary trusts. The bundled
+build does not enforce Certificate Transparency. That matters most for the
+commands that put real sessions and credentials into the browser:
+`cookie-import-browser`, `cookie-import`, `cookie`, `header`,
+`fill`/`type` and `handoff`, and a paired agent driving any of them. Aside
+uses your own browser's trust store and updates.
 
 **Known gap: the compromised eMudhra intermediates
 ([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked them
-by CRLSet on 2026-10-17 and removes their root, emSign ECC Root CA - G3, from
-the Chrome Root Store on 2026-10-27. gstack's pinned Playwright 1.62.1
-(Chromium 151), the latest release 1.64.1 (Chromium 156) and the 1.65
-alphas (Chromium 157) still trust them, so
+by CRLSet on 2026-10-17, the day the compromise was reported, and scheduled the
+removal of their root, emSign ECC Root CA - G3, from the Chrome Root Store for
+2026-10-27. gstack's pinned Playwright 1.62.1 (Chromium 151), the latest release
+1.64.1 (Chromium 156) and the 1.65 alphas (Chromium 157) still trust them, so
 `$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
 "That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
 fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
 the first Playwright release whose Chromium carries the removal. Until then,
 don't import cookies or type credentials in this engine on a network you do not
-trust, and prefer Aside for signed-in work where you have it. The same `goto`
-tells you when your build is fixed.
+trust, and prefer Aside for signed-in work where you have it. To check a build,
+run the same `goto`: only `ERR_CERT_AUTHORITY_INVALID` or `ERR_CERT_REVOKED`
+means it no longer trusts them. A DNS, network or other error proves nothing.
 
 ---
 
