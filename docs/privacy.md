@@ -33,9 +33,11 @@ no, and `gstack-config set telemetry off` turns it off at any time.
 skill start runs `gstack-update-check`. When its cache is stale (60 minutes after an
 up-to-date result, 12 hours while an upgrade is pending, 10 minutes after a
 failure) it asks GitHub for the latest version: a `git ls-remote` of
-`github.com/garrytan/gstack` and a GET of the `VERSION` file from
-`raw.githubusercontent.com`. GitHub sees your IP address; nothing about you or
-your code is sent. With telemetry on, the same check also posts your gstack
+`github.com/garrytan/gstack`, a GET of the `VERSION` file from
+`raw.githubusercontent.com` and, when that version equals yours but `main` has
+moved past your checkout, a GET of `api.github.com`'s compare endpoint for the
+two commit SHAs. GitHub sees your IP address; nothing about you or your code is
+sent. With telemetry on, the same check also posts your gstack
 version and OS to gstack's Supabase. Turn the check off with
 `gstack-config set update_check false`.
 

@@ -256,7 +256,7 @@ On Windows without Developer Mode (MSYS2 / Git Bash), `setup` falls back to file
 
 ## Privacy & Telemetry
 
-gstack sends nothing about how you use it unless you opt in. Telemetry is off by default and asked about once; the update check (two GitHub requests, a `git ls-remote` and a fetch of `VERSION`; with telemetry on it also reports your gstack version and OS; on by default) turns off with `gstack-config set update_check false`; outside reviews send code to Codex or Claude Code under your own login and turn off with `gstack-config set codex_reviews disabled`. Every off-machine send writes a receipt you can audit with `gstack-egress list`. The full account, including the exact fields telemetry carries and the local state that is not telemetry: [docs/privacy.md](docs/privacy.md).
+gstack sends nothing about how you use it unless you opt in. Telemetry is off by default and asked about once; the update check (two or three GitHub requests: a `git ls-remote`, a fetch of `VERSION` and, when that version equals yours but `main` has moved, a compare-API call; with telemetry on it also reports your gstack version and OS; on by default) turns off with `gstack-config set update_check false`; outside reviews send code to Codex or Claude Code under your own login and turn off with `gstack-config set codex_reviews disabled`. Every off-machine send writes a receipt you can audit with `gstack-egress list`. The full account, including the exact fields telemetry carries and the local state that is not telemetry: [docs/privacy.md](docs/privacy.md).
 
 ## Troubleshooting
 
