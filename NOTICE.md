@@ -76,3 +76,22 @@ https://github.com/google-labs-code/design.md
 `design-consultation/sections/proposal-and-preview.md.tmpl` implement the
 format (YAML token front matter in five groups, eight canonical sections in
 spec order, `{path}` token references). No specification text is reproduced.
+
+## tstack — Copyright Theo Browne — MIT License
+
+https://github.com/t3dotgg/tstack (`skills/sol-loop`, at 7de017b3). Ideas, not text: the
+three-word severity glossary (blocker, should, nit) and the two stop rules (a review that
+grew the diff cuts first; the end of the budget is not approval) in
+`ship/sections/review-army.md.tmpl`, `review/checklist.md` and `docs/review-policy.md`
+are written in gstack's words and mapped onto gstack's blocking floor. No sentence is copied,
+so no license text is carried; this entry is a courtesy.
+
+## pstack — Copyright Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/skills/interrogate`, `lead-judgment.md`). Ideas,
+not text: the lead-judgment filters applied before a merged review finding counts (nit
+gravity, hypothetical versus actual, structure for a case that does not exist, a different
+design is not a defect, missing context; independent agreement as the strongest signal;
+`NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
+`docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
+text is carried; this entry is a courtesy.

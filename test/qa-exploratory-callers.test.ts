@@ -326,7 +326,8 @@ describe('caller native-event observer controls', () => {
         .replace('"commit":"COMMIT"', `"commit":"'"$(git rev-parse --short HEAD)"'"`)
         .replace('"STATUS"', '"issues_found"').replace(/"issues_found":N/, '"issues_found":1').replace('"critical":N', '"critical":1').replace('"informational":N', '"informational":0')
         .replace('SCORE', '10.0').replace('SPECIALISTS_JSON', '{}').replace('FINDINGS_JSON', '[{"fingerprint":"scale.ts:3:functional-contract","severity":"CRITICAL","action":"ask-pending"}]')
-        .replace('COMPLETED', 'false').replace('CONVERGED', 'false').replace('CYCLES', '0').replace('REVIEW_START', 'native-token');
+        .replace('COMPLETED', 'false').replace('CONVERGED', 'false').replace('CYCLES', '0').replace('REVIEW_START', 'native-token')
+        .replace('"pass":PASS', '"pass":1').replace('"review_scope":"SCOPE"', '"review_scope":"frozen"').replace('RANGE_BASE_OR_NULL', 'null');
       expect(errorsFor(filled)).toEqual([]);
       const fixture = createQaCallerFixture(caller === 'review' ? 'review-exploratory-small-cli' : 'ship-exploratory-small-cli', { installRuntime: false });
       try { expect(qaCallerSessionOptions(fixture, 'free-control').prompt).toContain(callerReviewRecordTemplate(fixture)); } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }

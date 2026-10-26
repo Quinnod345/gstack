@@ -2179,7 +2179,12 @@ case with `bun run eval:pass-rates --headroom --case <id>`.
 ### `cost unknown (no billing captured for any of <N> trial(s))` / `cost $<x> known + <N> of <M> trial(s) cost unknown`
 
 **Meaning.** PTY and Codex sessions record no billing, so their cost is
-unknown. Only the known sum is shown.
+unknown. So is a trial in a multi-case shard whose result records are named by
+a display label rather than the case id, because no record can be attributed
+to it (a one-case shard's records are its case's). Only the known sum is
+shown. A train verdict's `ATTEMPT:` line reports the same as `cost=$<x> known
++ <n> of <m> case(s) cost unknown`, a bare `cost=$<x>` only when every case
+in the train record is priced, and no cost at all when none is.
 
 **Fix.** None needed; this is informational.
 
@@ -4323,6 +4328,67 @@ has incomplete coverage, never a clean result.
 
 **Fix.** Rerun the state-machines specialist on the same diff and check its
 output again.
+
+<a id="review-scope-input"></a>
+### `REVIEW_SCOPE_INPUT`
+
+**Meaning.** `gstack-review-scope` (the finding scope of /ship's review loop,
+[ship-policy.md#review-scope](ship-policy.md#review-scope)) was given input it
+cannot classify: the findings were not a JSON array of objects, `--pass` or
+`--policy` was outside its values, a pass 2+ call came without
+`--range-base`, `--range-base` was not a commit id (7 to 64 hex digits), or
+`summary --since` matched no review-log row of this branch written via /ship
+(so no `REVIEW_LOOP:` line could be derived, and the ship receipt's
+`--review-loop` input was not written). Nothing was classified, deferred or
+summarized.
+
+**Fix.** Pass the Step 9.3 findings as a JSON array (`--findings <file>` or
+stdin), `--pass <n>` from the invocation record, and from pass 2 on
+`--range-base <sha>`, the HEAD the previous pass saved when it started, as a
+hex commit id. For `summary`, check `REVIEW_SINCE` against the invocation
+record's start time and that each pass was finished with `via:"ship"`.
+
+<a id="review-scope-range"></a>
+### `REVIEW_SCOPE_RANGE`
+
+**Meaning.** `gstack-review-scope classify` could not read the diff it scopes
+findings against: `origin/<base>` or `--range-base` does not resolve, or the
+range base is not an ancestor of HEAD (history was rewritten since the previous
+pass).
+
+**Fix.** Fetch `origin/<base>`, check `--range-base` against the pass heads in
+the invocation record, and start a full pass (`--pass 1`) when the branch was
+rebased; /ship's own rule is to merge the base in, never rebase a reviewed head.
+
+<a id="receipt-carry-refused"></a>
+### `RECEIPT_CARRY_REFUSED`
+
+**Meaning.** `gstack-ship-receipt carry` could not carry the PR's /ship receipt
+to HEAD: the PR body has no valid receipt, the receipt's head is not an ancestor
+of HEAD (a rebase or force-push dropped it), the working tree has uncommitted
+or untracked changes (a carry certifies a commit, never a tree that differs from
+it), or git could not compare the two product diffs or read the working tree's
+status. The receipt in the body is unchanged and still names the old head, so
+`gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
+
+**Fix.** Keep the reviewed head in HEAD's history (merge the base in instead of
+rebasing), commit or stash every working-tree change, then rerun
+`gstack-ship-receipt carry --pr <n>` at the new head. When the history is
+already rewritten, run /ship on the new head.
+
+<a id="receipt-carry-product-changed"></a>
+### `RECEIPT_CARRY_PRODUCT_CHANGED`
+
+**Meaning.** Between the receipt's head and HEAD the product diff against the
+base changed: at least one path that is neither a test, release metadata nor
+part of the base merge has a different patch than the reviewed head had. The
+reviewed verdict does not cover HEAD, so the receipt is not carried. The
+refusal names the changed product paths.
+
+**Fix.** Run /ship on the new head. The receipt carries only across a
+conflict-only base merge, a test-only change or release metadata, which the
+`carry` object in the carried receipt records with the product patch-id and
+the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
 ## gstack-error-capture
 

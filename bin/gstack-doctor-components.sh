@@ -291,6 +291,10 @@ gstack_result_anchor() {
     STATE_MATRIX_INCOMPLETE) printf '%s' 'state-matrix-incomplete' ;;
     WTREE_UNAVAILABLE) printf '%s' 'wtree-unavailable' ;;
     REGEN_DEPS_MISSING) printf '%s' 'regen-deps-missing' ;;
+    REVIEW_SCOPE_INPUT) printf '%s' 'review-scope-input' ;;
+    REVIEW_SCOPE_RANGE) printf '%s' 'review-scope-range' ;;
+    RECEIPT_CARRY_REFUSED) printf '%s' 'receipt-carry-refused' ;;
+    RECEIPT_CARRY_PRODUCT_CHANGED) printf '%s' 'receipt-carry-product-changed' ;;
     APPROVAL_RECORD_INVALID) printf '%s' 'approval-record-invalid' ;;
     APPROVAL_RECORD_SECRET) printf '%s' 'approval-record-secret' ;;
     APPROVAL_RECORD_NO_BRANCH) printf '%s' 'approval-record-no-branch' ;;
