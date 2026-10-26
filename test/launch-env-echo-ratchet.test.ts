@@ -26,6 +26,7 @@
 import { describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CAPY_LAUNCH_MARKERS } from '../scripts/lib/shard-engine';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 
@@ -110,10 +111,13 @@ function markdownTargets(): string[] {
     /^capy\/skill\/gstack\/[^/]+\.md$/.test(rel));
 }
 
+/** Every shell helper under bin/, the setup script and the install scripts callers run first. */
 function shellTargets(): string[] {
-  return fs.readdirSync(path.join(ROOT, 'bin')).map(name => path.join('bin', name)).filter(rel => {
+  const candidates = [...fs.readdirSync(path.join(ROOT, 'bin')).map(name => path.join('bin', name)), 'setup',
+    ...fs.readdirSync(path.join(ROOT, 'scripts')).filter(name => name.endsWith('.sh')).map(name => path.join('scripts', name))];
+  return candidates.filter(rel => {
     const full = path.join(ROOT, rel);
-    return fs.statSync(full).isFile() && isShell(rel, fs.readFileSync(full, 'utf8'));
+    return fs.existsSync(full) && fs.statSync(full).isFile() && isShell(rel, fs.readFileSync(full, 'utf8'));
   });
 }
 
@@ -177,6 +181,7 @@ describe('launch-env echo ratchet', () => {
     const installer = fs.readFileSync(path.join(ROOT, 'bin/gstack-capy-install'), 'utf8');
     expect(installer).toContain('LAUNCH_FILE="${VERDICT%.json}.env"');
     expect(installer).toContain('chmod 0600 "$tmp"');
+    for (const name of CAPY_LAUNCH_MARKERS) expect(installer, name).toMatch(new RegExp(`^\\s*echo "export ${name}=`, 'm'));
     expect(installer).toContain('echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"');
     for (const file of ['ship/sections/documentation.md', 'document-release/SKILL.md', 'autoplan/DRIVER.md', 'capy/skill/gstack/SKILL.md']) {
       const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
