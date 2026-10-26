@@ -194,6 +194,36 @@ Two stages with separate clocks, both printed:
   issue templates, CODEOWNERS and dependabot config). Stylesheets (they import
   each other), any other dotfile (`.rspec`, `.husky/` hooks, `.env*`, version
   pins), CI workflows and actions, and `.gstack/` still need a lane.
+  A release manifest the branch only re-stamped is waived as
+  version-stamp-only (`version-stamp-only (no lane needed): …`): the file's
+  diff against the merge base changes nothing but its version values. Three
+  file kinds qualify, each by its own exact rule (lib/pregate/stamp-only.ts).
+  A JSON file (`*.json`) whose two sides parse to objects of the same shape
+  (the same own keys in the same order in every object, the same length in
+  every array, the same type at every leaf), whose only differing leaf is the
+  document's top-level `version` with a bare version on both sides (`1.2.3`,
+  `v1.2.3.4`, `1.2.3-rc.1`; never a range), and whose text is line-for-line
+  identical once that line has its old quoted version replaced by the new
+  one. A plist whose differing lines are all `<string>` versions under
+  `<key>CFBundleShortVersionString</key>` or `<key>CFBundleVersion</key>`. A
+  `VERSION` or `VERSION.txt` file (any case) holding one bare version, with at
+  most a trailing LF, on both sides. Texts are compared byte for byte outside
+  the stamped value, so a line-ending change or a BOM is content. Nothing
+  nested in JSON qualifies, so a dependency pin or range, a lockfile entry, a
+  catalog or a package named `version` is never a stamp; nor is a changed
+  description, a new, removed or reordered key, a floor such as
+  `minHostVersion`, `schemaVersion` or `MinimumOSVersion`, a reflow, a change
+  the parser would erase (a big integer, a duplicate key), a file that is not
+  valid UTF-8 or is over 1 MiB, a mode change or a symlink on either side, an
+  added, deleted or renamed manifest, or any other file kind: each keeps its
+  `PREGATE_NO_LANE`. The rule runs only after the import graph, the
+  declarations, the regen registry and both empty lanes found nothing, so a
+  manifest a test reads still selects that test, and never under a test,
+  fixture, golden, snapshot, `.gstack/` or CI-workflow tree, whose JSON a test
+  may compare against by a path the graph cannot see.
+  `--explain` prints the verdict per file (`version-stamp-only against
+  <merge-base> (version 1.0.0 → 1.0.1)` or `not version-stamp-only
+  (<reason>)`).
   In a Django project (a manage.py or code importing django, plus Python
   code, not a string or comment, that assigns `INSTALLED_APPS` or
   `ROOT_URLCONF`, or a config file names `DJANGO_SETTINGS_MODULE`), the files

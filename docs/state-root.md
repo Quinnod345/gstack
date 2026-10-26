@@ -166,14 +166,18 @@ option and never writes there.
 A child shell's `export` cannot configure the parent's later commands
 (`lib/state-root.ts` reads each process's own environment), so the installer
 ends with one machine-readable line the parent supplies to every gstack
-command it launches:
+command it launches, and the same assignments as a sourceable file:
 
 ```
 GSTACK_LAUNCH: GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=<path> GSTACK_EPHEMERAL=1
+GSTACK_LAUNCH_FILE: <verdict file without .json>.env
 ```
 
-Prefix each command with those assignments (or export them once in the shell
-that runs them). See [docs/capy-install.md](capy-install.md).
+Apply them with `. <that file>` at the start of the shell that runs each
+command; never re-type them as `export $(...)`, and never run `env`, `printenv`,
+a bare `set` or a bare `export` in a tool fence (a bare `export` prints every
+variable, credentials included). See
+[docs/capy-install.md](capy-install.md#the-launch-line).
 
 ## Uninstall
 
