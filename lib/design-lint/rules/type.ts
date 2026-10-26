@@ -7,8 +7,8 @@
 import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, memo, mergedRules, styleFor, trackingEm, valueOf } from '../context';
-import { CONTROL_TRACK_MAX_EM, GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, tokenSites, type CssDecl, type CssRule, type MergedRule } from '../css';
-import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf } from '../html';
+import { CONTROL_TRACK_MAX_EM, GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, selectorNames, tokenSites, type CssDecl, type CssRule, type MergedRule } from '../css';
+import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf, type Doc } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
 import { twMonoIsMaterial } from '../tailwind';
@@ -89,11 +89,27 @@ function shortProse(ctx: LintContext, sel: string): boolean {
   return short;
 }
 
+/** The open tags of a document by class, indexed once. */
+function byClass(doc: Doc): Map<string, number[]> {
+  const cached = doc.cache.byClass as Map<string, number[]> | undefined;
+  if (cached) return cached;
+  const index = new Map<string, number[]>();
+  for (let i = 0; i < doc.tags.length; i++) {
+    const t = doc.tags[i];
+    if (t.close || t.selfClosing) continue;
+    for (const c of (getAttr(t.attrs, 'class') || '').split(/\s+/)) if (c) { const list = index.get(c); if (list) list.push(i); else index.set(c, [i]); }
+  }
+  doc.cache.byClass = index;
+  return index;
+}
+
 function shortProseOf(ctx: LintContext, cls: string): boolean {
   const texts: string[] = [];
   for (const doc of ctx.docs) {
-    for (const el of openTags(doc, /./, 0, doc.tags.length, (t) => (getAttr(t.attrs, 'class') || '').split(/\s+/).includes(cls))) {
-      const paras = el.tag.name === 'p' ? [el.inner] : openTags(doc, /^p$/, el.idx + 1, closeIndex(doc, el.idx)).map((p) => p.inner);
+    for (const idx of byClass(doc).get(cls) ?? []) {
+      const el = innerOf(doc, idx);
+      if (!el) continue;
+      const paras = doc.tags[idx].name === 'p' ? [el.inner] : openTags(doc, /^p$/, idx + 1, closeIndex(doc, idx)).map((p) => p.inner);
       for (const p of paras) texts.push(stripTags(p).replace(/\s+/g, ' ').trim());
     }
   }
@@ -123,6 +139,7 @@ function check25(ctx: LintContext, r: Reporter): void {
 // sloplint check37 (gate 37)
 function check37(ctx: LintContext, r: Reporter): void {
   const families = new Map<string, { file: string; line: number }>();
+  const keys = new Set<string>();
   for (const rule of ctx.rules) {
     if (rule.selector === '@font-face') continue;
     for (const d of rule.decls) {
@@ -130,7 +147,8 @@ function check37(ctx: LintContext, r: Reporter): void {
       if (/^--font-/.test(d.prop) && !isTokenRule(rule)) continue;
       const fam = firstFamily(resolveVars(d.value, ctx.tokens));
       if (!fam || GENERIC_FAMILIES.has(fam) || fam.startsWith('var(')) continue;
-      if (![...families.keys()].some((k) => famKey(k) === famKey(fam))) families.set(fam, { file: rule.file, line: d.line });
+      const key = famKey(fam);
+      if (!keys.has(key)) { keys.add(key); families.set(fam, { file: rule.file, line: d.line }); }
     }
   }
   if (families.size <= 3) return;
@@ -149,7 +167,8 @@ function check38a(ctx: LintContext, r: Reporter): void {
   }
   const normSel = ctx.rules.filter((rule) => /(^|[\s,>+~])(em|i)\b/.test(rule.selector)
     && rule.decls.some((d) => d.prop === 'font-style' && /normal/.test(d.value))).flatMap((rule) => rule.selector.split(',').map((x) => x.trim()));
-  const normalised = (level: string, classes: string[]) => normSel.some((sel) => /^(em|i)$/.test(sel) || new RegExp(`(^|[\\s,>+~])h${level}\\b`).test(sel) || classes.some((c) => sel.includes('.' + c)));
+  const norm = selectorNames(normSel), bareNorm = normSel.some((sel) => /^(em|i)$/.test(sel));
+  const normalised = (level: string, classes: string[]) => bareNorm || norm.tags.has('h' + level) || classes.some((c) => norm.classes.has(c));
   for (const doc of ctx.docs) {
     for (const head of openTags(doc, /^h[1-6]$/)) {
       const level = head.tag.name.slice(1);

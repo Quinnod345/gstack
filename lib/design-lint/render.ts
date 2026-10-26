@@ -119,7 +119,7 @@ export function lineOf(src: string | null, at?: ProbeAt, lineAt: (i: number) => 
   let fallback = -1;
   for (const m of src.matchAll(new RegExp(`<${escapeRe(at.tag)}\\b[^>]*>`, 'gi'))) {
     const pos = m.index ?? 0;
-    if (cls && !(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(m[0]) ?? ['', '']).slice(1).join(' ').split(/\s+/).includes(cls)) continue;
+    if (cls && !(/(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(m[0]) ?? ['', '']).slice(1).join(' ').split(/\s+/).includes(cls)) continue;
     if (attr && !m[0].includes(attr)) continue;
     if (!want) { fallback = pos; break; }
     if (plainText(src.slice(pos + m[0].length, pos + m[0].length + 600)).toLowerCase().startsWith(want)) { fallback = pos; break; }

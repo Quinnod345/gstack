@@ -8,7 +8,7 @@
  */
 import { contrastRatio, oklchOf, parseColor, type Color } from '../color';
 import { mergedRules, type LintContext } from '../context';
-import { CONTRAST_SLACK, isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
+import { CONTRAST_SLACK, isTokenRule, resolveVars, pxOf, selectorNames, type MergedRule, type Tokens } from '../css';
 import { ancestorsOf, getAttr, hasAttr, innerOf, stripTags, textOf, treeOf } from '../html';
 import { trunc, type Finding, type Reporter } from '../report';
 
@@ -78,7 +78,7 @@ function iconSurfaces(ctx: LintContext): string {
     }
     for (const call of doc.virtuals) out.push(call.toks.join(' '));
     for (const toks of doc.classAt.values()) out.push(toks.join(' '));
-    for (const m of doc.scripts.matchAll(/\b(?:import\s*\(?\s*|require\s*\(\s*|from\s+)['"]([^'"\n]+)['"]/g)) out.push(m[1]);
+    for (const m of doc.scripts.matchAll(/\b(?:import\s*(?:\(\s*)?|require\s*\(\s*|from\s+)['"]([^'"\n]+)['"]/g)) out.push(m[1]);
   }
   for (const f of ctx.cssFiles) for (const m of f.raw.matchAll(/@import\s+(?:url\()?['"]?([^'")\s;]+)|url\(\s*['"]?([^'")]+)/g)) out.push(m[1] ?? m[2]);
   return out.join('\n');
@@ -193,9 +193,8 @@ function checkSurfaceInk(ctx: LintContext, r: Reporter): void {
 
 // sloplint check49 (gates 49a and 49b)
 function checkWrappingLabels(ctx: LintContext, r: Reporter): void {
-  const nowrapRules = ctx.rules.filter((rule) => rule.decls.some((d) => d.prop === 'white-space' && /nowrap/.test(d.value)));
-  const covered = (cls: string, tag: string): boolean => nowrapRules.some((rule) =>
-    cls.split(/\s+/).some((c) => c && rule.selector.includes('.' + c)) || new RegExp('(^|[\\s,>+~])' + tag + '\\b').test(rule.selector));
+  const nowrap = selectorNames(ctx.rules.filter((rule) => rule.decls.some((d) => d.prop === 'white-space' && /nowrap/.test(d.value))).map((rule) => rule.selector));
+  const covered = (cls: string, tag: string): boolean => nowrap.tags.has(tag) || cls.split(/\s+/).some((c) => c && nowrap.classes.has(c));
   for (const doc of ctx.docs) {
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];

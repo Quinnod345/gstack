@@ -162,7 +162,10 @@ function tooltipDelay(ctx: LintContext, r: Reporter): void {
   const delayed = (sel: RegExp): { file: string; line: number } | null => {
     for (const rule of tips) {
       if (!sel.test(rule.selector)) continue;
-      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && /(?<![\d.])(?:\d{3,}ms|[1-9]\d*(?:\.\d+)?s)\b/.test(x.value));
+      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && x.value.split(',').some((part) => {
+        const ms = [...part.matchAll(/(?<![\w.-])(\d*\.?\d+)(ms|s)\b/g)].map((m) => m[2] === 'ms' ? Number(m[1]) : Number(m[1]) * 1000);
+        return (x.prop === 'transition-delay' ? ms[0] : ms[1]) >= 100;
+      }));
       if (d) return { file: rule.file, line: d.line };
     }
     return null;

@@ -6,7 +6,7 @@
  * the render halves of 34 (horizontal-scroll) and 44d.
  */
 import { COLOR_LITERAL, oklchOf, parseColor } from '../color';
-import { isTokenRule, pxOf, resolveVars, type MergedRule } from '../css';
+import { isTokenRule, pxOf, resolveVars, selectorNames, type MergedRule } from '../css';
 import { memo, mergedRules, type LintContext } from '../context';
 import { getAttr, innerOf, stripTags, textOf, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
@@ -240,16 +240,13 @@ function bareFrTrack(ctx: LintContext, r: Reporter): void {
 
 // sloplint check50Wrap (gate 50)
 function displayHeadUnwrapped(ctx: LintContext, r: Reporter): void {
-  const wrapCovered = (cls: string, tag: string) => ctx.rules.some((rule) => {
-    const has = rule.decls.some((d) =>
-      (d.prop === 'overflow-wrap' && /anywhere|break-word/.test(d.value))
-      || (d.prop === 'word-break' && /break-word|break-all/.test(d.value))
-      || (d.prop === 'hyphens' && /auto/.test(d.value)));
-    if (!has) return false;
-    if (/^\*|:where\(|html|body/.test(rule.selector)) return true;
-    return (!!cls && cls.split(/\s+/).some((c) => c && rule.selector.includes('.' + c)))
-      || new RegExp(`(^|[\\s,>+~])${tag}\\b`).test(rule.selector);
-  });
+  const wrapping = ctx.rules.filter((rule) => rule.decls.some((d) =>
+    (d.prop === 'overflow-wrap' && /anywhere|break-word/.test(d.value))
+    || (d.prop === 'word-break' && /break-word|break-all/.test(d.value))
+    || (d.prop === 'hyphens' && /auto/.test(d.value)))).map((rule) => rule.selector);
+  const everywhere = wrapping.some((sel) => /^\*|:where\(|html|body/.test(sel));
+  const wrap = selectorNames(wrapping);
+  const wrapCovered = (cls: string, tag: string) => everywhere || wrap.tags.has(tag) || cls.split(/\s+/).some((c) => c && wrap.classes.has(c));
   for (const doc of ctx.docs) {
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];

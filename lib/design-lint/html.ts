@@ -478,11 +478,11 @@ class JsxScanner {
       if (isCls) this.inClass++;
       e = this.js(v + 1, true);
       if (isCls) this.inClass--;
-      if (e >= n) return -1;
+      if (e >= n) return JSX_EOF;
       if (isCls) cls.v = (cls.v || []).concat(clsLits(src.slice(v + 1, e)));
       else { this.paint(i, v); this.write(v, e + 1, '"' + src.slice(v + 1, e).replace(/[^\w$.\-/:#@]+/g, ' ') + '"'); }
     } else if (q === '<') {
-      e = this.el(v) - 1;
+      e = this.el(v) - 1; if (e === JSX_EOF - 1) return JSX_EOF;
       if (e < 0) return -1;
       this.blank(i, e + 1);
     } else return -1;
@@ -511,10 +511,10 @@ class JsxScanner {
       const c = src[i];
       if (c === '/' && src[i + 1] === '>') { this.paint(i, i + 2); if (cls.v) this.classes.push([start, cls.v]); return i + 2; }
       if (c === '>') { this.paint(i, i + 1); i++; break; }
-      if (c === '{') { const e = this.js(i + 1, true); if (e >= n) return -1; this.blank(i, e + 1); i = e + 1; continue; }
+      if (c === '{') { const e = this.js(i + 1, true); if (e >= n) return JSX_EOF; this.blank(i, e + 1); i = e + 1; continue; }
       if (!/[A-Za-z_$]/.test(c)) return -1;
       i = this.attr(i, cls);
-      if (i < 0) return -1;
+      if (i < 0) return i;
     }
     if (cls.v) this.classes.push([start, cls.v]);
     this.open.push(name);
@@ -526,7 +526,7 @@ class JsxScanner {
     const { src, n } = this;
     while (i < n) {
       const c = src[i];
-      if (c === '{') { const e = this.js(i + 1, true); if (e >= n) return -1; i = e + 1; continue; }
+      if (c === '{') { const e = this.js(i + 1, true); if (e >= n) return JSX_EOF; i = e + 1; continue; }
       if (c === '<') {
         if (src[i + 1] === '/') {
           const k = this.ws(i + 2);

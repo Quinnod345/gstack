@@ -76,6 +76,16 @@ function flatBody(src: string, s: number, e: number): string {
   return out.join('');
 }
 
+/** The tag names (a token at the start of a selector or after a combinator) and class names a list of selectors mentions, read once so a rule can ask "does any selector name this element" in constant time. */
+export function selectorNames(selectors: string[]): { tags: Set<string>; classes: Set<string> } {
+  const tags = new Set<string>(), classes = new Set<string>();
+  for (const sel of selectors) {
+    for (const m of sel.matchAll(/(?:^|[\s,>+~])([a-zA-Z]\w*)/g)) tags.add(m[1]);
+    for (const m of sel.matchAll(/\.([\w-]+)/g)) classes.add(m[1]);
+  }
+  return { tags, classes };
+}
+
 /** A selector longer than this is a nesting blow-up (comma lists nested in comma lists), not a stylesheet selector; past it the nested selector stands without its parent, so a sheet costs its length and not parts^depth. */
 const MAX_SELECTOR = 8192;
 
