@@ -746,9 +746,12 @@ $_gstack_legacy_root"
       VALUE="default"
     fi
     if [ "$KEY" = "proactive" ]; then
-      # Case-insensitive, like gstack-skill-start's read of a hand-edited value.
+      # Case-insensitive, and the YAML yes/no family maps like gstack-skill-start
+      # reads a hand-edited value: an opt-out must never fail open to core.
       VALUE=$(printf '%s' "$VALUE" | tr '[:upper:]' '[:lower:]')
       case "$VALUE" in
+        yes|y|on|1) VALUE="all" ;;
+        no|n|none|0|disabled|never) VALUE="off" ;;
         core|all|off|true|false) ;;
         *)
           echo "Warning: proactive '$VALUE' not recognized. Valid values: core, all, off (true = all, false = off). Using core." >&2

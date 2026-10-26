@@ -134,13 +134,25 @@ _SESSIONS=$(find "$_GH/sessions" -mmin -120 -type f 2>/dev/null | wc -l | tr -d 
 
 _PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "core")
 # A hand-edited config can hold anything: drop quotes and a trailing comment,
-# lowercase, read the legacy true/false as all/off, and anything else as core,
-# so STATUS only ever says core | all | off.
+# lowercase, read the legacy true/false and the YAML yes/no family as all/off
+# (an opt-out must never fail open), and anything else as core, so STATUS only
+# ever says core | all | off.
 _PROACTIVE=$(printf '%s' "$_PROACTIVE" | sed -e 's/[[:space:]]*#.*$//' -e "s/^[[:space:]]*[\"']*//" -e "s/[\"']*[[:space:]]*$//" | tr '[:upper:]' '[:lower:]')
-case "$_PROACTIVE" in true) _PROACTIVE="all" ;; false) _PROACTIVE="off" ;; core|all|off) ;; *) _PROACTIVE="core" ;; esac
-# off silences every unasked surface below: the tips and the CLAUDE.md routing offer.
+case "$_PROACTIVE" in
+  true|yes|y|on|1) _PROACTIVE="all" ;;
+  false|no|n|none|0|disabled|never) _PROACTIVE="off" ;;
+  core|all|off) ;;
+  *) _PROACTIVE="core" ;;
+esac
+# off silences every unasked surface below: the tips, the one-time prompt and
+# the CLAUDE.md routing offer. A stored off also answers the one-time prompt,
+# so the marker is written here, before STATUS reports it.
 case "$_PROACTIVE" in off) _PROACTIVE_OFF="yes" ;; *) _PROACTIVE_OFF="no" ;; esac
 _PROACTIVE_PROMPTED=$([ -f "$_GH/.proactive-prompted" ] && echo "yes" || echo "no")
+if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_PROACTIVE_OFF" = "yes" ]; then
+  touch "$_GH/.proactive-prompted" 2>/dev/null || true
+  _PROACTIVE_PROMPTED="yes"
+fi
 # Branch name is embedded in concatenated JSON below; strip anything outside
 # the gstack-slug BRANCH alphabet so a hostile ref name can't forge fields.
 _BRANCH=$(git branch --show-current 2>/dev/null | tr -cd 'a-zA-Z0-9._/-')
@@ -551,12 +563,7 @@ Always run: \`touch "$_GH/.telemetry-prompted"\`.
 EOI
 fi
 
-# Proactive-suggestions opt-in (interactive). A user who already stored off
-# has answered; record that instead of asking.
-if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_PROACTIVE_OFF" = "yes" ]; then
-  touch "$_GH/.proactive-prompted" 2>/dev/null || true
-  _PROACTIVE_PROMPTED="yes"
-fi
+# Proactive-suggestions opt-in (interactive; a stored off answered it above).
 if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_TEL_PROMPTED" = "yes" ]; then
   _emit_block proactive-prompt <<EOI
 Ask once:

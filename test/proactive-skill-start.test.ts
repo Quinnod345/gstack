@@ -70,7 +70,7 @@ function runStart(script: string, state: string, cwd = tmpHome): string {
 const proactiveLine = (out: string) => out.match(/^PROACTIVE: (.*)$/m)?.[1];
 
 describe('gstack-skill-start PROACTIVE status line', () => {
-  test('carries core when nothing is stored, the stored value otherwise, the legacy true/false as all/off, a quoted or upper-case hand edit normalized, and anything unknown as core', () => {
+  test('carries core when nothing is stored, the stored value otherwise, the legacy true/false and the yes/no family as all/off, a quoted or upper-case hand edit normalized, and anything unknown as core', () => {
     const cases: Array<[string, string]> = [
       ['update_check: false\n', 'core'],
       ['update_check: false\nproactive: all\n', 'all'],
@@ -79,7 +79,12 @@ describe('gstack-skill-start PROACTIVE status line', () => {
       ['update_check: false\nproactive: false\n', 'off'],
       ['update_check: false\nproactive: "off"\n', 'off'],
       ['update_check: false\nproactive: OFF # typed by hand\n', 'off'],
-      ['update_check: false\nproactive: on\n', 'core'],
+      ['update_check: false\nproactive: no\n', 'off'],
+      ['update_check: false\nproactive: 0\n', 'off'],
+      ['update_check: false\nproactive: none\n', 'off'],
+      ['update_check: false\nproactive: yes\n', 'all'],
+      ['update_check: false\nproactive: on\n', 'all'],
+      ['update_check: false\nproactive: maybe\n', 'core'],
     ];
     for (const [config, expected] of cases) {
       const state = freshState(config);
@@ -122,6 +127,7 @@ describe('gstack-skill-start PROACTIVE status line', () => {
         const out = runStart(path.join(BIN, 'gstack-skill-start'), state);
         expect(out.includes('GSTACK_INSTRUCTION_BEGIN: proactive-prompt'), config).toBe(asked);
         expect(fs.existsSync(path.join(state, '.proactive-prompted')), config).toBe(!asked);
+        expect(out, config).toContain(`PROACTIVE_PROMPTED: ${asked ? 'no' : 'yes'}`);
       } finally {
         fs.rmSync(state, { recursive: true, force: true });
       }

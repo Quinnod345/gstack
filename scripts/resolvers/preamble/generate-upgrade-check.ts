@@ -8,7 +8,7 @@ import type { TemplateContext } from '../types';
  * the fence prose scopes and the model follows.
  */
 export function generateUpgradeCheck(ctx: TemplateContext): string {
-  return `If \`PROACTIVE\` is \`off\`: suggest no skill unasked, nor ask. \`core\`: only /office-hours, /review, /qa, /ship. \`all\`: any. Skills the user or this skill's steps name run.
+  return `If \`PROACTIVE\` is \`off\`: suggest no skills unasked, nor ask. \`core\`: only /office-hours, /review, /qa, /ship. \`all\`: any. Skills the user names or this one invokes run.
 
 If \`SKILL_PREFIX\` is \`true\` use \`/gstack-*\` names; paths stay \`${ctx.paths.skillRoot}/[skill-name]/SKILL.md\`.`;
 }

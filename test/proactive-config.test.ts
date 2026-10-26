@@ -58,11 +58,20 @@ describe('gstack-config proactive', () => {
     expect(run(['get', 'proactive']).stdout).toBe('off');
   });
 
-  test('an unknown value warns and stores core (negative control: on is not a value)', () => {
+  test('the YAML yes/no family maps to all/off on set (an opt-out never fails open)', () => {
+    for (const [value, stored] of [['no', 'off'], ['None', 'off'], ['0', 'off'], ['disabled', 'off'], ['yes', 'all'], ['on', 'all'], ['1', 'all']]) {
+      const r = run(['set', 'proactive', value]);
+      expect(r.status, value).toBe(0);
+      expect(r.stderr, value).toBe('');
+      expect(run(['get', 'proactive']).stdout, value).toBe(stored);
+    }
+  });
+
+  test('an unknown value warns and stores core (negative control: maybe is not a value)', () => {
     run(['set', 'proactive', 'off']);
-    const junk = run(['set', 'proactive', 'on']);
+    const junk = run(['set', 'proactive', 'maybe']);
     expect(junk.status).toBe(0);
-    expect(junk.stderr).toContain("proactive 'on' not recognized");
+    expect(junk.stderr).toContain("proactive 'maybe' not recognized");
     expect(junk.stderr).toContain('core, all, off');
     expect(run(['get', 'proactive']).stdout).toBe('core');
   });

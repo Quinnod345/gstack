@@ -54,8 +54,8 @@ describe('proactive core set: every skill preamble', () => {
     expect(line).toMatch(/^If `PROACTIVE` is `off`/);
     expect(line).toContain('`core`: only /office-hours, /review, /qa, /ship');
     expect(line).toContain('`all`: any');
-    expect(line).toContain('suggest no skill unasked, nor ask');
-    expect(line).toContain("Skills the user or this skill's steps name run");
+    expect(line).toContain('suggest no skills unasked, nor ask');
+    expect(line).toContain('Skills the user names or this one invokes run');
     expect(line.split('\n')[0]).not.toContain('true');
     for (const skill of NON_CORE_SAMPLE) expect(line).not.toContain(skill);
   });
