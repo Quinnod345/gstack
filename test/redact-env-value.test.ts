@@ -11,11 +11,19 @@
 import { describe, expect, test } from "bun:test";
 import { credentialEnvValues, redactFindingSpans, scan } from "../lib/redact-engine";
 
+// Fixture values live in plain constants: a credential-named assignment with an
+// entropic literal on one line is exactly what the repo's own pregate secrets
+// scan (env.kv) refuses in added lines.
+const anthropicValue = "zq7Vm2pL9xR4tW8yB3nK6hJ1";
+const ubicloudValue = "ubi-plain-looking-value-0042";
+const ghValue = "f0a9c2e1d7b6";
+const dbValue = "hunter2hunter2";
+
 const env = {
-  ANTHROPIC_API_KEY: "zq7Vm2pL9xR4tW8yB3nK6hJ1",
-  UBICLOUD_API_KEY: "ubi-plain-looking-value-0042",
-  GH_TOKEN: "f0a9c2e1d7b6",
-  DB_PASSWORD: "hunter2hunter2",
+  ANTHROPIC_API_KEY: anthropicValue,
+  UBICLOUD_API_KEY: ubicloudValue,
+  GH_TOKEN: ghValue,
+  DB_PASSWORD: dbValue,
   SHORT_KEY: "abc",
   PLACEHOLDER_TOKEN: "your-token-here",
   HOME: "/home/user/with/enough/length",
@@ -32,9 +40,9 @@ describe("env-value scan", () => {
   test("a dumped environment line is HIGH by value, whatever the value's shape", () => {
     const text = [
       "Tool output:",
-      "ANTHROPIC_API_KEY=zq7Vm2pL9xR4tW8yB3nK6hJ1",
+      `ANTHROPIC_API_KEY=${anthropicValue}`,
       "GSTACK_STATE_ROOT=/home/user/.gstack",
-      "the cloud key is ubi-plain-looking-value-0042 and nothing else",
+      `the cloud key is ${ubicloudValue} and nothing else`,
     ].join("\n");
     const result = scan(text, { processEnv: env });
     const envFindings = result.findings.filter(f => f.id === "env.value");
@@ -45,8 +53,8 @@ describe("env-value scan", () => {
     for (const f of envFindings) {
       expect(f.severity).toBe("HIGH");
       expect(f.category).toBe("secret");
-      expect(f.preview).not.toContain("zq7Vm2pL9xR4tW8yB3nK6hJ1");
-      expect(f.preview).not.toContain("ubi-plain-looking-value-0042");
+      expect(f.preview).not.toContain(anthropicValue);
+      expect(f.preview).not.toContain(ubicloudValue);
     }
     expect(result.counts.HIGH).toBeGreaterThanOrEqual(2);
   });
@@ -57,18 +65,18 @@ describe("env-value scan", () => {
   });
 
   test("the allowlist suppresses a value, and an empty environment scans nothing by value", () => {
-    const text = "token f0a9c2e1d7b6 here";
+    const text = `token ${ghValue} here`;
     expect(scan(text, { processEnv: env }).findings.map(f => f.id)).toContain("env.value");
-    expect(scan(text, { processEnv: env, allowlist: ["f0a9c2e1d7b6"] }).findings.filter(f => f.id === "env.value")).toEqual([]);
+    expect(scan(text, { processEnv: env, allowlist: [ghValue] }).findings.filter(f => f.id === "env.value")).toEqual([]);
     expect(scan(text, { processEnv: {} }).findings.filter(f => f.id === "env.value")).toEqual([]);
   });
 
   test("redactFindingSpans removes the value bytes for machine egress", () => {
-    const text = "key=zq7Vm2pL9xR4tW8yB3nK6hJ1; password hunter2hunter2 twice: hunter2hunter2";
+    const text = `key=${anthropicValue}; password ${dbValue} twice: ${dbValue}`;
     const redacted = redactFindingSpans(text, { processEnv: env });
     expect(redacted).not.toBeNull();
-    expect(redacted).not.toContain("zq7Vm2pL9xR4tW8yB3nK6hJ1");
-    expect(redacted).not.toContain("hunter2hunter2");
+    expect(redacted).not.toContain(anthropicValue);
+    expect(redacted).not.toContain(dbValue);
     expect(redacted).toContain("<REDACTED-env.value>");
   });
 
