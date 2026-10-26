@@ -62,7 +62,7 @@ export function readSharedSections(skillMd: string): string[] {
  * The text a tier 2+ skill effectively follows, laid out as one file: the
  * pointer section is replaced by the shared sections, each with this skill's
  * same-heading section (or, for a cut-down variant, its replacement
- * subsections) applied, and those overriding sections leave their own place.
+ * and added subsections) applied, and those overriding sections leave their own place.
  * Every preamble section then appears once with the text the skill used to
  * inline; only the grouping differs. SKILL.md without a pointer is returned as is.
  */

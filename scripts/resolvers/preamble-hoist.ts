@@ -64,8 +64,9 @@ const headingOf = (section: string) => section.split('\n', 1)[0]!;
 
 /**
  * A skill-specific variant of a shared section, cut down to the `### `
- * subsections that differ, when the two share their heading, intro and
- * subsection headings. Otherwise the whole section stays inline.
+ * subsections that differ plus any it adds after the shared ones, when it
+ * keeps the shared heading, intro and subsection headings in order.
+ * Otherwise the whole section stays inline.
  */
 function variantSubsections(own: string, shared: string): string | null {
   const ownParts = splitSections(own, '### ');
