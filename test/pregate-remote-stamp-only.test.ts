@@ -194,19 +194,84 @@ describe('clear --receipt accepts a stamp-only predecessor tree (gate ahead of t
     expect(r.err).toContain('PREGATE_REMOTE_UNCLEARED');
   }, 120_000);
 
-  test("without a repository root clearDecision keeps the plain tree mismatch; baseBranchOf reads pregate.json's base field", async () => {
+  test('a same-tree receipt after a substituted clear drops the recorded substitution', async () => {
     const { repo, gatedTree } = gatedRepo();
     stamp(repo);
     const file = await pregateAt(repo);
-    const d = clearDecision(file, LANE, { receiptPath: receiptFile(repo, gatedTree) });
-    expect(d).toEqual({ refused: 'PREGATE_RECEIPT_INVALID', message: `the remote gate tested tree ${gatedTree.slice(0, 12)}, not ${file.tree.slice(0, 12)}; pregate.json/remote_gate stays uncleared` });
+    expect(clear(repo, ['--receipt', receiptFile(repo, gatedTree)]).status).toBe(EXIT.ok);
+    expect(pregateJson(repo).requires_remote[0].substitution).toBeDefined();
+    expect(clear(repo, ['--receipt', receiptFile(repo, file.tree)]).status).toBe(EXIT.ok);
+    expect(pregateJson(repo).requires_remote[0].substitution).toBeUndefined();
+    const verify = runBin(repo, 'gstack-pregate', ['verify']);
+    expect(verify.status).toBe(EXIT.ok);
+    expect(verify.out).not.toContain('stamp-only');
+  }, 120_000);
+
+  test('a symbolic tree, a head tree that is not here, a mode-only difference and a stamp file at the wrong version are refused', async () => {
+    const { repo, gatedTree } = gatedRepo();
+    stamp(repo);
+    const file = await pregateAt(repo);
+    const symbolic = clear(repo, ['--receipt', receiptFile(repo, 'HEAD^{tree}')]);
+    expect(symbolic.status).toBe(EXIT.fail);
+    expect(symbolic.err).toContain(`the remote gate tested tree HEAD^{tree}, not ${file.tree.slice(0, 12)}; the gated tree "HEAD^{tree}" is not a git object id, so it cannot be compared; pregate.json/remote_gate stays uncleared`);
+    expect(pregateJson(repo).requires_remote[0].receipt).toBeNull();
+    const headGone = substituteStampOnlyTree(repo.work, 'main', gatedTree, 'f00d'.repeat(10));
+    expect('problem' in headGone && headGone.problem).toContain('the head tree f00df00df00d is not an object in this repository');
+    const upper = substituteStampOnlyTree(repo.work, 'main', gatedTree.toUpperCase(), file.tree);
+    expect('problem' in upper && upper.problem).toContain('is not a git object id');
+    // A mode-only change leaves git diff --unified=0 with a file header and no hunk: classifyFile's mode rule, a change.
+    fs.chmodSync(path.join(repo.work, 'lib/util.js'), 0o755);
+    const modeHead = commit(repo, {}, 'mode only');
+    const mode = substituteStampOnlyTree(repo.work, 'main', gatedTree, repo.git('rev-parse', `${modeHead}^{tree}`));
+    expect('problem' in mode && mode.problem).toContain('lib/util.js (mode: file mode changed');
+    fs.chmodSync(path.join(repo.work, 'lib/util.js'), 0o644);
+    commit(repo, {}, 'mode back');
+    // A stamp file rewritten to a version other than the head's is not the old -> new rewrite.
+    const wrongHead = commit(repo, { 'README.md': '# fixture\n<!-- fixture-stamp: 1.0.7 -->\n' }, 'README at the wrong version');
+    const wrong = substituteStampOnlyTree(repo.work, 'main', gatedTree, repo.git('rev-parse', `${wrongHead}^{tree}`));
+    expect('problem' in wrong && wrong.problem).toContain('README.md (stamp_files: ');
+    expect('problem' in wrong && wrong.problem).toContain('1.0.7');
+  }, 120_000);
+
+  test("the policy branch comes from pregate.json's base field, else origin/HEAD; an invalid base policy refuses", async () => {
+    const { repo, gatedTree } = gatedRepo();
+    stamp(repo);
+    const file = await pregateAt(repo);
     expect(baseBranchOf(file.base)).toBe('main');
     expect(baseBranchOf('origin/release/2026@0123456789ab')).toBe('release/2026');
     expect(baseBranchOf(undefined)).toBeNull();
     expect(baseBranchOf('main')).toBeNull();
-    const s = substituteStampOnlyTree(repo.work, 'main', gatedTree, file.tree);
-    expect('substitution' in s && s.substitution.files).toEqual(STAMP_FILES);
     const noBase = substituteStampOnlyTree(repo.work, 'no-such-branch', gatedTree, file.tree);
     expect('problem' in noBase && noBase.problem).toContain('the ship policy on origin/no-such-branch could not be read');
+    // No base field: clearDecision uses origin/HEAD's branch (main here) and still accepts; a base field naming another branch refuses.
+    const { base: _b, ...noField } = file;
+    const d = clearDecision(noField as typeof file, LANE, { receiptPath: receiptFile(repo, gatedTree) }, repo.work);
+    expect('substitution' in d && d.substitution?.files).toEqual(STAMP_FILES);
+    const other = clearDecision({ ...file, base: 'origin/release@0123456789ab' }, LANE, { receiptPath: receiptFile(repo, gatedTree) }, repo.work);
+    expect('refused' in other && other.message).toContain(`pregate.json was recorded against origin/release, not this repository's base origin/main`);
+    expect('refused' in other && other.fix).toBe('rerun gstack-pregate --base main, then clear again');
+    // A policy that lists the test lane as stamp-sensitive (gstack's own does) refuses the substitution: that lane never reuses across a stamp.
+    repo.git('checkout', '-q', 'main');
+    commit(repo, { '.gstack/ship-policy.json': JSON.stringify({ ...POLICY, stamp_sensitive_gates: ['tests'] }, null, 2) + '\n' }, 'tests read the stamps');
+    repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feature');
+    repo.git('fetch', '-q', 'origin');
+    const sensitive = clear(repo, ['--receipt', receiptFile(repo, gatedTree)]);
+    expect(sensitive.status).toBe(EXIT.fail);
+    expect(sensitive.err).toContain(`not ${file.tree.slice(0, 12)}, and origin/main@`);
+    expect(sensitive.err).toContain(':.gstack/ship-policy.json lists the test lane as stamp-sensitive (stamp_sensitive_gates: tests), so a run on another tree never covers this one; pregate.json/remote_gate stays uncleared');
+    expect(pregateJson(repo).requires_remote[0].receipt).toBeNull();
+    // An invalid policy on the base refuses rather than classifying under the defaults.
+    repo.git('checkout', '-q', 'main');
+    commit(repo, { '.gstack/ship-policy.json': '{ "stamp_files": "VERSION" }\n' }, 'break the policy');
+    repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feature');
+    repo.git('fetch', '-q', 'origin');
+    const broken = clear(repo, ['--receipt', receiptFile(repo, gatedTree)]);
+    expect(broken.status).toBe(EXIT.fail);
+    expect(broken.err).toContain('.gstack/ship-policy.json on origin/main@');
+    expect(broken.err).toContain('is invalid (');
+    expect(broken.err).toContain('fix: fix the policy on the base branch (gstack-ship-policy validate)');
+    expect(pregateJson(repo).requires_remote[0].receipt).toBeNull();
   }, 120_000);
 });

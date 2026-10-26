@@ -13,10 +13,10 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ARTIFACT_SCHEMAS, checkSchema, type PregateFile, type PregateRemote, type ValidationError } from '../headless-artifacts';
+import { ARTIFACT_SCHEMAS, checkSchema, type PregateFile, type PregateReceiptSubstitution, type PregateRemote, type ValidationError } from '../headless-artifacts';
 import { wtreeFingerprint, type WtreeResult } from '../script-invocation';
 import { guardsCheck } from './checks/guards';
-import { clearHint, lanesCheck, parseRemoteReport, REMOTE_GATE_LANE, remoteReportProblem } from './checks/lanes';
+import { clearHint, lanesCheck, parseRemoteReport, REMOTE_GATE_LANE, remoteReportProblem, treeMismatch } from './checks/lanes';
 import { literalsCheck } from './checks/literals';
 import { regenCheck } from './checks/regen';
 import { secretsCheck } from './checks/secrets';
@@ -24,7 +24,7 @@ import { straysCheck } from './checks/strays';
 import { timingCheck } from './checks/timing';
 import { NON_DOWNGRADABLE, userPolicyAbsent } from './config';
 import { sha256, withFingerprint } from './context';
-import { baseBranchOf, describeSubstitution, substituteStampOnlyTree, type StampOnlySubstitution } from './remote-receipt';
+import { baseBranchOf, describeSubstitution, substituteStampOnlyTree } from './remote-receipt';
 import { resolveBaseBranch } from '../ship-policy';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
@@ -169,21 +169,21 @@ function userPolicyChange(file: PregateFile): string | null {
 }
 
 export interface ClearInput { runUrl?: string; bundleLane?: string; receiptPath?: string }
-export type ClearDecision = { receipt: string; attested: boolean; substitution?: StampOnlySubstitution } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string; fix?: string };
+export type ClearDecision = { receipt: string; attested: boolean; substitution?: PregateReceiptSubstitution } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string; fix?: string };
 
 /**
  * What `clear` may record for one obligation. A `pregate.json/remote_gate`
  * obligation needs the gate's own report (`--receipt <file>` holding its
  * PREGATE_REMOTE: line), validated as `--remote` validates it against the
- * tested tree; a run URL is not checkable there. With `repoRoot`, a report
- * whose tree is a stamp-only predecessor of pregate.json's tree (the gate ran
+ * tested tree; a run URL is not checkable there. A report whose tree is a
+ * stamp-only predecessor of pregate.json's tree in `repoRoot` (the gate ran
  * ahead of the stamp; lib/pregate/remote-receipt.ts) is accepted for this
- * tree and the substitution recorded; without it, or when any differing path
- * is not a stamp, the tree mismatch refuses as before. A `test_backend/<backend>`
- * obligation has no machine-checkable receipt, so its run URL is recorded as
- * attested. Platform lanes take a run URL or an evidence-bundle lane label.
+ * tree and the substitution recorded; when any differing path is not a stamp,
+ * the tree mismatch refuses as before. A `test_backend/<backend>` obligation
+ * has no machine-checkable receipt, so its run URL is recorded as attested.
+ * Platform lanes take a run URL or an evidence-bundle lane label.
  */
-export function clearDecision(file: PregateFile, lane: string, input: ClearInput, repoRoot?: string): ClearDecision {
+export function clearDecision(file: PregateFile, lane: string, input: ClearInput, repoRoot: string): ClearDecision {
   const list = file.requires_remote ?? [];
   const target = list.find(r => r.lane === lane);
   if (!target) return { refused: 'usage', message: `no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}` };
@@ -194,9 +194,13 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
     catch (e: any) { return { refused: 'PREGATE_RECEIPT_INVALID', message: `cannot read ${input.receiptPath}: ${e.message}` }; }
     const report = parseRemoteReport(text);
     if (!report) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${input.receiptPath} has no PREGATE_REMOTE: line; ${lane} stays uncleared` };
-    let substitution: StampOnlySubstitution | undefined;
-    if (report.tree !== file.tree && repoRoot) {
-      const s = substituteStampOnlyTree(repoRoot, baseBranchOf(file.base) ?? resolveBaseBranch(repoRoot), report.tree, file.tree);
+    let substitution: PregateReceiptSubstitution | undefined;
+    if (report.tree !== file.tree) {
+      // The stamp rule is the ship's own base branch's policy (origin/HEAD, as regate reads it), never a branch the artifact names.
+      const base = resolveBaseBranch(repoRoot);
+      const recorded = baseBranchOf(file.base);
+      if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${treeMismatch(report.tree, file.tree)}; pregate.json was recorded against origin/${recorded}, not this repository's base origin/${base}, so the stamp rule that would class the difference is not the base's; ${lane} stays uncleared`, fix: `rerun gstack-pregate --base ${base}, then clear again` };
+      const s = substituteStampOnlyTree(repoRoot, base, report.tree, file.tree);
       if ('problem' in s) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${s.problem}; ${lane} stays uncleared`, fix: s.fix };
       substitution = s.substitution;
     }
@@ -216,7 +220,7 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
 }
 
 /** Record the receipt that clears one obligation (a run URL, an evidence-bundle lane label, or a remote gate report, with the stamp-only substitution when one was accepted). */
-export function clearObligation(file: PregateFile, lane: string, receipt: string, by: string, substitution?: StampOnlySubstitution): PregateFile {
+export function clearObligation(file: PregateFile, lane: string, receipt: string, by: string, substitution?: PregateReceiptSubstitution): PregateFile {
   const list = file.requires_remote ?? [];
   const target = list.find(r => r.lane === lane);
   if (!target) throw new Error(`no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}`);

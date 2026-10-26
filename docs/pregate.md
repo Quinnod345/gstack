@@ -376,10 +376,18 @@ receipt for H when the two trees differ only as a stamp does:
   (`(was X)`, `since: X`, `vX`), and the version file, `package.json`'s
   `version`, a lockfile's root version keys and a CHANGELOG re-heading have
   their own built-in rules. There is no second list and no looser rule here:
-  the verdict `clear` reaches on a pair is the verdict `gstack-tree-receipt
-  --gated G --current H` reaches.
+  the file verdicts `clear` reaches on a pair are the verdicts
+  `gstack-tree-receipt --gated G --current H` reaches, and its gate rule holds
+  too: a policy whose `stamp_sensitive_gates` names the test lane (`tests`, as
+  gstack's own does because its tests read VERSION and the agents digest) is
+  refused outright, since the tree receipt never marks such a lane reusable.
+  The policy is the one on this repository's base branch (`origin/HEAD`, as
+  `regate` reads it) at its current tip, never a branch pregate.json names: a
+  pregate.json recorded against another base is refused. What the receipt does
+  not compare, exactly as a same-tree receipt does not, is the gate's execution
+  identity (Bun, OS, lockfiles); that stays the evidence bundle's job.
 - Accepted, the obligation's receipt reads `remote-gate tree=<gated>
-  tests=<n> accepted-for=<head> stamp-only=<files> receipt=<file>
+  tests=<n> accepted-for=<head> stamp-only=<file count> receipt=<file>
   sha256=<digest>`, and pregate.json records the substitution beside it:
   `substitution: { gated_tree, accepted_for, policy, files: [{ path, rule }] }`,
   the policy label (`origin/<base>@<sha>:.gstack/ship-policy.json`) and every
@@ -393,9 +401,14 @@ receipt for H when the two trees differ only as a stamp does:
   path: any differing path outside the rule (`lib/x.ts (stamp_files: not in the
   repo's stamp_files allowlist, line 1)`), a stamp path whose hunk is not the
   stamp rewrite (`plugin.json (stamp_files: "…description…" -> "…", line 4)`),
-  a gated tree that is not an object here (fetch the gated commit first), a
-  base branch whose policy cannot be read, or two trees at the same version
-  (a `stamp_files` hunk needs an old → new version to rewrite). The obligation stays uncleared; rerun
+  a gated tree that is not a 40- or 64-hex object id or not an object here
+  (fetch the gated commit first), or a
+  base branch whose policy cannot be read. The version rule is the tree
+  receipt's: a `stamp_files`, `stamp_paths` or `release_outputs` hunk is a stamp
+  only as the rewrite from the gated tree's version to the head's (so two trees
+  at the same version refuse such a hunk as `other`), while the built-in
+  version-file, manifest, lockfile and CHANGELOG rules compare content and do
+  not check the direction of the version move. The obligation stays uncleared; rerun
   the gate on the head, or make the extra change a stamp under the repo's
   rule.
 
@@ -405,6 +418,12 @@ file the tree receipt and restamp already read; nothing is declared in
 `.gstack/pregate.json` for this. gbrain's is in
 [gbrain worked configs](#gbrain-worked-configs). The sequence that reuses a
 gate-ahead run, on a machine under 8 cores:
+
+The gate must have run on a clean, committed checkout: `PREGATE_TREE` is the
+`bin/gstack-wtree` fingerprint, which equals the commit's tree only when nothing
+was uncommitted or untracked there, and `clear` can compare only trees that are
+objects in this repository. A receipt whose tree is not here is refused, never
+guessed.
 
 ```bash
 git fetch origin <gated sha>                      # the gated commit's tree must be here
