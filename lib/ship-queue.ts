@@ -80,21 +80,55 @@ function readAllPages(ctx: QueueContext, endpoint: string, key: 'check_runs' | '
   return { error: `${key}: more than ${CI_PAGE * CI_MAX_PAGES} entries, not all read` };
 }
 
-/** CI at one exact SHA: every check run and every commit-status context; unreadable or incomplete is unknown, never green. */
-function ciAtHead(ctx: QueueContext, sha: string): { line: string; green: boolean } {
+/**
+ * The latest run per check name, the way GitHub's rollup counts: a check that was
+ * re-run or superseded (a cancelled run beside a later pass of the same name on
+ * the same commit) is judged by its newest run alone. Runs without a name each
+ * stand on their own. Newest is the latest completed_at, then the highest id; a
+ * run still in progress has no completed_at and is newer than any finished one.
+ */
+export function latestRunPerName<T extends { name?: unknown; id?: unknown; status?: unknown; completed_at?: unknown }>(runs: T[]): T[] {
+  const latest = new Map<string, T>();
+  const unnamed: T[] = [];
+  const at = (r: T) => (r.status !== 'completed' ? Infinity : typeof r.completed_at === 'string' ? Date.parse(r.completed_at) || 0 : 0);
+  const id = (r: T) => (typeof r.id === 'number' ? r.id : Number(r.id) || 0);
+  for (const r of runs) {
+    if (typeof r.name !== 'string' || !r.name) { unnamed.push(r); continue; }
+    const have = latest.get(r.name);
+    if (!have || at(r) > at(have) || (at(r) === at(have) && id(r) > id(have))) latest.set(r.name, r);
+  }
+  return [...latest.values(), ...unnamed];
+}
+
+/** CI at one exact SHA: the latest check run per name (as GitHub's rollup counts) and every commit-status context; unreadable or incomplete is unknown, never green. */
+function ciAtHead(ctx: QueueContext, sha: string): { line: string; green: boolean; none: boolean } {
   const at = sha.slice(0, 12);
   const runs = readAllPages(ctx, `repos/{owner}/{repo}/commits/${sha}/check-runs`, 'check_runs');
-  if ('error' in runs) return { line: `unknown at ${at} (${runs.error})`, green: false };
+  if ('error' in runs) return { line: `unknown at ${at} (${runs.error})`, green: false, none: false };
   const statuses = readAllPages(ctx, `repos/{owner}/{repo}/commits/${sha}/status`, 'statuses');
-  if ('error' in statuses) return { line: `unknown at ${at} (${statuses.error})`, green: false };
+  if ('error' in statuses) return { line: `unknown at ${at} (${statuses.error})`, green: false, none: false };
   const verdicts = [
-    ...runs.items.map(c => c.status !== 'completed' ? 'pending' : c.conclusion === 'success' ? 'passed' : c.conclusion === 'skipped' || c.conclusion === 'neutral' ? 'skipped' : 'failed'),
+    ...latestRunPerName(runs.items).map(c => c.status !== 'completed' ? 'pending' : c.conclusion === 'success' ? 'passed' : c.conclusion === 'skipped' || c.conclusion === 'neutral' ? 'skipped' : 'failed'),
     ...statuses.items.map(s => s.state === 'success' ? 'passed' : s.state === 'pending' ? 'pending' : 'failed'),
   ];
   const count = (v: string) => verdicts.filter(x => x === v).length;
   const [passed, failed, pending, skipped] = [count('passed'), count('failed'), count('pending'), count('skipped')];
   const green = verdicts.length > 0 && pending === 0 && failed === 0;
-  return { line: `${green ? 'green' : pending ? 'pending' : verdicts.length ? 'red' : 'none'} at ${at} (passed=${passed} failed=${failed} pending=${pending} skipped=${skipped})`, green };
+  return { line: `${green ? 'green' : pending ? 'pending' : verdicts.length ? 'red' : 'none'} at ${at} (passed=${passed} failed=${failed} pending=${pending} skipped=${skipped})`, green, none: verdicts.length === 0 };
+}
+
+/**
+ * A PR that conflicts with the base (CHANGELOG-only conflicts included, which
+ * the train resolves) has no merge ref, so GitHub runs no pull_request CI on
+ * its head. The lane dispatches the free workflows on the branch by hand; their
+ * check runs attach to the commit, so ready reads them like any other.
+ */
+function conflictHint(mergeable: unknown, ci: { green: boolean; none: boolean }, branch: string | undefined, head: string): string | null {
+  if (mergeable !== 'CONFLICTING') return null;
+  const ref = branch ? `--ref ${branch}` : '--ref <branch>';
+  if (ci.none) return `ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${head.slice(0, 12)}); dispatch the free workflows on the branch (gh workflow run free-tests.yml ${ref} && gh workflow run windows-free-tests.yml ${ref}), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready`;
+  if (ci.green) return `ci-hint: PR conflicts with the base (no merge ref); the runs at ${head.slice(0, 12)} were dispatched on the branch, which counts`;
+  return null;
 }
 
 /** Under full_e2e: a passing gate bound to this head (the stamp journal, a gate-ahead attempt on it) or the lane's own run on it. */
@@ -120,8 +154,8 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
   const head = git(ctx.repoRoot, ['rev-parse', 'HEAD']).out;
   const dirty = git(ctx.repoRoot, ['status', '--porcelain', '--untracked-files=no']).out;
   if (dirty) return fail({ code: 'QUEUE_NOT_READY', message: `uncommitted tracked changes: ${dirty.split('\n').map(l => l.slice(3)).slice(0, 8).join(', ')}` }, [], run);
-  const view = ctx.gh(['pr', 'view', o.pr, '--json', 'headRefOid,url,body']);
-  let info: { headRefOid?: string; url?: string; body?: string } = {};
+  const view = ctx.gh(['pr', 'view', o.pr, '--json', 'headRefOid,url,body,mergeable,headRefName']);
+  let info: { headRefOid?: string; url?: string; body?: string; mergeable?: string; headRefName?: string } = {};
   try { info = view.ok ? JSON.parse(view.out) : {}; } catch {}
   if (!info.headRefOid) return fail({ code: 'QUEUE_NOT_READY', message: `cannot read PR #${o.pr}'s head through gh (${(view.err ?? view.out).trim().slice(0, 120)})` }, [], run);
   if (info.headRefOid !== head) return fail({ code: 'QUEUE_NOT_READY', message: `HEAD ${head.slice(0, 12)} is not PR #${o.pr}'s pushed head ${info.headRefOid.slice(0, 12)}` }, [], run);
@@ -143,6 +177,7 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
   }
   const receipt = extractReceipt(info.body ?? '');
   const attempt = currentAttempt(ctx.repoRoot, o.pr);
+  const hint = conflictHint(info.mergeable, ci, info.headRefName, head);
   const lines = [
     `READY #${o.pr} ${head} STAMP_VERSION=${version}`,
     `pr: ${info.url ?? `#${o.pr}`}`,
@@ -150,6 +185,7 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
     `version: ${version}`,
     `base: origin/${ctx.base}@${baseSha}`,
     `ci: ${ci.line}`,
+    ...(hint ? [hint] : []),
     pregateLine,
     gateLine(policy, attempt),
     receipt.found && receipt.receipt && !receipt.errors.length ? receiptSummaryLine(receipt.receipt) : `SHIP_RECEIPT: ${receipt.found ? 'invalid' : 'none'} in the PR body`,
