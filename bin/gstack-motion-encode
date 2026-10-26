@@ -28,7 +28,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  compareArgs, contactSheetArgs, cropError, framePath, judgeCheck, loopGifArgs, mp4Args, padError, parsePsnrStats, planChecks, resolveFfmpeg,
+  compareArgs, contactSheetArgs, cropError, framePath, judgeCheck, loopGifArgs, manifestError, mp4Args, padError, parsePsnrStats, planChecks, resolveFfmpeg,
   smallGifArgs, FFMPEG_MISSING, type CaptureManifest,
 } from '../lib/motion-encode';
 
@@ -97,6 +97,8 @@ try {
 } catch (err) {
   die(2, `gstack-motion-encode: cannot read ${path.join(dir, 'capture.json')}: ${(err as Error).message}; capture first with gstack-motion-capture.ts`);
 }
+const manifestProblem = manifestError(manifest);
+if (manifestProblem) die(2, `gstack-motion-encode: ${manifestProblem}; capture again with gstack-motion-capture.ts`);
 
 if (cmd === 'check') {
   const layout = flags.get('--layout') ?? 'cards';

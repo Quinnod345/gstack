@@ -53,10 +53,10 @@ function run(argv: string[]) {
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
 
-function capture(dir: string, html: string) {
+function capture(dir: string, html: string, o: { mask?: boolean } = {}) {
   const file = path.join(dir, 'page.html');
   fs.writeFileSync(file, html);
-  return run([CAPTURE, file, '--size', '640x100', '--cycle', '0.5', '--out', path.join(dir, 'cap'), '--mask', '.card']);
+  return run([CAPTURE, file, '--size', '640x100', '--cycle', '0.5', '--out', path.join(dir, 'cap'), ...(o.mask === false ? [] : ['--mask', '.card'])]);
 }
 
 describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', () => {
@@ -129,8 +129,8 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
   // Value: protects=a page without window.__start/__tick stops with MOTION_CONTRACT_MISSING and exit 1 before writing capture.json;
   //   fails_when=the contract probe is dropped and frames of an unanimated page are recorded as a capture; why_new=no test loads a page in the capture bin; seam=none;
   //   no_claim=only the missing-contract case; a contract that throws mid-capture is not exercised
-  //   The same capture dir, pre-filled first with a foreign still.png and then with a previous capture's files, checks that
-  //   a capture refuses a dir that is not a previous capture and clears a previous capture's manifest before it can fail.
+  //   The same --out also checks ownership: a foreign still.png is refused and kept, the retry after a refused page succeeds
+  //   (here without a mask, so check ends 'clean (overflow not checked)'), and a later failed capture clears that manifest.
   test('a page without the capture contract is refused', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
     try {
@@ -139,15 +139,42 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       fs.writeFileSync(path.join(cap, 'still.png'), 'not ours');
       const foreign = capture(dir, page({ loops: true, contract: false }));
       expect(foreign.code).toBe(2);
-      expect(foreign.err).toContain('already holds still.png but no capture.json');
+      expect(foreign.err).toContain('already holds still.png but no .gstack-motion-capture marker');
       expect(fs.readFileSync(path.join(cap, 'still.png'), 'utf-8')).toBe('not ours');
-      fs.writeFileSync(path.join(cap, 'capture.json'), '{}');
+      fs.rmSync(path.join(cap, 'still.png'));
+
       const c = capture(dir, page({ loops: true, contract: false }));
       expect(c.code).toBe(1);
       expect(c.err).toContain('MOTION_CONTRACT_MISSING');
+      const retry = capture(dir, page({ loops: true }), { mask: false });
+      expect(retry.code, retry.err).toBe(0);
+      expect(retry.out).toContain('CAPTURE_OK frames=54');
+      const check = run([ENCODE, 'check', cap, ...PHASES]);
+      expect(check.code, check.out + check.err).toBe(0);
+      expect(check.out).toContain('MOTION_CHECK: overflow skipped');
+      expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: clean (overflow not checked)');
+
+      expect(capture(dir, page({ loops: true, contract: false })).code).toBe(1);
       expect(fs.existsSync(path.join(cap, 'capture.json')) || fs.existsSync(path.join(cap, 'still.png'))).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 240_000);
+
+  // Value: protects=an offscreen loading=lazy image no longer hangs the still render (img.decode() never settles on it);
+  //   fails_when=the eager switch and the 30 s bound are both dropped and --still waits forever; why_new=adversarial probe hung at 90 s; seam=none;
+  //   no_claim=one lazy image on a local page; a slow network image is bounded only by the 30 s timer
+  test('a page with an offscreen lazy image renders its still', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'dot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+      const file = path.join(dir, 'lazy.html');
+      fs.writeFileSync(file, '<!doctype html><body style="margin:0"><div style="height:5000px"></div><img loading="lazy" src="dot.png" width="4" height="4"></body>');
+      const still = run([CAPTURE, file, '--size', '640x100', '--still', path.join(dir, 'still.png')]);
+      expect(still.code, still.err).toBe(0);
+      expect(still.err).not.toContain('still loading');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 200_000);
 });

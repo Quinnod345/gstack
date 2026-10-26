@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { clockMs, planCapture } from '../lib/motion-capture';
 import {
-  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, mp4Args, padError, parsePsnrStats, planChecks, psnrArgs,
+  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, manifestError, mp4Args, padError, parsePsnrStats, planChecks, psnrArgs,
   resolveFfmpeg, smallGifArgs, FFMPEG_MISSING, type CaptureManifest, type CheckJob, type CheckOptions,
 } from '../lib/motion-encode';
 
@@ -157,6 +157,30 @@ describe('PSNR parsing and verdicts', () => {
     const v = judgeCheck({ ...job, expected: 23 }, parsePsnrStats(STATS.replace('psnr_avg:46.28', 'psnr_avg:inf')));
     expect(v.pass).toBe(false);
     expect(v.line).toContain('compared 3 of 23 frames');
+    expect(judgeCheck({ ...job, expected: 0 }, []).pass).toBe(false);
+  });
+
+  // Value: protects=phase overrides that leave no story frame refuse the check instead of passing overflow on zero frames;
+  //   fails_when=the empty-span guard is dropped and overflow reports pass for 'story frames undefined-undefined'; why_new=new guard; seam=none;
+  //   no_claim=planning only
+  test('a cards overflow with no story frames is a planning error', () => {
+    const r = planChecks(manifest(), '/c', { ...OPTS, introEnd: 10.99, dissolveAt: 11 });
+    expect(r).toEqual({ error: 'no window frame lies between intro-end and dissolve-at, so overflow has no story frames to check' });
+  });
+
+  // Value: protects=a capture.json this tool did not write cannot put text into ffmpeg filter graphs or paths outside the capture dir;
+  //   fails_when=a field check is dropped and a string windowFrames or a ../ still reaches the encoder; why_new=new validator; seam=none;
+  //   no_claim=validator only; the bin calls it before building any job
+  test('a capture manifest is checked before its fields reach ffmpeg', () => {
+    expect(manifestError(manifest())).toBeNull();
+    expect(manifestError(manifest(12, false))).toBeNull();
+    expect(manifestError({ ...manifest(), schema: 2 })).toContain('schema 1');
+    expect(manifestError({ ...manifest(), windowFrames: '60,metadata=mode=print' })).toContain('windowFrames must be a non-negative integer');
+    expect(manifestError({ ...manifest(), cycle: 0 })).toContain('cycle must be a positive number');
+    expect(manifestError({ ...manifest(), clockMs: [0] })).toContain('one number per frame');
+    expect(manifestError({ ...manifest(), still: '../still.png' })).toContain('still must be a .png file name');
+    expect(manifestError({ ...manifest(), mask: 'mask.png,hue=s=0' })).toContain('mask must be a .png file name');
+    expect(manifestError(null)).toContain('schema 1');
   });
 });
 

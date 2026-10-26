@@ -36,6 +36,23 @@ export interface CaptureManifest {
 
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y'];
 
+/** capture.json fields reach ffmpeg arguments and file paths, so a manifest this tool did not write is refused. */
+export function manifestError(m: unknown): string | null {
+  const o = (m ?? {}) as Record<string, unknown>;
+  if (o.schema !== 1) return 'capture.json is not a schema 1 capture manifest';
+  for (const k of ['fps', 'pre', 'windowStart', 'windowFrames', 'frames']) {
+    if (!Number.isInteger(o[k]) || (o[k] as number) < 0) return `capture.json field ${k} must be a non-negative integer`;
+  }
+  if (typeof o.cycle !== 'number' || !(o.cycle > 0)) return 'capture.json field cycle must be a positive number';
+  if (!Array.isArray(o.clockMs) || o.clockMs.length !== o.frames || !o.clockMs.every(t => Number.isFinite(t))) return 'capture.json field clockMs must hold one number per frame';
+  for (const k of ['still', 'mask']) {
+    const v = o[k];
+    if (v === undefined && k === 'mask') continue;
+    if (typeof v !== 'string' || !/^[\w-]+\.png$/.test(v)) return `capture.json field ${k} must be a .png file name inside the capture dir`;
+  }
+  return null;
+}
+
 export function framePattern(dir: string): string {
   return path.join(dir, 'frames', '%05d.png');
 }
@@ -195,8 +212,10 @@ export function planChecks(m: CaptureManifest, dir: string, o: CheckOptions): Ch
       ? { from: m.windowStart, count: m.windowFrames, reference: empty0, label: `every window frame vs ${m.windowStart}` }
       : (() => {
         const story = framesBetween(m, ms(o.introEnd), ms(o.dissolveAt));
+        if (story.length === 0) return null;
         return { from: story[0]!, count: story.length, reference: still, label: `story frames ${story[0]}-${story[story.length - 1]} vs ${m.still}` };
       })();
+    if (!span) return { error: 'no window frame lies between intro-end and dissolve-at, so overflow has no story frames to check' };
     jobs.push({ id: 'overflow', what: `${span.label}, outside the mask`, args: psnrArgs({ first: start, start: span.from, count: span.count, reference: span.reference, mask, maskGrow: o.maskGrow }), expected: span.count });
   }
   return jobs;
@@ -206,7 +225,7 @@ export interface CheckVerdict { id: CheckId; pass: boolean; line: string }
 
 /** One verdict per job: pass when ffmpeg reported every frame and each is at or above minDb (Infinity = identical). */
 export function judgeCheck(job: CheckJob, frames: PsnrFrame[], minDb = Infinity): CheckVerdict {
-  if (frames.length < job.expected) {
+  if (job.expected === 0 || frames.length < job.expected) {
     return { id: job.id, pass: false, line: `MOTION_CHECK: ${job.id} fail ffmpeg compared ${frames.length} of ${job.expected} frames (${job.what})` };
   }
   const bad = frames.filter(f => f.psnr < minDb);

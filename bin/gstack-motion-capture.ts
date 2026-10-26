@@ -61,10 +61,14 @@ async function openPage(mode: 'capture' | 'still', scale: number) {
   const page = await context.newPage();
   await page.clock.install({ time: 0 });
   await page.goto(withMode(url, mode), { waitUntil: 'load' });
-  await page.evaluate(async () => {
+  const settled = page.evaluate(async () => {
     await document.fonts.ready;
+    for (const img of document.images) img.loading = 'eager';
     await Promise.all([...document.images].map(img => img.decode().catch(() => undefined)));
-  });
+  }).then(() => true);
+  if (!await Promise.race([settled, new Promise<false>(resolve => setTimeout(resolve, 30_000, false).unref())])) {
+    console.error('gstack-motion-capture: fonts or images were still loading after 30 s; rendering anyway');
+  }
   await page.clock.pauseAt(Math.max(10_000, await page.evaluate(() => Date.now()) + 1_000));
   return page;
 }
@@ -79,13 +83,14 @@ try {
     const out = path.resolve(opts.out!);
     const scale = captureScale(opts.width, opts.height);
     const plan = planCapture({ cycleSeconds: opts.cycle!, pre: opts.pre, tail: opts.tail });
-    const stale = ['frames', 'capture.json', 'still.png', 'mask.png', 'contact-sheet.png'];
-    const present = stale.filter(f => fs.existsSync(path.join(out, f)));
-    if (present.length > 0 && !present.includes('capture.json')) {
-      die(2, `gstack-motion-capture: ${out} already holds ${present.join(', ')} but no capture.json, so it is not a previous capture; pick an empty --out`);
+    const marker = path.join(out, '.gstack-motion-capture');
+    const present = ['frames', 'capture.json', 'still.png', 'mask.png', 'contact-sheet.png'].filter(f => fs.existsSync(path.join(out, f)));
+    if (present.length > 0 && !fs.existsSync(marker)) {
+      die(2, `gstack-motion-capture: ${out} already holds ${present.join(', ')} but no .gstack-motion-capture marker, so this tool did not write it; pick an empty --out`);
     }
     for (const f of present) fs.rmSync(path.join(out, f), { recursive: true, force: true });
     fs.mkdirSync(path.join(out, 'frames'), { recursive: true });
+    fs.writeFileSync(marker, '');
     const page = await openPage('capture', scale);
     const contract = await page.evaluate(() => typeof (window as any).__start === 'function' && typeof (window as any).__tick === 'function');
     if (!contract) die(1, `MOTION_CONTRACT_MISSING: ${opts.target}?capture does not expose window.__start() and window.__tick(dt); add the capture mode before recording`);
