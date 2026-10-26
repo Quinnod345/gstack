@@ -2945,14 +2945,14 @@ describe('Codex generation (--host codex)', () => {
 
   test('no .claude/skills/ in Codex output', () => {
     for (const skill of CODEX_SKILLS) {
-      const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
       expect(content).not.toContain('.claude/skills');
     }
   });
 
   test('no ~/.claude/ runtime paths in Codex output', () => {
     for (const skill of CODEX_SKILLS) {
-      const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
       // Outside prompts may explicitly forbid reading Claude's skill directory.
       // Every executable/runtime path must still use the selected host root.
       const withoutBoundary = content.replace(/^.*do not read or execute any files under[^\n]*$/gim, '');
@@ -3437,7 +3437,7 @@ describe('Parameterized host smoke tests', () => {
           if (isRepoRootSymlink(path.join(hostDir, skill))) continue;
           const skillMd = path.join(hostDir, skill, 'SKILL.md');
           if (!fs.existsSync(skillMd)) continue;
-          const content = fs.readFileSync(skillMd, 'utf-8');
+          const content = readSkillStartup(skillMd);
           const leaks = externalHostPathLeaks(content);
           if (leaks.length > 0) {
             throw new Error(`${skill}: .claude/skills leakage:\n${leaks.slice(0, 3).join('\n')}`);
@@ -4578,7 +4578,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
       if (!entry.isDirectory()) continue;
       const skillMd = path.join(ROOT, entry.name, 'SKILL.md');
       if (!fs.existsSync(skillMd)) continue;
-      const content = fs.readFileSync(skillMd, 'utf-8');
+      const content = readSkillStartup(skillMd);
       expect(content, `handshake marker in ${entry.name}/SKILL.md`).not.toContain(HANDSHAKE_MARKER);
       checked++;
     }
@@ -4601,7 +4601,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
         if (!entry.isDirectory()) continue;
         const skillMd = path.join(skillsRoot, entry.name, 'SKILL.md');
         if (!fs.existsSync(skillMd)) continue;
-        const content = fs.readFileSync(skillMd, 'utf-8');
+        const content = readSkillStartup(skillMd);
         expect(content, `handshake marker in ${host}/skills/${entry.name}/SKILL.md`).not.toContain(HANDSHAKE_MARKER);
         checked++;
       }

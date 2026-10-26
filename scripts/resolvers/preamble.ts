@@ -3,11 +3,11 @@
  *
  * Each generator lives in its own file under ./preamble/*.ts. This file only
  * wires them together: preambleSections() is the composition, and
- * generatePreamble() joins it into the full inline render (tier 1 skills and
- * the tests' oracle). For tier 2+ skills, {{PREAMBLE}} resolves through
- * ./preamble-hoist.ts, which splits the same sections into a per-skill pointer
- * plus the shared sections/preamble.md the skill Reads on load. Keep
- * composition declarative — no inline logic beyond tier gating.
+ * generatePreamble() joins it into the full inline render that tests use as
+ * the pre-hoist oracle. {{PREAMBLE}} resolves through ./preamble-hoist.ts,
+ * which renders tier 1 inline and splits tier 2+ into a per-skill pointer plus
+ * the shared sections/preamble.md the skill Reads on load. Keep composition
+ * declarative — no inline logic beyond tier gating.
  *
  * Each skill runs independently via `claude -p` (or the host's equivalent).
  * The preamble provides: update checks, session
