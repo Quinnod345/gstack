@@ -180,6 +180,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/plans/autoplan-focus-appearance.md': [],
   'test/fixtures/plans/ui-heavy-feature-design.md': [],
   'test/fixtures/prosons-neutral-neg-captures.json': ['test/prosons-neutral-posture.test.ts'],
+  'test/fixtures/prose-lint/**': ['test/prose-lint.test.ts'],
   'test/fixtures/pty-idle-turn-end.json': ['test/helpers/claude-pty-runner.runners.unit.test.ts', 'test/helpers/claude-pty-runner.screen.unit.test.ts'],
   'test/fixtures/redact-diagram/**': ['test/redact-context-exemptions.test.ts'],
   'test/fixtures/remote-identity-vectors.json': ['test/bin-context-windows-slug.test.ts', 'test/gstack-slug-parity.test.ts', 'test/remote-identity-vectors.test.ts'],
