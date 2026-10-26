@@ -3818,7 +3818,9 @@ time; `gstack-ship-policy validate` prints `MIN_READER:` for exactly that.
 coordinator could misread: the working tree has uncommitted tracked changes,
 HEAD is not the PR's pushed head (read through `gh pr view`), CI at that
 exact head is not green (failed, pending or unreadable), or the pregate result
-is missing, failed or recorded on another tree (`PREGATE_STALE`).
+is missing, failed or recorded on another tree (`PREGATE_STALE`). Under
+`--dispatch-ci` it is also a dispatched workflow run that concluded red (a red
+run clears no pregate lane) or a `gh workflow run` that failed.
 
 **Fix.** Commit and push, wait for CI on that head, rerun
 `gstack-pregate run --allow-repo-commands` when the tree changed, then rerun
@@ -3908,7 +3910,8 @@ a `train` block with `min_gstack_version` on the base branch first
 
 **Meaning.** A pinned PR's head repository is not the base repository. The
 train branch and its dispatches run with repository secrets, so fork work
-never rides a train.
+never rides a train. `ready --dispatch-ci` refuses a fork head for the same
+reason and dispatches nothing.
 
 **Fix.** Run the printed `train build --prs <list without it>`; the fork PR
 stays on the trusted-branch path.
@@ -3972,7 +3975,11 @@ one-PR train.
 ### `QUEUE_TRAIN_PENDING`
 
 **Meaning.** The train's run (free tests, the full gate or the bisect) has
-not finished, so there is no verdict yet.
+not finished, so there is no verdict yet. The same code covers a `train watch`
+that reached its timeout, `verify --pr <n> --screen` on a screen run still
+going, `verify --post-merge` on checks that have not settled, and a
+`ready --dispatch-ci` workflow run still going at its `--timeout`; each prints
+the command to rerun as `NEXT:`.
 
 **Fix.** Rerun the printed `NEXT:` command later. Nothing is dispatched again
 while a run is pending.
@@ -4110,10 +4117,14 @@ to fix this: the stamp comes only when the slot is called.
 <a id="queue-screen-stale-ref"></a>
 ### `QUEUE_SCREEN_STALE_REF`
 
-**Meaning.** `gstack-ship-queue ready --screen` dispatches the screen against
-GitHub's `refs/pull/<n>/merge`, and that ref is missing or still merges an
-older head than the PR's pushed head. GitHub stops recomputing the merge ref
-while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
+**Meaning.** `ready --screen` refuses with this code when the PR conflicts with
+the base beyond the CHANGELOG and the stamp files (the message lists the
+conflicting paths) or when it cannot list the remote's refs. A missing or
+lagging merge ref alone no longer refuses (see Fix). The rest of this
+paragraph is why such a ref cannot be screened directly: `ready --screen`
+dispatches the screen against GitHub's `refs/pull/<n>/merge`, and that ref can
+be missing or still merge an older head than the PR's pushed head. GitHub
+stops recomputing the merge ref while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
 counts), so a screen dispatched there checks out the old merge, sees itself
 superseded, plans 0 cases and reports success. GSTA-95 hit this on #3431:
 `ready` printed `SCREEN_DISPATCH:` as if a screen ran. `ready` now compares
@@ -4129,10 +4140,10 @@ read (`… paid-plan artifact has expired`, `… manifest.json is unreadable`, a
 unreadable run or artifact list, an unreadable repository slug, or a READY
 whose run id is not a number) keeps the slot screened and prints
 `SCREEN: #<n> <reason>; counted as screened, unverified`; `ready --screen`
-follows such a run. When `ready` cannot list the remote's refs or fetch the
-merge ref at all, it refuses with the same code and a `could not list …` or
-`could not fetch …` message whose NEXT line says to check the remote, not to
-resolve a conflict.
+follows such a run. When `ready` cannot list the remote's refs, it refuses with
+the same code and a `could not list …` message whose NEXT line says to check
+the remote, not to resolve a conflict; a merge ref that lists but cannot be
+fetched is replaced by the scratch merge described under Fix.
 
 **Fix.** Since the scratch-merge screen landed, a lagging merge ref is no
 longer a refusal: `ready --screen` builds the merge of the PR head onto
@@ -4142,8 +4153,10 @@ base's side, the CHANGELOG merges by section), pushes it as
 `SCREEN_MERGE: scratch merge …`. The code now means a real conflict: the
 message lists the conflicting paths. Resolve those with the base branch,
 push, and run `gstack-ship-queue ready --pr <n> --screen` again. A
-CHANGELOG-only or stamp-file-only conflict never refuses. `train prune
---stale` deletes the scratch branches of merged or closed PRs.
+CHANGELOG-only or stamp-file-only conflict does not refuse, unless the PR's
+CHANGELOG drops or renames a released heading (the message then names the
+CHANGELOG). `train prune --stale` deletes the scratch branches of merged or
+closed PRs.
 
 <a id="queue-screen-red"></a>
 ### `QUEUE_SCREEN_RED`
@@ -4172,8 +4185,9 @@ the flaky cases are listed for the ledger and need no rerun.
 ### `QUEUE_TRAIN_STACK_RED`
 
 **Meaning.** `gstack-ship-queue train build --dry-run --stack-tests` ran a PR's
-new test files (files the PR adds relative to the base under a test directory
-or named `*.test.*` / `*.spec.*`) on the integrated prefix that includes it,
+new test files (files the PR adds relative to the base whose name ends in
+`.test`, `_test`, `.spec` or `_spec` plus a JS or TS extension, bun's own
+rule; a helper or fixture under `test/` is not one) on the integrated prefix that includes it,
 T<k> (the base plus every slot up to and including that PR), in a scratch
 worktree, and they failed. The `STACK_TESTS: #<pr> T<k> <n> new test file(s)
 FAIL (<files>): <failing assertion>` line names the files and the runner's
@@ -4191,11 +4205,13 @@ other than `bun test`; the files are appended to the command.
 <a id="queue-post-merge-red"></a>
 ### `QUEUE_POST_MERGE_RED`
 
-**Meaning.** `gstack-ship-queue verify --post-merge <sha>` watched the check
-runs attached to a commit the train merged onto the base branch (the push
-workflows: free tests, the Windows subset, the main backstop) until none was
-still running, and at least one concluded `failure`, `timed_out`,
-`cancelled` or another non-success. A `neutral` or `skipped` check (the
+**Meaning.** `gstack-ship-queue verify --post-merge <sha>` (the full 40-character
+SHA) watched the check runs attached to a commit the train merged onto the
+base branch (the push workflows: free tests, the Windows subset, the main
+backstop) and its commit statuses until none was still running, and at least
+one check concluded `failure`, `timed_out`, `cancelled` or another non-success,
+or a commit status failed (the message then says a commit status, not a check
+run). A `neutral` or `skipped` check (the
 backstop superseding itself when main moved on) is counted as skipped, never
 red. The command keeps no process state: it polls gh until the checks settle
 or `--timeout` (default 2700 s) passes, prints `POST_MERGE: <sha12>
