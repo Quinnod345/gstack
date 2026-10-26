@@ -173,6 +173,9 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
     const record = JSON.parse(block.replace(/<number of refinement iterations>|<n>/g, '1'));
     expect(parseCraftExceptions(JSON.stringify(record))).toEqual([{ id: '<craft id>', count: 1, reason: '<why accepted>' }]);
     expect(parseCraftExceptions('{"mode":"freeform"}')).toEqual([]);
+    const legacy = parseCraftExceptions('{"craft_exceptions":[{"id":"transition-all","count":1,"reason":"recorded before the rename"}]}');
+    expect(legacy).toEqual([{ id: 'layout-transition', count: 1, reason: 'recorded before the rename' }]);
+    expect(acceptFindings(checkCraft('<style>a { transition: all .2s }</style>'), legacy).accepted).toEqual([{ id: 'layout-transition', count: 1, reason: 'recorded before the rename' }]);
     expect(parseCraftExceptions('{"craft_exceptions":[{"id":"oops","count":1,"reason":"quoted\\nfrom the user"}]}')).toEqual([{ id: 'oops', count: 1, reason: 'quoted from the user' }]);
     for (const bad of ['[]', 'null', '{"craft_exceptions":{}}', '{"craft_exceptions":[{"id":"oops","count":0,"reason":"x"}]}', '{"craft_exceptions":[{"id":"oops","count":1,"reason":" "}]}', '{"craft_exceptions":[{"id":"oops","count":1.5,"reason":"x"}]}']) {
       expect(() => parseCraftExceptions(bad)).toThrow();

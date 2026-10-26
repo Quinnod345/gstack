@@ -130,7 +130,7 @@ export function parseCraftExceptions(json: string): CraftException[] {
   const list = record.craft_exceptions ?? [];
   const valid = (e: any) => typeof e?.id === 'string' && Number.isInteger(e.count) && e.count > 0 && typeof e.reason === 'string' && e.reason.trim() !== '';
   if (!Array.isArray(list) || !list.every(valid)) throw new Error('craft_exceptions must be a list of { id, count, reason } with a positive count and a reason');
-  return list.map(({ id, count, reason }) => ({ id, count, reason: reason.replace(/\s+/g, ' ').trim() }));
+  return list.map(({ id, count, reason }) => ({ id: id === 'transition-all' ? 'layout-transition' : id, count, reason: reason.replace(/\s+/g, ' ').trim() }));
 }
 
 /** A finding is accepted when an exception names its id with at least its count; a higher count stays an issue and says how many were accepted. */
