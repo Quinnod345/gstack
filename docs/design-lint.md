@@ -26,8 +26,20 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
 - Reads `.html`, `.css`, `.jsx`, `.tsx`, `.vue`, `.svelte` and `.astro`.
   Tailwind class strings in components are read too, including `cn()`,
   `clsx()`, `cva()` and their kin. `node_modules`, dot folders and build
-  output below the top level are skipped; a symlink is followed once; a file
+  output below the top level are skipped; a symlink is followed once and lint
+  roots and the working directory are read through their real paths; a file
   over 2 MB is a bundle, not a page, and is skipped with a warning on stderr.
+  A page or stylesheet under a lint root that the lint skipped (over the cap,
+  unreadable, unparseable) is also one `internal-error` finding at ask, so a
+  page the lint could not read is not a pass; a linked stylesheet over the cap
+  is only warned about, because the page that links it is still read.
+- Markup inside an HTML comment is dead for every rule, a commented-out
+  `<style>` or `<script>` included. A tree nests at most 512 elements deep
+  (the browser's own cap); a start tag deeper than that is read as empty. An
+  open heading is closed by the next heading start tag, an open `<p>` by the
+  next block start, and a repeated `<li>`, `<button>`, `<a>`, `<label>`,
+  `<select>`, `<form>` or table cell by its next start tag, as the browser
+  does, so a page of unclosed elements costs its length to lint.
 - A page is linted with the stylesheets it links (`<link rel=stylesheet>`,
   `@import`, and anything they reach); a directory of components shares the
   project's tokens and global state styles, so a focus ring declared once in
@@ -109,8 +121,9 @@ that links it, and only for findings located in it: the shared-word check does
 not apply (a stylesheet has no prose), so the claim cannot reach a finding in
 the page's own markup. Two claims on one line are both read. A blocking copy
 tell (`generic-hero-copy`) is the Floor inside the hero, the section or header
-that holds the h1; the same line in body copy further down is suspected and
-reported at ask, so a waiver can answer it.
+that holds the h1; the same line, or a "Meet <Name>" or three-word triad
+heading, in body copy further down is suspected and reported at ask, so a
+waiver can answer it.
 
 ## Rules
 
@@ -289,9 +302,16 @@ container (`glow-wash` reports a blur over a translucent near-white or
 near-black fill; the zero-offset coloured glow is read from 8px in a Tailwind
 class and past 20px in a stylesheet, hallmark's two thresholds). The render
 tier's probes run in the page's own JavaScript, so a page that redefines them
-is caught only when it hands back a rule or grade the lint does not know; a
-page that answers every probe with nothing passes the render tier, which is why
-the static tier stands on its own and a URL target is measured, never trusted.
+is caught only when it hands back a rule, grade or shape the lint does not
+know (each such answer is one `render` finding naming the probe and width,
+and every well-formed finding beside it is kept); a page that answers every
+probe with nothing passes the render tier, which is why the static tier stands
+on its own and a URL target is measured, never trusted. A stylesheet shared by
+many pages is parsed once but its stylesheet-only rules run per page and are
+deduplicated at the end, so forty pages on one bundle cost forty passes over
+it. `overused-font` and `banned-font` match a catalog stem to the whole
+family name or its first words (`Cormorant Garamond`, `DM Serif Display`,
+`Comic Sans MS`), never to a longer word (`Interstate` is not `Inter`).
 
 ## What is deliberately not ported
 

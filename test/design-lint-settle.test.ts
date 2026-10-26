@@ -103,12 +103,14 @@ describe('design-lint render settled without a browser: what the page hands back
       ev[FIRST] = JSON.stringify([{ rule: 'horizontal-scroll', grade: 'warn', evidence: 'the hero may overflow' }, { rule: 'horizontal-scroll', grade: 'fail', evidence: 'the hero overflows' }]);
       ev[FIRST + 1] = JSON.stringify([{ rule: 'nope', grade: 'fail', evidence: 'x' }, { rule: 'horizontal-scroll', grade: 'maybe', evidence: 'y' }]);
     }) });
-    expect(byRule(r.findings, 'horizontal-scroll').map((f) => [f.grade, f.source, f.evidence])).toEqual([['blocks', 'render', '[320px] the hero overflows (also at 320, 375px)']]);
+    expect(byRule(r.findings, 'horizontal-scroll').map((f) => [f.grade, f.source, f.evidence])).toEqual([['blocks', 'render', '[320px] the hero overflows']]);
     const warns = await lintRender([file], { cwd: dir, run: runner((ev) => { ev[FIRST] = JSON.stringify([{ rule: 'horizontal-scroll', grade: 'warn', evidence: 'the hero may overflow' }]); }) });
     expect(byRule(warns.findings, 'horizontal-scroll').map((f) => [f.grade, f.source, f.evidence])).toEqual([['ask', 'render', '[320px] the hero may overflow']]);
-    expect(renders(r.findings).map(([g, e]) => [g, e.replace(/\(.*\)/, '(…)')])).toEqual([
+    expect(renders(r.findings).map(([g, e]) => [g, e.replace(/\(.*?\)/, '(…)').replace(/with the pr.*$/, 'with the probes')])).toEqual([
+      ['blocks', 'the page handed back a measurement the lint does not know (…); its scripts may be tampering with the probes'],
       ['blocks', 'the page handed back a measurement the lint does not know (…); its scripts may be tampering with the probes'],
     ]);
+    expect(renders(r.findings).map(([, e]) => /\((.*?)\)/.exec(e)![1])).toEqual(['nope', 'horizontal-scroll']);
   });
 
   test('a contrast claim whose pixel pass cannot be read keeps its computed ratio', async () => {

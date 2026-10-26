@@ -579,7 +579,9 @@ describe('design-lint: hardening (ship review)', () => {
     const before = process.memoryUsage().rss;
     const { parent } = treeOf(doc);
     expect(process.memoryUsage().rss - before).toBeLessThan(200e6);
-    expect(ancestorsOf(doc, 20001).length).toBe(20001);
+    expect(ancestorsOf(doc, 20001).length).toBe(512);
+    expect(innerOf(doc, 20001)!.inner).toBe('');
+    expect(innerOf(doc, 400)!.inner.length).toBeGreaterThan(1000);
     expect(parent[2]).toBe(1);
   });
 
