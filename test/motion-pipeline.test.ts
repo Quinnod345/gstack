@@ -53,10 +53,10 @@ function run(argv: string[]) {
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
 
-function capture(dir: string, html: string, o: { mask?: boolean } = {}) {
+function capture(dir: string, html: string, o: { mask?: string | false } = {}) {
   const file = path.join(dir, 'page.html');
   fs.writeFileSync(file, html);
-  return run([CAPTURE, file, '--size', '640x100', '--cycle', '0.5', '--out', path.join(dir, 'cap'), ...(o.mask === false ? [] : ['--mask', '.card'])]);
+  return run([CAPTURE, file, '--size', '640x100', '--cycle', '0.5', '--out', path.join(dir, 'cap'), ...(o.mask === false ? [] : ['--mask', o.mask ?? '.card'])]);
 }
 
 describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', () => {
@@ -129,9 +129,23 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
   // Value: protects=a page without window.__start/__tick stops with MOTION_CONTRACT_MISSING and exit 1 before writing capture.json;
   //   fails_when=the contract probe is dropped and frames of an unanimated page are recorded as a capture; why_new=no test loads a page in the capture bin; seam=none;
   //   no_claim=only the missing-contract case; a contract that throws mid-capture is not exercised
-  //   The same --out also checks ownership: a foreign still.png is refused and kept, the retry after a refused page succeeds
-  //   (here without a mask, so check ends 'clean (overflow not checked)'), and a later failed capture clears that manifest.
   test('a page without the capture contract is refused', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
+    try {
+      const c = capture(dir, page({ loops: true, contract: false }));
+      expect(c.code).toBe(1);
+      expect(c.err).toContain('MOTION_CONTRACT_MISSING');
+      expect(fs.existsSync(path.join(dir, 'cap', 'capture.json'))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  // Value: protects=a capture reuses an --out only when its own marker is there: a foreign still.png is refused and kept, the retry after a
+  //   refused page succeeds, and a later failed capture clears the previous manifest; the no-mask run ends 'clean (overflow not checked)'
+  //   and an unbounded --mask-grow is refused; fails_when=the marker test, the cleanup, the no-mask result or the grow bound is dropped;
+  //   why_new=review cycles found a refused retry and a deleted foreign dir; seam=none; no_claim=a crash mid-frame-loop is not simulated
+  test('an --out is reused only when this tool wrote it', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
     try {
       const cap = path.join(dir, 'cap');
@@ -153,6 +167,9 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       expect(check.code, check.out + check.err).toBe(0);
       expect(check.out).toContain('MOTION_CHECK: overflow skipped');
       expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: clean (overflow not checked)');
+      const grow = run([ENCODE, 'check', cap, ...PHASES, '--mask-grow', '33']);
+      expect(grow.code).toBe(2);
+      expect(grow.err).toContain('--mask-grow must be a whole number of pixels from 0 to 32');
 
       expect(capture(dir, page({ loops: true, contract: false })).code).toBe(1);
       expect(fs.existsSync(path.join(cap, 'capture.json')) || fs.existsSync(path.join(cap, 'still.png'))).toBe(false);
@@ -161,7 +178,24 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
     }
   }, 240_000);
 
-  // Value: protects=an offscreen loading=lazy image no longer hangs the still render (img.decode() never settles on it);
+  // Value: protects=a mask that paints the whole frame fails overflow instead of blacking out every pixel on both sides and passing;
+  //   fails_when=the mask-coverage guard is dropped; why_new=adversarial review reproduced a vacuous overflow pass; seam=none;
+  //   no_claim=only a full-frame mask; the 90% threshold itself is not swept
+  test('a mask that covers the frame fails overflow', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
+    try {
+      expect(capture(dir, page({ loops: true }), { mask: 'html' }).code).toBe(0);
+      const check = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES]);
+      expect(check.code).toBe(1);
+      expect(check.out).toMatch(/MOTION_CHECK: overflow fail the mask covers \d+% of the frame/);
+      expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: 1 failed');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
+
+  // Value: protects=an offscreen loading=lazy image no longer hangs the still render (img.decode() never settles on it), and --still writes
+  //   one PNG at --scale (the Step 3 fidelity reference);
   //   fails_when=the eager switch and the 30 s bound are both dropped and --still waits forever; why_new=adversarial probe hung at 90 s; seam=none;
   //   no_claim=one lazy image on a local page; a slow network image is bounded only by the 30 s timer
   test('a page with an offscreen lazy image renders its still', () => {
@@ -170,9 +204,13 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       fs.writeFileSync(path.join(dir, 'dot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
       const file = path.join(dir, 'lazy.html');
       fs.writeFileSync(file, '<!doctype html><body style="margin:0"><div style="height:5000px"></div><img loading="lazy" src="dot.png" width="4" height="4"></body>');
-      const still = run([CAPTURE, file, '--size', '640x100', '--still', path.join(dir, 'still.png')]);
+      const out = path.join(dir, 'still.png');
+      const still = run([CAPTURE, file, '--size', '640x100', '--still', out, '--scale', '2']);
       expect(still.code, still.err).toBe(0);
+      expect(still.out.trim()).toBe(`STILL_OK ${out}`);
       expect(still.err).not.toContain('still loading');
+      const png = fs.readFileSync(out);
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1280, 200]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

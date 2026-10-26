@@ -74,7 +74,7 @@ _FINALIZED=$(ls -t "$GSTACK_STATE_ROOT/projects/$SLUG/designs/"*/finalized.html 
 
 Nothing found and nothing named: ask once which design to animate, offering /design-shotgun or /design-html to make one.
 
-`BROWSER_UNAVAILABLE`: nothing can render; give its fix line, build `page.html` and stop before the first capture call. `NO_FFMPEG`: say ffmpeg is needed for the checks and exports (macOS `brew install ffmpeg`, Debian/Ubuntu `sudo apt-get install -y ffmpeg`, Windows `winget install Gyan.FFmpeg`), build the page, render its Step 3 still for a visual check, and stop.
+`BROWSER_UNAVAILABLE` or native Windows (capture needs WSL, macOS, Linux): nothing renders; give the fix, build `page.html` and stop before the first capture call. `NO_FFMPEG`: say ffmpeg is needed for the checks and exports (macOS `brew install ffmpeg`, Debian/Ubuntu `sudo apt-get install -y ffmpeg`), build the page, render its Step 3 still for a visual check, and stop.
 
 Set up the run directory:
 

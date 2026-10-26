@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { clockMs, planCapture } from '../lib/motion-capture';
 import {
-  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, manifestError, mp4Args, padError, parsePsnrStats, planChecks, psnrArgs,
+  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, manifestError, maskCoverageArgs, mp4Args, padError, parseMaskCoverage, parsePsnrStats, planChecks, psnrArgs,
   resolveFfmpeg, smallGifArgs, FFMPEG_MISSING, type CaptureManifest, type CheckJob, type CheckOptions,
 } from '../lib/motion-encode';
 
@@ -181,6 +181,15 @@ describe('PSNR parsing and verdicts', () => {
     expect(manifestError({ ...manifest(), still: '../still.png' })).toContain('still must be a .png file name');
     expect(manifestError({ ...manifest(), mask: 'mask.png,hue=s=0' })).toContain('mask must be a .png file name');
     expect(manifestError(null)).toContain('schema 1');
+    expect(manifestError({ ...manifest(), fps: 0 })).toContain('at least 1');
+    expect(manifestError({ ...manifest(), windowFrames: 1_000_000_000 })).toContain('runs past its frames');
+  });
+
+  test('mask coverage reads signalstats YAVG as a fraction of white', () => {
+    const args = maskCoverageArgs('/c/mask.png', 2);
+    expect(args[args.indexOf('-vf') + 1]).toBe('format=gray,dilation,dilation,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-');
+    expect(parseMaskCoverage('frame:0    pts:0       pts_time:0\nlavfi.signalstats.YAVG=127.5\n')).toBe(0.5);
+    expect(parseMaskCoverage('')).toBeNull();
   });
 });
 

@@ -79,6 +79,7 @@ describe('capture arguments', () => {
     expect(err(['p.html', '--size', '640x400', '--fps', '30'])).toContain("unknown option '--fps'");
     expect(err(['p.html', 'q.html', '--size', '640x400'])).toContain("unexpected argument 'q.html'");
     expect(err(['p.html', '--size'])).toContain('needs a value');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '4', '--out', 'c', '--mask', '.card} body {'])).toContain('--mask takes a CSS selector');
     // Value: protects=a degenerate frame, a zero cycle and a fractional tail are refused at parse time with exit-2 wording;
     //   fails_when=the size floor, the >0 check or the tail integer check is dropped; why_new=no row hit these three guards; seam=none;
     //   no_claim=parser only; Chromium's behaviour on such a frame is not exercised

@@ -121,6 +121,7 @@ export function parseCaptureArgs(argv: string[]): CaptureOptions | { error: stri
   }
   if (still && !/\.png$/i.test(still)) return { error: '--still must name a .png file' };
   if (still && flags.has('--mask')) return { error: '--mask belongs to a capture (--out), not a single still' };
+  if (/[{};]/.test(flags.get('--mask') ?? '')) return { error: `--mask takes a CSS selector, got '${flags.get('--mask')}'` };
   if (out && flags.has('--scale')) return { error: '--scale belongs to --still; a capture always uses the 1920x1200 scale' };
   return { target, width, height, out, still, cycle: nums['--cycle'], scale: nums['--scale'], pre, tail, mask: flags.get('--mask') };
 }

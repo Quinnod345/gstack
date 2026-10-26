@@ -43,6 +43,8 @@ export function manifestError(m: unknown): string | null {
   for (const k of ['fps', 'pre', 'windowStart', 'windowFrames', 'frames']) {
     if (!Number.isInteger(o[k]) || (o[k] as number) < 0) return `capture.json field ${k} must be a non-negative integer`;
   }
+  if ((o.fps as number) < 1 || (o.windowFrames as number) < 1) return 'capture.json fields fps and windowFrames must be at least 1';
+  if ((o.windowStart as number) + (o.windowFrames as number) > (o.frames as number)) return 'capture.json window runs past its frames (windowStart + windowFrames > frames)';
   if (typeof o.cycle !== 'number' || !(o.cycle > 0)) return 'capture.json field cycle must be a positive number';
   if (!Array.isArray(o.clockMs) || o.clockMs.length !== o.frames || !o.clockMs.every(t => Number.isFinite(t))) return 'capture.json field clockMs must hold one number per frame';
   for (const k of ['still', 'mask']) {
@@ -130,6 +132,18 @@ export function psnrArgs(o: { first: string; start?: number; count: number; refe
       + `[f][m1]${blackout}[fa];[r][m2]${blackout}[ra];[fa][ra]psnr=stats_file=-`;
   }
   return [...QUIET, ...inputs, '-filter_complex', graph, '-f', 'null', '-'];
+}
+
+/** Mean brightness of the grown mask, printed as lavfi.signalstats.YAVG (0-255), so check can refuse a mask that covers the frame. */
+export function maskCoverageArgs(mask: string, maskGrow = 2): string[] {
+  const grow = Array.from({ length: maskGrow }, () => 'dilation');
+  return [...QUIET, '-i', mask, '-vf', ['format=gray', ...grow, 'signalstats', 'metadata=print:key=lavfi.signalstats.YAVG:file=-'].join(','), '-f', 'null', '-'];
+}
+
+/** Fraction of the frame the mask covers, from maskCoverageArgs output; null when ffmpeg printed no YAVG. */
+export function parseMaskCoverage(text: string): number | null {
+  const m = /lavfi\.signalstats\.YAVG=([\d.]+)/.exec(text);
+  return m ? Number(m[1]) / 255 : null;
 }
 
 /** PSNR of two same-size images, optionally cropped and lightly blurred first (the still-fidelity check). */

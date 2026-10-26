@@ -28,7 +28,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  compareArgs, contactSheetArgs, cropError, framePath, judgeCheck, loopGifArgs, manifestError, mp4Args, padError, parsePsnrStats, planChecks, resolveFfmpeg,
+  compareArgs, contactSheetArgs, cropError, framePath, judgeCheck, loopGifArgs, manifestError, maskCoverageArgs, mp4Args, padError, parseMaskCoverage, parsePsnrStats, planChecks, resolveFfmpeg,
   smallGifArgs, FFMPEG_MISSING, type CaptureManifest,
 } from '../lib/motion-encode';
 
@@ -103,17 +103,27 @@ if (manifestProblem) die(2, `gstack-motion-encode: ${manifestProblem}; capture a
 if (cmd === 'check') {
   const layout = flags.get('--layout') ?? 'cards';
   if (layout !== 'app' && layout !== 'cards') die(2, '--layout must be app or cards');
+  const maskGrow = num('--mask-grow', 2);
+  if (!Number.isInteger(maskGrow) || maskGrow > 32) die(2, `gstack-motion-encode: --mask-grow must be a whole number of pixels from 0 to 32, got '${flags.get('--mask-grow')}'`);
   const jobs = planChecks(manifest, dir, {
     dissolveAt: num('--dissolve-at', manifest.cycle - 1.0),
     emptyFrom: num('--empty-from', manifest.cycle - 0.4),
     introEnd: num('--intro-end', 2.4),
     layout,
-    maskGrow: num('--mask-grow', 2),
+    maskGrow,
   });
   if ('error' in jobs) die(2, `gstack-motion-encode: ${jobs.error}`);
   const minDb = flags.has('--min-db') ? num('--min-db', 0) : Infinity;
   let failed = 0;
   for (const job of jobs) {
+    if (job.id === 'overflow') {
+      const coverage = parseMaskCoverage(String(run(maskCoverageArgs(path.join(dir, manifest.mask!), maskGrow)).stdout));
+      if (coverage === null || coverage > 0.9) {
+        failed++;
+        console.log(`MOTION_CHECK: overflow fail ${coverage === null ? 'the mask coverage could not be measured' : `the mask covers ${Math.round(coverage * 100)}% of the frame, so movement outside it cannot be seen`}; mark only the clip containers with data-motion-clip`);
+        continue;
+      }
+    }
     const r = run(job.args);
     if (r.status !== 0) {
       failed++;
