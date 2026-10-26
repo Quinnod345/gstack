@@ -650,8 +650,9 @@ carry display labels leaves those trials cost-unknown rather than guessing
 which case paid (`junitCensus` in `scripts/lib/paid-report.ts`). An absent
 field means known. Census and marathon cost lines print the known sum and
 `N of M trial(s) cost unknown`, and a train verdict's `ATTEMPT:` line prints
-`cost=$<known> known + <n> of <m> case(s) cost unknown` when any case in the
-train record has no cost, never a bare total over unknowns.
+`cost=$<known> known + <n> of <m> case(s) cost unknown` when some but not
+every case in the train record has a cost (a record with no priced case prints
+no cost at all), never a bare total over unknowns.
 
 <a id="session-ledger"></a>
 **Session ledger.** Every runner (session-runner, the Agent SDK runner

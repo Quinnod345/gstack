@@ -9,7 +9,7 @@
 
 ### Fixed
 - **`scripts/lib/paid-report.ts`**: when a shard ran exactly one case (every case shard since W5a), its result records belong to that case even when they are named by a display label, so the trial's `cost_usd` is the record's and `cost_known` is no longer false; a failed trial in such a shard also takes its `failure_class`, `exit_reason` and `error` from that record (train-gate classes a red `infra` record INFRA instead of VERDICT) where it was a bare `assertion` with the JUnit message. No case's pass or fail changes. A multi-case shard whose records carry display labels keeps those trials cost-unknown rather than guessing which case paid. The train record's per-case `cost_usd` (scripts/train-gate.ts) and the slice report's headline now agree for case shards; the headline was never wrong.
-- **`lib/ship-queue-train-verdict.ts`**: the `ATTEMPT:` line prints `cost=$<known> known + <n> of <m> case(s) cost unknown` when any panel has no cost, and the bare `cost=$<sum>` only when every panel is priced.
+- **`lib/ship-queue-train-verdict.ts`**: the `ATTEMPT:` line prints `cost=$<known> known + <n> of <m> case(s) cost unknown` when some but not every panel is priced, the bare `cost=$<sum>` only when every panel is priced, and no cost at all when none is (unchanged).
 
 ### Tests
 - `test/gstack-ship-policy.test.ts` pins the live fill rule (3 PRs or one hour) and exercises `fillDue` with the live block at 59 and 60 minutes and at 3 PRs.

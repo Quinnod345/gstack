@@ -2183,8 +2183,8 @@ unknown. So is a trial in a multi-case shard whose result records are named by
 a display label rather than the case id, because no record can be attributed
 to it (a one-case shard's records are its case's). Only the known sum is
 shown. A train verdict's `ATTEMPT:` line reports the same as `cost=$<x> known
-+ <n> of <m> case(s) cost unknown`, and a bare `cost=$<x>` only when every case
-in the train record is priced.
++ <n> of <m> case(s) cost unknown`, a bare `cost=$<x>` only when every case
+in the train record is priced, and no cost at all when none is.
 
 **Fix.** None needed; this is informational.
 
