@@ -462,7 +462,7 @@ You know the feeling. You have a feature, a page, a landing screen... and you're
 3. It generates 3 distinct design variants as PNGs
 4. A comparison board opens in your browser with all 3 side-by-side
 5. You click "Approve" on the one you like, or give feedback for another round
-6. The approved variant saves to `~/.gstack/projects/$SLUG/designs/` with an `approved.json`
+6. The approved variant saves to `~/.gstack/projects/$SLUG/designs/` with an `approved.json`; for a landing, pricing or campaign screen, it also records the page archetype you picked (`classic-hero`, `long-form-story`, `minimal-conversion` or `comparison`) and its section outline
 
 That `approved.json` is one way to feed `/design-html`. The design pipeline chains: shotgun picks the direction, design-html renders it as working code. But `/design-html` also works with CEO plans, design reviews, or just a description.
 
@@ -512,7 +512,7 @@ Not every page needs the full Pretext engine. The skill reads the design and pic
 
 ### The refinement loop
 
-1. Reads the approved mockup from `approved.json`
+1. Reads the approved mockup from `approved.json`, plus any page archetype and section outline you picked on the board, which it builds as given instead of asking again
 2. Uses GPT-4o vision to extract implementation spec (colors, typography, layout)
 3. Generates self-contained HTML with Pretext inlined (15KB, zero network dependency)
 4. Spins up a live-reload server so you see changes instantly

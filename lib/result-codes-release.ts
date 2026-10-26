@@ -132,6 +132,22 @@ export const RELEASE_RESULT_CODES = {
     summary: 'a train stopped partway through publication, so main holds a prefix no gate covered on its own; ordinary trains are refused until a repair lands',
     fix: 'admit one repair PR at its exact head (train build --repair --prs <n>@<sha>); the freeze clears when verify finds main’s tree after that merge in a green record',
   },
+  // CREW rule 22 (Garry, 2026-10-25): /ship runs before every READY; the queue refuses a PR whose body has no current receipt.
+  QUEUE_RECEIPT_MISSING: {
+    anchor: 'queue-receipt-missing',
+    summary: 'the PR body carries no valid /ship receipt, so the PR was never shipped through gstack and cannot be READY’d, admitted to a train or merged',
+    fix: 'run /ship on the branch (unattended it writes the receipt into an open PR at HEAD with gstack-ship-receipt write --pr <n> --body …, else leaves it in .gstack/tmp/ship-receipt.md for the parent to post), then gstack-ship-queue ready again; there is no flag to skip this',
+  },
+  QUEUE_RECEIPT_STALE: {
+    anchor: 'queue-receipt-stale',
+    summary: 'the PR body’s /ship receipt is for another head than the one being READY’d or merged (a push after /ship, or a receipt copied from another PR)',
+    fix: 'rerun /ship on the current head so the receipt names it, then gstack-ship-queue ready again; a slot’s stamp commit keeps the receipt written for its pinned head',
+  },
+  QUEUE_SCREEN_STALE_REF: {
+    anchor: 'queue-screen-stale-ref',
+    summary: 'GitHub’s refs/pull/<n>/merge is missing or still merges an older head than the PR’s: the PR conflicts with the base (a CHANGELOG-only conflict counts), so a screen dispatched on it would plan no cases and report success',
+    fix: 'resolve the conflict with the base branch (or wait for GitHub to recompute the merge ref), push, then gstack-ship-queue ready --pr <n> --screen again; a lane never READYs on a screen that planned nothing',
+  },
   READY_SCREEN_CHOICE_REQUIRED: {
     anchor: 'ready-screen-choice-required',
     summary: 'the base policy turns trains on, so READY needs an explicit screen choice: --screen (pay for a diff-relevant screen now) or --no-screen',

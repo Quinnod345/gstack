@@ -97,6 +97,7 @@ function report(r: RestampResult, json: boolean): number {
     process.stdout.write(`FILES: ${(r.files ?? []).join(' ') || '(none)'}\n`);
     if (r.mergeCondition) process.stdout.write(`MERGE_CONDITION: sha=${r.mergeCondition}\n`);
     if (r.status === 'gate-ahead' && r.gateAhead) process.stdout.write(`next: run the verification gate in ${r.gateAhead.worktree}, then \`gstack-evidence bundle --out <file>\` there; the branch is untouched. At this PR's turn rerun \`gstack-restamp --next\` here and read \`gstack-tree-receipt --from ${GATE_AHEAD_REL}\` before deciding what to rerun.\n`);
+    else if ((r.status === 'stamped' || r.status === 'noop') && r.queueMode === 'stamp-at-merge') process.stdout.write(`next: NEW_VERSION=${r.newVersion}; commit and push only the stamp diff above (FILES), with no edit of your own: the train's verify accepts the CHANGELOG only as the base's plus this PR's entry re-headed; merge with the expected head ${r.mergeCondition ?? 'sha'} and recompute on a stale queue.\n`);
     else if (r.status === 'stamped' || r.status === 'noop') process.stdout.write(`next: NEW_VERSION=${r.newVersion}; record the release decision, then write the CHANGELOG entry text only (the heading is already ${r.newVersion}); merge with the expected head ${r.mergeCondition ?? 'sha'} and recompute on a stale queue.\n`);
   }
   process.stdout.write(formatResult('restamp', status, r.journal ?? JOURNAL_REL) + '\n');

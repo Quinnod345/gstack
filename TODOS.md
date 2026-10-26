@@ -52,7 +52,7 @@ The 158 older open issues were re-checked against main 5cb5e1c (v1.91.83.0). Of 
 Each item was decided in the Wave 9 plan and parked with its reason. Credit the reporter or contributor when it is picked up.
 
 - **Fold `triggers:` into skill descriptions (#2118)** — `scripts/gen-skill-docs.ts` folds only `voice-triggers:`, and the trimmed description keeps one sentence, so natural-language triggers never reach the listing. Parked because it conflicts with the catalog-trim design and would regenerate every skill. Mechanism when picked up: a `when_to_use:` frontmatter key for the Claude host, built from `triggers:`, deduped, and kept inside the catalog byte budget (Claude Code's 1,536-character combined listing limit); hosts that allowlist name and description get a bounded "Use when…" sentence or nothing. **Effort:** M. **Priority:** P2.
-- **Plan-tune signals stuck at 0.5 (#2623)** — `hosts/claude/hooks/question-log-hook.ts` logs the UI label, while `scripts/psychographic-signals.ts` looks up stable option keys, so no row ever matches. The two-line key mapping is capture plumbing only and does not fix saturation. Acceptance criteria: labels map to stable option keys at log time; `profile.inferred` records contributing events per dimension; per-event and per-session accumulation is bounded so a dimension cannot pin at 1.0; `{skill}-{slug}` ids get a hinted fallback. Needs a design call on the key source. **Effort:** M. **Priority:** P2.
+- **Plan-tune `{skill}-{slug}` ids never reach a signal (#3442, split from #2623)** — the label-to-key capture (#3394), `contributing_events` and the per-day bound (#3397) closed the rest of #2623. Remaining: `scripts/resolvers/question-tuning.ts` lets skills use `{skill}-{slug}` ids, which have no registry entry and so no `signal_key`; those answers never move a dimension. Acceptance: `{skill}-{slug}` ids get a hinted fallback to a registered signal key. Needs a design call on the key source. Credit @v639dragoon. **Effort:** M. **Priority:** P2.
 - **Stateless, instruction-only host mode (#3061, @m-check1B)** — hosted multi-tenant runtimes have no install, state root or helper binaries, but skill bodies still read and write `$GSTACK_STATE_ROOT`, call `bin/gstack-*` and log telemetry. Deferred to the new-hosts theme below. Requirements kept on record: tenant-owned state (a `capabilities.state: 'none'` host renders host-provided hooks instead of shell steps), named artifact hooks (`ARTIFACT_SAVE`/`ARTIFACT_FIND` per kind, `WEB_RESEARCH`, `SECRET_SCAN`, `USER_PREF`) mapped the way the gbrain resolvers already are, a generator check that fails a stateless render containing `~/.gstack`, `$GSTACK_`, `bin/gstack-*` or `--event-type`, and the `claude` host's output byte-identical. The contributor offered an office-hours overlay plus the generator check as a first PR. **Effort:** L. **Priority:** P3.
 - **Legacy unprefixed Cursor skill folders (#3084)** — 1.31 Cursor installs created `~/.cursor/skills/<skill>/SKILL.md` links; 1.91 links `gstack-*` folders and `_prune_stale_generated` in `setup` only looks at `gstack-*` names, so Cursor can load two skills with the same name. `setup` already removes old unprefixed Claude entries; Cursor needs the same owned-link cleanup (remove only links that point into a gstack checkout). Split from #3084's data-loss fix, which Wave 9 Lane A0 ships. **Effort:** S. **Priority:** P3.
 - **`/retro global` says what a "session" is (#1315, third problem)** — `bin/gstack-global-discover.ts` counts transcript files and rollouts, so cron- or agent-driven repos show hundreds of "sessions" with no interactive work. Annotate the retro output that sessions are tool invocations or files, not distinct human working sessions. Problems 1 and 2 are fixed (v1.91.66.0 and Wave 9 Lane F). **Effort:** S. **Priority:** P3.
@@ -60,7 +60,7 @@ Each item was decided in the Wave 9 plan and parked with its reason. Credit the 
 
 ### P3: feature themes from the Wave 9 triage (filed 2026-10-11)
 
-The 73 open feature requests, grouped by theme with counted demand (issues in the theme). Each issue closes with a link to its theme here; the three largest cross-cutting themes (new hosts, provider pluralism, install footprint) stay open as tracking issues. Pick a theme up as a whole and credit every linked reporter.
+The 73 open feature requests (75 with #3061 and #3122, which the themes below also name), grouped by theme with counted demand (issues in the theme). Each issue stays open under the `parked` label with a link to its theme here (the rule is in docs/triage.md); the three largest cross-cutting themes (new hosts, provider pluralism, install footprint) also have tracking issues. Pick a theme up as a whole and credit every linked reporter.
 
 - **New hosts (8 issues, plus #3061 above and 9 PRs parked on Oct 8)** — Kimi CLI (#1072), Gemini CLI (#1247), Pi Agent (#1288), Claude Desktop Cowork (#1345), Letta Code (#2117), team mode for non-Claude hosts (#890), `/retro global` discovery of Antigravity (#1977) and Kimi Code / OMP sessions (#2917). Waits for the host-config work; see "Parked contributor ideas (Oct 8 triage)" for the parked host PRs. **Priority:** P3.
 - **Provider pluralism (7 issues, plus #3122)** — Gemini CLI as an outside-voice backend (#619), non-OpenAI image providers in `design` (#990), Codex-native `image_gen` in the `design` binary's own generate, evolve and prototype calls (#2174; design-shotgun itself already uses `$imagegen` on Codex since #2175), GPT-6 Sol/Luna tiers in Codex call routing (#2943), a `/grok` review port (#2947), Codex review token usage (#2948), Codex refresh-token recovery docs (#1542), and a configurable PR review bot instead of hard-coded Greptile in /review, /ship and /retro (#3122, folded here by decision D4). One provider seam serves all of them. **Priority:** P3.
@@ -777,18 +777,22 @@ Each item was deferred with a reason during the `/claude-api prompt-audit` clean
 - **Judge prose and rubric cleanup (W2 deferral)** — the arm, qa health-rubric,
   qa anti-refusal, cross-skill and voice judges, and the default workflow judge,
   now send a JSON schema; their prompt-audit s11 M1-M7 prose cleanup is still
-  open, as is the qa anti-refusal rubric's "always … regardless" wording. Two
+  open, as is the qa anti-refusal rubric's "always … regardless" wording. Three
   prose steps were triggered and not run: the qa workflow judge (its schema
   comparison held: 4/24 new flips vs 2/24 old, one new false pass on a06, zero
-  format errors, so it stays on today's request) and the default workflow judge
+  format errors, so it stays on today's request), the default workflow judge
   (landed, but one provider refusal on corpus item f03 under the new prompt,
-  matched by one under the old prompt). Reuse `test/fixtures/judge-calibration`
+  matched by one under the old prompt) and the cookie workflow judge (GSTA-91:
+  held on one new false pass on a07, zero new-request format errors, so it stays
+  on today's request; today's request itself false-passes a07 in `old-b` and on
+  both valid `old-a` samples, and a08 in `old-a`, so the prose step targets those). Reuse `test/fixtures/judge-calibration`
   and `scripts/judge-calibration.ts`. Priority P3. Effort M.
-- **Uncalibrated workflow-judge configurations** — build corpora and calibrate
-  schema transport for the frontier configuration (review/SKILL.md workflow) and
-  the cookie configuration (setup-browser-cookies/SKILL.md workflow); both stay on
-  today's request. After any transport change, re-run the review and cookie
-  workflow judges. Priority P3. Effort M.
+- **Uncalibrated workflow-judge configurations** — build a corpus and calibrate
+  schema transport for the frontier configuration (review/SKILL.md workflow); it
+  stays on today's request. The cookie configuration
+  (setup-browser-cookies/SKILL.md workflow) has a corpus and a held comparison-1
+  (GSTA-91), so it also stays on today's request. After any transport change,
+  re-run the review and cookie workflow judges. Priority P3. Effort M.
 - **Claude model auto-detection for the skill overlay** — when no
   `claude_overlay_model` is set, detect the Claude Code model (`ANTHROPIC_MODEL`,
   user and managed settings `model`) in `./setup` and render its pinned overlay.
