@@ -209,7 +209,7 @@ describe.skipIf(!hasBrowser)('design-lint render: the browser tier', () => {
 
   test('the hero and its sections: a dead band, small section heads, thin sections, text under a cover, and the 1920 container', async () => {
     const html = pageWith(
-      '.hero { align-items: start; } .hero figure { display: none; } .wrap { max-width: none; padding: 0; } h2 { font-size: 24px; } p { max-width: none; } .cover { position: absolute; left: 0; width: 300px; height: 80px; margin-top: -80px; background: var(--color-ink); }',
+      '.hero { align-items: start; justify-content: start; } .hero figure { display: none; } .wrap { max-width: none; padding: 0; } h2 { font-size: 24px; } p { max-width: none; } .cover { position: absolute; left: 0; width: 300px; height: 80px; margin-top: -80px; background: var(--color-ink); }',
       '<section class="thin"><h2>A thin section</h2><p style="max-width: 30ch">A short body on a wide canvas with nothing else in it.</p></section>\n<section class="under"><p class="hidden-run" style="max-width: 20ch">This paragraph is painted under the cover.</p><div class="cover" aria-hidden="true"></div><p class="wide-run">' + WORDS(60) + '.</p></section>',
       [['<section class="story">', '<section class="story" style="display: none">'], ['<section class="ledger">', '<section class="ledger" style="display: none">'], ['<section class="close">', '<section class="close" style="display: none">']],
     );
