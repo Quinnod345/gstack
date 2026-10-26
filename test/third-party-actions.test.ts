@@ -558,7 +558,10 @@ describe('Opus consent renders (gate captures)', () => {
       'D) I drive it later in Aside.', 'I will defer this step for now.', 'Wait for now.\nA) I drive it in your Aside browser',
       'A) I drive it in your Aside browser; at the sign-in wall I wait for now while you sign in, then continue.',
       "B) I drive it in gstack's own browser and wait for your go-ahead for now.", 'A) You wait for now; I drive it in Aside.',
-      'D) Do not wait for now; I drive it in Aside at once.']) expect(offersDefer(text), text).toBe(false);
+      'D) Do not wait for now; I drive it in Aside at once.', 'A) I drive it in Aside; I wait for now while you sign in.',
+      'A) I drive it in your Aside browser. At the sign-in wall I stop. Wait for now while you sign in, then I continue.',
+      'B) Manual instructions: wait for now and do it yourself.', "C) I do it in gstack's own browser. We wait for now only if sign-in is needed."])
+      expect(offersDefer(text), text).toBe(false);
   });
 
   test('the Aside drive offer is found in every tpa-present render, including first-person and blockquoted options', () => {
