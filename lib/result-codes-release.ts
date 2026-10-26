@@ -136,7 +136,7 @@ export const RELEASE_RESULT_CODES = {
   QUEUE_RECEIPT_MISSING: {
     anchor: 'queue-receipt-missing',
     summary: 'the PR body carries no valid /ship receipt, so the PR was never shipped through gstack and cannot be READY’d, admitted to a train or merged',
-    fix: 'run /ship on the branch (unattended it writes the receipt with gstack-ship-receipt write --pr <n> --body …), then gstack-ship-queue ready again; there is no flag to skip this',
+    fix: 'run /ship on the branch (unattended it writes the receipt into an open PR at HEAD with gstack-ship-receipt write --pr <n> --body …, else leaves it in .gstack/tmp/ship-receipt.md for the parent to post), then gstack-ship-queue ready again; there is no flag to skip this',
   },
   QUEUE_RECEIPT_STALE: {
     anchor: 'queue-receipt-stale',

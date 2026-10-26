@@ -70,21 +70,31 @@ export function downloadJson(ctx: QueueContext, slug: string, run: number, name:
 }
 
 /**
- * A finished screen run that planned no cases is not a screen: evals.yml plans
- * 0 cases and reports success when the merge ref it was dispatched for was
- * superseded (GSTA-95 on #3431). Returns the reason when the run is hollow,
- * null when it is live, still running, or its census cannot be read.
+ * A finished screen run that planned no cases is not a screen: when the merge
+ * ref it was dispatched for was superseded, evals.yml skips plan-slices and
+ * concludes success (GSTA-95 on #3431). A screen run uploads no train record,
+ * so the evidence is the plan itself: no `paid-plan` artifact, or a manifest
+ * with nothing planned. Returns the reason when the run is hollow, null when
+ * it is live, still running, or its plan cannot be read.
  */
-export function hollowScreen(ctx: QueueContext, slug: string, run: number, artifact: string): string | null {
+export function hollowScreen(ctx: QueueContext, slug: string, run: number): string | null {
   const view = runView(ctx, slug, run);
   if (!view || view.status !== 'completed') return null;
+  const list = json<{ artifacts?: Array<{ name?: string; expired?: boolean }> }>(ctx.gh(['api', `repos/${slug}/actions/runs/${run}/artifacts?per_page=100`]));
+  if (!Array.isArray(list?.artifacts)) return null;
+  const plan = list.artifacts.find(a => a.name === PLAN_ARTIFACT);
+  if (!plan) return `run ${run} planned no cases (no ${PLAN_ARTIFACT} artifact; concluded ${view.conclusion ?? 'unknown'})`;
+  if (plan.expired) return null;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-screen-'));
-  let rec: { census?: { planned?: { rule?: unknown; judge?: unknown } } } | null;
-  try { rec = downloadJson(ctx, slug, run, artifact, scratch) as typeof rec; } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
-  const planned = rec?.census?.planned;
-  if (!planned || typeof planned.rule !== 'number' || typeof planned.judge !== 'number') return null;
-  return planned.rule + planned.judge === 0 ? `run ${run} planned 0 cases (concluded ${view.conclusion ?? 'unknown'})` : null;
+  let manifest: { entries?: Array<{ status?: unknown }> } | null;
+  try { manifest = downloadJson(ctx, slug, run, PLAN_ARTIFACT, scratch) as typeof manifest; } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+  if (!Array.isArray(manifest?.entries)) return null;
+  const planned = manifest.entries.filter(e => e?.status === 'planned').length;
+  return planned === 0 ? `run ${run} planned 0 cases (concluded ${view.conclusion ?? 'unknown'})` : null;
 }
+
+/** The plan manifest every evals.yml run that planned anything uploads (plan-slices); a superseded screen never reaches that job. */
+const PLAN_ARTIFACT = 'paid-plan';
 
 /** The named check run on a commit (the newest when several); null when absent or unreadable. */
 export function checkRun(ctx: QueueContext, sha: string, name: string): CheckInfo | null {

@@ -302,7 +302,7 @@ function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { 
     if (!ready) return outRefused({ code: 'QUEUE_NOT_READY', message: `no READY receipt for #${p.pr} at ${info.headRefOid.slice(0, 12)} (local state or ${'refs/notes/gstack-trains'})` }, [], `the lane runs ${Q} ready --pr ${p.pr} --screen|--no-screen`, 'none');
     let screen = ready.screen;
     if (screen.choice === 'screen' && screen.run && slug === undefined) slug = repoSlug(ctx);
-    const hollow = screen.choice === 'screen' && screen.run && slug ? hollowScreen(ctx, slug, screen.run, env.train.record_artifact) : null;
+    const hollow = screen.choice === 'screen' && screen.run && slug ? hollowScreen(ctx, slug, screen.run) : null;
     if (hollow) { lines.push(`SCREEN: #${p.pr} ${hollow}; counted as not-run, the slot rides unscreened`); screen = { ...screen, choice: 'no-screen' }; }
     slots.push({ pr: p.pr, head: info.headRefOid, ready_at: ready.ready_at, screen });
   }

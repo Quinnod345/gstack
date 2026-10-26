@@ -373,10 +373,11 @@ it. Before dispatching, `ready` fetches the merge ref and requires its second
 parent to be the PR head: a missing or lagging merge ref (GitHub stops
 recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
 included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
-no cases and reports success. A finished screen whose record planned 0 cases
-is never followed as a screen: `ready --screen` dispatches a fresh one and
-`train build` prints `SCREEN: #<n> run <id> planned 0 cases; counted as
-not-run` and seats the slot unscreened.
+no cases and reports success. A finished screen that planned no cases (no
+`paid-plan` artifact, which a superseded run never uploads, or a plan manifest
+with nothing planned) is never followed as a screen: `ready --screen`
+dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
+no cases …; counted as not-run` and seats the slot unscreened.
 
 **2. Coordinator: build.** Name the pins exactly as READY reported them:
 

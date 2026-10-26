@@ -202,8 +202,9 @@ function cmdRead(rest: string[], json: boolean): number {
  */
 function cmdResult(rest: string[], json: boolean): number {
   const bodyFile = flag(rest, '--body');
-  const pr = flag(rest, '--pr');
-  if (pr !== undefined && !/^\d+$/.test(pr)) { process.stderr.write(`gstack-ship-receipt result: --pr must be a PR number, got ${JSON.stringify(pr.slice(0, 40))}\n`); return EXIT.usage; }
+  const prFlag = flag(rest, '--pr');
+  if (prFlag !== undefined && !/^[1-9]\d*$/.test(prFlag)) { process.stderr.write(`gstack-ship-receipt result: --pr must be a PR number, got ${JSON.stringify(prFlag.slice(0, 40))}\n`); return EXIT.usage; }
+  const pr = prFlag;
   const repoRoot = git(['rev-parse', '--show-toplevel']);
   const head = flag(rest, '--head') ?? (repoRoot ? git(['rev-parse', 'HEAD'], repoRoot) : undefined);
   const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'QUEUE_RECEIPT_STALE', message: string) => {

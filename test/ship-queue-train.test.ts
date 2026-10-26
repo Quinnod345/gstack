@@ -238,26 +238,29 @@ describe('ready under a train policy: the screen choice', () => {
   // fails_when=the census is not read (a hollow run is followed, or ORDER says screened); why_new=no test reads a screen run's record; seam=none; no_claim=evals.yml's real artifact (the shim's record stands in)
   test('a screen run that planned 0 cases is not followed by ready and is counted as not-run by train build', () => {
     const { fx, head, pregate } = readyFixture();
-    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', record: { verdict: 'GREEN', census: { complete: true, planned: { rule: 0, judge: 0 }, executed: { rule: 0, judge: 0 } }, panels: [] } }; });
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: null }; });
     const first = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(first.status).toBe(EXIT.ok);
     expect(line(first.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 100 /);
     const again = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(again.status).toBe(EXIT.ok);
-    expect(line(again.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 101 .* \(not following run 100 planned 0 cases \(concluded success\): a screen that planned nothing is not a screen\)$/);
+    expect(line(again.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 101 .* \(not following run 100 planned no cases \(no paid-plan artifact; concluded success\): a screen that planned nothing is not a screen\)$/);
     expect(dispatches(fx, 'evals.yml').length).toBe(2);
     const build = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
     expect(build.status).toBe(EXIT.ok);
-    expect(line(build.out, 'SCREEN:')).toBe('SCREEN: #1 run 101 planned 0 cases (concluded success); counted as not-run, the slot rides unscreened');
+    expect(line(build.out, 'SCREEN:')).toBe('SCREEN: #1 run 101 planned no cases (no paid-plan artifact; concluded success); counted as not-run, the slot rides unscreened');
     expect(line(build.out, 'ORDER:')).toBe('ORDER: 1:#1(unscreened)');
-    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', record: { verdict: 'GREEN', census: { complete: true, planned: { rule: 0, judge: 3 }, executed: { rule: 0, judge: 3 } }, panels: [] } }; });
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 0 } }; });
+    const emptyPlan = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(line(emptyPlan.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 102 .*not following run 101 planned no cases/);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 3 } }; });
     const live = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(live.status).toBe(EXIT.ok);
-    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 102 .*not following run 101 planned 0 cases/);
+    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 103 .*not following run 102 planned 0 cases \(concluded success\)/);
     const followed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(followed.status).toBe(EXIT.ok);
-    expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 102 (same merge SHA, base and policy; no duplicate)');
-    expect(dispatches(fx, 'evals.yml').length).toBe(3);
+    expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
+    expect(dispatches(fx, 'evals.yml').length).toBe(4);
     const liveBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
     expect([liveBuild.status, line(liveBuild.out, 'ORDER:'), line(liveBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
     fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });

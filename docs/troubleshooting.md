@@ -1604,8 +1604,9 @@ message lists.
 
 **Meaning.** On a Capy machine (`GSTACK_CAPY=1`, set by the `GSTACK_LAUNCH`
 line), an unattended or spawned workflow starts only with a passing install
-verdict (`<state root>/install-verdicts/<sha256 of the checkout path>.json`,
-named as `GSTACK_INSTALL_VERDICT`) for this checkout, its current HEAD and a
+verdict (`<state root>/install-verdicts/<sha256 of the checkout path>/<sha256
+of the project directory, or none>.json`, named as `GSTACK_INSTALL_VERDICT`)
+for this checkout, its current HEAD and a
 workflow at least as wide as the one starting: a verdict for `--for autoplan`
 does not cover `qa`'s browser, and a planning-only pins SKIP does not cover a
 workflow that runs the repo's tests. `gstack-skill-start` printed this row and
@@ -1613,8 +1614,10 @@ workflow that runs the repo's tests. `gstack-skill-start` printed this row and
 an unattended run whose Bun on PATH is below the supported minimum
 (`INSTALL: fail runtime ... (RUNTIME_BELOW_MINIMUM)`) on any host.
 
-**Fix.** Run the Capy skill installer with `--for <workflow>` on this machine
-and launch with the `GSTACK_LAUNCH` line it prints.
+**Fix.** Run the Capy skill installer (`scripts/install.sh --for <workflow>`)
+from the project directory the workflow will run in, since the verdict is
+keyed by that directory (GSTA-85), and launch with the `GSTACK_LAUNCH` line it
+prints.
 `GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1` admits anyway (printed as
 `INSTALL_VERDICT: overridden`); record it as a deviation.
 
@@ -4035,8 +4038,11 @@ before merging PRs; [ship-policy.md](ship-policy.md#ship-before-ready)).
 
 **Fix.** Run /ship on the branch. Unattended, it ends by writing the receipt
 into the PR body (`gstack-ship-receipt write --pr <n> … --body <file>`, then
-`gstack-post pr-body`). Then rerun `gstack-ship-queue ready --pr <n>
---screen|--no-screen` and send the new READY block.
+`gstack-post pr-body`) when an open PR exists for the branch at HEAD;
+otherwise it leaves the receipt in `.gstack/tmp/ship-receipt.md` and the
+parent posts it ([unattended.md](unattended.md)). Then rerun
+`gstack-ship-queue ready --pr <n> --screen|--no-screen` and send the new READY
+block.
 
 <a id="queue-receipt-stale"></a>
 ### `QUEUE_RECEIPT_STALE`
@@ -4064,10 +4070,12 @@ counts), so a screen dispatched there checks out the old merge, sees itself
 superseded, plans 0 cases and reports success. GSTA-95 hit this on #3431:
 `ready` printed `SCREEN_DISPATCH:` as if a screen ran. `ready` now compares
 the merge ref's second parent with the PR head before dispatching, and a
-finished screen whose record says it planned 0 cases is never adopted as a
-screen: `ready --screen` dispatches a fresh one and `train build` prints
-`SCREEN: #<n> run <id> planned 0 cases; counted as not-run` and seats the slot
-unscreened.
+finished screen that planned no cases is never adopted as a screen. A screen
+run uploads no train record, so the evidence is its plan: a superseded run
+skips `plan-slices` and uploads no `paid-plan` artifact, and a manifest with
+nothing planned counts the same. `ready --screen` dispatches a fresh one and
+`train build` prints `SCREEN: #<n> run <id> planned no cases (no paid-plan
+artifact; …); counted as not-run` and seats the slot unscreened.
 
 **Fix.** Resolve the conflict with the base branch (or wait for GitHub to
 recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
