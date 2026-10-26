@@ -115,7 +115,7 @@ function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): s
 export function stripTags(s: string, keep = false, limit = Infinity): string {
   let out = '', i = 0, seen = 0;
   for (;;) {
-    if (limit < Infinity) for (let k = i; k < s.length && s[k] !== '<'; k++) if (s[k] > ' ' && ++seen > limit) return out + s.slice(i, k + 1);
+    if (limit < Infinity) for (let k = i; k < s.length && s[k] !== '<'; k++) if (!/\s/.test(s[k]) && ++seen > limit) return out + s.slice(i, k + (s.charCodeAt(k) >= 0xd800 && s.charCodeAt(k) < 0xdc00 ? 2 : 1));
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
     const gt = s.indexOf('>', lt + 1);

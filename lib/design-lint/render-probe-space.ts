@@ -155,7 +155,7 @@ export function glWords(P: Probes, ctx: HeroCtx): ProbeFinding[] {
   const H = document.documentElement.scrollHeight;
   let maxWords = 0, at = 0;
   for (let y = 0; y < H; y += 50) {
-    const w = Math.round(words.reduce((a, x) => { const h = Math.max(1, x.bottom - x.top); const ov = Math.max(0, Math.min(x.bottom, y + 900) - Math.max(x.top, y)); return a + x.c * Math.min(1, ov / h); }, 0));
+    const w = Math.round(words.reduce((a, x) => { const h = Math.max(1, x.bottom - x.top); const ov = Math.max(0, Math.min(x.bottom, y + innerHeight) - Math.max(x.top, y)); return a + x.c * Math.min(1, ov / h); }, 0));
     if (w > maxWords) { maxWords = w; at = y; }
   }
   if (maxWords > 95) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: maxWords + ' words on one ' + innerHeight + 'px screen (from y=' + at + ')', fix: 'one idea per screen: cut to about 80 words and make the section an object' });

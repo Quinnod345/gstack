@@ -86,15 +86,16 @@ export function selectorNames(selectors: string[]): { tags: Set<string>; classes
   return { tags, classes };
 }
 
-/** A selector longer than this is a nesting blow-up (comma lists nested in comma lists), not a stylesheet selector; past it the nested selector stands without its parent, so a sheet costs its length and not parts^depth. */
+/** A selector longer than this is a nesting blow-up (comma lists nested in comma lists, a parent repeated per '&'), not a stylesheet selector; a nested selector that would pass it stands without its parent, and every stored selector is cut there, so a sheet costs its length and not parts^depth. */
 const MAX_SELECTOR = 8192;
 
 /** Expand a nested selector against its parent: `&` is replaced, a bare selector is descendant-joined. */
 function nestSelector(sel: string, parent: string): string {
-  const p = parent.includes(',') ? `:is(${parent})` : parent;
   const parts = splitTop(sel).map((part) => part.trim());
   const substitutions = parts.reduce((n, part) => n + Math.max(1, part.split('&').length - 1), 0);
-  if (sel.length + p.length * substitutions > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || p;
+  const wrapped = parent.includes(',') ? parent.length + 5 : parent.length;
+  if (sel.length + wrapped * substitutions > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || splitTop(parent.slice(0, 256))[0].trim();
+  const p = parent.includes(',') ? `:is(${parent})` : parent;
   return parts.map((part) => part.includes('&') ? part.replace(/&/g, p) : `${p} ${part}`).join(', ');
 }
 
@@ -167,7 +168,8 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
           if (depthLeft > 0) walk(blockStart, blockEnd, media, keyframes, null, depthLeft - 1);
         }
       } else {
-        const sel = parent && !keyframes ? nestSelector(selector, parent) : selector;
+        const nested = parent && !keyframes ? nestSelector(selector, parent) : selector;
+        const sel = nested.length > MAX_SELECTOR ? nested.slice(0, MAX_SELECTOR) : nested;
         rules.push(makeRule(sel, blockStart, blockEnd, media, keyframes));
         if (!keyframes && depthLeft > 0 && src.slice(blockStart, blockEnd).includes('{')) walk(blockStart, blockEnd, media, keyframes, sel, depthLeft - 1);
       }
