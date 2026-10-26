@@ -1625,6 +1625,7 @@ export const GLOBAL_TOUCHFILES = [
   'test/helpers/e2e-helpers.ts',     // Shared harness every paid test imports (selection wiring, preflight, describeIfSelected) — an edit here changes every test's behavior
   'test/helpers/paid-test-set.ts',   // Paid-vs-free classification — an edit moves files between suites
   'test/helpers/skill-fixture.ts',   // SKILL.md fixture extraction — reshapes the skill content most E2E suites read
+  'test/helpers/skill-startup.ts',   // skill-fixture.ts splices the shared sections/preamble.md through it
   // NOTE: this file (touchfiles-data.ts) is deliberately NOT a global
   // touchfile. Changes to it route through map-diff selection in
   // test-selection.ts: the old git version is evaluated and the maps are
