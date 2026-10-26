@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.246.0] - 2026-10-26
 
 **The README is a first-ten-minutes page again: what gstack is, how to install it, the first three skills to try, the skills tables, platform notes, and links to docs/ for everything else.** It was 862 lines and 90 KB, with CSO producer sandboxing, Codex model-selection order and the uninstall script in the path of someone deciding whether to try it. It is now about 300 lines and 33 KB. Nothing was deleted: every removed section moved to a docs/ page, verbatim except the "Proactive skill suggestions" paragraph in docs/why-gstack.md, which now describes the core-set default and `gstack-config set proactive core|all|off` landing in #3432, and every anchor other files link to (`#install--about-30-seconds`, `#gbrain--persistent-knowledge-for-your-coding-agent`) still resolves.
 
