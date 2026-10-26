@@ -76,15 +76,19 @@ const SHELL_EXEMPT: Record<string, string> = {
 /** Run only on Linux (the Ubicloud VM or its Linux-only local fallback), where /dev/null is the spelling; remote command strings expand there. */
 const SHELL_LINUX_ONLY = (f: string) => f.startsWith('scripts/ubicloud/');
 
-/** Lines of shell text that use GSTACK_BUN_CONFIG with no CONFIG_DEF line before them, or define it any other way. */
+/** Lines of shell text that use GSTACK_BUN_CONFIG with no CONFIG_DEF line before them, or define it any other way. A `local` definition covers only the rest of its function. */
 function configDefinitionGaps(text: string): string[] {
   const gaps: string[] = [];
   let defined = false;
+  let definedInFunction = false;
   text.split('\n').forEach((line, i) => {
     if (/^\s*(?:local\s+)?GSTACK_BUN_CONFIG=/.test(line)) {
-      if (line.trim().replace(/^local\s+/, '') === CONFIG_DEF) defined = true;
-      else gaps.push(`${i + 1}: redefined: ${line.trim()}`);
-    } else if (!defined && line.includes('${GSTACK_BUN_CONFIG')) gaps.push(`${i + 1}: used before CONFIG_DEF`);
+      const local = /^\s*local\s/.test(line);
+      if (line.trim().replace(/^local\s+/, '') !== CONFIG_DEF) gaps.push(`${i + 1}: redefined: ${line.trim()}`);
+      else if (local) definedInFunction = true;
+      else defined = true;
+    } else if (/^}/.test(line)) definedInFunction = false;
+    else if (!defined && !definedInFunction && line.includes('${GSTACK_BUN_CONFIG')) gaps.push(`${i + 1}: used before CONFIG_DEF`);
   });
   return gaps;
 }
@@ -154,6 +158,7 @@ describe('GSTA-56: gstack never takes configuration from the audited repository'
     const use = `bun ${SHELL_FLAGS} -e 1`;
     expect(configDefinitionGaps(`#!/usr/bin/env bash\n${CONFIG_DEF}\n${use}\n`)).toEqual([]);
     expect(configDefinitionGaps(`f() {\n  local ${CONFIG_DEF}\n  ${use}\n}\n`)).toEqual([]);
+    expect(configDefinitionGaps(`f() {\n  local ${CONFIG_DEF}\n}\ng() {\n  ${use}\n}\n`)).toEqual(['5: used before CONFIG_DEF']);
     expect(configDefinitionGaps(`#!/usr/bin/env bash\n${use}\n`)).toEqual(['2: used before CONFIG_DEF']);
     expect(configDefinitionGaps(`${use}\n${CONFIG_DEF}\n`)).toEqual(['1: used before CONFIG_DEF']);
     expect(configDefinitionGaps(`GSTACK_BUN_CONFIG=./bunfig.toml\n${use}\n`)).toEqual(['1: redefined: GSTACK_BUN_CONFIG=./bunfig.toml', '2: used before CONFIG_DEF']);

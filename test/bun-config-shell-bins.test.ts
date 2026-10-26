@@ -33,6 +33,7 @@ let stateRoot = '';
 let evilRoot = '';
 let preloadMarker = '';
 let fakeBun = '';
+let crashBun = '';
 
 const BINS: Array<{ bin: string; input: string; log: string }> = [
   { bin: 'gstack-review-log', log: 'main-reviews.jsonl', input: JSON.stringify({ skill: 'plan-eng-review', timestamp: '2026-10-25T00:00:00Z', status: 'clean', unresolved: 0, critical_gaps: 0, issues_found: 0, mode: 'FULL_REVIEW', commit: 'abc1234' }) },
@@ -64,6 +65,7 @@ function records(log: string): string[] {
 
 function resetState(): void {
   fs.rmSync(stateRoot, { recursive: true, force: true });
+  fs.rmSync(preloadMarker, { force: true });
   fs.mkdirSync(stateRoot, { recursive: true });
 }
 
@@ -101,6 +103,9 @@ beforeAll(() => {
     `exec ${JSON.stringify(process.execPath)} "\${a[@]}"`,
     '',
   ].join('\n'));
+  crashBun = path.join(tmp, 'crash-bun');
+  fs.mkdirSync(crashBun);
+  writeExec(path.join(crashBun, 'bun'), '#!/usr/bin/env bash\nexit 3\n');
   writeExec(path.join(fakeBun, 'cygpath'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "${@: -1}"\n');
 });
 
@@ -150,6 +155,17 @@ describe.skipIf(IS_WINDOWS)('#3415: simulated Windows bash (POSIX hosts)', () =>
       expect(r.status).toBe(0);
       expect(r.stderr).toBe('');
     }
+  });
+
+  test('a Bun that dies with exit 3 (how a Bun crash exits on Windows) is reported, never read as invalid input', () => {
+    resetState();
+    const timeline = run('gstack-timeline-log', JSON.stringify({ skill: 'review', event: 'started' }), crashBun);
+    expect(timeline.status).not.toBe(0);
+    expect(timeline.stderr).toContain('bun exited 3');
+    expect(records('timeline.jsonl')).toEqual([]);
+    const profile = run('gstack-developer-profile', '--log-session', crashBun, {}, [JSON.stringify({ date: '2026-10-25', mode: 'startup' })]);
+    expect(profile.status).not.toBe(0);
+    expect(profile.stderr).toContain('bun exited 3');
   });
 
   for (const { bin, input, log } of BINS) {

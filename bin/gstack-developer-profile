@@ -186,17 +186,22 @@ do_log_session() {
   fi
 
   # Validate: input must be parseable JSON with required fields (date, mode).
-  # Invalid input exits 3; any other non-zero exit means Bun itself failed.
-  local VALIDATE_RC=0
-  printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
+  # The validator prints its verdict; a non-zero exit means Bun itself failed.
+  local VALIDATE_RC=0 VALIDATE_OUT
+  VALIDATE_OUT=$(printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
+    const text = await Bun.stdin.text();
     let j;
-    try { j = JSON.parse(await Bun.stdin.text()); } catch { process.exit(3); }
-    if (!j || !j.date || !j.mode) process.exit(3);
-  " || VALIDATE_RC=$?
-  case "$VALIDATE_RC" in
-    0) ;;
-    3) return 0 ;;
-    *) echo "gstack-developer-profile: bun exited $VALIDATE_RC before the session was validated; nothing was logged" >&2; return "$VALIDATE_RC" ;;
+    try { j = JSON.parse(text); } catch {}
+    console.log(j && j.date && j.mode ? 'valid' : 'invalid');
+  ") || VALIDATE_RC=$?
+  if [ "$VALIDATE_RC" -ne 0 ]; then
+    echo "gstack-developer-profile: bun exited $VALIDATE_RC before the session was validated; nothing was logged" >&2
+    return "$VALIDATE_RC"
+  fi
+  case "$VALIDATE_OUT" in
+    valid) ;;
+    invalid) return 0 ;;
+    *) echo "gstack-developer-profile: bun printed no verdict while validating the session; nothing was logged" >&2; return 1 ;;
   esac
 
   ensure_profile
