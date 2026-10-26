@@ -59,7 +59,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `full_e2e` | `true` \| `false` | `false` | `true`: every merge needs a passing full-gate result bound to a tree equal to the merging one modulo stamps; `gstack-ship-queue ready`, `stamp` and `verify` refuse without one (`QUEUE_GATE_MISSING`): a gate-ahead record, or the lane's `--gate-exit 0 --gate-log <file>` from its run on the gated head. Needs `min_gstack_version`. |
 | `review_scope` | `frozen` \| `diff-plus-blocking` \| `all` | `frozen` | The finding scope of `/ship`'s review loop; see [review_scope](#review-scope). `frozen` fixes the diff on pass 1, files blocking findings in unchanged code as issues, and later passes read only the range since the previous pass. `diff-plus-blocking` is the same but fixes a blocking finding in unchanged code in this PR instead of filing it. `all` is the earlier loop: every finding is fixed on every pass. Needs `min_gstack_version` when not `frozen`. |
 | `min_gstack_version` | version or `null` | `null` | The oldest gstack that may read the file; see the compatibility rule above. |
-| `docs` | `{ caps: [{ path, max_bytes }] }` or `null` | `null` | Documentation files with a byte cap. `/ship` Step 14.5 runs `gstack-ship-receipt docs-caps --policy .gstack/ship-policy.json` before the verification gate and prints one `DOCS_CAP: <path> <bytes>/<max> ok\|over` line per cap; any `over` (an absent file counts) exits 1 and blocks the ship until the file is trimmed or the cap raised on the base branch (`DOCS_AUDIT_BLOCKED`). At most 64 caps, each path contained. See [the ship receipt](#ship-receipt). Needs `min_gstack_version`. |
+| `docs` | `{ caps: [{ path, max_bytes }] }` or `null` | `null` | Documentation files with a byte cap. `/ship` Step 14.5 runs `gstack-ship-receipt docs-caps --base <base>` (the caps come from `origin/<base>`'s policy, never the branch's copy; `--policy <file>` is for a repository bootstrapping its policy) before the verification gate and prints one `DOCS_CAP: <path> <bytes>/<max> ok\|over` line per cap; any `over` (an absent file counts) exits 1 and blocks the ship until the file is trimmed or the cap raised on the base branch (`DOCS_AUDIT_BLOCKED`). At most 64 caps, each path contained. See [the ship receipt](#ship-receipt). Needs `min_gstack_version`. |
 | `train` | `{ gate_workflow, free_workflow, full_gate_check, record_artifact, max_size, fill_hours, screen_selection, trial_reservation_usd }` or `null` | `null` | Turns on [merge trains](#run-a-merge-train), read from the base revision only. Every field is required and an unknown field is `POLICY_INVALID`: `max_size` 1 to 6, `fill_hours` above 0 and at most 24, `screen_selection` `gstack-paid` \| `none`, `trial_reservation_usd` above 0 and at most 100. `null` keeps the per-PR queue exactly as it is. Needs `min_gstack_version`. |
 
 Containment, checked by `validate` and again at write time: paths and globs are
@@ -609,8 +609,11 @@ stops there. With `--body`, the body's `## Documentation` section must carry
 the exception word for word (`Documentation exception: accepted by <owner>
 <date> via <ref>: <reason>`), or the write refuses with the same code. Doc
 caps: a repository declares `docs.caps: [{ path, max_bytes }]` in its policy,
-and Step 14.5 runs `gstack-ship-receipt docs-caps --policy <file>` before the
-verification gate; one `DOCS_CAP: <path> <bytes>/<max> ok|over` line per cap
+and Step 14.5 runs `gstack-ship-receipt docs-caps --base <base>` before the
+verification gate, reading the caps from `origin/<base>`'s policy so the branch
+cannot raise its own (`--policy <file>` only while bootstrapping a policy; an
+unreadable base policy is `POLICY_SOURCE_UNAVAILABLE`); one
+`DOCS_CAP: <path> <bytes>/<max> ok|over` line per cap
 (`absent/<max> over` for a path the tree lacks), exit 1 on any `over`, whose
 repair is trimming the file, never raising the cap in the same PR.
 
@@ -618,8 +621,11 @@ repair is trimming the file, never raising the cap in the same PR.
 (or `--body <file>`) compares every counter the body quotes with the receipt's
 integers under `review_loop`, `gate` and `ci`: `passes=2`, `passes: 2` and
 `2 passes` are claims about `review_loop.passes`, `1 deferred` about
-`review_loop.deferred`, `passed: 41` about `gate.passed` (an underscore in a
-key matches `_`, a space or `-`). A body that quotes a different number is
+`review_loop.deferred`, `passed: 41` about `gate.passed` (a leaf key shared by
+several counters, `passed` under `gate` and `ci` or `pass` under every gate
+lane, matches when the number equals any of them; an underscore in a key
+matches `_`, a space or `-`; a name inside a longer word, `3 pass-through`, is
+not a claim). A body that quotes a different number is
 `RECEIPT_PROSE_MISMATCH` (exit 1) and the `PROSE:` line names each field with
 both values; prose that quotes no counter is not a claim. Data PRs (evals,
 measurements, sweeps) run it before READY so the body's numbers are the run's.

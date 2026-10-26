@@ -184,19 +184,20 @@ degraded coverage, as long as the model that reviewed is recorded. Its
 review-log row is the same row every Step 11 pass writes
 (`ship/sections/adversarial.md`): `skill: "adversarial-review"`,
 `phase: "adversarial"`, `source` naming the runner that actually reviewed
-(`host-subagent` for the cross-family subagent, the same runner id
-`bin/gstack-outside-voice runners` prints and the table below describes;
-`codex-cli` for the CLI; `"none"` when no outside pass completed),
+(the outside provider that reviewed, with the model recorded, for the
+cross-family subagent; `codex` for completed Codex CLI output, as
+`ship/sections/adversarial.md` prescribes),
 `outside_provider` (the provider the host would have used, as the generated
 prose names it), `outside_status` (`completed` for a finished outside pass;
-`unavailable` when neither the CLI nor a subagent completed, with
-`unavailable_reason`; `disabled` under `codex_reviews: disabled`), `status`
+`unavailable` when neither the CLI nor a subagent completed, the cause on the
+`OUTSIDE_STATUS` line rather than in the row; `disabled` under
+`codex_reviews: disabled`), `status`
 (`clean`, `issues_found` or `unavailable`), `completed`, `converged`, and the
-subagent's model recorded with the pass (`gstack-outside-voice submit --runner
-host-subagent --model <id>` binds it; the row's text names it where the host
-reports it). The native in-host adversarial
-subagent writes its own row with `source` naming the native host; native
-completion never credits outside coverage. A parent reads the rows with
+subagent's model recorded with the pass (`gstack-outside-voice run --runner
+host-subagent --result <file> --model <id> --prompt <file> --out <file>` binds
+it; the row's text names it where the host reports it). The native in-host adversarial
+subagent writes its own row with `source: "in-host"`; native completion never
+credits outside coverage. A parent reads the rows with
 `gstack-review-read` and treats `outside_status: unavailable` as missing
 coverage, not as a clean outside review.
 
