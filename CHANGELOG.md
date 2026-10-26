@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+**Five paid-case flakes from the 2026-10-26 train gates, repaired at their causes (GSTA-107 daily flaky pass).** The "ship-docsync family" was three distinct slips, not one shared cause: a mistyped `--help` path the detector refused although the usage had already been read, an undeclared refusal of gstack's own state directory as an artifact location, and a fixture that did not install the shared preamble a generated skill requires. tpa-present's consent question paraphrased "defer" as "wait for now", and qa-functional-webhook-fix ran the probe's `--help` bare before its first capture.
+
+### Fixed
+- **ship-docsync-store (gate 40323989742 slice 3):** a candidate `--help` typed at a wrong, non-existent path (exit 127) is ignored when the declared binary's `--help` ran anywhere in the transcript, before or after, since a help probe reads nothing the agent still has to recover (`test/helpers/docsync-observer.ts` `candidateNotFound`); snapshot and compare still need the declared retry after the slip, and a wrong path that exists, a failed declared run, or no declared run at all still fail.
+- **ship-docsync-completion (gate 40290033102 slice 2):** the parent put its snapshot `--out`, saved section and report insert under `<home>/state`, gstack's own state directory (GSTACK_HOME), which the authority refuses but the fixture interface never named. The interface now says a private artifact lives directly under the fixture home or in a new directory there, and names every refused root: the repository, the installed skills, the Claude config dir, `<home>/state` and `<home>/remote.git` (`test/helpers/docsync-interface.ts`). The authority is unchanged.
+- **docsync-spawned (PR #3434 screen 40269992077 slice 13):** `fixtureDocs` installs `<skill>/sections/preamble.md` beside the required sections when the generated skill has one, so a spawned child whose SKILL.md names the shared preamble as a required asset no longer blocks on its absence (`test/helpers/docsync-fixture.ts`). A generated skill without one installs exactly the files it did before.
+- **tpa-present (gate 40290033102 slice 14):** the defer-option detector accepts "wait for now" and "hold off (on this) for now" as the option's own opening or sentence (`test/helpers/third-party-actions.ts` `offersDefer`); a drive option that waits while the user signs in, a "do not wait for now", or the phrase outside a lettered option still does not count.
+- **qa-functional-webhook-fix (gate 40290033102 slice 9):** the fixture interface states that the evidence helper's `--help` is the only one it grants and that a bare `bun run probe` with `--help` or any argument outside a capture is a bypass (`test/helpers/qa-functional-eval.ts`); the grammar and the bypass detector are unchanged.
+
+### Tests
+- `test/docsync-lifecycle-interface.test.ts` replays the captured store run (`test/fixtures/docsync-help-not-found-public.json`) as a pass, with controls for no declared `--help`, a failed one, and a wrong-path compare that only an earlier declared run precedes.
+- `test/docsync-authority.test.ts` pins the interface sentence that names each refused root and replays the captured state-dir calls (`test/fixtures/docsync-state-dir-artifacts-public.json`): four refused commands and one refused write, all accepted once relocated to a new directory under the home.
+- `test/ship-document-release-dispatch.test.ts` builds a generated root with and without a document-release preamble and checks the fixture installs it in the first case only.
+- `test/third-party-actions.test.ts` adds the 40290033102 tpa-present render to the Opus consent captures (29 consent questions, 5 paraphrased defers) with new positive and negative wordings.
+- `test/qa-functional-prompt.test.ts` pins the helper-only `--help` sentence before the observation forms and keeps `bun run probe -- --help` outside the grammar.
+
 ## [1.91.246.0] - 2026-10-26
 
 **The README is a first-ten-minutes page again: what gstack is, how to install it, the first three skills to try, the skills tables, platform notes, and links to docs/ for everything else.** It was 862 lines and 90 KB, with CSO producer sandboxing, Codex model-selection order and the uninstall script in the path of someone deciding whether to try it. It is now about 300 lines and 33 KB. Nothing was deleted: every removed section moved to a docs/ page, verbatim except the "Proactive skill suggestions" paragraph in docs/why-gstack.md, which now describes the core-set default and `gstack-config set proactive core|all|off` landing in #3432, and every anchor other files link to (`#install--about-30-seconds`, `#gbrain--persistent-knowledge-for-your-coding-agent`) still resolves.

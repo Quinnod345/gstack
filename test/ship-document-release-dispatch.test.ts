@@ -234,6 +234,33 @@ describe('completion observer negative controls', () => {
 });
 
 describe('native docs fixture preflight', () => {
+  // PR #3434 screen 40269992077 slice 13 (docsync-spawned): the generated skill named
+  // sections/preamble.md as a required asset, the fixture had not installed it, and the
+  // spawned child blocked on the missing asset instead of auditing the docs.
+  test('installs a generated shared preamble beside the required sections, and nothing when the skill has none', () => {
+    const withPreamble = fs.mkdtempSync(path.join(os.tmpdir(), 'docsync-preamble-'));
+    try {
+      fs.cpSync(generated, withPreamble, { recursive: true });
+      const preamble = path.join(withPreamble, 'document-release/sections/preamble.md');
+      fs.writeFileSync(preamble, '# Shared preamble\n\nFixture copy marker.\n');
+      const fixture = fixtureDocs('risky', withPreamble);
+      try {
+        expect(fs.readFileSync(path.join(fixture.skills, 'document-release/sections/preamble.md'), 'utf8')).toBe(fs.readFileSync(preamble, 'utf8'));
+        expect(fs.existsSync(path.join(fixture.skills, 'ship/sections/preamble.md'))).toBe(false);
+        expect(fs.readdirSync(path.join(fixture.skills, 'document-release/sections')).sort()).toEqual(['audit-scope.md', 'preamble.md', 'release-body.md']);
+      } finally { fixture.clean(); }
+    } finally { fs.rmSync(withPreamble, { recursive: true, force: true }); }
+    const withoutPreamble = fs.mkdtempSync(path.join(os.tmpdir(), 'docsync-no-preamble-'));
+    try {
+      fs.cpSync(generated, withoutPreamble, { recursive: true });
+      fs.rmSync(path.join(withoutPreamble, 'document-release/sections/preamble.md'), { force: true });
+      const plain = fixtureDocs('risky', withoutPreamble);
+      try {
+        expect(fs.readdirSync(path.join(plain.skills, 'document-release/sections')).sort()).toEqual(['audit-scope.md', 'release-body.md']);
+      } finally { plain.clean(); }
+    } finally { fs.rmSync(withoutPreamble, { recursive: true, force: true }); }
+  });
+
   test('staged, unstaged and new content are distinct from HEAD and user content is excluded', () => {
     const fixture = fixtureDocs('updated', generated);
     try {
