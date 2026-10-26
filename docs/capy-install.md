@@ -438,7 +438,10 @@ with `gstack-owner-brief render --captain`, answers are recorded with
 `gstack-approvals`, and /ship's PR body opens with before/after images
 (`gstack-pr-shots`), Why and Approvals. The guide is
 [`capy/skill/gstack/captain.md`](../capy/skill/gstack/captain.md);
-`GSTACK_CAPY_ASKS=0` drops the block for one session.
+`GSTACK_CAPY_ASKS=0` drops the block for one session. The controller's side (the
+READY contract, merge trains, the digest, the daily flaky pass, with templates for the
+crew rules file and the Captain's drive) is the `/captain` skill and
+[captain.md](captain.md).
 
 ## Raising the supported minimum
 
