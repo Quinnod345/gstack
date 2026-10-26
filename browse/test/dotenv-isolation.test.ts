@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { emptyBunConfig } from '../src/bun-child-config';
 import { spawnTerminalAgent } from '../src/terminal-agent-control';
 
 const ROOT = path.resolve(import.meta.dir, '..', '..');
@@ -60,7 +61,7 @@ describe('D0: project .env and bunfig.toml are ignored', () => {
     expect(JSON.parse(await waitForFile(out))).toEqual({ sandbox: null });
     const atomic = path.join(path.dirname(project), 'atomic.json');
     fs.writeFileSync(path.join(path.dirname(project), 'atomic-probe.ts'), probeSource(atomic));
-    const run = Bun.spawnSync([process.execPath, '--no-env-file', '--config=/dev/null', path.join(path.dirname(project), 'atomic-probe.ts')], { cwd: project, env: { PATH: process.env.PATH ?? '' }, stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
+    const run = Bun.spawnSync([process.execPath, '--no-env-file', `--config=${emptyBunConfig()}`, path.join(path.dirname(project), 'atomic-probe.ts')], { cwd: project, env: { PATH: process.env.PATH ?? '' }, stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
     expect(run.exitCode, run.stderr.toString()).toBe(0);
     expect(JSON.parse(fs.readFileSync(atomic, 'utf-8'))).toEqual({ sandbox: null });
     expect(fs.existsSync(atomic + '.tmp')).toBe(false);

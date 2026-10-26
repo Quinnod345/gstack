@@ -306,7 +306,9 @@ describe('Claude Code restricted execution', () => {
       expect(fireTimeout).toBeDefined();
       const readyBy = Date.now() + 2000;
       while (publishedPid() === undefined && Date.now() < readyBy) await Bun.sleep(5);
-      expect(running(publishedPid()!)).toBe(true);
+      const descendantPid = publishedPid();
+      expect(descendantPid, 'descendant never published its pid within the readiness window').toBeDefined();
+      expect(running(descendantPid!)).toBe(true);
       const start = Date.now();
       const expire = fireTimeout!;
       fireTimeout = undefined;
