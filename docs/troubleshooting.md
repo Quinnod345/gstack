@@ -3078,16 +3078,18 @@ should have found it, report the specifier as a resolver gap.
 <a id="pregate-incomplete"></a>
 ### `PREGATE_INCOMPLETE`
 
-**Meaning.** A check timed out, repo commands were not allowed, no runner is
-declared or detected, or the working tree changed while the check ran.
-Incomplete is never pass and blocks publication. A tool missing from PATH, a
+**Meaning.** A check timed out, a runner process was killed by a signal (out of
+memory, an outside kill) and ended without an exit code, repo commands were not
+allowed, no runner is declared or detected, or the working tree changed while
+the check ran. Incomplete is never pass and blocks publication. A tool missing from PATH, a
 network or quota error before any test ran, or a full disk is
 [`PREGATE_ENVIRONMENT`](#pregate-environment) instead, so the machine's failure
 reads apart from the diff's.
 
 **Fix.** Pass `--allow-repo-commands`, commit the `pubspec.yaml` of a Dart
 package the message says has none (or declare `runner`), raise `--timeout`, or
-keep the tree still, then rerun. A tool missing from PATH is
+keep the tree still, then rerun. A runner killed by a signal never passes: read
+the lane log, then rerun or split the selection. A tool missing from PATH is
 [`PREGATE_ENVIRONMENT`](#pregate-environment), with its own fix.
 
 <a id="pregate-stalled"></a>
