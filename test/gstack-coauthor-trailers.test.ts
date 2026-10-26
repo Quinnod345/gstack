@@ -72,8 +72,13 @@ test('--message appends only the missing trailers and is idempotent; a bad range
   const file = path.join(dir, 'MSG');
   fs.writeFileSync(file, 'port: contributor fix\n\nCo-authored-by: ada contributor <ADA@example.org>\n');
   expect(run(dir, ['--message', file]).status).toBe(EXIT.ok);
-  const expected = 'port: contributor fix\n\nCo-authored-by: ada contributor <ADA@example.org>\n\nCo-authored-by: Bo Helper <bo@example.org>\n';
+  const expected = 'port: contributor fix\n\nCo-authored-by: ada contributor <ADA@example.org>\nCo-authored-by: Bo Helper <bo@example.org>\n';
   expect(fs.readFileSync(file, 'utf8')).toBe(expected);
+  expect(spawnSync('git', ['interpret-trailers', '--parse'], { cwd: dir, input: expected, encoding: 'utf8' }).stdout.trim().split('\n')).toHaveLength(2);
+  const plain = path.join(dir, 'PLAIN');
+  fs.writeFileSync(plain, 'port: contributor fix\n');
+  expect(run(dir, ['--message', plain]).status).toBe(EXIT.ok);
+  expect(fs.readFileSync(plain, 'utf8')).toBe('port: contributor fix\n\nCo-authored-by: Ada Contributor <Ada@Example.org>\nCo-authored-by: Bo Helper <bo@example.org>\n');
   const again = run(dir, ['--message', file, '--json']);
   expect(JSON.parse(again.stdout).appended).toEqual([]);
   expect(fs.readFileSync(file, 'utf8')).toBe(expected);

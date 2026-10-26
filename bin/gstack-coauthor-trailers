@@ -77,8 +77,12 @@ function main(argv: string[]): number {
     const present = new Set([...text.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)].map(m => m[1]!.toLowerCase()));
     appended = [...authors.entries()].filter(([key]) => !present.has(key)).map(([, a]) => `Co-authored-by: ${a.name} <${a.email}>`);
     if (appended.length) {
+      // Trailers are one paragraph: a blank line before the new ones would make git (and GitHub's
+      // attribution) read only the last paragraph as the trailer block and drop the existing co-authors.
       const body = text.replace(/\s+$/, '');
-      fs.writeFileSync(message, (body ? body + '\n\n' : '') + appended.join('\n') + '\n');
+      const cut = body.lastIndexOf('\n\n');
+      const endsInTrailer = cut >= 0 && body.slice(cut + 2).split('\n').every(l => /^[A-Za-z][\w-]*: \S/.test(l));
+      fs.writeFileSync(message, (body ? body + (endsInTrailer ? '\n' : '\n\n') : '') + appended.join('\n') + '\n');
     }
   }
   if (argv.includes('--json')) process.stdout.write(JSON.stringify({ range, authors: [...authors.values()], trailers, appended }) + '\n');
