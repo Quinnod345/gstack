@@ -158,8 +158,8 @@ export function glWords(P: Probes, ctx: HeroCtx): ProbeFinding[] {
     const w = Math.round(words.reduce((a, x) => { const h = Math.max(1, x.bottom - x.top); const ov = Math.max(0, Math.min(x.bottom, y + 900) - Math.max(x.top, y)); return a + x.c * Math.min(1, ov / h); }, 0));
     if (w > maxWords) { maxWords = w; at = y; }
   }
-  if (maxWords > 95) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: maxWords + ' words on one 900px screen (from y=' + at + ')', fix: 'one idea per screen: cut to about 80 words and make the section an object' });
-  else if (maxWords > 80) out.push({ rule: 'screen-word-budget', grade: 'warn', evidence: maxWords + ' words on one 900px screen (from y=' + at + '), close to the 80-word budget' });
+  if (maxWords > 95) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: maxWords + ' words on one ' + innerHeight + 'px screen (from y=' + at + ')', fix: 'one idea per screen: cut to about 80 words and make the section an object' });
+  else if (maxWords > 80) out.push({ rule: 'screen-word-budget', grade: 'warn', evidence: maxWords + ' words on one ' + innerHeight + 'px screen (from y=' + at + '), close to the 80-word budget' });
   if (ctx.stack > 2) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: 'the hero carries ' + ctx.stack + ' text blocks before its actions', fix: 'headline, one sentence, actions; delete the rest', at: ctx.h1 ? P.H.at(ctx.h1) : undefined });
   if (ctx.hero && ctx.h1) {
     const actions = Array.from(ctx.hero.querySelectorAll('a, button')).filter((c) => vis(c) && (c.textContent || '').trim() && !c.closest('nav, form, figure, footer'));
@@ -335,8 +335,8 @@ export function glHeroSpace(P: Probes, ctx: HeroCtx): ProbeFinding[] {
     heroFoot = { cBottom, navBottom };
   }
   if (heroEnd != null) {
-    if (heroEnd > vh + 8) out.push({ rule: 'hero-balance', grade: 'fail', evidence: 'the hero runs past the 1440x900 fold (it ends at ' + Math.round(heroEnd) + 'px)', fix: 'size the display and the visual so the hero is one screen', at: heroAt });
-    else if (heroEnd < vh * 0.84 && secs.length > 1) out.push({ rule: 'hero-balance', grade: 'fail', evidence: 'the hero ends at ' + Math.round(heroEnd) + 'px of a 900px screen', fix: 'fill the first screen with the visual or the headline, not with copy', at: heroAt });
+    if (heroEnd > vh + 8) out.push({ rule: 'hero-balance', grade: 'fail', evidence: 'the hero runs past the ' + innerWidth + 'x' + innerHeight + ' fold (it ends at ' + Math.round(heroEnd) + 'px)', fix: 'size the display and the visual so the hero is one screen', at: heroAt });
+    else if (heroEnd < vh * 0.84 && secs.length > 1) out.push({ rule: 'hero-balance', grade: 'fail', evidence: 'the hero ends at ' + Math.round(heroEnd) + 'px of a ' + innerHeight + 'px screen', fix: 'fill the first screen with the visual or the headline, not with copy', at: heroAt });
   }
   if (fig && textBox) {
     const off = Math.round((fig.top + fig.bottom) / 2 - (textBox.top + textBox.bottom) / 2);
@@ -442,10 +442,10 @@ export function glWide(P: Probes, ctx: HeroCtx): ProbeFinding[] {
   const { vis, text, at } = P.H;
   const out: ProbeFinding[] = [];
   const vh = innerHeight;
-  if (ctx.textBox && ctx.textBox.left < 120) out.push({ rule: 'wide-container', grade: 'fail', evidence: 'the hero text starts ' + Math.round(ctx.textBox.left) + 'px from the edge at 1920', fix: 'cap the container at 1360 to 1520px and centre it', at: ctx.h1 ? at(ctx.h1) : undefined });
-  if (ctx.heroEnd != null && ctx.heroEnd > vh + 8) out.push({ rule: 'wide-container', grade: 'fail', evidence: 'the hero runs past the 1920x1080 screen (it ends at ' + Math.round(ctx.heroEnd) + 'px)', fix: 'cap vw-sized visuals and display sizes', at: ctx.hero ? at(ctx.hero) : undefined });
+  if (ctx.textBox && ctx.textBox.left < 120) out.push({ rule: 'wide-container', grade: 'fail', evidence: 'the hero text starts ' + Math.round(ctx.textBox.left) + 'px from the edge at ' + innerWidth, fix: 'cap the container at 1360 to 1520px and centre it', at: ctx.h1 ? at(ctx.h1) : undefined });
+  if (ctx.heroEnd != null && ctx.heroEnd > vh + 8) out.push({ rule: 'wide-container', grade: 'fail', evidence: 'the hero runs past the ' + innerWidth + 'x' + innerHeight + ' screen (it ends at ' + Math.round(ctx.heroEnd) + 'px)', fix: 'cap vw-sized visuals and display sizes', at: ctx.hero ? at(ctx.hero) : undefined });
   const inkWidth = (e: Element) => { const range = document.createRange(); range.selectNodeContents(e); return range.getBoundingClientRect().width; };
   const wide = Array.from(document.querySelectorAll('p, h1, h2, h3, li')).filter((e) => vis(e) && !e.querySelector('p, h1, h2, h3, h4, div, figure, ul, ol, table, section') && text(e).length > 40 && inkWidth(e) > 1600);
-  if (wide.length) out.push({ rule: 'wide-container', grade: 'fail', evidence: wide.length + ' text block' + (wide.length > 1 ? 's run' : ' runs') + ' wider than 1600px at 1920 (first: ' + wide[0].tagName.toLowerCase() + ' "' + text(wide[0]).slice(0, 28) + '")', fix: 'cap the container; hold the measure', at: at(wide[0]) });
+  if (wide.length) out.push({ rule: 'wide-container', grade: 'fail', evidence: wide.length + ' text block' + (wide.length > 1 ? 's run' : ' runs') + ' wider than 1600px at ' + innerWidth + ' (first: ' + wide[0].tagName.toLowerCase() + ' "' + text(wide[0]).slice(0, 28) + '")', fix: 'cap the container; hold the measure', at: at(wide[0]) });
   return out;
 }

@@ -80,7 +80,7 @@ function flatBody(src: string, s: number, e: number): string {
 export function selectorNames(selectors: string[]): { tags: Set<string>; classes: Set<string> } {
   const tags = new Set<string>(), classes = new Set<string>();
   for (const sel of selectors) {
-    for (const m of sel.matchAll(/(?:^|[\s,>+~])([a-zA-Z]\w*)/g)) tags.add(m[1]);
+    for (const m of sel.matchAll(/(?:^|[\s,>+~(])([a-zA-Z]\w*)/g)) tags.add(m[1]);
     for (const m of sel.matchAll(/\.([\w-]+)/g)) classes.add(m[1]);
   }
   return { tags, classes };
@@ -93,7 +93,8 @@ const MAX_SELECTOR = 8192;
 function nestSelector(sel: string, parent: string): string {
   const p = parent.includes(',') ? `:is(${parent})` : parent;
   const parts = splitTop(sel).map((part) => part.trim());
-  if (sel.length + p.length * parts.length > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || p;
+  const substitutions = parts.reduce((n, part) => n + Math.max(1, part.split('&').length - 1), 0);
+  if (sel.length + p.length * substitutions > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || p;
   return parts.map((part) => part.includes('&') ? part.replace(/&/g, p) : `${p} ${part}`).join(', ');
 }
 

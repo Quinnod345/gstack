@@ -225,13 +225,15 @@ function accentedHeads(ctx: LintContext): CssRule[] {
       if (!inner) continue;
       const headLen = textOf(doc, i).replace(/\s+/g, '').length || 1;
       const spans = openTags(doc, /^(span|em|strong|b|i|mark)$/, i + 1, closeIndex(doc, i), (s) => !!(getAttr(s.attrs, 'class') || '').trim())
-        .map((el) => ({ classes: getAttr(el.tag.attrs, 'class') || '', inner: el.inner }));
-      const cover = (cls: string) => spans.filter((x) => x.classes.split(/\s+/).includes(cls)).reduce((n, x) => n + plainText(x.inner).replace(/\s+/g, '').length, 0) / headLen;
+        .map((el) => ({ classes: (getAttr(el.tag.attrs, 'class') || '').split(/\s+/).filter(Boolean), text: plainText(el.inner) }));
+      const covered = new Map<string, number>();
+      for (const x of spans) for (const cls of x.classes) covered.set(cls, (covered.get(cls) ?? 0) + x.text.replace(/\s+/g, '').length);
+      const cover = (cls: string) => (covered.get(cls) ?? 0) / headLen;
       const headDecls = styleFor(ctx, getAttr(t.attrs, 'class'), t.name, true);
       const own = (prop: string) => valueOf(ctx, headDecls, prop) ?? (prop === 'color' ? resolveVars('var(--color-ink)', ctx.tokens) : null);
       for (const m of spans) {
-        if (!/[A-Za-z0-9]/.test(plainText(m.inner))) continue;
-        for (const cls of m.classes.split(/\s+/).filter(Boolean)) {
+        if (!/[A-Za-z0-9]/.test(m.text)) continue;
+        for (const cls of m.classes) {
           if (cover(cls) >= 0.8) continue;
           for (const rule of byClass.get(cls) ?? []) {
             if (seen.has(rule.selector)) continue;

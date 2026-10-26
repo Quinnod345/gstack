@@ -115,14 +115,13 @@ function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): s
 export function stripTags(s: string, keep = false, limit = Infinity): string {
   let out = '', i = 0, seen = 0;
   for (;;) {
+    if (limit < Infinity) for (let k = i; k < s.length && s[k] !== '<'; k++) if (s[k] > ' ' && ++seen > limit) return out + s.slice(i, k + 1);
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
     const gt = s.indexOf('>', lt + 1);
     if (gt < 0) break;
-    const text = s.slice(i, lt);
-    out += text + (keep ? pad(s.slice(lt, gt + 1)) : ' ');
+    out += s.slice(i, lt) + (keep ? pad(s.slice(lt, gt + 1)) : ' ');
     i = gt + 1;
-    if (limit < Infinity && (seen += (text.match(/\S/g) || []).length) > limit) return out;
   }
   return out + s.slice(i);
 }
@@ -533,7 +532,7 @@ class JsxScanner {
           let j = k;
           while (j < n && /[\w$.:-]/.test(src[j])) j++;
           const e = this.ws(j);
-          if (src[e] !== '>') return -1;
+          if (src[e] !== '>') { i = e; continue; }
           const closer = src.slice(k, j);
           if (closer === name) { if (name) this.paint(i, e + 1); return e + 1; }
           if (this.open.lastIndexOf(closer) >= 0 && this.open.lastIndexOf(closer) < this.open.length - 1) return i;

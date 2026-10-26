@@ -172,7 +172,7 @@ export const RULES: Record<string, RuleMeta> = {
   'waiver': { tier: 'ask', gate: 'waiver', title: 'a waiver the lint refused', fix: 'fix the finding, or waive it with the rule id and a reason about this page' },
   'house-style': { tier: 'polish', gate: 'waiver', title: 'more than three rules waived on one page', fix: 'lock the choices into DESIGN.md so later pages inherit them instead of re-arguing them' },
   'render': { tier: 'blocks', gate: 'render', title: 'the page did not render, so its render rules did not run', fix: 'fix the page or the URL and rerun; an unrendered page is never a pass' },
-  'internal-error': { tier: 'ask', gate: 'lint', title: 'a rule family threw on this page, so its rules did not run', fix: 'report the error with the page that caused it; a page the lint could not read is not a pass' },
+  'internal-error': { tier: 'ask', gate: 'lint', title: 'a rule family threw, or a page or stylesheet could not be read, so the lint did not run on it', fix: 'report the error with the page that caused it; a page the lint could not read is not a pass' },
 };
 
 

@@ -5,7 +5,7 @@
  * missing-states, missing-reduced-motion, autoplay-unmuted, lazy-lcp, video-without-poster, input-state-shift,
  * control-height, content-hidden-at-rest.
  */
-import { isTokenRule, pxOf, resolveVars, selectorIsInteractive, stripComments } from '../css';
+import { isTokenRule, pxOf, resolveVars, selectorIsInteractive, splitTop, stripComments } from '../css';
 import { mergedRules, type LintContext, type SharedStyles } from '../context';
 import { getAttr, hasAttr } from '../html';
 import { trunc, type Reporter } from '../report';
@@ -162,7 +162,7 @@ function tooltipDelay(ctx: LintContext, r: Reporter): void {
   const delayed = (sel: RegExp): { file: string; line: number } | null => {
     for (const rule of tips) {
       if (!sel.test(rule.selector)) continue;
-      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && x.value.split(',').some((part) => {
+      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && splitTop(x.value).some((part) => {
         const ms = [...part.matchAll(/(?<![\w.-])(\d*\.?\d+)(ms|s)\b/g)].map((m) => m[2] === 'ms' ? Number(m[1]) : Number(m[1]) * 1000);
         return (x.prop === 'transition-delay' ? ms[0] : ms[1]) >= 100;
       }));

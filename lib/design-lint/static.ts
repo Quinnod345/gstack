@@ -140,8 +140,9 @@ class CssCache {
       const raw = fs.readFileSync(f, 'utf8');
       out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') this.warn(`design-lint: skipped ${f}, not found`);
-      else { const why = `it could not be parsed (${(e as Error).message})`; this.warn(`design-lint: skipped ${f}, ${why}`); this.skipped.push({ file: f, kind: 'unparseable', why }); }
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') this.warn(`design-lint: skipped ${f}, not found`);
+      else { const why = code ? `it cannot be read (${code})` : `it could not be parsed (${(e as Error).message})`; this.warn(`design-lint: skipped ${f}, ${why}`); this.skipped.push({ file: f, kind: code ? 'unreadable' : 'unparseable', why }); }
     }
     this.files.set(f, out);
     return out;
