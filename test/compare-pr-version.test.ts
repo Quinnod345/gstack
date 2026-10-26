@@ -168,6 +168,68 @@ describe('version gate: unstamped heads under a train policy', () => {
     }
   });
 
+  describe('a release output regenerated at the base VERSION is not a stamp (GSTA-96: an unstamped PR could not reword the agents digest)', () => {
+    const gen = (r: FixtureRepo, body: string) => write(r, 'gen.js', `const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\n${body}\\n');\n`);
+
+    test('a generator change with its regenerated output at the base VERSION passes as unstamped', () => {
+      const r = fixture();
+      branch(r);
+      gen(r, 'reworded body');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'reword the digest'));
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('an output that is not what the generator produces at the base VERSION still counts as a stamp', () => {
+      for (const edit of [
+        (r: FixtureRepo) => write(r, 'generated/digest.md', '# digest v1.2.3.0\nhand-edited body\n'),
+        (r: FixtureRepo) => { gen(r, 'reworded body'); write(r, 'generated/digest.md', '# digest v1.2.4.0\nreworded body\n'); },
+      ]) {
+        const r = fixture();
+        branch(r);
+        write(r, 'CHANGELOG.md', withUnreleased(r));
+        edit(r);
+        const res = run(r, commit(r, 'not a regeneration'));
+        expect(res.code).toBe(1);
+        expect(res.out).toContain('must carry v1.2.4.0');
+      }
+    });
+
+    test('a VERSION bump without the regenerated output is a stamp, never an unstamped head', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'VERSION', '1.2.4.0\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'bump without digest'), '1.2.3.0');
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
+      expect(res.out).not.toContain('is unstamped under the base');
+    });
+
+    test('a release tool that fails at the head is an error, not a pass', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', 'process.stderr.write("gen broke\\n");process.exit(3);\n');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'broken generator'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('release_tool `node gen.js` exited 3');
+      expect(res.out).toContain('gen broke');
+    });
+
+    test('without a release_tool a changed output keeps counting as a stamp', () => {
+      const r = fixture({ ...BASE_POLICY, release_tool: null, train: TRAIN });
+      branch(r);
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'no tool'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
+    });
+  });
   test('negative controls: CHANGELOG edits outside [Unreleased] fail an unstamped head', () => {
     const cases: Array<(r: FixtureRepo) => string> = [
       r => withUnreleased(r).replace('- older', '- older, rewritten'),

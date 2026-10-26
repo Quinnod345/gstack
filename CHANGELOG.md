@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**An unstamped PR can change a release output again (GSTA-96 on #3434).** Regenerating `agents-digest/gstack-AGENTS.md` after a generator change made the Version Gate classify the head as stamped (the digest is in `release_outputs`) and demand base + bump, while changing only `scripts/gen-agents-digest.ts` failed `test/agents-digest.test.ts`'s freshness check, so a digest rewording could not land before its slot.
+
+### Fixed
+- **Version Gate under a train policy** (`lib/version-gate-train.ts`, `scripts/compare-pr-version.ts`): a changed `release_outputs` file no longer counts as a stamp when it is byte for byte what the policy's `release_tool` generates at the base's `VERSION`; the gate runs the head's tool in a throwaway worktree with the base's `VERSION` and compares. `VERSION` and `package.json` version changes still classify the head as stamped, as does an output that differs (hand-edited, or generated at a bumped version) or a policy with no `release_tool`; a tool that exits non-zero is an error with its stderr, never a pass. The freshness test stays strict and a stamp commit still changes only the stamp files, since the slot's restamp regenerates the output. `docs/ship-policy.md` states the rule under "Lane: report ready".
+
+### Tests
+- `test/compare-pr-version.test.ts`: a generator change with its regenerated output at the base VERSION passes as unstamped (red without the fix); a hand-edited output, an output generated at the bumped version, a VERSION bump without the output, a failing release tool and a policy without `release_tool` all still refuse.
+
 ## [1.91.226.0] - 2026-10-26
 
 **/review can re-review just its own fixes after a fixing pass, under the same rules as /ship (#3339).** Before, every /review fix cycle reran the whole review over the whole branch, so a large branch could hit the three-cycle stop on findings in code the earlier passes had already read. Now the pass after an edited pass starts with `gstack-review-log --start review --fix-range` and its checklist, specialists and QA read only what changed since that pass. The Step 4.8 adversarial review still reads the whole branch on every pass, because its rows carry their own freshness. A narrowed pass is never the final review: when it makes no edits, /review runs one full pass before writing the final record, and a fix-range record is never CURRENT. Garry's "do it" on 2026-10-24 for a fix-range re-review with a final full pass covers it.
