@@ -595,7 +595,7 @@ write_launch_file() {
   tmp=$(umask 077 && mktemp "$LAUNCH_FILE.tmp.XXXXXX") || return 1
   {
     echo "# gstack launch environment, written by gstack-capy-install; mode 0600."
-    echo "# Apply it with: . $(shq "$LAUNCH_FILE")"
+    echo "# Apply it with: . <this file>"
     echo "# Never print it or the environment: no \`export \$(...)\`, \`env\`, \`printenv\` or bare \`set\` in a tool fence."
     [ -n "$LAUNCH_DIR" ] && echo "case \":\$PATH:\" in *:$(shq "$LAUNCH_DIR"):*) ;; *) PATH=$(shq "$LAUNCH_DIR"):\"\$PATH\" ;; esac; export PATH"
     echo "export GSTACK_SESSION_KIND=unattended"
@@ -603,9 +603,9 @@ write_launch_file() {
     echo "export GSTACK_EPHEMERAL=$(shq "${GSTACK_EPHEMERAL:-1}")"
     echo "export GSTACK_CAPY=1"
     echo "export GSTACK_INSTALL_VERDICT=$(shq "$VERDICT")"
-  } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE"
+  } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE" || { rm -f "$tmp"; return 1; }
 }
-write_launch_file || { rm -f "$LAUNCH_FILE".tmp.* 2>/dev/null; say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }
+write_launch_file || { say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }
 echo "GSTACK_LAUNCH: ${LAUNCH_DIR:+PATH=$LAUNCH_DIR:\$PATH }GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=$GSTACK_STATE_ROOT GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-1} GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=$VERDICT"
 [ -n "$LAUNCH_DIR" ] && echo "GSTACK_LAUNCH_PATH: $LAUNCH_DIR"
 [ -n "$LAUNCH_FILE" ] && echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"
