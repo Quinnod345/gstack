@@ -97,6 +97,33 @@ describe('census attribution from the 2026-10-03 artifacts', () => {
   });
 });
 
+describe('a case shard\'s result records are its one case\'s cost (2026-10-26 train 76db1d1f10c4: 54 of 136 trials cost-unknown, verdict $24.41 under a $32.92 run)', () => {
+  const shard = (dir: string, slug: string) => path.join(dir, 'paid-slice-1-a1', 'shards', slug);
+  const results = (dir: string, slug: string, tests: Array<Record<string, unknown>>) =>
+    fs.writeFileSync(path.join(shard(dir, slug), 'e2e-2026-10-26.json'), JSON.stringify({ tests, total_cost_usd: tests.reduce((sum, t) => sum + Number(t.cost_usd), 0) }));
+  const collector = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, 'collector-outcomes.json'), 'utf8'));
+
+  test('a record named by its display label ("/qa fix loop") belongs to the shard\'s only case, so the trial and the verdict carry its cost', () => {
+    const r = report('periodic', dir => results(dir, 'skill-e2e-qa-workflow--qa-fix-loop',
+      [{ name: '/qa fix loop', suite: 'QA skill E2E', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 1.23 }]));
+    const trial = r.history.find(record => record.case === 'qa-fix-loop');
+    expect(trial).toMatchObject({ outcome: 'passed', cost_usd: 1.23 });
+    expect(trial.cost_known).toBeUndefined();
+    expect(collector(r.dir).verdict.costUsd).toBe(1.23);
+    expect(r.out).toContain('cost $1.23 known + 6 of 7 trial(s) cost unknown');
+  });
+
+  test('a multi-case shard whose records carry display labels keeps those trials cost-unknown instead of guessing', () => {
+    const r = report('periodic', dir => results(dir, 'skill-e2e-cso',
+      [{ name: '/cso full audit', suite: 'cso', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 0.5 },
+        { name: 'cso-infra-scope', suite: 'cso', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 0.25 }]));
+    expect(r.history.find(record => record.case === 'cso-full-audit')).toMatchObject({ cost_usd: 0, cost_known: false });
+    expect(r.history.find(record => record.case === 'cso-infra-scope')).toMatchObject({ cost_usd: 0.25 });
+    expect(r.history.find(record => record.case === 'cso-infra-scope').cost_known).toBeUndefined();
+    expect(collector(r.dir).verdict.costUsd).toBe(0.75);
+  });
+});
+
 describe('record builders attach ledger sessions and failure causes (plan 0.1/0.2)', () => {
   const noOp = (dir: string) => path.join(dir, 'paid-slice-1-a1', 'shards', 'skill-e2e-plan-mode-no-op');
   const failNoOp = (dir: string) => {

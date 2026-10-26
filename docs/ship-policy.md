@@ -317,7 +317,7 @@ warning on stderr). A block for gstack itself would read:
 "train": {
   "gate_workflow": "evals.yml", "free_workflow": "free-tests.yml",
   "full_gate_check": "gstack/full-gate", "record_artifact": "gstack-train-record",
-  "max_size": 5, "fill_hours": 3, "screen_selection": "gstack-paid",
+  "max_size": 3, "fill_hours": 1, "screen_selection": "gstack-paid",
   "trial_reservation_usd": 1.5
 },
 "min_gstack_version": "<the version that introduced train>"
@@ -437,9 +437,11 @@ tree=<tree>` per prefix and one `SLOT:` per PR. `--dry-run` adds the
 writes `train.json`, pushes `train/<nonce>`, dispatches `free_workflow` there
 and waits (`--free-timeout <s>`, default 2700) for a green
 `workflow_dispatch` run on that exact SHA, then dispatches the full gate
-through eval-bg's nonce. A train under `max_size` waits until its oldest READY
-has waited `fill_hours` (`QUEUE_TRAIN_WAITING`); `--urgent` dispatches a
-one-PR train at once. The same pins on the same base return the live train
+through eval-bg's nonce. A train fills at `max_size` READY PRs or when its
+oldest READY has waited `fill_hours`, whichever comes first; until then
+`QUEUE_TRAIN_WAITING` names the time, and `--urgent` dispatches a one-PR
+train at once. gstack's own block fills at 3 PRs or one hour (it was 5 PRs or
+three hours until 2026-10-26, which left READY PRs waiting most of a day). The same pins on the same base return the live train
 instead of a second one; `train build --train <nonce>` resumes a train from
 its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork
 head), `QUEUE_TRAIN_MOVED` (a head moved from its pin),

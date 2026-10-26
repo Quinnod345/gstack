@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+**Merge trains fill at 3 READY PRs or one hour after the first READY, and a train verdict's cost line no longer hides the trials it could not price.** On 2026-10-26 the 5-PR / 3-hour fill left READY PRs waiting most of a day, and `train verdict` printed `cost=$24.41` for a train whose slice report said `cost $32.92 known + 54 of 136 trial(s) cost unknown`. The slice report was right: 54 E2E trials had no cost attributed because their result records are named by a display label ("/benchmark workflow") while the case is named by its id (`benchmark-workflow`), so the per-case sum the train record carries was short by $8.51.
+
+### Changed
+- **`.gstack/ship-policy.json`**: `train.max_size` 5 → 3 and `train.fill_hours` 3 → 1. `fillDue` already dispatches at either bound, whichever comes first; a fourth READY PR is `HELD:` for the next train. docs/ship-policy.md says so in the fill paragraph and its example block.
+
+### Fixed
+- **`scripts/lib/paid-report.ts`**: when a shard ran exactly one case (every case shard since W5a), its result records belong to that case even when they are named by a display label, so the trial's `cost_usd` is the record's and `cost_known` is no longer false. A multi-case shard whose records carry display labels keeps those trials cost-unknown rather than guessing which case paid. The train record's per-case `cost_usd` (scripts/train-gate.ts) and the slice report's headline now agree for case shards; the headline was never wrong.
+- **`lib/ship-queue-train-verdict.ts`**: the `ATTEMPT:` line prints `cost=$<known> known + <n> of <m> case(s) cost unknown` when any panel has no cost, and the bare `cost=$<sum>` only when every panel is priced.
+
+### Tests
+- `test/gstack-ship-policy.test.ts` pins the live fill rule (3 PRs or one hour) and exercises `fillDue` with the live block at 59 and 60 minutes and at 3 PRs.
+- `test/paid-report-census.test.ts`: a display-labelled record in the periodic fixture's `qa-fix-loop` case shard gives the trial `cost_usd: 1.23` with no `cost_known: false`, `verdict.costUsd` 1.23 and the headline `cost $1.23 known + 6 of 7 trial(s) cost unknown` (red before the fix: `cost_usd: 0, cost_known: false`); the two-case `skill-e2e-cso` shard keeps its display-labelled trial unknown while the id-named one is priced.
+- `test/ship-queue-train-cost.test.ts`: a green train whose record has two unpriced panels prints `cost=$0.70 known + 2 of 3 case(s) cost unknown`; a fully priced record prints `cost=$1.50` alone (red before the fix: the bare `cost=$0.70`).
+
+### Gate integrity
+- No threshold, rubric, trial count, case kind or judge prompt changed. Cost attribution changes what a trial record reports, never whether a case passed.
+
 ## [1.91.248.0] - 2026-10-26
 
 **`$B` in direct mode no longer lets Chromium pick a proxy from the environment (#3440 item 8).** `BROWSE_PROXY_URL=direct` (and an unparseable `HTTPS_PROXY`) only stopped gstack from configuring a proxy. The daemon inherits the whole environment and the launch passed no proxy switch, so Chromium read `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` itself and every `goto` still went through that proxy while `$B` reported a direct connection. That made the BROWSER.md precedence list false and any certificate check on a proxied machine unreliable. Reproduced on Linux with Playwright 1.62.1: a logging CONNECT proxy in `HTTPS_PROXY` received `CONNECT <host>:443` with `BROWSE_PROXY_URL=direct` set.
