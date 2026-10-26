@@ -46,6 +46,7 @@ function markCheckout(dir: string): void {
   fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
   fs.writeFileSync(path.join(dir, "VERSION"), "1.0.0\n");
   fs.writeFileSync(path.join(dir, "setup"), "#!/bin/sh\n");
+  fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: gstack\ndescription: g\n---\n# gstack\n");
 }
 
 function fileBytes(...segments: string[]): number {
@@ -822,12 +823,13 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-exact-once-"));
     const checkout = path.join(tmp, "checkout");
     fs.mkdirSync(path.join(checkout, "shared"), { recursive: true });
-    fs.writeFileSync(path.join(checkout, "SKILL.md"), "---\nname: twin\ndescription: d\n---\n# twin\n");
+    fs.mkdirSync(path.join(checkout, "twin"));
+    fs.writeFileSync(path.join(checkout, "twin", "SKILL.md"), "---\nname: twin\ndescription: d\n---\n# twin\n");
     fs.writeFileSync(path.join(checkout, "shared", "guide.md"), "SHARED-GUIDE ".repeat(20));
     const skills = path.join(tmp, "skills");
     for (const name of ["a", "b"]) {
       fs.mkdirSync(path.join(skills, name), { recursive: true });
-      fs.symlinkSync(path.join(checkout, "SKILL.md"), path.join(skills, name, "SKILL.md"));
+      fs.symlinkSync(path.join(checkout, "twin", "SKILL.md"), path.join(skills, name, "SKILL.md"));
       fs.symlinkSync(path.join(checkout, "shared"), path.join(skills, name, "refs"));
     }
     markCheckout(checkout);
@@ -1156,6 +1158,14 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     });
     expect(parentSwapped.calls.some((c) => c.body.includes("SYNTHETIC_PRIVATE"))).toBe(false);
     expect(parentSwapped.code).toBe(1);
+    expect(parentSwapped.err).toContain("changed after it was walked");
+
+    const sameFileMoved = await run((store) => {
+      fs.renameSync(store, `${store}-old`);
+      fs.symlinkSync(`${store}-old`, store);
+    });
+    expect(sameFileMoved.code).toBe(1);
+    expect(sameFileMoved.err).toContain("changed after it was walked");
   });
 
   it("sends files in the root and the linked gstack checkout, and refuses and names anything else a link reaches", async () => {
@@ -1240,7 +1250,7 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     }
   });
 
-  it("does not take a gstack/ entry as the checkout unless it is a gstack checkout outside the root", async () => {
+  it("does not take a gstack/ entry as the checkout unless it is a gstack checkout", async () => {
     if (process.platform === "win32") return;
     const cases: Array<(tmp: string, skills: string, docs: string) => void> = [
       (_tmp, skills, docs) => fs.symlinkSync(docs, path.join(skills, "gstack")),
@@ -1249,8 +1259,16 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
         fs.symlinkSync(docs, path.join(skills, "gstack"));
       },
       (tmp, skills) => {
-        markCheckout(tmp);
+        fs.mkdirSync(path.join(tmp, ".git"));
+        fs.writeFileSync(path.join(tmp, "VERSION"), "1.0.0\n");
+        fs.writeFileSync(path.join(tmp, "setup"), "#!/bin/sh\n");
+        fs.writeFileSync(path.join(tmp, "SKILL.md"), "---\nname: my-project\ndescription: p\n---\n# p\n");
         fs.symlinkSync(tmp, path.join(skills, "gstack"));
+      },
+      (_tmp, skills, docs) => {
+        markCheckout(docs);
+        fs.rmSync(path.join(docs, ".git"), { recursive: true });
+        fs.symlinkSync(docs, path.join(skills, "gstack"));
       },
     ];
     for (const plant of cases) {
@@ -1267,9 +1285,27 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
       fs.rmSync(tmp, { recursive: true, force: true });
       expect(run.code).toBe(0);
       expect(run.calls.some((c) => c.body.includes("PRIVATE-DIARY"))).toBe(false);
-      expect(run.err).toContain("not sending 1 .md file(s)");
+      expect(run.err).toMatch(/not sending \d+ \.md file\(s\)/);
+      expect(run.err).toContain("diary.md");
       expect(run.err).not.toContain("in the gstack checkout");
     }
+  });
+
+  it("sends a dev-setup tree's files from the gstack checkout that contains it", async () => {
+    if (process.platform === "win32") return;
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-dev-setup-"));
+    markCheckout(repo);
+    fs.mkdirSync(path.join(repo, "review"));
+    fs.writeFileSync(path.join(repo, "review", "SKILL.md"), "---\nname: review\ndescription: d\n---\n# REVIEW-SKILL\n");
+    const skills = path.join(repo, ".claude", "skills");
+    fs.mkdirSync(path.join(skills, "review"), { recursive: true });
+    fs.symlinkSync(repo, path.join(skills, "gstack"));
+    fs.symlinkSync(path.join(repo, "review", "SKILL.md"), path.join(skills, "review", "SKILL.md"));
+    const run = await exactRun(skills);
+    fs.rmSync(repo, { recursive: true, force: true });
+    expect(run.code).toBe(0);
+    expect(run.calls.some((c) => c.body.includes("REVIEW-SKILL"))).toBe(true);
+    expect(run.err).not.toContain("not sending");
   });
 
   it("says every billed file was refused, not that there was none, when nothing is left to send", async () => {

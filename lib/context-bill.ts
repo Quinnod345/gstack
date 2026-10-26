@@ -248,11 +248,27 @@ function encloses(outer: string, inner: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
+/** walkMdFiles(dir)'s lexical paths, with no billedRoot fence or nested-skill skip. */
+export function walkMd(dir: string): string[] {
+  return walkMdFiles(dir).map((f) => f.path);
+}
+
+export interface WalkedFile {
+  /** The lexical path under the walked dir; the key the bill and --exact use. */
+  path: string;
+  /** The file's realpath when it was walked. */
+  real: string;
+  /** The file's identity, taken without following links when it was walked; --exact reads only that same file. */
+  dev: number;
+  ino: number;
+}
+
 /**
- * Every .md file under a tree, for the on-disk total and for exact
- * measurement. Skips node_modules and dot-directories: a skills tree that is
- * also a repo checkout (dev symlink installs) would otherwise bill its
- * dependency tree and CI state as skill content. A child repo checkout (the
+ * Every .md file under a tree, with its realpath and identity, for the
+ * on-disk total and for exact measurement. Skips node_modules and
+ * dot-directories: a skills tree that is also a repo checkout (dev symlink
+ * installs) would otherwise bill its dependency tree and CI state as skill
+ * content. A child repo checkout (the
  * `gstack/` link inside ~/.claude/skills) is skipped for the same reason.
  *
  * Symlinked files and directories are followed, and every returned path stays
@@ -269,26 +285,10 @@ function encloses(outer: string, inner: string): boolean {
  * With `skipNestedSkills`, a top-level subdirectory holding its own SKILL.md is
  * not entered, so a container skill keeps the files it shares with a nested
  * skill instead of losing them to whichever path sorted first.
- */
-export function walkMd(dir: string): string[] {
-  return walkMdFiles(dir).map((f) => f.path);
-}
-
-export interface WalkedFile {
-  /** The lexical path under the walked dir; the key the bill and --exact use. */
-  path: string;
-  /** The file's realpath when it was walked. */
-  real: string;
-  /** The file's identity, taken without following links when it was walked; --exact reads only that same file. */
-  dev: number;
-  ino: number;
-}
-
-/**
- * walkMd's files with their realpaths. Every directory is read through its
- * realpath, so a lookup crosses at most one link however deep the lexical
- * path runs: a chain of links never hits the kernel's link-depth limit
- * (ELOOP) and silently loses the files past it.
+ *
+ * Every directory is read through its realpath, so a lookup crosses at most
+ * one link however deep the lexical path runs: a chain of links never hits
+ * the kernel's link-depth limit (ELOOP) and silently loses the files past it.
  */
 export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNestedSkills?: boolean } = {}): WalkedFile[] {
   const out: WalkedFile[] = [];
@@ -839,13 +839,21 @@ export interface ExactSendSet {
  * What --exact sends: the same per-skill walks totalMd bills, with the same
  * fences, so nothing is walked or sent that no skill bills. Of those, only
  * files inside the root or inside the gstack checkout the skills link into
- * (the root's gstack/ entry, a repo checkout) are sent; anything else a link
+ * (the root's gstack/ entry, when it is a git checkout whose SKILL.md is named
+ * gstack and which has VERSION and setup) are sent; anything else a link
  * reaches is refused and estimated offline.
  *
  * The root is resolved before keying. buildBill resolves its root, so a
  * relative root here would produce keys that never match and every lookup
  * would fall back to the estimate.
  */
+function isGstackCheckout(dir: string): boolean {
+  if (!fs.existsSync(path.join(dir, ".git"))) return false;
+  if (!["VERSION", "setup", "SKILL.md"].every((name) => isFile(path.join(dir, name)))) return false;
+  const { block } = parseFrontmatter(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"));
+  return /^name:\s*gstack\s*$/m.test(block);
+}
+
 export function exactSendSet(root: string): ExactSendSet {
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
@@ -855,9 +863,7 @@ export function exactSendSet(root: string): ExactSendSet {
   const seen = new Set<string>();
   const rootReal = fs.realpathSync(resolved);
   const gstackEntry = path.join(resolved, "gstack");
-  const looksLikeCheckout = ["VERSION", "setup"].every((name) => isFile(path.join(gstackEntry, name)));
-  const gstackReal = looksLikeCheckout && fs.existsSync(path.join(gstackEntry, ".git")) ? fs.realpathSync(gstackEntry) : undefined;
-  const checkout = gstackReal && !encloses(gstackReal, rootReal) ? gstackReal : undefined;
+  const checkout = isGstackCheckout(gstackEntry) ? fs.realpathSync(gstackEntry) : undefined;
   for (const dir of findSkillDirs(resolved)) {
     frontmatter.add(fs.realpathSync(path.join(dir, "SKILL.md")));
     for (const file of walkMdFiles(dir, { billedRoot: resolved, skipNestedSkills: true })) {
