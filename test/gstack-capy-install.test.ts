@@ -293,6 +293,11 @@ describe('gstack-capy-install', () => {
     const bare = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'gstack-upgrade exit 9' });
     expect(bare.status).toBe(0);
     expect(lastLine(bare.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: gstack-upgrade exit 9 (UPGRADE_REFUSED); fix: ${f.root}/bin/gstack-upgrade)`);
+    // A code the installer does not know collapses to UPGRADE_SKIPPED, whose anchor exists; the reason and fix are kept.
+    const other = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'origin unreachable; fix: retry when online (UPGRADE_FETCH_FAILED)' });
+    expect(other.status).toBe(0);
+    expect(lastLine(other.stdout)).toBe('gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: origin unreachable (UPGRADE_SKIPPED); fix: retry when online)');
+    expect(other.stdout).toMatch(/^WARN behind — .*; fix: retry when online \(UPGRADE_SKIPPED; .*#upgrade-skipped\)$/m);
     expect(lastLine(run(f, [], { ...busy, STUB_DOCTOR_FAIL: '1' }).stdout)).toBe('gstack: fail codex');
   });
 
@@ -338,6 +343,11 @@ describe('gstack-capy-install', () => {
     const verdict = full.stdout.match(/GSTACK_INSTALL_VERDICT=(\S+)/)![1]!;
     expect(JSON.parse(fs.readFileSync(verdict, 'utf8'))).toMatchObject({ for: 'autoplan', ok: true });
     expect(lastLine(full.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+    // The message is for the review-voice -> workflow step only: a rerun of the same profile, a --check and a second review-voice install stay silent.
+    const upgrading = /upgrading the review-voice install in place/;
+    expect(run(f, ['--for', 'autoplan', '--project', project]).stdout).not.toMatch(upgrading);
+    expect(run(f, ['--check', '--for', 'autoplan', '--project', project]).stdout).not.toMatch(upgrading);
+    expect(run(f, ['--for', 'review-voice', '--project', project]).stdout).not.toMatch(upgrading);
   });
 
   test('--root clones when the directory is absent and refuses a non-gstack directory', () => {

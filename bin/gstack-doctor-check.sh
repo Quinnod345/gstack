@@ -527,7 +527,7 @@ _dc_wrapper_rev() {
 # ~/.capy/drive/*/skills/gstack/scripts/install.sh, failing only when each is
 # stale. The workaround runs the checkout's own copy, which certifies.
 _dc_check_wrapper() {
-  local min copy rev stale="" current="" active="${GSTACK_CAPY_WRAPPER_PATH:-}" workaround owner
+  local min copy rev stale="" current="" pre="" active="${GSTACK_CAPY_WRAPPER_PATH:-}" workaround owner
   min=$(sed -n 's/^GSTACK_CAPY_MIN_WRAPPER=\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$SRC/capy/support.env" 2>/dev/null | head -1); min="${min:-1}"
   workaround="bash $SRC/capy/skill/gstack/scripts/install.sh --check${CHECK_FOR:+ --for $CHECK_FOR} (this session)"
   owner="owner action: copy $SRC/capy/skill/gstack/ over the Drive skill folder, or have Capy re-sync it; this recurs every session until the Drive copy changes"
@@ -536,10 +536,12 @@ _dc_check_wrapper() {
     [ -n "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ "$copy" = "$active" ] && continue
     [ -z "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ -n "$active" ] && [ -f "$active" ] && [ "$copy" != "$active" ] && continue
     rev=$(_dc_wrapper_rev "$copy")
+    [ "$rev" -eq 0 ] 2>/dev/null && pre=1
     if [ "$rev" -lt "$min" ] 2>/dev/null; then stale="${stale:+$stale, }$copy (wrapper $rev)"; else current="${current:+$current, }$copy (wrapper $rev)"; fi
   done
   if [ -z "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ -n "$active" ] && [ -f "$active" ] && [ -z "$stale$current" ]; then
     rev=$(_dc_wrapper_rev "$active")
+    [ "$rev" -eq 0 ] 2>/dev/null && pre=1
     if [ "$rev" -lt "$min" ] 2>/dev/null; then stale="$active (wrapper $rev)"; else current="$active (wrapper $rev)"; fi
   fi
   if [ -n "${GSTACK_CAPY_WRAPPER_REV:-}" ]; then
@@ -552,6 +554,10 @@ _dc_check_wrapper() {
     fi
   elif [ -n "$current" ]; then
     _dc_row PASS wrapper "Drive copy $current (minimum $min)${stale:+; stale copies: $stale}"
+  elif [ -n "$stale" ] && [ -z "$pre" ]; then
+    # Every copy is a bootstrapper below the minimum: it still works (a direct
+    # run has no provenance to say so), so the row is the owner action, not a FAIL.
+    _dc_row WARN wrapper "every Capy skill copy is below the minimum wrapper $min (it still works): $stale" "$owner" CAPY_WRAPPER_STALE
   elif [ -n "$stale" ]; then
     _dc_row FAIL wrapper "every Capy skill copy is stale (minimum wrapper $min): $stale" "$workaround; owner: ${owner#owner action: }" CAPY_WRAPPER_STALE
   else

@@ -393,6 +393,18 @@ describe('capy skill: the session hands the installer GSTACK_CAPY_BEHIND', () =>
     }
   });
 
+  test('an older bootstrapper handing --for none to the session in install mode: the session certifies nothing and moves nothing (no self-upgrade, HEAD unchanged), and reports behind like --check', () => {
+    const f = fixture({ cloneAt: 'B' });
+    write(path.join(f.root, 'bin/gstack-capy-install'), ENV_INSTALLER, 0o755);
+    f.git(['update-index', '--assume-unchanged', 'bin/gstack-capy-install']);
+    f.git(['fetch', '-q', 'origin', 'main']);
+    const r = spawnSync('bash', [path.join(f.root, 'bin/gstack-capy-session'), '--root', f.root, '--for', 'none'], { cwd: f.host.home, encoding: 'utf8', env: { ...f.host.env, GSTACK_CAPY_REMOTE_MIN: '1.0.1', GSTACK_CAPY_WRAPPER_REV: '2', GSTACK_CAPY_WRAPPER_PATH: BOOT }, timeout: 120_000 });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).not.toMatch(/^SELF_UPGRADE:/m);
+    expect(r.stdout.trim().split('\n').at(-1)).toBe(`gstack: ok 1.0.1 for=autoplan behind=1 to=1.0.2 fix=bash ${BOOT} --for none`);
+    expect(f.git(['rev-parse', 'HEAD'])).toBe(f.b);
+  });
+
   test('current, or the fetch failed: nothing is exported, and values inherited from a parent session are dropped', () => {
     const f = fixture({ cloneAt: 'B' });
     f.git(['fetch', '-q', 'origin', 'main']);

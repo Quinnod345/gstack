@@ -1574,8 +1574,10 @@ every lease with its age and `alive|dead|stale`; a holder is named as
 When you know they are idle, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
 proceeds. At a Capy session start the same refusal appears as
 `SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`,
-and the trailer is `gstack: fail behind — … (UPGRADE_BUSY)`: a session that
-could not upgrade is never certified ok.
+the doctor adds `WARN behind — … (UPGRADE_BUSY)` and the trailer stays
+`gstack: ok … (behind=<n> (latest: <v>); upgrade skipped: … (UPGRADE_BUSY); fix: …)`:
+the installed revision is above the supported minimum, so the session is
+certified and the note names the fix.
 
 <a id="upgrade-fetch-failed"></a>
 ### `gstack-upgrade: could not reach origin (...) (UPGRADE_FETCH_FAILED)`
@@ -1618,9 +1620,12 @@ action that never fails the run. Without provenance (a direct
 `gstack-doctor --check`, or a pre-bootstrapper copy with no
 `GSTACK_CAPY_WRAPPER=` line, which reads as wrapper 0) it reads the Drive
 copies (`~/.capy/drive/*/skills/gstack/scripts/install.sh`, or only
-`GSTACK_CAPY_WRAPPER_PATH` when set) and fails only when every copy is stale,
-listing each with its revision. A stale active wrapper is a `WARN` too: an
-older copy still works (`capy/support.env`). `bin/gstack-upgrade` runs the
+`GSTACK_CAPY_WRAPPER_PATH` when set), listing each with its revision: every
+copy a bootstrapper below the minimum is `WARN wrapper — every Capy skill copy
+is below the minimum wrapper <m> (it still works): ...` with the owner action,
+and it fails only when a copy is pre-bootstrapper (wrapper 0), which cannot
+hand over at all. A stale active wrapper is a `WARN` too: an older copy still
+works (`capy/support.env`). `bin/gstack-upgrade` runs the
 installer with the checkout's own copy as the active wrapper and never leaves
 a pending reinstall when the wrapper row is the only failure.
 

@@ -41,6 +41,7 @@
  */
 
 import { RESULT_CODES } from './result-codes';
+import { SHIP_POLICY_PATH } from './ship-policy';
 
 export type ComponentKind = 'core' | 'host' | 'component' | 'optional';
 
@@ -100,7 +101,7 @@ export const NOT_NEEDED_PROFILE = 'none';
 export const NOT_NEEDED_REVISION = 'not-needed';
 
 /** The project file and key the `floor` row reads (the same key gstack-ship-queue validates). */
-export const PROJECT_FLOOR_FILE = '.gstack/ship-policy.json';
+export const PROJECT_FLOOR_FILE = SHIP_POLICY_PATH;
 export const PROJECT_FLOOR_FIELD = 'min_gstack_version';
 
 /** The read-only helpers the `helpers` row launches (`<bin> --help` loads each module graph with the launch Bun). */

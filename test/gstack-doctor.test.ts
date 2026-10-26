@@ -885,6 +885,22 @@ describe('gstack-doctor --check: wrapper and runtime drift', () => {
     expect(fresh.status, fresh.out).toBe(0);
   });
 
+  posixPathTest('direct doctor run: a bootstrapper Drive copy below the minimum still works, so it is an owner-action WARN with an ok trailer (only a pre-bootstrapper copy fails)', () => {
+    const f = makeFixture();
+    withSupport(f, Number(currentRev) + 1);
+    const old = drive(f, 'user-garry-tan', current);
+    const r = parse(f, []);
+    expect(r.status, r.out).toBe(0);
+    expect(r.trailer).toMatch(/^gstack: ok /);
+    expect(r.line('wrapper')).toBe(`WARN wrapper — every Capy skill copy is below the minimum wrapper ${Number(currentRev) + 1} (it still works): ${old} (wrapper ${currentRev}); owner action: copy ${f.root}/capy/skill/gstack/ over the Drive skill folder, or have Capy re-sync it; this recurs every session until the Drive copy changes (CAPY_WRAPPER_STALE; https://github.com/garrytan/gstack/blob/main/docs/troubleshooting.md#capy-wrapper-stale)`);
+    const json = JSON.parse(doctor(f, ['--check', '--json']).out);
+    expect(json.ok).toBe(true);
+    expect(json.rows.find((x: { id: string }) => x.id === 'wrapper')).toMatchObject({ status: 'WARN', code: 'CAPY_WRAPPER_STALE' });
+    // A pre-bootstrapper copy beside it keeps the FAIL: that copy cannot hand over at all.
+    drive(f, 'org', PRE_BOOTSTRAPPER);
+    expect(parse(f, []).trailer).toBe('gstack: fail wrapper');
+  });
+
   posixPathTest('two Drive copies, one current: PASS naming the stale one; GSTACK_CAPY_WRAPPER_PATH alone decides when set without a revision', () => {
     const f = makeFixture();
     withSupport(f);

@@ -506,8 +506,10 @@ floor is not what keeps machines current). It never exceeds VERSION
 changes in a way older copies cannot work with; older Drive copies keep
 working and print an owner action
 ([CAPY_WRAPPER_STALE](troubleshooting.md#capy-wrapper-stale)), and the
-doctor's `wrapper` row warns (an active copy below the minimum is a WARN,
-never a FAIL; `bin/gstack-upgrade` never leaves a pending reinstall for it).
+doctor's `wrapper` row warns (a bootstrapper copy below the minimum is a WARN,
+active or found in the Drive by a direct run, never a FAIL; only a
+pre-bootstrapper copy with no `GSTACK_CAPY_WRAPPER=` line fails;
+`bin/gstack-upgrade` never leaves a pending reinstall for it).
 Wrapper 2 only added optional exports (the trailer's `latest:` note and the
 `cloned` line). Wrapper 3 answers `--check --for none` itself (a copy at 1 or 2
 prints `fail not-installed` for a coordinator machine and still works for every
