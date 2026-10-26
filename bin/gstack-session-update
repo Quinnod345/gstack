@@ -252,6 +252,13 @@ if [ -f "$THROTTLE_FILE" ]; then
   fi
 fi
 
+# The caller's own session never counts as a lease holder (#3363). Resolve its
+# harness pid now, the same way bin/gstack-skill-start names the pid it leases:
+# once this hook exits, the background updater's $$ names a dead process and
+# an ancestry walk from it excludes nothing.
+. "$(cd "$(dirname "$0")" && pwd)/gstack-harness-pid.sh" 2>/dev/null || gstack_harness_pid() { printf '%s\n' "$1"; }
+CALLER_PID=$(gstack_harness_pid "$PPID")
+
 # ── Fork to background: zero latency on session start ──
 (
   # Prevent git from prompting for credentials (would hang the background process)
@@ -368,7 +375,7 @@ fi
   # retry runs under it, the rule bin/gstack-upgrade enforces as UPGRADE_BUSY.
   # The throttle file is not written, so the next session start tries again.
   if [ "${GSTACK_UPGRADE_FORCE:-}" != 1 ] && [ -x "$LEASE" ] \
-    && BUSY=$("$LEASE" live --root "$GSTACK_DIR" --exclude-ancestry-of $$ 2>/dev/null); then
+    && BUSY=$("$LEASE" live --root "$GSTACK_DIR" --exclude-ancestry-of "$CALLER_PID" 2>/dev/null); then
     log_entry "SKIP leased $(printf '%s\n' "$BUSY" | awk 'NF { printf "%spid=%s/%s", n++ ? " " : "", $1, $2 }')"
     exit 0
   fi

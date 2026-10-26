@@ -364,5 +364,20 @@ describe.skipIf(process.platform === 'win32')('gstack-session-update honors work
     const log = await waitFor(dead, /UPDATED from=1\.0\.0 to=1\.1\.0/);
     expect(log).not.toContain('SKIP leased');
   }, 30_000);
+
+  test("the starting session's own lease never blocks its update, behind a shell wrapper too", async () => {
+    const fx = makeFixture();
+    upstreamRelease(fx, '1.1.0');
+    touchLease(fx, process.pid);
+    const r = spawnSync('/bin/sh', ['-c', 'bash "$0"; exit $?', SCRIPT], {
+      encoding: 'utf8',
+      env: { PATH: `${path.dirname(process.execPath)}:${process.env.PATH}`, HOME: fx.home, GSTACK_DIR: fx.install, GSTACK_STATE_ROOT: fx.state, SETUP_CONTROL: fx.control, SETUP_CALLS: fx.calls, TMPDIR: fx.base, ...leaseEnv(fx) },
+      timeout: 20_000,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const log = await waitFor(fx, /UPDATED from=1\.0\.0 to=1\.1\.0/);
+    expect(log).not.toContain('SKIP leased');
+    expect(setupRuns(fx)).toBe(1);
+  }, 30_000);
 });
 
