@@ -579,15 +579,13 @@ case "$TRAILER" in "gstack: ok "*) if [ -n "$BLOCKED" ]; then
   TRAILER="gstack: fail behind — installed $INSTALLED is ${GSTACK_CAPY_BEHIND:-?} commits behind origin (latest ${GSTACK_CAPY_BEHIND_TO:-unknown}) and the session-start upgrade was skipped: $BLOCKED"
   RC=1
 elif [ -n "$NOTES" ]; then TRAILER="$TRAILER ($NOTES)"; fi ;; esac
-record_verdict "$TRAILER" "$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
-[ "$CHECK_ONLY" -eq 1 ] || [ "$PROFILE" -eq 1 ] || write_shim
-printf '%s\n' "$OUT" | grep -v '^gstack: '
-say "total: $(( $(now) - T0 ))s"
 # The launch file: the same assignments as a sourceable script, mode 0600,
 # beside the verdict. `. <file>` applies them without ever printing them; the
 # line carries no secret, but a caller that re-typed it as `export $(...)`
 # ran a bare `export` when the substitution came back empty and dumped the
-# whole environment, API keys included, into its tool output (GSTA-96).
+# whole environment, API keys included, into its tool output (GSTA-96). The
+# file is part of the ok verdict: a passing run that cannot write it fails,
+# so no caller is left with only the line and the re-typing path.
 LAUNCH_FILE="${VERDICT%.json}.env"
 write_launch_file() {
   local tmp
@@ -605,7 +603,15 @@ write_launch_file() {
     echo "export GSTACK_INSTALL_VERDICT=$(shq "$VERDICT")"
   } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE" || { rm -f "$tmp"; return 1; }
 }
-if [ "$RC" -eq 0 ]; then write_launch_file || { say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }; else LAUNCH_FILE=""; fi
+if [ "$RC" -eq 0 ] && ! write_launch_file; then
+  TRAILER="gstack: fail launch-file — could not write the launch file $LAUNCH_FILE; fix: make $(dirname "$LAUNCH_FILE") writable, or set GSTACK_STATE_ROOT to a writable directory (LAUNCH_FILE_UNWRITABLE)"
+  RC=1
+fi
+[ "$RC" -eq 0 ] || { rm -f "$LAUNCH_FILE"; LAUNCH_FILE=""; }
+record_verdict "$TRAILER" "$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
+[ "$CHECK_ONLY" -eq 1 ] || [ "$PROFILE" -eq 1 ] || write_shim
+printf '%s\n' "$OUT" | grep -v '^gstack: '
+say "total: $(( $(now) - T0 ))s"
 echo "GSTACK_LAUNCH: ${LAUNCH_DIR:+PATH=$LAUNCH_DIR:\$PATH }GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=$GSTACK_STATE_ROOT GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-1} GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=$VERDICT"
 [ -n "$LAUNCH_DIR" ] && echo "GSTACK_LAUNCH_PATH: $LAUNCH_DIR"
 [ -n "$LAUNCH_FILE" ] && echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"

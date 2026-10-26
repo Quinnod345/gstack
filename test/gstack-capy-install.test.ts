@@ -142,9 +142,11 @@ describe('gstack-capy-install', () => {
     expect(g.calls().filter(l => l.startsWith('doctor '))).toEqual(['doctor --check --require claude,codex,patch,browse-bundle,browser GSTACK_EPHEMERAL=1']);
   });
 
-  test('a FAIL from the doctor is exit 1 with its trailer last; usage errors exit 2', () => {
+  test('a FAIL from the doctor is exit 1 with its trailer last and no launch file; usage errors exit 2', () => {
     const f = fixture();
     const r = run(f, [], { STUB_DOCTOR_FAIL: '1' });
+    expect(r.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+    expect(fs.readdirSync(path.join(f.home, '.gstack-state/install-verdicts'), { recursive: true }).some(n => String(n).endsWith('.env'))).toBe(false);
     expect(r.status).toBe(1);
     expect(lastLine(r.stdout)).toBe('gstack: fail codex');
     expect(r.stdout).toContain('FAIL codex');
@@ -448,15 +450,21 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     const failed = run(f, ['--check', '--for', 'autoplan'], { STUB_DOCTOR_FAIL: '1' });
     expect(failed.status).toBe(1);
     expect(JSON.parse(fs.readFileSync(files[0], 'utf8'))).toMatchObject({ ok: false, trailer: 'gstack: fail codex' });
+    // A failing run announces no launch file and removes the one the passing run left, so nothing
+    // sourceable points at a verdict that now says fail.
+    expect(failed.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+    expect(fs.existsSync(files[0].replace(/\.json$/, '.env'))).toBe(false);
   });
 
-  // /ship Step 7 value card. protects: when the launch file cannot be written, the run says so,
-  // prints no GSTACK_LAUNCH_FILE line (a caller must never be handed an empty path to source),
-  // leaves no temp file behind, and keeps its exit code and trailer; the earlier launch file is
-  // untouched. fails_when: the `[ -n "$LAUNCH_FILE" ]` guard goes, the write failure changes RC or
-  // ordering, or the temp file is created outside the umask/cleanup path. why_existing_misses:
-  // every fixture's state root is writable. seam=none (filesystem permissions). no_claim: root.
-  test.skipIf(process.platform !== 'linux' || process.getuid?.() === 0)('a launch file that cannot be written is reported, prints no GSTACK_LAUNCH_FILE line, leaves no temp file and keeps the exit code and trailer', () => {
+  // /ship Step 7 value card. protects: the launch file is part of the ok verdict. When it cannot be
+  // written on a passing run, the run FAILS (exit 1, `gstack: fail launch-file — …` trailer naming
+  // the fix), prints no GSTACK_LAUNCH_FILE line (a caller must never be handed an empty path to
+  // source, and never be left with only the line and the re-typing path) and leaves no temp file
+  // behind. The directory is unwritable here, so the earlier launch file and the earlier ok verdict
+  // stay as they were. fails_when: the write failure stops setting RC, the trailer loses its fix, or
+  // the temp file is created outside the umask/cleanup path. why_existing_misses: every fixture's
+  // state root is writable. seam=none (filesystem permissions). no_claim: root.
+  test.skipIf(process.platform !== 'linux' || process.getuid?.() === 0)('a launch file that cannot be written fails the run with a launch-file trailer, prints no GSTACK_LAUNCH_FILE line and leaves no temp file', () => {
     const f = fixture();
     const first = run(f, ['--for', 'autoplan']);
     expect(first.status, first.stdout + first.stderr).toBe(0);
@@ -466,11 +474,10 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     fs.chmodSync(dir, 0o555);
     try {
       const c = run(f, ['--check', '--for', 'autoplan']);
-      expect(c.status, c.stdout + c.stderr).toBe(0);
-      expect(c.stdout).toContain(`gstack-capy-install: could not write the launch file ${launchFile}`);
+      expect(c.status, c.stdout + c.stderr).toBe(1);
       expect(c.stdout).toContain('GSTACK_LAUNCH: ');
       expect(c.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
-      expect(lastLine(c.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+      expect(lastLine(c.stdout)).toBe(`gstack: fail launch-file — could not write the launch file ${launchFile}; fix: make ${dir} writable, or set GSTACK_STATE_ROOT to a writable directory (LAUNCH_FILE_UNWRITABLE)`);
       expect(fs.readdirSync(dir).filter(n => n.includes('.tmp.'))).toEqual([]);
       expect(fs.readFileSync(launchFile, 'utf8')).toBe(before);
     } finally {
@@ -480,27 +487,27 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
 
   // protects: when the launch file's temp file IS created and the final mv fails, write_launch_file
   // removes its own temp file and nothing else (a sibling temp file from a concurrent run survives),
-  // the run says so, prints no GSTACK_LAUNCH_FILE line and keeps the earlier launch file, exit code
-  // and trailer. fails_when: the `|| { rm -f "$tmp"; return 1; }` cleanup goes (the temp file stays),
-  // or a glob cleanup returns (the sibling disappears). why_existing_misses: the unwritable-directory
-  // case above fails at mktemp, before any temp file exists. seam: an mv shim first on PATH that
-  // refuses only the launch-file target.
-  test('a launch-file move that fails after the temp file exists removes only that temp file', () => {
+  // the run fails with the launch-file trailer, prints no GSTACK_LAUNCH_FILE line, removes the
+  // earlier launch file (its verdict now says fail) and records ok:false. fails_when: the
+  // `|| { rm -f "$tmp"; return 1; }` cleanup goes (the temp file stays), a glob cleanup returns (the
+  // sibling disappears), or the fail branch stops removing the stale file. why_existing_misses: the
+  // unwritable-directory case above fails at mktemp, before any temp file exists, and cannot delete.
+  // seam: an mv shim first on PATH that refuses only the launch-file target.
+  test('a launch-file move that fails after the temp file exists removes only that temp file and the stale launch file, and fails the run', () => {
     const f = fixture();
     const first = run(f, ['--for', 'autoplan']);
     expect(first.status, first.stdout + first.stderr).toBe(0);
     const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
-    const before = fs.readFileSync(launchFile, 'utf8');
     const sibling = `${launchFile}.tmp.OTHER1`;
     fs.writeFileSync(sibling, '');
     script(path.join(f.stub, 'mv'), [`for a in "$@"; do [ "$a" = "${launchFile}" ] && exit 1; done`, 'exec /bin/mv "$@"']);
     const c = run(f, ['--check', '--for', 'autoplan']);
-    expect(c.status, c.stdout + c.stderr).toBe(0);
-    expect(c.stdout).toContain(`gstack-capy-install: could not write the launch file ${launchFile}`);
+    expect(c.status, c.stdout + c.stderr).toBe(1);
     expect(c.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
-    expect(lastLine(c.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+    expect(lastLine(c.stdout)).toMatch(/^gstack: fail launch-file — could not write the launch file .*\(LAUNCH_FILE_UNWRITABLE\)$/);
     expect(fs.readdirSync(path.dirname(launchFile)).filter(n => n.includes('.tmp.'))).toEqual([path.basename(sibling)]);
-    expect(fs.readFileSync(launchFile, 'utf8')).toBe(before);
+    expect(fs.existsSync(launchFile)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(launchFile.replace(/\.env$/, '.json'), 'utf8'))).toMatchObject({ ok: false });
   });
 });
 

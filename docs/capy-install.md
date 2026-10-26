@@ -335,6 +335,11 @@ GSTACK_LAUNCH_FILE: <verdict file without .json>.env
 
 `GSTACK_LAUNCH_FILE` names the same assignments as a sourceable script (mode
 0600, beside the verdict under the state root; the PATH prepend is idempotent).
+The file is part of the ok verdict: a passing run that cannot write it exits 1
+with `gstack: fail launch-file — could not write the launch file <path>; fix:
+make <dir> writable, or set GSTACK_STATE_ROOT to a writable directory
+(LAUNCH_FILE_UNWRITABLE)`, and a failing run prints no `GSTACK_LAUNCH_FILE` line
+and removes the file an earlier passing run left.
 `. <that file>` at the start of a shell applies them without ever printing them,
 which is the only way to hand them to a child agent: pass the path, never the
 values. None of the assignments is a secret, but during GSTA-96's unattended
@@ -349,7 +354,11 @@ in the writer's environment (any case; names carrying a `PUBLIC` word are
 framework-public and exempt, gstack's own `GSTACK_BRAIN_LOCK_TOKEN` is not a
 secret) (`env.value`, HIGH), so a leaked value cannot reach a PR body, receipt,
 report or Drive file. There is no path exemption: a path-valued `SSL_KEY` that
-must appear in a text goes through the allowlist.
+must appear in a text goes through `bin/gstack-redact --allowlist` or the
+pre-push hook's committed `.gstack-redact-allowlist`; the other writers
+(`gstack-post`, receipts, reports) take no allowlist, so for one of those
+commands set the variable empty for that command alone
+(`SSL_KEY= gstack-post …`): an empty value is below the length floor.
 
 `PATH=<dir>:$PATH` and `GSTACK_LAUNCH_PATH` appear only when the certified Bun,
 or the project's resolved Node, is not first on PATH (older Capy images ship
