@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+**Three free-tier fixtures stop racing themselves (GSTA-107 daily flaky pass).** Two tests polled for a result file's existence while its writer created it with a plain `writeFileSync`, so a poll between create and write read an empty file; a third copied a shared template repository with `fs.cpSync` and threw once inside the directory walk.
+
+### Fixed
+- **`browse/test/dotenv-isolation.test.ts`** (Free Tests 39902683183 and 40322888041, shard 2, "JSON Parse error: Unexpected EOF" at the `agent-env.json` read): the probe writes its result to a temp file and renames it into place, and `waitForFile` waits for content, not only for the file. A new test feeds the old race (an empty file filled 150 ms later) and runs the probe source itself.
+- **`test/claude-code-runner.test.ts`** (Free Tests 39694715116, shard 13, `running(pid)` false at the timeout case): the descendant publishes `descendant.pid` by rename, and the test polls `publishedPid()`, a positive integer, instead of the file's existence, so an empty read can no longer become pid 0.
+- **`test/cso-git-hardening.test.ts`** (Free Tests 40288142343, shard 17, `fs.cpSync` threw in `fixture()` with an empty message and passed on the serial retry): every fixture builds its own repository with Git instead of copying a shared template; the `beforeAll` still pays the cold macOS Git spawns once, on a throwaway repository. No timeout changed.
+
 ## [1.91.246.0] - 2026-10-26
 
 **The README is a first-ten-minutes page again: what gstack is, how to install it, the first three skills to try, the skills tables, platform notes, and links to docs/ for everything else.** It was 862 lines and 90 KB, with CSO producer sandboxing, Codex model-selection order and the uninstall script in the path of someone deciding whether to try it. It is now about 300 lines and 33 KB. Nothing was deleted: every removed section moved to a docs/ page, verbatim except the "Proactive skill suggestions" paragraph in docs/why-gstack.md, which now describes the core-set default and `gstack-config set proactive core|all|off` landing in #3432, and every anchor other files link to (`#install--about-30-seconds`, `#gbrain--persistent-knowledge-for-your-coding-agent`) still resolves.
