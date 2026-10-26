@@ -12,11 +12,12 @@
  *       frontmatter + the named `## <section>` blocks, concatenated in the
  *       order given. For tests that exercise specific workflow steps.
  *   - extractSkillBody(skillDir)
- *       frontmatter + intro + everything AFTER the shared generated preamble
- *       ("## Preamble (run first)" or "## Preamble (after scope gate)"
- *       .. end of "## Plan Status Footer").
+ *       frontmatter + intro + everything AFTER the generated preamble (tier 1:
+ *       "## Preamble (run first)" or "## Preamble (after scope gate)" .. end of
+ *       "## Plan Status Footer"; tier 2+: the shared-preamble pointer .. this
+ *       skill's own preamble sections through Telemetry).
  *       For tests that exercise the skill's ENTIRE specific flow but never
- *       touch the ~780-line shared preamble.
+ *       touch the generated preamble.
  *   - extractSkillHead(skillDir, bodyLineCount)
  *       frontmatter + the first N body lines. For ROUTING / discovery tests,
  *       where the agent only reads the frontmatter (name + description) to
@@ -97,8 +98,8 @@ export const CODEX_REVIEW_E2E_SECTIONS = [
 
 // ─── Parsing internals ──────────────────────────────────────────────────────
 
-/** First/last H2 headings of the shared preamble block that gen-skill-docs
- *  emits into every tier >= 2 skill. extractSkillBody drops this range. */
+/** First/last H2 headings of an inline (tier 1) preamble block. extractSkillBody
+ *  drops this range; a hoisted tier 2+ preamble is bounded by its pointer instead. */
 const SHARED_PREAMBLE_FIRST = ['Preamble (run first)', 'Preamble (after scope gate)'];
 const SHARED_PREAMBLE_LAST = 'Plan Status Footer';
 /** Preamble sections a hoisted SKILL.md keeps inline because they name the skill. */
@@ -238,7 +239,7 @@ export function extractSkillSections(skillDir: string, sections: string[]): stri
  * full skill-specific body (everything after the "## Plan Status Footer"
  * section; in a hoisted SKILL.md, the shared-preamble pointer through the
  * skill's own preamble sections ending at Telemetry). Use when a test exercises the whole skill flow: this drops the
- * ~780-line shared generated preamble and nothing else.
+ * generated preamble and nothing else.
  */
 export function extractSkillBody(skillDir: string): string {
   const { file, frontmatter, bodyLines, sections: all } = loadSkill(skillDir, true);
@@ -266,13 +267,13 @@ export function extractSkillBody(skillDir: string): string {
     last = boundary([SHARED_PREAMBLE_LAST]);
   }
   if (first.start >= last.start) {
-    throw new Error(`skill-fixture: "## ${SHARED_PREAMBLE_LAST}" precedes the preamble in ${file}.`);
+    throw new Error(`skill-fixture: "## ${last.heading}" precedes the preamble in ${file}.`);
   }
   const intro = bodyLines.slice(0, first.start).join('\n').trimEnd();
   const tail = bodyLines.slice(last.end).join('\n').trimEnd();
   if (!tail) {
     throw new Error(
-      `skill-fixture: ${file} has no content after "## ${SHARED_PREAMBLE_LAST}" — `
+      `skill-fixture: ${file} has no content after "## ${last.heading}" — `
       + 'refusing to write a preamble-only fixture.',
     );
   }

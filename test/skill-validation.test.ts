@@ -752,7 +752,7 @@ describe('v0.4.1 preamble features', () => {
   test('bin/gstack-skill-start owns the session-tracking machinery (new home of _SESSIONS)', () => {
     // The sessions-dir touch + stale-session cleanup that every preamble used
     // to inline now lives in the consolidated script — pin it there.
-    const script = readSkillStartup(path.join(ROOT, 'bin', 'gstack-skill-start'));
+    const script = fs.readFileSync(path.join(ROOT, 'bin', 'gstack-skill-start'), 'utf-8');
     expect(script).toContain('mkdir -p "$_GH/sessions"');
     expect(script).toContain('touch "$_GH/sessions/$PARENT_PID"');
     expect(script).toContain('-mmin +120'); // 120-min freshness window survives the move

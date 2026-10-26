@@ -81,12 +81,14 @@ describe('SKILL.md size budget regression (gate, free)', () => {
     for (const [skill, before] of Object.entries(baseline.skills)) {
       const after = current.skills[skill];
       if (!after) continue; // skill removed since v1.44 — not a regression
-      if (after.skillMdBytes <= before.skillMdBytes * RATIO) continue;
+      const skillMd = path.join(REPO_ROOT, skill, 'SKILL.md');
+      const afterBytes = fs.existsSync(skillMd) ? Buffer.byteLength(readSkillStartup(skillMd), 'utf-8') : after.skillMdBytes;
+      if (afterBytes <= before.skillMdBytes * RATIO) continue;
       regressions.push({
         skill,
         beforeBytes: before.skillMdBytes,
-        afterBytes: after.skillMdBytes,
-        growth: after.skillMdBytes / before.skillMdBytes,
+        afterBytes,
+        growth: afterBytes / before.skillMdBytes,
       });
     }
 
