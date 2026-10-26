@@ -35,10 +35,10 @@ function splitSections(text: string, marker = '## '): string[] {
   let current: string[] = [];
   let fence: string | null = null;
   for (const line of text.split('\n')) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    const [, delimiter, info] = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line) ?? [];
     if (delimiter) {
       if (!fence) fence = delimiter;
-      else if (delimiter[0] === fence[0] && delimiter.length >= fence.length) fence = null;
+      else if (delimiter[0] === fence[0] && delimiter.length >= fence.length && !info.trim()) fence = null;
     } else if (!fence && line.startsWith(marker) && current.some(l => l.trim())) {
       sections.push(current.join('\n').trim());
       current = [];
