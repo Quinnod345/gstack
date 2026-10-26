@@ -118,7 +118,8 @@
         "## Step 17: Push",
         "## Step 18: Prepare publication metadata",
         "## Step 20: Persist ship metrics",
-        "## Step 21: Plan-tune discoverability nudge (first-successful-ship only)"
+        "## Step 21: Plan-tune discoverability nudge (first-successful-ship only)",
+        "## Step 22: Terminal line (every run)"
       ],
       "sections/adversarial.md": [
         "## Step 11: Adversarial review (always-on)"
