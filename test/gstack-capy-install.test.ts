@@ -485,6 +485,25 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     }
   });
 
+  // protects: a failing profile check (--for review-voice) that keeps a fuller ok verdict for this
+  // HEAD leaves that verdict's launch file in place while announcing none of its own; the fail
+  // branch's cleanup only removes a file whose verdict it rewrites. fails_when: the cleanup runs
+  // before the kept-verdict test (the fuller install's sourceable file vanishes under a failing
+  // profile check). why_existing_misses: every other failing run owns its verdict.
+  test('a failing profile check keeps the fuller verdict and its launch file', () => {
+    const f = fixture();
+    const first = run(f, ['--for', 'autoplan']);
+    expect(first.status, first.stdout + first.stderr).toBe(0);
+    const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    const before = fs.readFileSync(launchFile, 'utf8');
+    const c = run(f, ['--check', '--for', 'review-voice'], { STUB_DOCTOR_FAIL: '1' });
+    expect(c.status, c.stdout + c.stderr).toBe(1);
+    expect(c.stdout).toContain(`gstack-capy-install: kept the install verdict for=autoplan at ${launchFile.replace(/\.env$/, '.json')}`);
+    expect(c.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+    expect(fs.readFileSync(launchFile, 'utf8')).toBe(before);
+    expect(JSON.parse(fs.readFileSync(launchFile.replace(/\.env$/, '.json'), 'utf8'))).toMatchObject({ ok: true });
+  });
+
   // protects: when the launch file's temp file IS created and the final mv fails, write_launch_file
   // removes its own temp file and nothing else (a sibling temp file from a concurrent run survives),
   // the run fails with the launch-file trailer, prints no GSTACK_LAUNCH_FILE line, removes the

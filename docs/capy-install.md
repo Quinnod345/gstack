@@ -339,7 +339,8 @@ The file is part of the ok verdict: a passing run that cannot write it exits 1
 with `gstack: fail launch-file — could not write the launch file <path>; fix:
 make <dir> writable, or set GSTACK_STATE_ROOT to a writable directory
 (LAUNCH_FILE_UNWRITABLE)`, and a failing run prints no `GSTACK_LAUNCH_FILE` line
-and removes the file an earlier passing run left.
+and removes the file an earlier passing run left beside the verdict it rewrites
+(a profile check that keeps a fuller ok verdict leaves that verdict's file).
 `. <that file>` at the start of a shell applies them without ever printing them,
 which is the only way to hand them to a child agent: pass the path, never the
 values. None of the assignments is a secret, but during GSTA-96's unattended

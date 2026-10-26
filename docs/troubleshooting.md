@@ -1470,6 +1470,20 @@ or nvm), then re-run `bin/gstack-capy-install`. A checksum mismatch means the
 upstream installer changed: update `GSTACK_BUN_INSTALL_SHA` only after
 reviewing the new script.
 
+<a id="capy-install-launch-file-unwritable"></a>
+### `gstack: fail launch-file — could not write the launch file <path>; fix: ... (LAUNCH_FILE_UNWRITABLE)`
+
+**Meaning.** The doctor passed, but `bin/gstack-capy-install` could not write
+the launch file (`GSTACK_LAUNCH_FILE`, the sourceable mode-0600 copy of the
+`GSTACK_LAUNCH` assignments beside the install verdict). The file is part of the
+ok verdict: without it a caller would be left with only the line and the
+re-typing path that leaked an environment in GSTA-96, so the run fails instead.
+The directory under the state root is unwritable, or a temp file could not be
+moved into place.
+
+**Fix.** Make the verdict directory writable, or set `GSTACK_STATE_ROOT` to a
+writable directory, then re-run `bin/gstack-capy-install`.
+
 <a id="upgrade-refused"></a>
 ### `gstack-upgrade: <cause>; nothing was changed; fix: <command> (UPGRADE_REFUSED)`
 
