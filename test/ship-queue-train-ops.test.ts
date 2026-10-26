@@ -105,6 +105,23 @@ describe('the screen verdict comes from the run', () => {
 
   // Value: protects=a screen that concluded success with no slice (18 of 41 PR screens on 2026-10-26, superseded by a push before the plan) is NOT-RUN at verdict, not a screen and not a stale ref;
   // fails_when=verify --screen calls it GREEN, HOLLOW or QUEUE_SCREEN_STALE_REF, or ready follows it; why_new=the hollow outcome reused the stale-ref code; seam=the gh shim's run with no plan artifact; no_claim=why evals.yml planned nothing
+  // Value: protects=train build --dry-run (with or without --stack-tests) writes nothing: the screen verdict it reads is printed, not recorded in the READY receipt or pushed to refs/notes/gstack-trains, as its DRY-RUN line says;
+  // fails_when=admitSlots persists the read verdict under --dry-run (the notes ref moves and the receipt gains a verdict before any real build); why_new=the other dry-run tests only check the trains dir; seam=none; no_claim=a verdict that was already recorded by ready or verify
+  test('train build --dry-run prints the screen verdict it read without recording it in the receipt or pushing the notes ref', () => {
+    const { fx, head, pregate } = readyFixture();
+    fx.write(d => { d.rules['evals.yml'] = GREEN_SCREEN; });
+    expect(queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']).status).toBe(EXIT.ok);
+    expect(receiptOf(fx, '1', head).screen.verdict).toBeUndefined();
+    const notes = fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-trains');
+    const build = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([build.status, line(build.out, 'SCREEN:'), line(build.out, 'DRY-RUN:')]).toEqual([EXIT.ok, 'SCREEN: #1 run 100 GREEN (flaky: c-flaky)', 'DRY-RUN: nothing written, pushed or dispatched']);
+    expect(receiptOf(fx, '1', head).screen.verdict).toBeUndefined();
+    expect(fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-trains')).toBe(notes);
+    const verify = queue(fx, ['verify', '--pr', '1', '--screen']);
+    expect([verify.status, receiptOf(fx, '1', head).screen.verdict?.outcome]).toEqual([EXIT.ok, 'GREEN']);
+    expect(fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-trains')).not.toBe(notes);
+  }, 120_000);
+
   test('a screen run that concluded success with no slice is NOT-RUN: verify --screen refuses with QUEUE_SCREEN_NOT_RUN, the receipt records NOT_RUN, and ready --screen dispatches afresh', () => {
     const { fx, head, pregate } = readyFixture();
     fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: null }; });

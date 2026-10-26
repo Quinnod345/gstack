@@ -296,7 +296,7 @@ export function parseOrder(spec: string | undefined, pins: Array<{ pr: string }>
 }
 
 /** The slots a new train would carry: trusted, unmoved, READY PRs, in slot order. */
-function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { slots: TrainSlot[]; lines: string[] } | TrainOut {
+function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>, dryRun: boolean): { slots: TrainSlot[]; lines: string[] } | TrainOut {
   const { ctx } = env;
   const specs = pins.map(p => `+refs/pull/${p.pr}/head:refs/gstack/train/pr-${p.pr}`);
   const f = git(ctx.repoRoot, ['fetch', '--no-tags', '-q', env.remote, ...specs]);
@@ -320,7 +320,7 @@ function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { 
     let screen = ready.screen;
     if (screen.choice === 'screen' && screen.run && slug === undefined) slug = repoSlug(ctx);
     const read = screen.choice === 'screen' && screen.run ? (slug ? screenVerdict(ctx, slug, screen.run) : { kind: 'unknown' as const, detail: 'the repository slug is unreadable' }) : null;
-    if (read && screen.run && recordVerdict(ready.screen, read)) { ready.updated_at = nowIso(); persist(ctx.repoRoot, [ready], { remote: env.remote }); }
+    if (read && screen.run && recordVerdict(ready.screen, read) && !dryRun) { ready.updated_at = nowIso(); persist(ctx.repoRoot, [ready], { remote: env.remote }); }
     if (read?.kind === 'red') {
       return outRefused({ code: 'QUEUE_SCREEN_RED', message: `#${p.pr}'s screen run ${screen.run} is RED on ${read.red.join(', ') || 'its gate binding'} (${read.detail}); a red head is not seated` },
         [...lines, ...verdictLines(p.pr, screen.run!, read)], without ? `${Q} train build --prs ${without}` : 'none', 'none');
@@ -345,7 +345,7 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
     frozenLines(freeze), `${Q} train build --repair --prs <repair-pr>@<sha>`, 'none');
   const explicit = parseOrder(o.order, pins);
   if (explicit && 'error' in explicit) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: explicit.error }, [], 'none', 'none');
-  const admitted = admitSlots(env, pins);
+  const admitted = admitSlots(env, pins, o.dryRun);
   if ('exit' in admitted) return admitted;
   const order = orderSlots(admitted.slots, o.repair ? 1 : env.train.max_size, explicit);
   const lines = [
