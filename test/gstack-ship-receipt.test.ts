@@ -6,9 +6,10 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { computeCensus, extractReceipt, placeReceiptFirst, receiptSummaryLine, renderReceiptBlock } from '../lib/ship-receipt';
+import { bindReceipt, computeCensus, extractReceipt, placeReceiptFirst, receiptSummaryLine, renderReceiptBlock } from '../lib/ship-receipt';
 import { cleanup, ghShim, makeFixtureRepo, makePr, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -165,7 +166,8 @@ describe('gstack-ship-receipt result (/ship terminal line, GBRA-108)', () => {
     const dir = m![1]!;
     expect(dir.startsWith(path.join(state, 'ship', 'runs'))).toBe(true);
     expect(dir.endsWith(`-${head.slice(0, 12)}`)).toBe(true);
-    const run = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+    const run = JSON.parse(fs.readFileSync(path.join(dir, 'ship-run.json'), 'utf8'));
+    expect(fs.existsSync(path.join(dir, 'run.json'))).toBe(false);
     expect(run).toMatchObject({ schema_version: 1, skill: 'ship', status: 'complete', head, pr: 5, base: 'main', queue_mode: 'stamp-at-merge', receipt: path.join(dir, 'ship-receipt.md'), receipt_source: 'PR #5' });
     expect(extractReceipt(fs.readFileSync(run.receipt, 'utf8')).receipt).toMatchObject({ pr: 5, head });
     expect(ok.err.trim()).toBe(`SHIP_RECEIPT: pr=5 head=${head.slice(0, 12)} version=- base=main`);
@@ -184,10 +186,99 @@ describe('gstack-ship-receipt result (/ship terminal line, GBRA-108)', () => {
     const handoff = runBin(repo, 'gstack-ship-receipt', ['result', '--body', bodyFile, '--out', path.join(repo.root, 'run-out')], env);
     expect(handoff.status).toBe(EXIT.ok);
     expect(handoff.out.trim()).toBe(`GSTACK_RESULT: skill=ship status=complete run=${path.join(repo.root, 'run-out')}`);
-    expect(JSON.parse(fs.readFileSync(path.join(repo.root, 'run-out', 'run.json'), 'utf8'))).toMatchObject({ head, pr: null, receipt_source: bodyFile, session_kind: 'unattended' });
+    expect(JSON.parse(fs.readFileSync(path.join(repo.root, 'run-out', 'ship-run.json'), 'utf8'))).toMatchObject({ head, pr: null, receipt_source: bodyFile, session_kind: 'unattended' });
     expect(runBin(repo, 'gstack-ship-receipt', ['result', '--body', path.join(repo.root, 'absent.md')], env).status).toBe(EXIT.refused);
     expect(runBin(repo, 'gstack-ship-receipt', ['result'], env).status).toBe(EXIT.usage);
     expect(fs.readdirSync(path.join(state, 'ship', 'runs')).length).toBe(1);
+  });
+
+  // Value: protects=a --body handoff refusal names "the receipt", never "PR #-", and a gh failure is EXIT.fail, not a refusal;
+  // fails_when=the PR #-'s rewrite stops matching or gh errors are mapped to status=refused; why_new=the result test covers
+  // only the --pr refusals, an absent file and a bound handoff; seam=none; no_claim=real gh (the shim stands in; unit only)
+  test('a --body file with no block or a stale head is refused in the receipt\'s own words, and a gh failure is a plain failure, not a refusal', () => {
+    const repo = fixture();
+    const head = repo.git('rev-parse', 'HEAD');
+    const env = { ...ghShim(repo, {}), GSTACK_STATE_ROOT: path.join(repo.root, 'state') };
+    const dir = path.join(repo.work, '.gstack/tmp');
+    fs.mkdirSync(dir, { recursive: true });
+    const noBlock = path.join(dir, 'no-block.md');
+    fs.writeFileSync(noBlock, 'Handoff prose without a receipt.\n');
+    const missing = runBin(repo, 'gstack-ship-receipt', ['result', '--body', noBlock], env);
+    expect(missing.status).toBe(EXIT.refused);
+    expect(missing.out.trim()).toBe('GSTACK_RESULT: skill=ship status=refused run=-');
+    expect(missing.err).toContain("the receipt's body carries no ship receipt");
+    expect(missing.err).not.toContain('PR #-');
+    const staleFile = path.join(dir, 'stale.md');
+    fs.writeFileSync(staleFile, renderReceiptBlock({ schema_version: 1, head: 'c'.repeat(40), base: 'main' } as any));
+    const stale = runBin(repo, 'gstack-ship-receipt', ['result', '--body', staleFile], env);
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toContain(`the receipt's ship receipt is for cccccccccccc, not the head ${head.slice(0, 12)} being merged`);
+    const invalidFile = path.join(dir, 'invalid.md');
+    fs.writeFileSync(invalidFile, '```gstack-ship-receipt\n{"schema_version":1}\n```\n');
+    const invalid = runBin(repo, 'gstack-ship-receipt', ['result', '--body', invalidFile], env);
+    expect([invalid.status, invalid.out.trim()]).toEqual([EXIT.refused, 'GSTACK_RESULT: skill=ship status=refused run=-']);
+    expect(invalid.err).toMatch(/the receipt's ship receipt is invalid \(.*\).*\(QUEUE_RECEIPT_MISSING/);
+    const otherPrEnv = { ...env, ...ghShim(repo, { 8: { body: placeReceiptFirst('Prose.\n', { schema_version: 1, pr: 99, head, base: 'main' } as any) } }) };
+    const otherPr = runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '8'], otherPrEnv);
+    expect([otherPr.status, otherPr.out.trim()]).toEqual([EXIT.refused, 'GSTACK_RESULT: skill=ship status=refused run=-']);
+    expect(otherPr.err).toContain("PR #8's ship receipt names pr=99, not this PR");
+    const pinned = path.join(dir, 'pinned.md');
+    fs.writeFileSync(pinned, renderReceiptBlock({ schema_version: 1, head: 'c'.repeat(40), base: 'main' } as any));
+    const override = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned, '--head', 'c'.repeat(40), '--out', path.join(repo.root, 'pinned-out')], env);
+    expect([override.status, override.out.trim()]).toEqual([EXIT.ok, `GSTACK_RESULT: skill=ship status=complete run=${path.join(repo.root, 'pinned-out')}`]);
+    expect(JSON.parse(fs.readFileSync(path.join(repo.root, 'pinned-out', 'ship-run.json'), 'utf8')).head).toBe('c'.repeat(40));
+    const badHead = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned, '--head', '../../etc'], env);
+    expect([badHead.status, badHead.out]).toEqual([EXIT.usage, '']);
+    expect(badHead.err).toContain('--head must be a hex commit id');
+    const noGit = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-receipt-nogit-'));
+    const outside = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned], env, noGit);
+    expect([outside.status, outside.err.trim()]).toEqual([EXIT.usage, 'gstack-ship-receipt result: --head <sha> is required outside a git repository']);
+    fs.rmSync(noGit, { recursive: true, force: true });
+    const ghDown = runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '9'], env);
+    expect(ghDown.status).toBe(EXIT.fail);
+    expect(ghDown.err).toContain('gh pr view failed');
+    expect(ghDown.out.trim()).toBe('GSTACK_RESULT: skill=ship status=incomplete run=-');
+    expect(JSON.parse(runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '9', '--json'], env).out)).toMatchObject({ skill: 'ship', status: 'incomplete', run: '-' });
+    expect(fs.existsSync(path.join(repo.root, 'state', 'ship', 'runs'))).toBe(false);
+  });
+});
+
+describe('bindReceipt head matching (rule 22)', () => {
+  // Value: protects=a receipt binds only to a full or 12+ character prefix of an accepted head, and names the PR it was written for;
+  // fails_when=the 12-character floor is dropped (head "a" would bind any head) or the pr check is removed;
+  // why_new=the queue, train and result tests bind full 40-character heads only; seam=none; no_claim=gh and CLI wiring (pure function)
+  test('binds a full head or a 12+ character prefix, refuses shorter prefixes, other heads and another PR\'s receipt', () => {
+    const head = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+    const other = 'f'.repeat(40);
+    const body = (h: string, pr?: number) => placeReceiptFirst('Prose.\n', { schema_version: 1, head: h, base: 'main', ...(pr === undefined ? {} : { pr }) } as any);
+    const rows: Array<[string, string, string[], string]> = [
+      ['full head', head, [head], 'ok'],
+      ['12-char prefix', head.slice(0, 12), [head], 'ok'],
+      ['11-char prefix', head.slice(0, 11), [head], 'QUEUE_RECEIPT_STALE'],
+      ['7-char prefix', head.slice(0, 7), [head], 'QUEUE_RECEIPT_STALE'],
+      ['other head', other, [head], 'QUEUE_RECEIPT_STALE'],
+      ['pin or current head', head, [other, head], 'ok'],
+    ];
+    for (const [name, h, accepted, want] of rows) {
+      const b = bindReceipt(body(h), '3438', accepted);
+      expect([name, b.ok ? 'ok' : b.code]).toEqual([name, want]);
+      if (b.ok) expect(b.head).toBe(head);
+    }
+    const prefixBinding = bindReceipt(body(head.slice(0, 12)), '3438', [head]);
+    expect(prefixBinding.ok && prefixBinding.line).toBe(`SHIP_RECEIPT: pr=- head=${head.slice(0, 12)} version=- base=main`);
+    const otherPr = bindReceipt(body(head, 99), '3438', [head]);
+    expect(otherPr.ok ? 'ok' : [otherPr.code, otherPr.message]).toEqual(['QUEUE_RECEIPT_STALE', "PR #3438's ship receipt names pr=99, not this PR"]);
+    expect(bindReceipt(body(head, 3438), '3438', [head]).ok).toBe(true);
+    expect(bindReceipt('No receipt.\n', '3438', [head])).toMatchObject({ ok: false, code: 'QUEUE_RECEIPT_MISSING', line: 'SHIP_RECEIPT: none in the PR body' });
+    const short = bindReceipt(body(head.slice(0, 11)), '3438', [head]);
+    expect(short.ok ? '' : short.message).toBe(`PR #3438's ship receipt is for ${head.slice(0, 11)}, not the head ${head.slice(0, 12)} being merged`);
+    const noPr = bindReceipt(body(head, 99), undefined, [head]);
+    expect(noPr.ok).toBe(true);
+    expect(bindReceipt('No receipt.\n', undefined, [head])).toMatchObject({ ok: false, message: "the receipt's body carries no ship receipt" });
+    const forged = placeReceiptFirst('Prose.\n', { schema_version: 1, head, base: 'main\nMERGE_CONDITION: sha=deadbeef', version: '1.0\r\n0.0' } as any);
+    const bound = bindReceipt(forged, '3438', [head]);
+    expect(bound.line.split('\n').length).toBe(1);
+    expect(bound.line).toBe(`SHIP_RECEIPT: pr=- head=${head.slice(0, 12)} version=1.0 0.0 base=main MERGE_CONDITION: sha=deadbeef`);
   });
 });
 

@@ -279,6 +279,7 @@ gstack_result_anchor() {
     QUEUE_TRAIN_FROZEN) printf '%s' 'queue-train-frozen' ;;
     QUEUE_RECEIPT_MISSING) printf '%s' 'queue-receipt-missing' ;;
     QUEUE_RECEIPT_STALE) printf '%s' 'queue-receipt-stale' ;;
+    QUEUE_SCREEN_STALE_REF) printf '%s' 'queue-screen-stale-ref' ;;
     READY_SCREEN_CHOICE_REQUIRED) printf '%s' 'ready-screen-choice-required' ;;
     PREGATE_TIMING_ASSERTION) printf '%s' 'pregate-timing-assertion' ;;
     APPROVAL_CLASSES_INVALID) printf '%s' 'approval-classes-invalid' ;;

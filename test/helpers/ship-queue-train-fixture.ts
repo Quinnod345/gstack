@@ -70,7 +70,13 @@ export function setPrBody(fx: TrainFixture, pr: string, body: string): void {
   fx.write(d => { d.prs[pr] = { ...(d.prs[pr] as Record<string, unknown>), body }; });
 }
 
-/** A same-repo PR: a branch from origin/main touching `file`, published as refs/pull/<n>/head (and /merge), known to the gh shim with a /ship receipt for its head (`shipped: false` leaves the body empty). */
+/** What GitHub keeps at refs/pull/<n>/merge: a merge commit whose first parent is the base and whose second parent is the PR head. */
+export function mergeRefCommit(fx: TrainFixture, head: string): string {
+  const { repo } = fx;
+  return repo.git('commit-tree', `${head}^{tree}`, '-p', 'origin/main', '-p', head, '-m', `Merge ${head.slice(0, 12)} into main`);
+}
+
+/** A same-repo PR: a branch from origin/main touching `file`, published as refs/pull/<n>/head (and /merge, as GitHub's merge commit), known to the gh shim with a /ship receipt for its head (`shipped: false` leaves the body empty). */
 export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text?: string; changelog?: boolean | ((text: string) => string); cross?: boolean; from?: string; shipped?: boolean } = {}): string {
   const { repo } = fx;
   repo.git('checkout', '-q', opts.from ?? 'origin/main', '-B', `pr-${pr}`);
@@ -84,7 +90,7 @@ export function openPr(fx: TrainFixture, pr: string, opts: { file?: string; text
   repo.git('add', '-A');
   repo.git('commit', '-q', '-m', `feat #${pr}`);
   const head = repo.git('rev-parse', 'HEAD');
-  repo.git('push', '-q', '-f', 'origin', `HEAD:refs/pull/${pr}/head`, `HEAD:refs/pull/${pr}/merge`);
+  repo.git('push', '-q', '-f', 'origin', `HEAD:refs/pull/${pr}/head`, `${mergeRefCommit(fx, head)}:refs/pull/${pr}/merge`);
   fx.write(d => { d.prs[pr] = { headRefOid: head, isCrossRepository: !!opts.cross, state: 'OPEN', headRefName: `pr-${pr}`, url: `https://github.com/fixture/repo/pull/${pr}`, body: opts.shipped === false ? '' : shippedBody(pr, head) }; });
   return head;
 }

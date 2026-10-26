@@ -143,6 +143,11 @@ export const RELEASE_RESULT_CODES = {
     summary: 'the PR body’s /ship receipt is for another head than the one being READY’d or merged (a push after /ship, or a receipt copied from another PR)',
     fix: 'rerun /ship on the current head so the receipt names it, then gstack-ship-queue ready again; a slot’s stamp commit keeps the receipt written for its pinned head',
   },
+  QUEUE_SCREEN_STALE_REF: {
+    anchor: 'queue-screen-stale-ref',
+    summary: 'GitHub’s refs/pull/<n>/merge is missing or still merges an older head than the PR’s: the PR conflicts with the base (a CHANGELOG-only conflict counts), so a screen dispatched on it would plan no cases and report success',
+    fix: 'resolve the conflict with the base branch (or wait for GitHub to recompute the merge ref), push, then gstack-ship-queue ready --pr <n> --screen again; a lane never READYs on a screen that planned nothing',
+  },
   READY_SCREEN_CHOICE_REQUIRED: {
     anchor: 'ready-screen-choice-required',
     summary: 'the base policy turns trains on, so READY needs an explicit screen choice: --screen (pay for a diff-relevant screen now) or --no-screen',

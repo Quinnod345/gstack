@@ -15,6 +15,8 @@
  * scripts/eval-bg.ts's nonce.
  */
 import { randomBytes } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { DISPATCH_INPUTS, awaitNonceRun, dispatchWorkflow, listDispatchRuns, makeNonce, runForNonce, type WorkflowDispatch } from '../scripts/eval-bg';
 import { changelogDamage, mergeChangelogs, parseChangelog, type ChangelogSection } from './changelog-check';
 import type { ResultStatus } from './headless-artifacts';
@@ -23,7 +25,7 @@ import type { LoadedPolicy, ShipPolicy, TrainPolicy } from './ship-policy';
 import { loadBasePolicy, type QueueContext } from './ship-queue';
 import { bindReceipt } from './ship-receipt';
 import { git, sha256, withIndex, type QueueFailure } from './ship-queue-gate';
-import { asRun, execFor, newestBranchRun, prInfo, remoteBranchSha, repoSlug, runView, checkRun } from './ship-queue-train-github';
+import { asRun, execFor, hollowScreen, newestBranchRun, prInfo, remoteBranchSha, repoSlug, runView, checkRun } from './ship-queue-train-github';
 import {
   TERMINAL_STATES, activeFreeze, attemptsOf, listTrains, loadBisect, loadReady, loadTrain, nowIso, persist, rebuildFromNotes, repoIdentity, trainFile,
   type AttemptPurpose, type AttemptRecord, type TrainRecord, type TrainSlot,
@@ -285,6 +287,8 @@ function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { 
   const f = git(ctx.repoRoot, ['fetch', '--no-tags', '-q', env.remote, ...specs]);
   if (!f.ok) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `git fetch of the PR heads failed: ${f.err.slice(0, 160)}` }, [], 'none', 'none');
   const slots: TrainSlot[] = [];
+  const lines: string[] = [];
+  let slug: string | null | undefined;
   for (const p of pins) {
     const info = prInfo(ctx, p.pr);
     if ('error' in info) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: info.error }, [], 'none', 'none');
@@ -298,9 +302,13 @@ function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { 
     if (!shipped.ok) return outRefused({ code: shipped.code, message: shipped.message }, [shipped.line], `#${p.pr}'s lane runs /ship, then ${Q} ready --pr ${p.pr} --screen|--no-screen; then ${Q} train build --prs <pins>`, 'none');
     const ready = loadReady(env.repo.keys, p.pr, info.headRefOid);
     if (!ready) return outRefused({ code: 'QUEUE_NOT_READY', message: `no READY receipt for #${p.pr} at ${info.headRefOid.slice(0, 12)} (local state or ${'refs/notes/gstack-trains'})` }, [], `the lane runs ${Q} ready --pr ${p.pr} --screen|--no-screen`, 'none');
-    slots.push({ pr: p.pr, head: info.headRefOid, ready_at: ready.ready_at, screen: ready.screen });
+    let screen = ready.screen;
+    if (screen.choice === 'screen' && screen.run && slug === undefined) slug = repoSlug(ctx);
+    const hollow = screen.choice === 'screen' && screen.run && slug ? hollowScreen(ctx, slug, screen.run, env.train.record_artifact, path.join(os.tmpdir(), 'gstack-screen-scratch')) : null;
+    if (hollow) { lines.push(`SCREEN: #${p.pr} ${hollow}; counted as not-run, the slot rides unscreened`); screen = { ...screen, choice: 'no-screen' }; }
+    slots.push({ pr: p.pr, head: info.headRefOid, ready_at: ready.ready_at, screen });
   }
-  return { slots, lines: [] };
+  return { slots, lines };
 }
 
 /** Start a new train from --prs, or find the live train with the same pins and base. */
@@ -318,6 +326,7 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
   if ('exit' in admitted) return admitted;
   const order = orderSlots(admitted.slots, o.repair ? 1 : env.train.max_size, explicit);
   const lines = [
+    ...admitted.lines,
     `ORDER: ${order.train.map((s, i) => `${i + 1}:#${s.pr}(${s.screen.choice === 'screen' ? 'screened' : 'unscreened'})`).join(' ')}${explicit ? ' (explicit --order)' : ''}`,
     ...(order.held.length ? [`HELD: ${order.held.map(s => '#' + s.pr).join(',')} (${order.split ? 'unscreened PRs form their own train' : `over the train size ${env.train.max_size}`})`] : []),
   ];

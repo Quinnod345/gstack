@@ -17,7 +17,9 @@
  * fenced block (and SHIP_RECEIPT: <identifiers> on stderr), writes it to --out,
  * and with --body makes it the first section of that PR body file.
  * `result` is /ship's terminal step: it binds the receipt to HEAD, writes the
- * run record under <state>/ship/runs/ and prints GSTACK_RESULT: skill=ship.
+ * run record under <state>/ship/runs/ (ship-run.json: a /ship record, not a
+ * `run` v1 manifest, so `gstack-artifact validate` does not apply to it) and
+ * prints GSTACK_RESULT: skill=ship. A gh failure prints status=incomplete.
  * Query commands: no GSTACK_RESULT line. Logic: lib/ship-receipt.ts.
  */
 import { spawnSync } from 'node:child_process';
@@ -42,7 +44,7 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
   read --body <file>                  parse the block from a file
   result --pr <n> [--repo <r>] | --body <file> [--head <sha>] [--out <dir>]
                                       /ship's terminal line: binds the receipt to HEAD (QUEUE_RECEIPT_MISSING / QUEUE_RECEIPT_STALE),
-                                      writes <state>/ship/runs/<utc>-<head12>/{run.json,ship-receipt.md} and prints
+                                      writes <state>/ship/runs/<utc>-<head12>/{ship-run.json,ship-receipt.md} and prints
                                       GSTACK_RESULT: skill=ship status=complete run=<dir> (refused: status=refused run=-)
   census --repo <r> --since <tag|date> [--cohort <file>]
                                       the P7 adoption number over merged PRs (deduplicated by run and thread)
@@ -209,6 +211,12 @@ function cmdResult(rest: string[], json: boolean): number {
     return EXIT.refused;
   };
   if (!head) { process.stderr.write('gstack-ship-receipt result: --head <sha> is required outside a git repository\n'); return EXIT.usage; }
+  if (!/^[0-9a-f]{7,64}$/i.test(head)) { process.stderr.write(`gstack-ship-receipt result: --head must be a hex commit id, got ${JSON.stringify(head.slice(0, 40))}\n`); return EXIT.usage; }
+  const incomplete = (why: string) => {
+    process.stderr.write(`gstack-ship-receipt result: ${why}\n`);
+    process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'incomplete', run: '-', message: why }) + '\n' : 'GSTACK_RESULT: skill=ship status=incomplete run=-\n');
+    return EXIT.fail;
+  };
   let body: string;
   let source: string;
   if (bodyFile) {
@@ -218,12 +226,12 @@ function cmdResult(rest: string[], json: boolean): number {
   } else if (pr) {
     const repo = flag(rest, '--repo');
     const r = gh(['pr', 'view', pr, ...(repo ? ['--repo', repo] : []), '--json', 'body']);
-    if (!r.ok) { process.stderr.write(`gstack-ship-receipt result: gh pr view failed: ${r.err}\n`); return EXIT.fail; }
-    try { body = JSON.parse(r.out).body ?? ''; } catch { process.stderr.write('gstack-ship-receipt result: gh returned no JSON body\n'); return EXIT.fail; }
+    if (!r.ok) return incomplete(`gh pr view failed: ${r.err.trim()}`);
+    try { body = JSON.parse(r.out).body ?? ''; } catch { return incomplete('gh returned no JSON body'); }
     source = `PR #${pr}${repo ? ` (${repo})` : ''}`;
   } else { process.stderr.write(`gstack-ship-receipt result: --pr <n> or --body <file> is required\n${HELP}\n`); return EXIT.usage; }
-  const bound = bindReceipt(body, pr ?? String(extractReceipt(body).receipt?.pr ?? '-'), [head]);
-  if (!bound.ok) return refused(bound.code, bound.message.replace(/^PR #-'s /, "the receipt's "));
+  const bound = bindReceipt(body, pr, [head]);
+  if (!bound.ok) return refused(bound.code, bound.message);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = flag(rest, '--out') ?? path.join(resolveStateRoot(), 'ship', 'runs', `${stamp}-${head.slice(0, 12)}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -234,7 +242,7 @@ function cmdResult(rest: string[], json: boolean): number {
     queue_mode: bound.receipt.queue_mode ?? null, session_kind: bound.receipt.session_kind ?? process.env.GSTACK_SESSION_KIND ?? null,
     receipt: receiptPath, receipt_source: source, branch: repoRoot ? git(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot) ?? null : null, created_at: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify(run, null, 2) + '\n');
+  fs.writeFileSync(path.join(dir, 'ship-run.json'), JSON.stringify(run, null, 2) + '\n');
   process.stderr.write(bound.line + '\n');
   process.stdout.write(json ? JSON.stringify({ ...run, run: dir }) + '\n' : `GSTACK_RESULT: skill=ship status=complete run=${dir}\n`);
   return EXIT.ok;

@@ -332,7 +332,18 @@ slot. The queue enforces this at every step from the PR body alone:
 stamp files (and, from slot 2 on, merges main into the pin), so no /ship runs
 on it: the receipt written for the pinned head stays the binding one. `verify
 --train` accepts a receipt whose `head` is either the slot's pinned head or
-the current head; any other head is `QUEUE_RECEIPT_STALE`.
+the current head, and the re-READY after the stamp push (`ready` at the stamp
+commit) accepts the receipt for the pin when HEAD is the pin plus stamp files,
+or (from slot 2 on) the pin merged with main plus stamp files; any other head
+is `QUEUE_RECEIPT_STALE`.
+
+This is a process gate, not an authenticity check: the receipt is a block in
+the PR body, which the PR author writes, so the codes prove that /ship was run
+and recorded for this head, not that nobody typed the block by hand. Fork heads
+are already refused (`QUEUE_TRAIN_UNTRUSTED`). The `ship-run.json` that
+`gstack-ship-receipt result` writes under the lane's state root is a
+normalized copy of that same block bound to the head it was run at, not an
+authenticity proof either.
 
 **1. Lane: READY with a screen choice.** Under a train policy READY needs an
 explicit choice:
@@ -340,7 +351,7 @@ explicit choice:
 ```bash
 gstack-ship-queue ready --pr 42                    # prints SCREEN: lines and the recommendation, refuses
 gstack-ship-queue ready --pr 42 --no-screen        # READY receipt; the PR rides unscreened
-gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA
+gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (QUEUE_SCREEN_STALE_REF when GitHub's merge ref lags the head)
 ```
 
 Without a choice it prints the `SCREEN:` selection (with
@@ -356,7 +367,14 @@ dispatches `gate_workflow` with `screen_pr`, `screen_merge_sha` (the
 the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
-it.
+it. Before dispatching, `ready` fetches the merge ref and requires its second
+parent to be the PR head: a missing or lagging merge ref (GitHub stops
+recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
+included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
+no cases and reports success. A finished screen whose record planned 0 cases
+is never followed as a screen: `ready --screen` dispatches a fresh one and
+`train build` prints `SCREEN: #<n> run <id> planned 0 cases; counted as
+not-run` and seats the slot unscreened.
 
 **2. Coordinator: build.** Name the pins exactly as READY reported them:
 

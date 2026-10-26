@@ -69,6 +69,21 @@ export function downloadJson(ctx: QueueContext, slug: string, run: number, name:
 }
 
 /** The named check run on a commit (the newest when several); null when absent or unreadable. */
+/**
+ * A finished screen run that planned no cases is not a screen: evals.yml plans
+ * 0 cases and reports success when the merge ref it was dispatched for was
+ * superseded (GSTA-95 on #3431). Returns the reason when the run is hollow,
+ * null when it is live, still running, or its census cannot be read.
+ */
+export function hollowScreen(ctx: QueueContext, slug: string, run: number, artifact: string, scratch: string): string | null {
+  const view = runView(ctx, slug, run);
+  if (!view || view.status !== 'completed') return null;
+  const rec = downloadJson(ctx, slug, run, artifact, scratch) as { census?: { planned?: { rule?: unknown; judge?: unknown } } } | null;
+  const planned = rec?.census?.planned;
+  if (!planned || typeof planned.rule !== 'number' || typeof planned.judge !== 'number') return null;
+  return planned.rule + planned.judge === 0 ? `run ${run} planned 0 cases (concluded ${view.conclusion ?? 'unknown'})` : null;
+}
+
 export function checkRun(ctx: QueueContext, sha: string, name: string): CheckInfo | null {
   const r = json<{ check_runs?: Array<{ name?: string; status?: string; conclusion?: string | null }> }>(
     ctx.gh(['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?check_name=${encodeURIComponent(name)}`]));

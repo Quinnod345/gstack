@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import { readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
-import { bindReceipt } from './ship-receipt';
+import { bindReceipt, extractReceipt } from './ship-receipt';
 import { isUnavailable, loadPolicyFromBase, type LoadedPolicy } from './ship-policy';
 import {
   QUEUE_DIR_REL, applyStampPatch, commitForTree, currentAttempt, git, listAttempts, recomputeMergeTree, sha256, writeJsonAtomic,
@@ -58,6 +58,36 @@ export function receiptDigest(r: TreeReceipt): string {
 function treeReceipt(ctx: QueueContext, policy: LoadedPolicy, gated: string, current: string): TreeReceipt | QueueFailure {
   const r = buildReceipt({ repoRoot: ctx.repoRoot, gated, current, policy: policy.policy, policyLabel: policy.source.label });
   return 'error' in r ? { code: 'QUEUE_PROOF_MISSING', message: r.error } : r;
+}
+
+/**
+ * The heads a READY accepts a /ship receipt for: HEAD, plus the receipt's own
+ * head when HEAD is that commit with only stamp files changed on top (the
+ * slot's stamp commit, docs/ship-policy.md#ship-before-ready), or, from slot
+ * 2 on, the stamp over a merge of the base into it: /ship ran on the pin, the
+ * stamp changes nothing it checked, and verify --train binds the same pair
+ * against the train's own prefix. Any other receipt head stays
+ * QUEUE_RECEIPT_STALE.
+ */
+function acceptedReceiptHeads(ctx: QueueContext, policy: LoadedPolicy, head: string, body: string): string[] {
+  const ex = extractReceipt(body);
+  const r = ex.receipt;
+  if (!r || ex.errors.length || typeof r.head !== 'string' || !/^[0-9a-f]{12,64}$/i.test(r.head) || head.startsWith(r.head)) return [head];
+  const root = ctx.repoRoot;
+  const full = git(root, ['rev-parse', '--verify', '--quiet', `${r.head}^{commit}`]);
+  if (!full.ok || !git(root, ['merge-base', '--is-ancestor', full.out, head]).ok) return [head];
+  const stampOnly = (from: string, to: string) => { const t = from === to ? null : treeReceipt(ctx, policy, from, to); return !t || (!('message' in t) && t.tree === 'same-modulo-stamps'); };
+  if (stampOnly(full.out, head)) return [full.out, head];
+  const baseSha = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
+  const onBase = (sha: string) => !!sha && git(root, ['merge-base', '--is-ancestor', sha, baseSha]).ok;
+  for (const merge of [head, git(root, ['rev-parse', '--verify', '--quiet', `${head}^1`]).out]) {
+    if (!merge || !stampOnly(merge, head)) continue;
+    const parents = git(root, ['rev-list', '--parents', '-n', '1', merge]).out.split(' ').slice(1);
+    if (parents.length !== 2) continue;
+    const pinSide = onBase(parents[0]!) ? parents[1]! : onBase(parents[1]!) ? parents[0]! : '';
+    if (pinSide && git(root, ['merge-base', '--is-ancestor', full.out, pinSide]).ok && stampOnly(full.out, pinSide)) return [full.out, head];
+  }
+  return [head];
 }
 
 const CI_PAGE = 100;
@@ -142,7 +172,7 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
   }
-  const receipt = bindReceipt(info.body ?? '', o.pr, [head]);
+  const receipt = bindReceipt(info.body ?? '', o.pr, acceptedReceiptHeads(ctx, policy, head, info.body ?? ''));
   const attempt = currentAttempt(ctx.repoRoot, o.pr);
   const lines = [
     `READY #${o.pr} ${head} STAMP_VERSION=${version}`,

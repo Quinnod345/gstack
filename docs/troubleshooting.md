@@ -4053,6 +4053,28 @@ written for the pinned head is the binding one and `verify --train` accepts it.
 `gstack-ship-queue ready --pr <n> --screen|--no-screen`. A lane never stamps
 to fix this: the stamp comes only when the slot is called.
 
+<a id="queue-screen-stale-ref"></a>
+### `QUEUE_SCREEN_STALE_REF`
+
+**Meaning.** `gstack-ship-queue ready --screen` dispatches the screen against
+GitHub's `refs/pull/<n>/merge`, and that ref is missing or still merges an
+older head than the PR's pushed head. GitHub stops recomputing the merge ref
+while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
+counts), so a screen dispatched there checks out the old merge, sees itself
+superseded, plans 0 cases and reports success. GSTA-95 hit this on #3431:
+`ready` printed `SCREEN_DISPATCH:` as if a screen ran. `ready` now compares
+the merge ref's second parent with the PR head before dispatching, and a
+finished screen whose record says it planned 0 cases is never adopted as a
+screen: `ready --screen` dispatches a fresh one and `train build` prints
+`SCREEN: #<n> run <id> planned 0 cases; counted as not-run` and seats the slot
+unscreened.
+
+**Fix.** Resolve the conflict with the base branch (or wait for GitHub to
+recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
+--screen` again. Under crew rule 14 a CHANGELOG-only conflict is left to the
+train, so a lane that cannot get a fresh merge ref READYs `--no-screen` only
+after its own focused paid cases passed (rule 6).
+
 <a id="ready-screen-choice-required"></a>
 ### `READY_SCREEN_CHOICE_REQUIRED`
 

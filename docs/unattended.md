@@ -83,15 +83,17 @@ Not every workflow writes this line or a run directory today:
 - **`/ship`** ends with `gstack-ship-receipt result --pr <n>` (or `--body
   .gstack/tmp/ship-receipt.md` after the handoff section). It binds the
   receipt to the branch head, writes `<state root>/ship/runs/<utc>-<head12>/`
-  (`run.json` with `head`, `pr`, `base`, `version`, `queue_mode`,
+  (`ship-run.json` with `head`, `pr`, `base`, `version`, `queue_mode`,
   `session_kind`, `receipt` as the path of the copied `ship-receipt.md`, and
-  `receipt_source`) and prints `GSTACK_RESULT: skill=ship status=complete
-  run=<dir>`. A receipt that is missing or names another head prints
+  `receipt_source`; it is a /ship record, not the `run` v1 manifest below, so
+  read it directly: `gstack-artifact validate` does not apply) and prints
+  `GSTACK_RESULT: skill=ship status=complete run=<dir>`. When gh cannot read
+  the PR it prints `GSTACK_RESULT: skill=ship status=incomplete run=-` (exit 1). A receipt that is missing or names another head prints
   `GSTACK_RESULT: skill=ship status=refused run=-` with `QUEUE_RECEIPT_MISSING`
   or `QUEUE_RECEIPT_STALE` on stderr (exit 3); a run that stops before
   publication prints the same refused line itself. A parent's merge check is
   then mechanical: take `run=` from the last result line, read
-  `run.json`, and compare its `head` to the PR head. `gstack-ship-queue ready`,
+  `ship-run.json`, and compare its `head` to the PR head. `gstack-ship-queue ready`,
   `train build` and `verify --train` make the same comparison from the PR body
   ([ship-policy.md](ship-policy.md#ship-before-ready)), which is why an
   unattended /ship may update the body of a PR that already exists: when an
@@ -150,8 +152,10 @@ JSON Schema for any of `findings`, `decisions`, `tasks`, `timing`, `run`,
 
 ## How a parent consumes a run
 
-1. **Decide whether the run finished.** `gstack-artifact validate <dir>/run.json`
-   is the deterministic completion check. It exits `0` and prints
+1. **Decide whether the run finished.** For an `/autoplan` run directory,
+   `gstack-artifact validate <dir>/run.json`
+   is the deterministic completion check (a `/ship` `run=` directory holds
+   `ship-run.json`, read directly as described above). It exits `0` and prints
    `ARTIFACT_VALID: run=<id> status=<status>` only when the manifest parses and
    matches its schema, every required phase and each reviewer voice has a
    terminal outcome, every listed artifact exists inside the run directory with
