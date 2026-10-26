@@ -103,19 +103,18 @@ function spansOf(lower: string, open: string, close: string, element: boolean): 
 function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): string {
   if (!ranges.length) return s;
   let out = '', at = 0;
-  for (const [a, b] of ranges) {
-    if (a < at) continue;
-    out += s.slice(at, a) + (cut ? ' ' : pad(s.slice(a, b)));
-    at = b;
-  }
+  for (const [a, b] of ranges) if (a >= at) { out += s.slice(at, a) + (cut ? ' ' : pad(s.slice(a, b))); at = b; }
   return out + s.slice(at);
 }
 
-/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. With a limit, the read stops once more than that many non-space characters are out, so a caller that only needs to know whether the text is short does not pay for an element that runs to the end of the file. */
+/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. With a limit, the read stops once more than that many non-space characters are out, or once the walk has read 64 × limit + 4096 characters of the current text run without reaching the limit (a whitespace run, which the limit cannot stop), so a caller that only needs to know whether the text is short does not pay for an element that runs to the end of the file. */
 export function stripTags(s: string, keep = false, limit = Infinity): string {
   let out = '', i = 0, seen = 0;
   for (;;) {
-    if (limit < Infinity) for (let k = i; k < s.length && s[k] !== '<'; k++) if (!/\s/.test(s[k]) && ++seen > limit) return out + s.slice(i, k + (s.charCodeAt(k) >= 0xd800 && s.charCodeAt(k) < 0xdc00 ? 2 : 1));
+    if (limit < Infinity) for (let k = i, c = 0; k < s.length && s[k] !== '<'; k++) {
+      if (k - i > 64 * limit + 4096) return out + s.slice(i, k);
+      if ((c = s.charCodeAt(k)) > 32 && (c < 128 || !/\s/.test(s[k])) && ++seen > limit) return out + s.slice(i, k + (c >= 0xd800 && c < 0xdc00 ? 2 : 1));
+    }
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
     const gt = s.indexOf('>', lt + 1);

@@ -86,12 +86,14 @@ export function selectorNames(selectors: string[]): { tags: Set<string>; classes
   return { tags, classes };
 }
 
-/** A selector longer than this is a nesting blow-up (comma lists nested in comma lists, a parent repeated per '&'), not a stylesheet selector; a nested selector that would pass it stands without its parent, and every stored selector is cut there, so a sheet costs its length and not parts^depth. */
+/** A selector longer than this is a nesting blow-up (comma lists nested in comma lists, a parent repeated per '&'), not a stylesheet selector; a nested selector that would pass it stands without its parent, and every stored selector is cut there. The sheet as a whole may store at most expansionBudget() selector characters: once that is spent, nested selectors stand unexpanded (their own text, `&` kept), so thousands of children under one long parent cost the sheet its length and not children × MAX_SELECTOR. */
 const MAX_SELECTOR = 8192;
+const expansionBudget = (src: string): number => src.length * 4 + 65536;
 
-/** Expand a nested selector against its parent: `&` is replaced, a bare selector is descendant-joined. */
-function nestSelector(sel: string, parent: string): string {
+/** Expand a nested selector against its parent: `&` is replaced, a bare selector is descendant-joined; with expand off (the sheet's budget is spent) the selector stands as written. */
+function nestSelector(sel: string, parent: string, expand = true): string {
   const parts = splitTop(sel).map((part) => part.trim());
+  if (!expand) return parts.filter(Boolean).join(', ') || '&';
   const substitutions = parts.reduce((n, part) => n + Math.max(1, part.split('&').length - 1), 0);
   const wrapped = parent.includes(',') ? parent.length + 5 : parent.length;
   if (sel.length + wrapped * substitutions > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || splitTop(parent.slice(0, 256))[0].trim();
@@ -118,6 +120,8 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
   const src = stripComments(source);
   const lineOf = lineIndex(src, lineOffset);
   const rules: CssRule[] = [];
+  const budget = expansionBudget(src);
+  let stored = 0;
   const makeRule = (selector: string, s: number, e: number, media: string | null, keyframes: string | null): CssRule => {
     const body = flatBody(src, s, e);
     const decls: CssDecl[] = [];
@@ -168,8 +172,9 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
           if (depthLeft > 0) walk(blockStart, blockEnd, media, keyframes, null, depthLeft - 1);
         }
       } else {
-        const nested = parent && !keyframes ? nestSelector(selector, parent) : selector;
+        const nested = parent && !keyframes ? nestSelector(selector, parent, stored <= budget) : selector;
         const sel = nested.length > MAX_SELECTOR ? nested.slice(0, MAX_SELECTOR) : nested;
+        stored += sel.length;
         rules.push(makeRule(sel, blockStart, blockEnd, media, keyframes));
         if (!keyframes && depthLeft > 0 && src.slice(blockStart, blockEnd).includes('{')) walk(blockStart, blockEnd, media, keyframes, sel, depthLeft - 1);
       }
