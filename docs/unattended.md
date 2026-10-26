@@ -502,6 +502,9 @@ and `status: "pending"`, named in the handoff, never taken.
   a bare `--force-with-lease` protects only against commits this clone never
   fetched, and a plain `--force` is never allowed. A rejected lease means the
   remote moved: fetch, read what landed, and start the disposition again.
+  `/ship` itself never rebases or force-pushes, and an unattended `/modernize`
+  stops at its verdict; this route is for a run whose plan or slot call named
+  the rebase before it started.
 - **Tests: the methods the repository's instructions name, without asking
   first.** AGENTS.md or CLAUDE.md, the named Setup commands, `package.json`
   scripts and the pregate configuration define the set; running one of them

@@ -382,7 +382,11 @@ export function runPost(argv: string[], env: PostEnv, configBin = "gstack-config
     const hasQuad = parts.some(([, text]) => /\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(text));
     const { found, oversize } = scanParts(parts, vis, email.status === 0 ? email.stdout.trim() || undefined : undefined, hasQuad ? repoReleaseVersions(env) : []);
     env.out(`REPO_VISIBILITY: ${vis}\n`);
-    const line = (m: Located) => `RULE: ${m.finding.id} LINE: ${m.finding.line} PART: ${m.part}\n`;
+    const calloutLines = req.attribute ? attributionCallout(req.attribute).split("\n").length - 1 : 0;
+    const line = (m: Located) => {
+      if (m.part === "body" && m.finding.line <= calloutLines) return `RULE: ${m.finding.id} LINE: 1 PART: attribute\n`;
+      return `RULE: ${m.finding.id} LINE: ${m.part === "body" ? m.finding.line - calloutLines : m.finding.line} PART: ${m.part}\n`;
+    };
     const high = found.filter(m => m.finding.severity === "HIGH");
     if (oversize || high.length) {
       for (const m of high) env.out(`HIGH ${line(m)}`);

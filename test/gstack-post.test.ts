@@ -267,7 +267,7 @@ describe("gstack-post --attribute labels a comment, opt-in and off by default", 
     const files = { "/b": "Ping jane.roe@acme-corp.io about it.\n" };
     const first = fakeEnv({ files, visibility: "public" });
     expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", "GPT on behalf of octocat"], first)).toBe(EXIT.confirm);
-    expect(first.stdout()).toContain("RULE: pii.email LINE: 4 PART: body");
+    expect(first.stdout()).toContain("RULE: pii.email LINE: 1 PART: body");
     const t = token(first.stdout())!;
     const plain = fakeEnv({ files, visibility: "public" });
     expect(run(["pr-comment", "9", "--body-file", "/b"], plain)).toBe(EXIT.confirm);
@@ -280,6 +280,7 @@ describe("gstack-post --attribute labels a comment, opt-in and off by default", 
     expect(second.posts()[0]!.input).toBe(attributionCallout("GPT on behalf of octocat") + files["/b"]);
     const secret = fakeEnv({ files: { "/b": "ok\n" } });
     expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", `key ${AWS}`], secret)).toBe(EXIT.refused);
+    expect(secret.stdout()).toContain("HIGH RULE: aws.access_key LINE: 1 PART: attribute");
     expect(secret.posts()).toEqual([]);
   });
 
