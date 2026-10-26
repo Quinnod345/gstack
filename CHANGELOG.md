@@ -6,11 +6,12 @@
 
 ### Added
 - **`captain/SKILL.md.tmpl`**: the skill, tier 2, routed from the root router on "captain", "crew", "merge train", "call the slot", "validate this ready", "write the digest" and "flaky pass".
-- **`captain/templates/`**: `CREW.md` (the 22 lane rules, parametrized), `DIGEST.md`, `flaky-ledger.md`, `report.md` (Outcome, PR, Needs, Cost, Lesson, Approvals), `READY.md` (the block, the optional lines, the refusal list), `slot-call.md`, `plan-ask.md`, `merge-ask.md` and `automation-flaky-pass.md` (the schedule, what it reads, what it starts).
-- **`docs/captain.md`**: how a team sets up a Captain crew on Capy with gstack: the drive layout, the crew rules file, the READY contract, trains, approvals, the digest, the flaky pass, and the setup steps; linked from the README docs table, `docs/skills.md`, `docs/capy-install.md` and the skill.
+- **`captain/templates/`**: `CREW.md` (the 22 lane rules, parametrized), `AGENTS.md` (the controller's standing rules with the owner's dated words), `NOTES.md` (the append-only timestamped log), `DIGEST.md`, `flaky-ledger.md`, `report.md` (Outcome, PR, Needs, Cost, Lesson, Approvals), `READY.md` (the block, the optional lines, the refusal list), `slot-call.md`, `plan-ask.md`, `merge-ask.md` and `automation-flaky-pass.md` (the schedule, what it reads, what it starts).
+- **`docs/captain.md`**: how a team sets up a Captain crew on Capy with gstack: the roles, the drive layout, the crew rules file, the READY contract, the lane's /ship sequence before READY, trains with the slot-2 recipe, approvals, the digest, the flaky pass, the owner's device, the lessons loop, and the setup steps; linked from the README docs table, `docs/skills.md`, `docs/capy-install.md` and the skill.
 - **`test/captain-skill.test.ts`**: pins the contract the skill teaches, the template set, the generic wording (no crew codes, names or repository literals) and the registration points.
 
 ### Changed
+- **`gstack-owner-brief render --captain`** closes "What we need from you" with the **do it** reply (every recommendation at full scope, the plan's follow-ons included, carried through with no further ask) and invites `rec` or `do it`; `capy/skill/gstack/captain.md` documents it as step 6 and points at the controller's side.
 - `README.md` (power tools), `AGENTS.md`, `docs/skills.md`, `docs/PROJECT_STRUCTURE.md`, the root router and the doctor component table register the skill; `test/fixtures/context-budget.json` gains the `captain` ceiling and the router's, grown by its one new rule; `test/catalog-budget.test.ts` and `CLAUDE.md` carry the catalog ceiling the new skill ratchets to.
 
 ## [1.91.248.0] - 2026-10-26

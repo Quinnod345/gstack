@@ -22,6 +22,20 @@ rebuilt at most once. Every decision the owner makes travels through the control
 fixed shape and is recorded in the owner's words. Flakes are logged in a ledger and fixed
 by a daily pass; nothing is retried into green.
 
+## Roles
+
+- **The owner** decides what only the owner can decide: product and behaviour, spend over
+  a cap, anything published outside the repository, thresholds and budgets, closing a
+  contribution, anything destructive. Every answer is recorded in the owner's words.
+- **The controller** (the Captain) runs the crew: starts lanes on disjoint files, keeps the
+  rules file, the digest and the notes, validates READYs, builds and merges trains, calls
+  slots, relays asks to the owner in the three shapes, runs the flaky pass, and decides
+  everything that needs no access, credentials, spend over cap or a cited approval.
+- **A lane** (a crew thread) owns named files, builds on its own branch and machine,
+  runs /ship, sends one READY block, stamps on call, writes one report, and never merges.
+- **The controller never commits to a lane's branch**, and a lane never pushes to another
+  lane's. One committer per shared tree.
+
 ## Drive layout
 
 The Captain's drive is mounted read-write on every crew thread, so it is the handoff
@@ -29,10 +43,10 @@ surface. Keep it small and predictable:
 
 | Path | Who writes | What it holds |
 |---|---|---|
-| `AGENTS.md` | the controller | standing rules and the owner's decisions, each with date and words |
+| `AGENTS.md` | the controller | standing rules and the owner's decisions, each with date and words ([template](../captain/templates/AGENTS.md)) |
 | `CREW.md` | the controller | the lanes' contract ([template](../captain/templates/CREW.md)) |
 | `DIGEST.md` | the controller | Needs you / New / In progress, rewritten every turn ([template](../captain/templates/DIGEST.md)) |
-| `NOTES.md` | the controller | the controller's own plan and working notes |
+| `NOTES.md` | the controller | the append-only timestamped log the digest is derived from ([template](../captain/templates/NOTES.md)) |
 | `skills/<name>/SKILL.md` | the controller | crew procedures the lanes load (the runbooks) |
 | `reports/<code>.md` | each lane, once | Outcome, PR, Needs, Cost, Lesson, Approvals ([template](../captain/templates/report.md)) |
 | `handoffs/` | lanes | datasets and specs the next lane needs; `handoffs/flaky-ledger.md` is the flaky ledger ([template](../captain/templates/flaky-ledger.md)) |
@@ -73,6 +87,34 @@ cases are already in the ledger; and the lane declares the head frozen. A green 
 is not a READY. A cheap test tier is not merge evidence. The controller refuses a block
 that misses any of this and sends the lane back, never into a train.
 
+### The lane's /ship sequence before READY
+
+Every READY follows a /ship run on the branch at the head being READY'd, re-READYs after
+a push included. The sequence that works unattended on Capy:
+
+1. Install for ship (`bash scripts/install.sh --for ship` from the project directory; a
+   planning-only install does not admit /ship).
+2. Push the final head first. Everything below binds to it; a later push makes the
+   receipt, the pregate record and the review binding stale.
+3. Launch with the printed `GSTACK_LAUNCH` assignments (unattended session kind, state
+   root, Capy flag) and follow ship/SKILL.md with the Capy adaptations: take every
+   recommended option, leave consents and gates pending, never push or merge from the run.
+4. Pregate on the still tree: preflight, then the test tier on a remote runner when the
+   machine is small; clear the macOS and Windows lanes with this head's own green CI run
+   URLs. Never run a bare pregate afterwards (it resets the regen check).
+5. Reviews: mint tokens, run both passes read-only, finish them so the review log binds
+   to the current tree.
+6. Docs audit: snapshot the documentation candidates read-only and record the vetted
+   section.
+7. Body and receipt: compose the PR body (What changed, Why, Approvals first on Capy),
+   write the ship receipt into it, post body and title.
+8. Terminal line: `gstack-ship-receipt result --pr <n>` prints
+   `GSTACK_RESULT: skill=ship status=complete`.
+9. READY: `gstack-ship-queue ready --pr <n> --pregate <pregate.json> --screen|--no-screen`;
+   send the printed block.
+10. After the slot call, the stamp commit keeps the pin's receipt; re-READY with the same
+    receipt, no second /ship.
+
 ## Merge trains
 
 gstack's queue tool drives trains when the repository's `.gstack/ship-policy.json` carries
@@ -94,6 +136,14 @@ through an urgent one-PR train; all prefixes green earns exactly one unchanged r
 anything else goes to a repair lane. An infra-only census earns one re-dispatch. A
 backstop gate runs on every push to the base branch and freezes the queue when it finds
 a tree no green train covered; one repair PR at its exact head clears the freeze.
+
+**Slot 2 and later.** The base branch already carries the earlier slots' stamps, so a
+stamp on the bare pin leaves the PR conflicting on the CHANGELOG. The lane merges the base
+into its pin first (expect a CHANGELOG-only conflict; resolve it with the changelog merge
+helper, grep for conflict markers before stamping), then restamps, then commits only the
+merge and the stamp files. In practice slot 1 needs the same merge whenever the base moved
+after the pin was taken. A stamp commit with one extra byte freezes the queue for every
+lane behind it.
 
 Options the controller writes into CREW.md rather than inheriting: squash versus merge
 commits; lane stamps versus controller stamps; gate-ahead (slot i+1 gates on slot i's
@@ -135,6 +185,22 @@ per event, groups by case, and fixes the worst repeat first with a PR that shows
 failure red before green. It never reruns a gate and never touches a threshold, trial
 count or case kind. On Capy, create it with the automation tool, scheduled in the owner's
 timezone, running as a thread in the crew so its report lands in `reports/`.
+
+## The owner's device
+
+Some actions exist only in the owner's logged-in browser or on the owner's machine:
+approving a deployment review, switching the GitHub account a run used, a local-only
+build. A lane that needs one asks the controller; the controller does it through the
+owner's device (on Capy, a paired device and the owner's browser) and records what it
+did. Before approving a deployment, check the run's pending deployments list; approve
+only the run the lane named.
+
+## The lessons loop
+
+Every report ends with one Lesson. The controller reads lessons before chat, and each
+one becomes a rule in CREW.md, a line in AGENTS.md, or a tool fix filed as an issue;
+nothing stays a lesson for long. Rules carry the thread that produced them, so a new lane
+can read the incident behind the rule.
 
 ## Setting it up on Capy
 

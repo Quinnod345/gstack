@@ -307,7 +307,10 @@ occurrence escalates. Every rerun's spend is reported.
 
 A lane that finishes writes `reports/<code>.md` (`captain/templates/report.md`): Outcome,
 PR (number, head, version, checks), Needs (what the owner must do), Cost, Lesson, and
-the Approvals table. The controller reads reports before it reads chat.
+the Approvals table. The controller reads reports before it reads chat, and turns every
+Lesson into a rule in the rules file, a line in the standing-rules file
+(`captain/templates/AGENTS.md`), or a filed tool fix. The controller's own log is
+append-only and timestamped (`captain/templates/NOTES.md`); the digest is derived from it.
 
 Serial slots cost tens of minutes each, so small fixes in one area travel together: when
 a lane's diff is small and open PRs touch the same area, fold them into one wave PR with
