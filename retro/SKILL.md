@@ -675,11 +675,11 @@ Report `COMMIT_SIZE_BUCKETS`:
 
 ### Step 7.5: Factory scorecard (optional)
 
-With `gh` authenticated, add what git cannot show: merged PRs (crew vs outside), lead time (PR open → merge, first READY comment → merge), gate runs and known cost, red-train rate, flaky events, issues opened vs closed, releases. Read-only, no spend; a busy 7-day window takes a few minutes.
+With `gh` authenticated, add what git cannot show: merged PRs (crew vs outside), lead time (PR open → merge, READY → merge), review passes per PR, gate runs and known cost, red-train rate, flaky events, issues opened vs closed, releases. Read-only, no spend; a busy week takes minutes.
 
 ```bash
 _FS="$HOME/.claude/skills/gstack/bin/gstack-factory-scorecard"
-gh auth status >/dev/null 2>&1 && "$_FS" --base "<default>" --since-days <window-days> \
+gh auth status >/dev/null 2>&1 && "$_FS" --base "<default>" --since-days "<window-days>" \
   || echo "FACTORY_SCORECARD: unavailable"
 ```
 

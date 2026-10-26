@@ -90,6 +90,7 @@ export const IDENTIFIER_PLACEHOLDERS: Record<string, IdentifierGrammar> = {
   '<start_date>': { grammar: DATE, what: 'YYYY-MM-DD' },
   '<since>': { grammar: /^[0-9]+[dhwm]$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, what: 'retro window (7d, 24h, 2w) or date' },
   '<window>': { grammar: /^[0-9]+[dhwm]$/, what: 'retro window (7d, 24h, 2w)' },
+  '<window-days>': { grammar: NUM, what: 'retro window in whole days' },
 
   // Git refs. Branch names from remote data travel as data (ENG-8), never through this list.
   '<base>': { grammar: REF, what: 'base branch detected by the skill' },

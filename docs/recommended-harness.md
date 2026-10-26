@@ -253,18 +253,25 @@ line whose input could not be read says `unavailable (<reason>)` rather than 0.
 ```bash
 gstack-factory-scorecard --repo owner/name --since-days 7 \
   [--crew login,login] [--gate-workflow evals.yml] [--free-workflow free-tests.yml] \
-  [--train-prefix train/] [--ready-marker 'READY #\d+|SHIP_RECEIPT:'] [--out-dir .context/factory-scorecard]
+  [--train-prefix train/] [--ready-marker 'READY #\d+|SHIP_RECEIPT:'] [--pass-marker '"passes": (\d+)|passes=(\d+)'] \
+  [--pass-cap 3] [--out-dir .context/factory-scorecard]
 ```
+
+`--repo` defaults to the origin remote's GitHub owner/name and is required
+without one. Each run writes this window's `scorecard.md` and `scorecard.csv`
+to `--out-dir` and appends the same rows to `trend.csv` there, so a weekly
+retro accumulates its own trend without renaming files.
 
 | Line | How it is counted | What one of the best software factories would show |
 |---|---|---|
 | Merged PRs | `merged_at` in the window, base = default branch; crew by `--crew` logins, else author association OWNER/MEMBER/COLLABORATOR | several merges a day, every day; outside contributions land in the same week |
 | Lead time, created → merged | PR `created_at` to `merged_at`, median and p90 | median under 24h, p90 under 3 days (DORA "elite" change lead time is under a day) |
-| Lead time, READY → merged | first PR comment matching `--ready-marker` to `merged_at`; PRs with no such comment are left out and counted | under 2h; every merged PR carries a READY comment |
+| Lead time, READY → merged | first PR comment matching `--ready-marker` at or before `merged_at`; PRs with no such comment are left out and counted | under 2h; every merged PR carries a READY comment |
+| Review passes per PR | the largest count `--pass-marker` captures in the PR body (the ship receipt's `"passes": N` once /ship writes it) or a PR comment (`passes=N`, `REVIEW_PASSES: N`), median and p90, plus how many PRs sat at `--pass-cap` (3: pass 1 reviews the whole diff, later passes only the delta, a pass that finds nothing new is the exit) | median 2 passes; none at the cap |
 | Gate runs green / red / cancelled | completed runs of the gate workflow (`workflow_dispatch` by default; `--gate-event any`); cost from the run's `report-verdict-a*` artifact (`collector-outcomes.json` `.verdict.costUsd`), else the `**$N** rule/judge cost` or `cost=$N` line of the PR's verdict comment | green on 95%+ of runs, cancelled near 0, cost known for every run |
 | Known gate cost per merged PR | known cost / merged PRs; unknown-cost runs make it a floor | known, stable or falling week over week |
 | Red-train rate | runs whose head branch starts with `--train-prefix`, cancelled excluded; red = conclusion other than success; red backstops and screens shown beside it | under 5% (each red train is a bisect plus a rebuild, about two gates) |
-| Flaky events | `flake-records-a*` records of the newest gate runs (count, known rerun spend) and `flake-ledger-*` entries of free runs on the default branch | 0 repeat cases; under 1 flaky case per 10 gates; free retries under 1% of runs |
+| Flaky events | `flake-records-a*` records of the newest gate runs (count, known rerun spend) and `flake-ledger-*` entries of free runs on the default branch; a run whose artifacts cannot be read is counted and named, never scored 0 | 0 repeat cases; under 1 flaky case per 10 gates; free retries under 1% of runs |
 | Issues opened / closed | GitHub search, created and closed in the window | closed ≥ opened; nothing severe older than a week |
 | Releases cut | releases published in the window, drafts excluded | at least one tagged release a week, on schedule |
 
@@ -275,26 +282,28 @@ the gap next to the number.
 ### Where gstack's own numbers stand
 
 Measured on gstack's repository with this tool for 2026-10-19 to 2026-10-26
-(the first full week of trains and `/ship`-before-READY; 102 merged PRs, 77
+(the first full week of trains and `/ship`-before-READY; 103 merged PRs, 77
 gate runs, artifacts read for the newest 60):
 
 | Line | gstack, that week | Against the bar |
 |---|---|---|
-| Merged PRs | 102 (crew 99, outside 3) | volume is there; outside contributions are few and are ported by the crew rather than merged from forks |
+| Merged PRs | 103 (crew 100, outside 3) | volume is there; outside contributions are few and are ported by the crew rather than merged from forks |
 | Lead time, created → merged | median 7.9h, p90 23.7h | inside the bar on both |
-| Lead time, READY → merged | no number: 0 of 102 PRs had a READY comment | the crew reports READY in-thread; step 6 above (post it on the PR) is what makes this measurable |
+| Lead time, READY → merged | no number: 0 of 103 PRs had a READY comment | the crew reports READY in-thread; step 6 above (post it on the PR) is what makes this measurable |
+| Review passes per PR | no number: 0 of 103 PRs carried a pass count | the receipt's `passes` field lands with /ship's convergence rule; until then crews record the count in the READY block, and the marker reads it from a PR comment |
 | Gate runs | 73 green / 4 red / 0 cancelled; known cost $1,628 on 59 of 77 runs | green rate 95%; cost unknown on 18 runs (screens that planned no cases, and runs older than the artifact cap) |
-| Known gate cost per merged PR | $15.96 (a floor) | about $24 per train of up to 5 PRs, plus screens; one gate per PR would have been about $33 each |
+| Known gate cost per merged PR | $15.81 (a floor) | about $24 per train of up to 5 PRs, plus screens; one gate per PR would have been about $33 each |
 | Red-train rate | 4% (1 red of 28 trains; 0 red backstop, 3 red screens) | inside the bar; the three red screens were one judge reading a moved file |
-| Flaky events | 21 paid cases passed on their one rerun (rerun spend $10.72); 17 free-suite retries in 17 of 102 runs | above the bar on both: 0.27 flaky cases per gate against 0.1, and 17% of free runs retried against 1%. One family (`ship-docsync-*`) repeated three times in two days |
-| Issues opened / closed | 52 / 56 | inside the bar |
+| Flaky events | 21 paid cases passed on their one rerun (rerun spend $10.72); 17 free-suite retries in 17 of 103 runs | above the bar on both: 0.27 flaky cases per gate against 0.1, and 17% of free runs retried against 1%. One family (`ship-docsync-*`) repeated three times in two days |
+| Issues opened / closed | 50 / 56 | inside the bar |
 | Releases cut | 1 (the first weekly release) | on schedule, with the starvation caveat above |
 
 Read the gap honestly: lead time and throughput are where they should be, the
 gate is green and its cost is mostly known, and flakiness is the line that is
 not. The daily pass exists for exactly that line; the scorecard's job is to
 show next week whether it moved. The inventory lane's baseline CSV, when it
-lands in the Captain's Drive, supersedes these numbers for trend tracking.
+lands in the Captain's Drive, supersedes these numbers for trend tracking;
+from then on `trend.csv` in `--out-dir` carries the weeks.
 
 ## What is Capy-specific and what is not
 

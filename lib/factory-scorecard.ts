@@ -14,7 +14,7 @@
  *                        kind by head branch (train/<nonce>) and run title (screen #, backstop);
  *                        cost from the run's report-verdict artifact (collector-outcomes.json
  *                        .verdict.costUsd), else the "**$N** rule/judge cost" / "cost=$N" line of
- *                        the PR's verdict comment, else unknown
+ *                        the PR's verdict comment (used by one run per PR), else unknown
  *   flaky events         flake-records-a<n> artifacts of gate runs (paid, one record per case
  *                        that failed once and passed its one rerun) and flake-ledger-* artifacts
  *                        of <free workflow> runs on <base> (free-suite serial retries); the same
@@ -35,8 +35,8 @@ import {
 
 export interface ScorecardSource {
   getJson(apiPath: string): unknown;
-  /** Downloaded, unzipped artifact directories of one run whose names match. */
-  artifactDirs(runId: number, match: (name: string) => boolean): string[];
+  /** Downloaded, unzipped artifact directories of one run whose names match, keyed by artifact name; one listing per call. */
+  artifactDirs(runId: number, match: (name: string) => boolean): Map<string, string>;
 }
 
 export interface ScorecardOptions {
@@ -51,22 +51,28 @@ export interface ScorecardOptions {
   freeWorkflow: string;
   trainPrefix: string;
   readyMarker: RegExp;
+  /** Matches a review pass count in the PR body (the ship receipt's "passes": N) or a comment; the first captured number is the count. */
+  passMarker: RegExp;
+  /** The review-pass cap (passes at or above it are counted as capped). */
+  passCap: number;
   /** Newest runs whose artifacts are read; the rest count without cost or flake data. */
   maxArtifactRuns: number;
 }
 
 export const DEFAULTS = {
   base: 'main', sinceDays: 7, gateWorkflow: 'evals.yml', gateEvent: 'workflow_dispatch', freeWorkflow: 'free-tests.yml',
-  trainPrefix: 'train/', readyMarker: 'READY #\\d+|SHIP_RECEIPT:|gstack-ship-receipt', maxArtifactRuns: 60,
+  trainPrefix: 'train/', readyMarker: 'READY #\\d+|SHIP_RECEIPT:|gstack-ship-receipt',
+  passMarker: '"passes"\\s*:\\s*(\\d+)|\\bpasses=(\\d+)|\\bREVIEW_PASS(?:ES)?[:= ]\\s*(\\d+)', passCap: 3, maxArtifactRuns: 60,
 } as const;
 
 export const CREW_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const PAGE = 100;
+const MAX_PAGES = 20;
 const COST_LINE = /\*\*\$(\d+(?:\.\d+)?)\*\* rule\/judge cost|\bcost=\$(\d+(?:\.\d+)?)/g;
 
 export interface MergedPr {
   number: number; author: string; association: string; crew: boolean; title: string;
-  createdAt: string; mergedAt: string; readyAt: string | null; commentCostUsd: number | null;
+  createdAt: string; mergedAt: string; readyAt: string | null; commentCostUsd: number | null; passes: number | null;
 }
 export type GateKind = 'train' | 'screen' | 'backstop' | 'other';
 export type GateOutcome = 'green' | 'red' | 'cancelled';
@@ -74,10 +80,13 @@ export interface GateRun {
   id: number; kind: GateKind; outcome: GateOutcome; createdAt: string; branch: string; title: string; pr: number | null;
   costUsd: number | null; costSource: 'artifact' | 'comment' | null; flakes: number; flakeRerunUsd: number;
 }
-export interface FreeRetryRun { id: number; conclusion: string | null; retries: number }
+/** retries is null when the run's artifacts could not be read. */
+export interface FreeRetryRun { id: number; conclusion: string | null; retries: number | null }
 export interface Scorecard {
   repo: string; base: string; windowStart: string; windowEnd: string;
-  prs: MergedPr[]; gates: GateRun[]; freeRuns: FreeRetryRun[]; artifactRunsRead: number;
+  prs: MergedPr[]; gates: GateRun[]; freeRuns: FreeRetryRun[]; artifactRunsRead: number; passCap: number;
+  /** Gate runs whose artifacts could not be read; they count without cost or flake data. */
+  artifactErrors: number;
   issuesOpened: number | null; issuesClosed: number | null; releases: Array<{ tag: string; publishedAt: string }>;
   unavailable: string[];
 }
@@ -89,7 +98,7 @@ export function ghSource(repo: string, cacheDir: string, client: GhClient = GH_C
   const fetcher = historyFetcher(client);
   return {
     getJson: apiPath => client.getJson(apiPath),
-    artifactDirs: (runId, match) => downloadRunArtifacts({ repo, run: { id: runId }, match, cacheDir, fetcher }),
+    artifactDirs: (runId, match) => new Map(downloadRunArtifacts({ repo, run: { id: runId }, match, cacheDir, fetcher }).map(dir => [path.basename(dir), dir])),
   };
 }
 
@@ -106,15 +115,17 @@ export function fixtureSource(fixture: FixtureFile, scratch = fs.mkdtempSync(pat
       return fixture.responses[apiPath];
     },
     artifactDirs: (runId, match) => {
-      const dirs: string[] = [];
+      const dirs = new Map<string, string>();
       for (const [name, files] of Object.entries(fixture.artifacts?.[String(runId)] ?? {})) {
         if (!match(name)) continue;
-        const dir = path.join(scratch, String(runId), name);
+        const dir = path.resolve(scratch, String(runId), name);
         for (const [file, text] of Object.entries(files)) {
-          fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
-          fs.writeFileSync(path.join(dir, file), text);
+          const target = path.resolve(dir, file);
+          if (!target.startsWith(dir + path.sep)) throw new Error(`fixture artifact file escapes its directory: ${file}`);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, text);
         }
-        dirs.push(dir);
+        dirs.set(name, dir);
       }
       return dirs;
     },
@@ -132,17 +143,19 @@ function pullsPage(source: ScorecardSource, o: ScorecardOptions, page: number): 
 export function readMergedPrs(source: ScorecardSource, o: ScorecardOptions, since: string): MergedPr[] {
   const out: MergedPr[] = [];
   const crewLogins = o.crew ? new Set(o.crew.map(l => l.toLowerCase())) : null;
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const pulls = pullsPage(source, o, page);
     for (const pr of pulls) {
       const mergedAt = typeof pr.merged_at === 'string' ? pr.merged_at : null;
       if (!mergedAt || mergedAt < since) continue;
       const author = String(pr.user?.login ?? '');
       const association = String(pr.author_association ?? 'NONE');
-      const comments = readComments(source, o.repo, Number(pr.number), o.readyMarker);
+      const comments = readComments(source, o.repo, Number(pr.number), { readyMarker: o.readyMarker, passMarker: o.passMarker, mergedAt });
+      const bodyPasses = passCount(String(pr.body ?? ''), o.passMarker);
       out.push({ number: Number(pr.number), author, association, title: String(pr.title ?? ''),
         crew: crewLogins ? crewLogins.has(author.toLowerCase()) : CREW_ASSOCIATIONS.has(association),
-        createdAt: String(pr.created_at), mergedAt, readyAt: comments.readyAt, commentCostUsd: comments.costUsd });
+        createdAt: String(pr.created_at), mergedAt, readyAt: comments.readyAt, commentCostUsd: comments.costUsd,
+        passes: bodyPasses === null ? comments.passes : Math.max(bodyPasses, comments.passes ?? 0) });
     }
     const oldest = pulls[pulls.length - 1]?.updated_at;
     if (pulls.length < PAGE || (typeof oldest === 'string' && oldest < since)) break;
@@ -150,19 +163,36 @@ export function readMergedPrs(source: ScorecardSource, o: ScorecardOptions, sinc
   return out.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
 }
 
-/** The first READY-style comment's time and the newest verdict comment's cost, from one page of a PR's comments. */
-export function readComments(source: ScorecardSource, repo: string, pr: number, readyMarker: RegExp): { readyAt: string | null; costUsd: number | null } {
-  const body = source.getJson(`repos/${repo}/issues/${pr}/comments?per_page=${PAGE}&page=1`);
-  const comments = Array.isArray(body) ? body : [];
+/** The largest pass count the marker captures in a text, null when it never matches. */
+export function passCount(text: string, marker: RegExp): number | null {
+  let max: number | null = null;
+  for (const m of text.matchAll(new RegExp(marker.source, marker.flags.includes('g') ? marker.flags : marker.flags + 'g'))) {
+    const n = Number(m.slice(1).find(g => g !== undefined));
+    if (Number.isFinite(n) && (max === null || n > max)) max = n;
+  }
+  return max;
+}
+
+/** The first READY-style comment's time (comments after the merge are ignored), the newest verdict comment's cost and the largest pass count, across every page of a PR's comments. */
+export function readComments(source: ScorecardSource, repo: string, pr: number, m: { readyMarker: RegExp; passMarker: RegExp; mergedAt?: string }):
+  { readyAt: string | null; costUsd: number | null; passes: number | null } {
   let readyAt: string | null = null;
   let costUsd: number | null = null;
-  for (const c of comments) {
-    const text = String(c.body ?? '');
-    const at = String(c.created_at ?? '');
-    if (readyMarker.test(text) && (!readyAt || at < readyAt)) readyAt = at;
-    for (const m of text.matchAll(COST_LINE)) costUsd = Number(m[1] ?? m[2]);
+  let passes: number | null = null;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const body = source.getJson(`repos/${repo}/issues/${pr}/comments?per_page=${PAGE}&page=${page}`);
+    const comments = Array.isArray(body) ? body : [];
+    for (const c of comments) {
+      const text = String(c.body ?? '');
+      const at = String(c.created_at ?? '');
+      if (m.readyMarker.test(text) && (!m.mergedAt || at <= m.mergedAt) && (!readyAt || at < readyAt)) readyAt = at;
+      for (const match of text.matchAll(COST_LINE)) costUsd = Number(match[1] ?? match[2]);
+      const n = passCount(text, m.passMarker);
+      if (n !== null && (passes === null || n > passes)) passes = n;
+    }
+    if (comments.length < PAGE) break;
   }
-  return { readyAt, costUsd };
+  return { readyAt, costUsd, passes };
 }
 
 export function classifyGate(run: { branch: string; title: string }, trainPrefix: string): GateKind {
@@ -208,11 +238,11 @@ export function flakeRecords(dirs: string[]): { flakes: number; rerunUsd: number
 }
 
 /** Gate runs in the window with kind, outcome, cost and flake records; artifacts are read for the newest maxArtifactRuns only. */
-export function readGateRuns(source: ScorecardSource, o: ScorecardOptions, since: string, prCost: Map<number, number>): { gates: GateRun[]; artifactRunsRead: number } {
+export function readGateRuns(source: ScorecardSource, o: ScorecardOptions, since: string, prCost: Map<number, number>): { gates: GateRun[]; artifactRunsRead: number; artifactErrors: number } {
   const query = [`status=completed`, `per_page=${PAGE}`, `created=${encodeURIComponent(`>=${since.slice(0, 10)}`)}`,
     ...(o.gateEvent ? [`event=${encodeURIComponent(o.gateEvent)}`] : [])].join('&');
   const gates: GateRun[] = [];
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const body = source.getJson(`repos/${o.repo}/actions/workflows/${o.gateWorkflow}/runs?${query}&page=${page}`) as { workflow_runs?: any[] };
     const runs = Array.isArray(body?.workflow_runs) ? body.workflow_runs : [];
     for (const run of runs) {
@@ -227,25 +257,35 @@ export function readGateRuns(source: ScorecardSource, o: ScorecardOptions, since
   }
   gates.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const artifactRunsRead = Math.min(gates.length, o.maxArtifactRuns);
+  const commentCostUsed = new Set<number>();
+  let artifactErrors = 0;
   gates.forEach((gate, index) => {
     if (index < artifactRunsRead) {
-      gate.costUsd = verdictCost(source.artifactDirs(gate.id, name => /^report-verdict-a\d+$/.test(name)));
-      if (gate.costUsd !== null) gate.costSource = 'artifact';
-      const flakes = flakeRecords(source.artifactDirs(gate.id, name => /^flake-records-a\d+$/.test(name)));
-      gate.flakes = flakes.flakes;
-      gate.flakeRerunUsd = flakes.rerunUsd;
+      try {
+        const dirs = source.artifactDirs(gate.id, name => /^(report-verdict|flake-records)-a\d+$/.test(name));
+        const named = (prefix: string) => [...dirs].filter(([name]) => name.startsWith(prefix)).map(([, dir]) => dir);
+        gate.costUsd = verdictCost(named('report-verdict-'));
+        if (gate.costUsd !== null) gate.costSource = 'artifact';
+        const flakes = flakeRecords(named('flake-records-'));
+        gate.flakes = flakes.flakes;
+        gate.flakeRerunUsd = flakes.rerunUsd;
+      } catch { artifactErrors++; }
     }
-    if (gate.costUsd === null && gate.pr !== null && prCost.has(gate.pr)) { gate.costUsd = prCost.get(gate.pr)!; gate.costSource = 'comment'; }
+    if (gate.costUsd === null && gate.pr !== null && prCost.has(gate.pr) && !commentCostUsed.has(gate.pr)) {
+      gate.costUsd = prCost.get(gate.pr)!; gate.costSource = 'comment'; commentCostUsed.add(gate.pr);
+    }
   });
-  return { gates, artifactRunsRead };
+  return { gates, artifactRunsRead, artifactErrors };
 }
 
 /** Free-suite runs on base in the window and the flaky-pass entries their flake-ledger-* artifacts hold. */
 export function readFreeRetries(source: ScorecardSource, o: ScorecardOptions, since: string): FreeRetryRun[] {
   const client: GhClient = { getJson: p => source.getJson(p), downloadZip: () => { throw new Error('not used'); } };
   const runs = listWorkflowRuns(client, o.repo, o.freeWorkflow, { since, branch: o.base });
-  return runs.map((run, index) => ({ id: run.id, conclusion: run.conclusion,
-    retries: index < o.maxArtifactRuns ? source.artifactDirs(run.id, name => name.startsWith('flake-ledger-')).flatMap(readFlakeLedgerDir).length : 0 }));
+  const retries = (runId: number): number | null => {
+    try { return [...source.artifactDirs(runId, name => name.startsWith('flake-ledger-')).values()].flatMap(readFlakeLedgerDir).length; } catch { return null; }
+  };
+  return runs.map((run, index) => ({ id: run.id, conclusion: run.conclusion, retries: index < o.maxArtifactRuns ? retries(run.id) : 0 }));
 }
 
 function searchCount(source: ScorecardSource, q: string): number | null {
@@ -263,7 +303,7 @@ export function readReleases(source: ScorecardSource, repo: string, since: strin
 export function collectScorecard(source: ScorecardSource, o: ScorecardOptions): Scorecard {
   const since = new Date(o.now - o.sinceDays * 86_400_000).toISOString();
   const card: Scorecard = { repo: o.repo, base: o.base, windowStart: since, windowEnd: new Date(o.now).toISOString(),
-    prs: [], gates: [], freeRuns: [], artifactRunsRead: 0, issuesOpened: null, issuesClosed: null, releases: [], unavailable: [] };
+    prs: [], gates: [], freeRuns: [], artifactRunsRead: 0, passCap: o.passCap, artifactErrors: 0, issuesOpened: null, issuesClosed: null, releases: [], unavailable: [] };
   const guard = (what: string, fn: () => void) => { try { fn(); } catch (e) { card.unavailable.push(`${what}: ${unavailableReason(e)}`); } };
   guard('merged PRs', () => { card.prs = readMergedPrs(source, o, since); });
   guard('gate runs', () => {
@@ -271,10 +311,10 @@ export function collectScorecard(source: ScorecardSource, o: ScorecardOptions): 
     Object.assign(card, readGateRuns(source, o, since, prCost));
   });
   guard('free retries', () => { card.freeRuns = readFreeRetries(source, o, since); });
-  const day = since.slice(0, 10);
+  const instant = since.replace(/\.\d{3}Z$/, 'Z');
   guard('issues', () => {
-    card.issuesOpened = searchCount(source, `repo:${o.repo} is:issue created:>=${day}`);
-    card.issuesClosed = searchCount(source, `repo:${o.repo} is:issue closed:>=${day}`);
+    card.issuesOpened = searchCount(source, `repo:${o.repo} is:issue created:>=${instant}`);
+    card.issuesClosed = searchCount(source, `repo:${o.repo} is:issue closed:>=${instant}`);
   });
   guard('releases', () => { card.releases = readReleases(source, o.repo, since); });
   return card;
@@ -305,6 +345,7 @@ export const BENCHMARKS: Record<string, string> = {
   merged: 'several merges a day, every day; outside contributions land in the same week',
   lead_time: 'median under 24h, p90 under 3 days (DORA elite: change lead time under a day)',
   ready_to_merge: 'under 2h from READY to merge; every merged PR carries a READY comment',
+  review_passes: 'median 2 passes, none at the cap (a pass that finds nothing new is the exit; what is left at the cap is named in the PR body)',
   gates: 'green on 95%+ of runs, cancelled near 0, cost known for every run',
   cost_per_merge: 'known, stable or falling week over week',
   red_train: 'under 5% of trains red (each red train costs a bisect and a rebuild)',
@@ -324,25 +365,34 @@ export function scorecardRows(card: Scorecard): ScorecardRow[] {
   const trains = gates.filter(g => g.kind === 'train' && g.outcome !== 'cancelled');
   const flakes = gates.reduce((s, g) => s + g.flakes, 0);
   const flakeUsd = gates.reduce((s, g) => s + g.flakeRerunUsd, 0);
-  const retries = card.freeRuns.reduce((s, r) => s + r.retries, 0);
-  const retryRuns = card.freeRuns.filter(r => r.retries > 0).length;
+  const retries = card.freeRuns.reduce((s, r) => s + (r.retries ?? 0), 0);
+  const retryRuns = card.freeRuns.filter(r => (r.retries ?? 0) > 0).length;
+  const unreadableFree = card.freeRuns.filter(r => r.retries === null).length;
+  const passes = card.prs.filter(p => p.passes !== null).map(p => p.passes!);
   const unavailable = (what: string) => card.unavailable.find(u => u.startsWith(what + ':'));
-  const row = (id: string, metric: string, what: string, value: () => string, rule: string): ScorecardRow =>
-    ({ id, metric, value: unavailable(what) ? `unavailable (${unavailable(what)!.slice(what.length + 2)})` : value(), benchmark: BENCHMARKS[id]!, rule });
+  const unavailableText = (what: string) => `unavailable (${unavailable(what)!.slice(what.length + 2)})`;
+  const row = (id: string, metric: string, what: string | string[], value: () => string, rule: string): ScorecardRow => {
+    const failed = (Array.isArray(what) ? what : [what]).find(w => unavailable(w));
+    return { id, metric, value: failed ? unavailableText(failed) : value(), benchmark: BENCHMARKS[id]!, rule };
+  };
+  const paidFlakes = () => `${flakes} paid case(s) passed on their one rerun (rerun spend ${usd(flakeUsd)})${card.artifactErrors ? `; artifacts unreadable on ${card.artifactErrors} run(s)` : ''}`;
+  const freeRetries = () => `${retries} free-suite retr${retries === 1 ? 'y' : 'ies'} in ${retryRuns} of ${card.freeRuns.length} runs${unreadableFree ? ` (${unreadableFree} unreadable)` : ''}`;
   return [
     row('merged', 'Merged PRs', 'merged PRs', () => `${card.prs.length} (crew ${crewPrs.length}, outside ${card.prs.length - crewPrs.length})`,
       `merged_at inside the window, base ${card.base}; crew by login list or author_association OWNER/MEMBER/COLLABORATOR`),
     row('lead_time', 'Lead time, created to merged', 'merged PRs', () => `median ${fmtHours(percentile(lead, 0.5))}, p90 ${fmtHours(percentile(lead, 0.9))}`,
       'PR created_at to merged_at over the merged PRs above'),
     row('ready_to_merge', 'Lead time, READY to merged', 'merged PRs', () => `median ${fmtHours(percentile(ready, 0.5))}, p90 ${fmtHours(percentile(ready, 0.9))} (${ready.length} of ${card.prs.length} PRs with a READY comment)`,
-      'first PR comment matching the READY marker to merged_at; PRs without one are left out'),
-    row('gates', 'Gate runs green / red / cancelled', 'gate runs', () => `${by('green')} / ${by('red')} / ${by('cancelled')}; known cost ${usd(knownUsd)} on ${known.length} of ${gates.length} runs`,
-      'completed runs of the gate workflow in the window; cost from the verdict artifact, else the PR verdict comment'),
-    row('cost_per_merge', 'Known gate cost per merged PR', 'gate runs', () => (card.prs.length ? `${usd(knownUsd / card.prs.length)} (${gates.length - known.length} runs without a known cost)` : 'n/a (no merges)'),
+      'first PR comment matching the READY marker, at or before merged_at; PRs without one are left out'),
+    row('review_passes', 'Review passes per PR', 'merged PRs', () => `median ${percentile(passes, 0.5) ?? 'n/a'}, p90 ${percentile(passes, 0.9) ?? 'n/a'} (${passes.length} of ${card.prs.length} PRs report a pass count; ${passes.filter(n => n >= card.passCap).length} at the cap of ${card.passCap})`,
+      'largest count matching the pass marker in the PR body (the ship receipt\'s "passes") or a PR comment; PRs without one are left out'),
+    row('gates', 'Gate runs green / red / cancelled', 'gate runs', () => `${by('green')} / ${by('red')} / ${by('cancelled')}; known cost ${usd(knownUsd)} on ${known.length} of ${gates.length} runs${unavailable('merged PRs') ? ' (comment costs unavailable: merged PRs unreadable)' : ''}`,
+      'completed runs of the gate workflow in the window; cost from the verdict artifact, else the PR verdict comment (one run per PR)'),
+    row('cost_per_merge', 'Known gate cost per merged PR', ['gate runs', 'merged PRs'], () => (card.prs.length ? `${usd(knownUsd / card.prs.length)} (${gates.length - known.length} runs without a known cost)` : 'n/a (no merges)'),
       'known gate cost divided by merged PRs; unknown-cost runs make this a floor'),
     row('red_train', 'Red-train rate', 'gate runs', () => `${pct(trains.filter(t => t.outcome === 'red').length, trains.length)} (${trains.filter(t => t.outcome === 'red').length} red of ${trains.length} trains; ${by('red', 'backstop')} red backstop, ${by('red', 'screen')} red screens)`,
       `runs whose head branch starts with the train prefix, cancelled runs excluded; red means the run's conclusion was not success`),
-    row('flaky', 'Flaky events', 'gate runs', () => `${flakes} paid case(s) passed on their one rerun (rerun spend ${usd(flakeUsd)}); ${retries} free-suite retr${retries === 1 ? 'y' : 'ies'} in ${retryRuns} of ${card.freeRuns.length} runs`,
+    row('flaky', 'Flaky events', [], () => `${unavailable('gate runs') ? unavailableText('gate runs') : paidFlakes()}; ${unavailable('free retries') ? unavailableText('free retries') : freeRetries()}`,
       `flake-records artifacts of the newest ${card.artifactRunsRead} gate runs and flake-ledger artifacts of free runs on the base branch`),
     row('issues', 'Issues opened / closed', 'issues', () => `${card.issuesOpened ?? 'n/a'} / ${card.issuesClosed ?? 'n/a'}`, 'GitHub search: created, closed inside the window'),
     row('releases', 'Releases cut', 'releases', () => `${card.releases.length}${card.releases.length ? ` (${card.releases.map(r => r.tag).join(', ')})` : ''}`, 'releases published inside the window, drafts excluded'),

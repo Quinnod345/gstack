@@ -11,7 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  BENCHMARKS, DEFAULTS, classifyGate, collectScorecard, fixtureSource, flakeRecords, fmtHours, gateOutcome, percentile, readComments, renderCsv,
+  BENCHMARKS, DEFAULTS, classifyGate, collectScorecard, fixtureSource, flakeRecords, fmtHours, gateOutcome, passCount, percentile, readComments, renderCsv,
   renderMarkdown, scorecardRows, verdictCost, type FixtureFile, type ScorecardOptions,
 } from '../lib/factory-scorecard';
 
@@ -28,7 +28,8 @@ const fixture = (): FixtureFile => JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
 const options = (over: Partial<ScorecardOptions> = {}): ScorecardOptions => ({
   repo: 'acme/widgets', base: DEFAULTS.base, now: NOW, sinceDays: DEFAULTS.sinceDays, crew: null, gateWorkflow: DEFAULTS.gateWorkflow,
   gateEvent: DEFAULTS.gateEvent, freeWorkflow: DEFAULTS.freeWorkflow, trainPrefix: DEFAULTS.trainPrefix,
-  readyMarker: new RegExp(DEFAULTS.readyMarker, 'm'), maxArtifactRuns: DEFAULTS.maxArtifactRuns, ...over,
+  readyMarker: new RegExp(DEFAULTS.readyMarker, 'm'), passMarker: new RegExp(DEFAULTS.passMarker, 'm'), passCap: DEFAULTS.passCap,
+  maxArtifactRuns: DEFAULTS.maxArtifactRuns, ...over,
 });
 const byId = (rows: ReturnType<typeof scorecardRows>) => Object.fromEntries(rows.map(r => [r.id, r.value]));
 
@@ -42,6 +43,7 @@ describe('factory-scorecard: recorded window', () => {
     expect(card.prs.find(p => p.number === 101)!.readyAt).toBe('2026-10-24T16:00:00Z');
     expect(card.prs.find(p => p.number === 101)!.commentCostUsd).toBe(12.5);
     expect(card.prs.find(p => p.number === 102)!.readyAt).toBeNull();
+    expect(card.prs.map(p => p.passes)).toEqual([2, 3, null]);
     expect(card.gates.map(g => [g.id, g.kind, g.outcome, g.costUsd, g.costSource, g.flakes])).toEqual([
       [9004, 'backstop', 'cancelled', null, null, 0],
       [9003, 'screen', 'green', 12.5, 'comment', 0],
@@ -57,6 +59,7 @@ describe('factory-scorecard: recorded window', () => {
     expect(values.merged).toBe('3 (crew 2, outside 1)');
     expect(values.lead_time).toBe('median 8.0h, p90 5.0d');
     expect(values.ready_to_merge).toBe('median 1.0h, p90 2.0h (2 of 3 PRs with a READY comment)');
+    expect(values.review_passes).toBe('median 2, p90 3 (2 of 3 PRs report a pass count; 1 at the cap of 3)');
     expect(values.gates).toBe('2 / 1 / 1; known cost $43.00 on 2 of 4 runs');
     expect(values.cost_per_merge).toBe('$14.33 (2 runs without a known cost)');
     expect(values.red_train).toBe('50% (1 red of 2 trains; 0 red backstop, 0 red screens)');
@@ -77,6 +80,48 @@ describe('factory-scorecard: recorded window', () => {
     expect(card.gates.map(g => g.id)).not.toContain(9005);
     expect(card.releases.map(r => r.tag)).not.toContain('v1.1.0');
     expect(source.calls.filter(c => c.includes('/pulls?'))).toHaveLength(1);
+  });
+
+  test('a full page inside the window reads the next page; a full page whose oldest update predates the window does not', () => {
+    // Value: protects=the PR paging loop continues past page 1 only while the page is full and still inside the window; fails_when=the break condition stops after one page or ignores the oldest update; why_new=the recorded fixture never fills a page, so the continue branch was untested; seam=none; no_claim=none beyond protects
+    const pullsKey = (page: number) => `repos/acme/widgets/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100&page=${page}`;
+    const page = (first: number, updatedAt: string) => Array.from({ length: 100 }, (_, i) => ({ number: first + i, title: `pr ${first + i}`, user: { login: 'alice' }, author_association: 'MEMBER',
+      created_at: '2026-10-24T00:00:00Z', merged_at: '2026-10-25T00:00:00Z', updated_at: updatedAt }));
+    const withPages = (oldest: string) => {
+      const fx = fixture();
+      fx.responses[pullsKey(1)] = page(1000, oldest);
+      fx.responses[pullsKey(2)] = page(2000, oldest).slice(0, 5);
+      for (let n = 1000; n < 1100; n++) fx.responses[`repos/acme/widgets/issues/${n}/comments?per_page=100&page=1`] = [];
+      for (let n = 2000; n < 2005; n++) fx.responses[`repos/acme/widgets/issues/${n}/comments?per_page=100&page=1`] = [];
+      return fx;
+    };
+    const inWindow = fixtureSource(withPages('2026-10-25T00:00:00Z'), scratch());
+    expect(collectScorecard(inWindow, options()).prs).toHaveLength(105);
+    expect(inWindow.calls.filter(c => c.includes('/pulls?'))).toHaveLength(2);
+    const stale = fixtureSource(withPages('2026-10-01T00:00:00Z'), scratch());
+    expect(collectScorecard(stale, options()).prs).toHaveLength(100);
+    expect(stale.calls.filter(c => c.includes('/pulls?'))).toHaveLength(1);
+  });
+
+  test('a PR comment cost backs one gate run per PR; the gate-run read failing marks only its lines unavailable', () => {
+    // Value: protects=two artifact-less gate runs on one PR do not both copy the PR's comment cost into known cost; fails_when=the once-per-PR guard is removed; why_new=review found the fallback keyed by PR number only; seam=none; no_claim=none beyond protects
+    const fx = fixture();
+    const runsKey = Object.keys(fx.responses).find(k => k.includes('/actions/workflows/evals.yml/runs?') && k.includes('event=workflow_dispatch'))!;
+    const body = fx.responses[runsKey] as { workflow_runs: any[] };
+    const screen = body.workflow_runs.find(r => r.id === 9003)!;
+    body.workflow_runs.push({ ...screen, id: 9006, created_at: '2026-10-25T13:00:00Z' });
+    const card = collectScorecard(fixtureSource(fx, scratch()), options());
+    expect(card.gates.filter(g => g.id === 9003 || g.id === 9006).map(g => [g.pr, g.costSource])).toEqual([[101, 'comment'], [101, null]]);
+    expect(byId(scorecardRows(card)).gates).toBe('3 / 1 / 1; known cost $43.00 on 2 of 5 runs');
+    const broken = fixture();
+    delete broken.responses[runsKey];
+    const noGates = collectScorecard(fixtureSource(broken, scratch()), options());
+    expect(noGates.unavailable).toHaveLength(1);
+    expect(noGates.unavailable[0]).toStartWith('gate runs: ');
+    const values = byId(scorecardRows(noGates));
+    expect(values.gates).toStartWith('unavailable (');
+    expect(values.red_train).toStartWith('unavailable (');
+    expect(values.merged).toBe('3 (crew 2, outside 1)');
   });
 
   test('--max-artifact-runs caps artifact reads: later runs count without cost or flake data', () => {
@@ -156,9 +201,30 @@ describe('factory-scorecard: recorded window', () => {
     const values = byId(scorecardRows(card));
     expect(values.merged).toStartWith('unavailable (');
     expect(values.lead_time).toStartWith('unavailable (');
-    expect(values.gates).toBe('2 / 1 / 1; known cost $30.50 on 1 of 4 runs');
+    expect(values.gates).toBe('2 / 1 / 1; known cost $30.50 on 1 of 4 runs (comment costs unavailable: merged PRs unreadable)');
+    expect(values.cost_per_merge).toStartWith('unavailable (');
+    expect(values.review_passes).toStartWith('unavailable (');
     expect(card.gates.find(g => g.id === 9003)!.costSource).toBeNull();
     expect(values.issues).toBe('5 / 7');
+  });
+
+  test('a failed free-run read marks only the free half of the flaky line; an unreadable artifact leaves its run without cost or flake data', () => {
+    // Value: protects=the flaky line never prints a clean 0 for a read that failed, and one bad artifact does not drop the whole gate section; fails_when=the flaky row is keyed to one guard again or the per-run try/catch is removed; why_new=red-team review found both; seam=none; no_claim=none beyond protects
+    const fx = fixture();
+    for (const key of Object.keys(fx.responses)) if (key.includes('/actions/workflows/free-tests.yml/')) delete fx.responses[key];
+    const values = byId(scorecardRows(collectScorecard(fixtureSource(fx, scratch()), options())));
+    expect(values.flaky).toMatch(/^2 paid case\(s\) passed on their one rerun \(rerun spend \$1\.10\); unavailable \(/);
+    expect(values.gates).toBe('2 / 1 / 1; known cost $43.00 on 2 of 4 runs');
+    const inner = fixtureSource(fixture(), scratch());
+    const flaky = { getJson: (p: string) => inner.getJson(p), artifactDirs: (id: number, m: (n: string) => boolean) => { if (id === 9001 || id === 8001) throw new Error('unzip failed'); return inner.artifactDirs(id, m); } };
+    const card = collectScorecard(flaky, options());
+    expect(card.unavailable).toEqual([]);
+    expect(card.artifactErrors).toBe(1);
+    expect(card.gates.find(g => g.id === 9001)!.costUsd).toBeNull();
+    expect(card.freeRuns.find(r => r.id === 8001)!.retries).toBeNull();
+    const v = byId(scorecardRows(card));
+    expect(v.gates).toBe('2 / 1 / 1; known cost $12.50 on 1 of 4 runs');
+    expect(v.flaky).toBe('0 paid case(s) passed on their one rerun (rerun spend $0.00); artifacts unreadable on 1 run(s); 0 free-suite retries in 0 of 3 runs (1 unreadable)');
   });
 });
 
@@ -174,9 +240,15 @@ describe('factory-scorecard: pieces', () => {
 
   test('READY marker: the first matching comment wins and the newest cost line is kept', () => {
     const source = fixtureSource(fixture(), scratch());
-    expect(readComments(source, 'acme/widgets', 101, /READY #\d+/m)).toEqual({ readyAt: '2026-10-24T16:00:00Z', costUsd: 12.5 });
-    expect(readComments(source, 'acme/widgets', 101, /never matches/m)).toEqual({ readyAt: null, costUsd: 12.5 });
-    expect(readComments(source, 'acme/widgets', 103, new RegExp(DEFAULTS.readyMarker, 'm'))).toEqual({ readyAt: '2026-10-25T03:00:00Z', costUsd: null });
+    const markers = (readyMarker: RegExp, mergedAt?: string) => ({ readyMarker, passMarker: new RegExp(DEFAULTS.passMarker, 'm'), mergedAt });
+    expect(readComments(source, 'acme/widgets', 101, markers(/READY #\d+/m))).toEqual({ readyAt: '2026-10-24T16:00:00Z', costUsd: 12.5, passes: null });
+    expect(readComments(source, 'acme/widgets', 101, markers(/never matches/m))).toEqual({ readyAt: null, costUsd: 12.5, passes: null });
+    expect(readComments(source, 'acme/widgets', 103, markers(new RegExp(DEFAULTS.readyMarker, 'm')))).toEqual({ readyAt: '2026-10-25T03:00:00Z', costUsd: null, passes: 3 });
+    // Value: protects=a READY-style comment posted after the merge (a controller recap) does not become the READY time; fails_when=the mergedAt bound is dropped; why_new=review found negative READY-to-merge durations possible; seam=none; no_claim=none beyond protects
+    expect(readComments(source, 'acme/widgets', 102, markers(/READY #\d+/m, '2026-10-25T12:00:00Z')).readyAt).toBeNull();
+    expect(readComments(source, 'acme/widgets', 102, markers(/READY #\d+/m)).readyAt).toBe('2026-10-26T01:00:00Z');
+    expect(passCount('"passes": 4 then passes=1 then REVIEW_PASSES: 2', new RegExp(DEFAULTS.passMarker, 'm'))).toBe(4);
+    expect(passCount('no count here', new RegExp(DEFAULTS.passMarker, 'm'))).toBeNull();
   });
 
   test('verdict cost reads collector-outcomes.json and ignores an unreadable one; flake records skip torn lines and unknown rerun cost', () => {
@@ -230,6 +302,18 @@ describe('factory-scorecard: the bin', () => {
     expect(r.stdout).toContain('(1 of 3 PRs with a READY comment)');
     expect(fs.existsSync(path.join(cwd, 'card.csv'))).toBe(true);
     expect(fs.existsSync(path.join(out, 'scorecard.md'))).toBe(true);
+    // Value: protects=--csv into a directory that does not exist yet is created instead of crashing after every read; fails_when=the mkdirSync before the CSV write is removed; why_new=review found only --out-dir was created; seam=none; no_claim=none beyond protects
+    const nested = run(['--repo', 'acme/widgets', '--fixtures', FIXTURE, '--now', '2026-10-26T12:00:00Z', '--csv', path.join(cwd, 'trends', 'w43', 'card.csv')], cwd);
+    expect(nested.status, nested.stderr).toBe(0);
+    expect(fs.existsSync(path.join(cwd, 'trends', 'w43', 'card.csv'))).toBe(true);
+    // Value: protects=every run appends its rows to trend.csv with one header, so weeks line up without renaming files; fails_when=the append is removed or the header repeats; why_new=review found scorecard.csv overwritten every run; seam=none; no_claim=none beyond protects
+    const trend = fs.readFileSync(path.join(cwd, '.context', 'factory-scorecard', 'trend.csv'), 'utf8').split('\n').filter(Boolean);
+    expect(trend.filter(l => l.startsWith('repo,')).length).toBe(1);
+    expect(trend.length).toBe(1 + Object.keys(BENCHMARKS).length);
+    const again = run(['--repo', 'acme/widgets', '--fixtures', FIXTURE, '--now', '2026-10-27T12:00:00Z'], cwd);
+    expect(again.status, again.stderr).toBe(0);
+    expect(fs.readFileSync(path.join(cwd, '.context', 'factory-scorecard', 'trend.csv'), 'utf8').split('\n').filter(Boolean).length).toBe(1 + 2 * Object.keys(BENCHMARKS).length);
+    expect(nested.stdout).toContain(`SCORECARD_TREND: ${path.join('.context', 'factory-scorecard', 'trend.csv')}`);
   });
 
   test('bad usage exits 2 with the usage text; --help exits 0', () => {
@@ -238,6 +322,17 @@ describe('factory-scorecard: the bin', () => {
     // Value: protects=an unparsable --now exits 2 before any read; fails_when=the --now validation branch is removed; why_new=the other flag validations were covered and this one was not; seam=none; no_claim=none beyond protects
     expect(run(['--now', 'yesterday-ish', '--fixtures', FIXTURE], cwd).status).toBe(2);
     expect(run(['--ready-marker', '(', '--fixtures', FIXTURE], cwd).status).toBe(2);
+    // Value: protects=a non-numeric or negative --max-artifact-runs exits 2 instead of silently reading no artifact; fails_when=the validation is removed and Number('lots') flows into Math.min; why_new=review found this flag unvalidated; seam=none; no_claim=none beyond protects
+    const lots = run(['--max-artifact-runs', 'lots', '--fixtures', FIXTURE], cwd);
+    expect(lots.status).toBe(2);
+    expect(lots.stderr).toContain('--max-artifact-runs must be a non-negative integer');
+    expect(run(['--max-artifact-runs', '-1', '--fixtures', FIXTURE], cwd).status).toBe(2);
+    expect(run(['--pass-cap', '0', '--fixtures', FIXTURE], cwd).status).toBe(2);
+    expect(run(['--pass-marker', '[', '--fixtures', FIXTURE], cwd).status).toBe(2);
+    // Value: protects=without --repo and without a GitHub origin the bin refuses instead of guessing a repository; fails_when=a hard-coded fallback repository returns; why_new=red-team review found the shared helper's fallback would score the wrong repository; seam=none; no_claim=none beyond protects
+    const noRepo = run(['--fixtures', FIXTURE], cwd);
+    expect(noRepo.status).toBe(2);
+    expect(noRepo.stderr).toContain('--repo owner/name is required');
     const stray = run(['stray'], cwd);
     expect(stray.status).toBe(2);
     expect(stray.stderr).toContain('unexpected argument: stray');
