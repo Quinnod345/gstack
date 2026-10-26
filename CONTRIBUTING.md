@@ -909,6 +909,14 @@ bun install && bun run build && ./setup
 
 This affects all projects. To revert: `git checkout main && git pull && bun run build && ./setup`.
 
+## Issue triage
+
+An issue is open, parked or closed, and closed means fixed, duplicate or won't
+fix, each with its reason in the closing comment. An issue we intend to fix
+later stays open under the `parked` label with one comment saying where it is
+tracked (a TODOS.md theme or a tracking issue) and what fixes it. The full rule,
+including the labels and the close reasons, is in [docs/triage.md](docs/triage.md).
+
 ## Community PR triage (wave process)
 
 When community PRs accumulate, batch them into themed waves:

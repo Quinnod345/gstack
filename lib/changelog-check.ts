@@ -2,8 +2,9 @@
  * changelog-check — CHANGELOG re-heading and checks for gstack-restamp (C2)
  * and the tree receipt (C3). A restamp moves the PR's section (`[Unreleased]`
  * or the version currently stamped on the branch) to the top under the new
- * version, above its predecessor's entry. Duplicate version headings and a
- * top entry that is not VERSION are errors. The tree receipt uses
+ * version, above its predecessor's entry. Duplicate version headings beyond
+ * those the base branch already carries, and a top entry that is not VERSION,
+ * are errors. The tree receipt uses
  * `normalizeChangelog` to accept a heading move as a stamp, never a change.
  */
 import type { ResultCodeName } from './result-codes';
@@ -44,15 +45,36 @@ export function parseChangelog(text: string): ParsedChangelog {
   return { header, sections };
 }
 
-/** Duplicate headings, and (when `expectedTop` is given) the top entry equals VERSION. */
-export function checkChangelog(text: string, expectedTop: string | null, file = 'CHANGELOG.md'): ChangelogError[] {
+/**
+ * Duplicate headings, and (when `expectedTop` is given) the top entry equals
+ * VERSION. `base` holds readings of the base branch's CHANGELOG (the base tip,
+ * and the commit the PR's own lines are counted from): a heading it already carries N
+ * times may appear N times here (history the PR inherited and may not
+ * rewrite); only an occurrence beyond that count is a duplicate the PR
+ * introduced. The count is per heading, not per section body: an inherited
+ * copy the PR edits or replaces is caught by the train's released-history
+ * checks (`ownEntryAboveMain`, `changelogDamage`), not here.
+ */
+export function checkChangelog(text: string, expectedTop: string | null, file = 'CHANGELOG.md', base: string[] = []): ChangelogError[] {
   const errors: ChangelogError[] = [];
   const parsed = parseChangelog(text);
-  const seen = new Map<string, number>();
+  const key = (s: ChangelogSection) => (s.unreleased ? 'Unreleased' : s.version!);
+  const inherited = new Map<string, number>();
+  for (const reading of base) {
+    const counts = new Map<string, number>();
+    for (const s of parseChangelog(reading).sections) counts.set(key(s), (counts.get(key(s)) ?? 0) + 1);
+    for (const [k, n] of counts) inherited.set(k, Math.max(inherited.get(k) ?? 0, n));
+  }
+  const seen = new Map<string, number[]>();
   for (const s of parsed.sections) {
-    const key = s.unreleased ? 'Unreleased' : s.version!;
-    if (seen.has(key)) errors.push({ code: 'CHANGELOG_DUPLICATE_HEADING', path: `${file}:${s.start + 1}`, message: `${key} already headed at line ${seen.get(key)! + 1}` });
-    else seen.set(key, s.start);
+    const k = key(s);
+    const starts = seen.get(k) ?? [];
+    const allowed = Math.max(1, inherited.get(k) ?? 0);
+    if (starts.length >= allowed) {
+      const where = allowed > 1 ? `headed ${starts.length + 1} times (the base carries it ${allowed} times; first at line ${starts[0]! + 1})` : `already headed at line ${starts[0]! + 1}`;
+      errors.push({ code: 'CHANGELOG_DUPLICATE_HEADING', path: `${file}:${s.start + 1}`, message: `${k} ${where}` });
+    }
+    seen.set(k, [...starts, s.start]);
   }
   if (expectedTop) {
     const top = parsed.sections[0];
