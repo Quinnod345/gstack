@@ -211,14 +211,16 @@ describe('literals (pure)', () => {
       'test/other.test.ts': ['expect(install.steps.length).toBe(2);', ''].join(nl),
       'test/retry.test.ts': ["expect(require('../lib/retry.js').TIMEOUT_MS).toBe(5000);", ''].join(nl),
       'test/retry-path.test.ts': ["const mod = require('../lib/retry.js');", 'expect(mod.wait()).toBe(5000);', ''].join(nl),
+      'test/retry-bare.test.ts': ["const mod = load('retry.js');", 'expect(mod.wait()).toBe(5000);', ''].join(nl),
+      'test/reretry.test.ts': ["const mod = load('preretry.js');", 'expect(mod.wait()).toBe(5000);', ''].join(nl),
       'test/retry-words.test.ts': ['// the retry budget was 5000 once', 'expect(elapsed).toBeLessThan(5000);', ''].join(nl),
     };
     for (const [rel, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); }
     const all = Object.keys(files);
     // A one-character value: only the file that names the constant counts; the path fragment alone is not enough for "2".
     expect(consumersOf(root, all, { name: 'GSTACK_CAPY_WRAPPER', old: '2', new: '3', file: 'capy/skill/gstack/scripts/install.sh' })).toEqual(['test/wrapper.test.ts:2']);
-    // A longer value: the constant's name or the module as a path fragment; the bare word "retry" in prose does not count.
-    expect(consumersOf(root, all, { name: 'TIMEOUT_MS', old: '5000', new: '9000', file: 'lib/retry.js' })).toEqual(['test/retry.test.ts:1', 'test/retry-path.test.ts:2']);
+    // A longer value: the constant's name, the module's full file name, or its stem as a path fragment; the bare word "retry" in prose and "preretry.js" do not count.
+    expect(consumersOf(root, all, { name: 'TIMEOUT_MS', old: '5000', new: '9000', file: 'lib/retry.js' })).toEqual(['test/retry.test.ts:1', 'test/retry-path.test.ts:2', 'test/retry-bare.test.ts:2']);
     fs.rmSync(root, { recursive: true, force: true });
   });
   test('runner summaries: bun, node --test, vitest, jest, pytest, zero-run', () => {
