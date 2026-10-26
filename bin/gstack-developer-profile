@@ -415,9 +415,10 @@ do_gap() {
 # not its session_id: writers log different ids for one review (the
 # PostToolUse hook logs the host conversation, the agent the preamble run)
 # and an unsubstituted placeholder such as SESSION_ID would merge or split
-# reviews. A ts without a zone is read as UTC, and every row without a
-# parseable string ts shares one undated bucket, so junk timestamps cannot
-# escape the bound. diversity.days_span counts the same days.
+# reviews. Only an ISO 8601 date or date-time counts as dated; a time
+# without a zone is read as UTC. Every other row shares one undated bucket,
+# so junk timestamps cannot escape the bound (Date alone parses strings
+# like "junk 1" as real days). diversity.days_span counts the same days.
 # The body is a single-quoted bash string: its JS must not contain a single
 # quote (use double quotes or backticks), or the assignment ends early and
 # every subcommand fails to parse.
@@ -445,8 +446,8 @@ function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
     count++;
     skills.add(e.skill);
     qids.add(e.question_id);
-    const iso = typeof e.ts === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(e.ts) ? e.ts + "Z" : e.ts;
-    const when = typeof iso === "string" ? new Date(iso) : null;
+    const m = typeof e.ts === "string" ? /^(\d{4}-\d\d-\d\d)(?:[Tt ](\d\d:\d\d(?::\d\d(?:\.\d+)?)?)(Z|z|[+-]\d\d:\d\d)?)?$/.exec(e.ts) : null;
+    const when = m ? new Date(m[2] ? m[1] + "T" + m[2] + (m[3] || "Z").toUpperCase() : m[1]) : null;
     const day = when && !Number.isNaN(when.getTime()) ? when.toISOString().slice(0, 10) : null;
     if (day) days.add(day);
     const def = Object.hasOwn(QUESTIONS, e.question_id) ? QUESTIONS[e.question_id] : undefined;

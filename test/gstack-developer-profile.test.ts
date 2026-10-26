@@ -351,11 +351,15 @@ describe('gstack-developer-profile --derive', () => {
     const projects = path.join(tmpHome, 'projects');
     for (const slug of fs.readdirSync(projects)) {
       const log = path.join(projects, slug, 'question-log.jsonl');
-      if (fs.existsSync(log)) fs.appendFileSync(log, 'null\n');
+      if (!fs.existsSync(log)) continue;
+      fs.appendFileSync(log, 'null\n');
+      fs.appendFileSync(log, JSON.stringify({ skill: 'plan-eng-review', question_id: ['plan-eng-review-arch-finding'], user_choice: 'fix-now' }) + '\n');
+      fs.appendFileSync(log, JSON.stringify({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', user_choice: ['fix-now'] }) + '\n');
     }
     const r = runDev('--derive');
     expect(r.status).toBe(0);
-    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number } };
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number; sample_size: number } };
+    expect(p.inferred.sample_size).toBe(2);
     expect(p.inferred.signal_events).toBe(1);
     expect(p.inferred.contributing_events.architecture_care).toBe(1);
     expect(runDev('--trace', 'architecture_care').stdout).toContain('1 events for architecture_care');
@@ -439,6 +443,7 @@ describe('gstack-developer-profile per-day bound', () => {
     atTs('2026-04-01T20:00:00-08:00');
     deriveWestOfUtc();
     expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
   });
 
   test('a ts without a zone is read as UTC', () => {
@@ -449,11 +454,23 @@ describe('gstack-developer-profile per-day bound', () => {
     expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
   });
 
-  test('rows without a parseable string ts share one undated bucket', () => {
-    for (const ts of ['not-a-date', 'TS', 1775000000]) atTs(ts);
+  test('a ts with a space separator and no zone is read as UTC', () => {
+    atTs('2026-04-01 23:30:00');
+    atTs('2026-04-02T00:30:00Z');
+    deriveWestOfUtc();
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
+  });
+
+  test('rows without an ISO 8601 string ts share one undated bucket', () => {
+    const junk: unknown[] = ['not-a-date', 'TS', 'junk 1', 'foo 12', 1775000000];
+    for (const ts of junk) expect(atTs(ts)).toBe(0);
     runDev('--derive');
+    const p = readProfile() as { inferred: { sample_size: number; contributing_events: Record<string, number>; diversity: { days_span: number } } };
+    expect(p.inferred.sample_size).toBe(junk.length);
+    expect(p.inferred.contributing_events.architecture_care).toBe(junk.length);
     expect(inferred().values.architecture_care).toBe(value(CAP));
-    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(0);
+    expect(p.inferred.diversity.days_span).toBe(0);
   });
 
   test('answers on one day net out before the bound applies', () => {
