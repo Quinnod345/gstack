@@ -2619,8 +2619,22 @@ read the receipt again.
 
 **Meaning.** Two sections share one version heading, usually a stamp that
 re-headed `[Unreleased]` beside an entry that already carried the version.
+In `gstack-restamp` only duplicates the PR introduces count: the headings are
+compared against the base branch's CHANGELOG as read at `origin/<base>` and at
+the commit the branch's own lines are counted from (its fork point, or the
+predecessor's head in a gate-ahead stamp); the larger count per heading wins,
+so a version the base already heads twice (released history the PR inherited
+and must keep) passes as long as the PR adds no further copy of it. When a
+reading is unavailable (the PR adds the CHANGELOG itself, or the file moved),
+the stage detail and the refusal name it: with no reading left every duplicate
+counts, otherwise inherited headings are counted at the readable commit only. Two paths keep the strict rule: the section being re-headed itself
+(`[Unreleased]`, or the branch's earlier stamp) may exist only once, and
+`gstack-version-bump write --changelog` (the claim-at-open bump) compares the
+file with itself.
 
-**Fix.** Merge them into one entry under the new version.
+**Fix.** Merge the duplicate sections the PR introduced into one entry under
+the new version. A duplicate that is on the base branch itself is not this
+PR's to fix in a restamp; leave it and the stamp proceeds.
 
 <a id="changelog-top-mismatch"></a>
 ### `CHANGELOG_TOP_MISMATCH`
