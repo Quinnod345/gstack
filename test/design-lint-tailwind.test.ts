@@ -69,7 +69,7 @@ describe('design-lint tailwind: the reader', () => {
     const { contexts } = lintStatic([dir], { cwd: dir, warn: (l: string) => { throw new Error(l); } });
     const ctx = contexts.find((c) => c.docs.length === 3)!;
     const tw = twGroup(ctx);
-    const by = (tag: string) => tw.items.filter((i) => i.tag === tag).map((i) => i.toks.join(' '));
+    const by = (tag: string) => tw.items.filter((i) => i.tag === tag).map((i) => i.info.classes.join(' '));
     expect(by('cva')).toEqual(['rounded-full text-xs uppercase tracking-widest']);
     expect(by('clsx')).toEqual(['flex transition-all']);
     expect(by('a')).toEqual(['px-3 hover:bg-accent focus-visible:outline-2']);

@@ -132,7 +132,7 @@ describe('design-lint seventh cycle: rule judgements', () => {
   });
 
   test('an uppercase control under an uppercase display may carry 0.04em in a stylesheet as in a class string, no more', () => {
-    const f = run(page('h1 { text-transform: uppercase; } .btn{text-transform:uppercase;letter-spacing:0.045em;font-size:14px} .ok{text-transform:uppercase;letter-spacing:0.04em;font-size:14px}', '<main><h1>HELLO THERE</h1><a class="btn" href="#">Go now</a><a class="ok" href="#">Stay</a></main>'));
+    const f = run(page('h1 { text-transform: uppercase; } .btn{text-transform:uppercase;letter-spacing:0.045em;font-size:14px} .cta{text-transform:uppercase;letter-spacing:0.04em;font-size:14px}', '<main><h1>HELLO THERE</h1><a class="btn" href="#">Go now</a><a class="cta" href="#">Stay</a></main>'));
     expect(only(f, 'wide-tracking').map((x) => x.evidence)).toEqual(['.btn: an uppercase control tracked 0.045em']);
   });
 

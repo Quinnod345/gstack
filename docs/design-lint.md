@@ -32,14 +32,17 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   A page or stylesheet under a lint root that the lint skipped (over the cap,
   unreadable, unparseable) is also one `internal-error` finding at ask, so a
   page the lint could not read is not a pass; a linked stylesheet over the cap
-  is only warned about, because the page that links it is still read. A
+  is only warned about, because the page that links it is still read, and a
+  linked stylesheet that does not exist is warned about and otherwise ignored
+  (its tokens are simply absent). A
   relative stylesheet href may not climb out of the project (the nearest
   directory holding a `package.json` or `.git`), by its path and by its real
   path, so a symlink inside the project that points outside it is not read
   either; outside any project it is bounded only by the disk, and only `.css`
   files are read.
 - Markup inside an HTML comment is dead for every rule, a commented-out
-  `<style>` or `<script>` included. A tree nests at most 512 elements deep
+  `<style>` or `<script>` included. A tag start with no `>` (a stray `<img `)
+  is text, so a page whose tail is ten thousand of them costs its length. A tree nests at most 512 elements deep
   (the browser's own cap); a start tag deeper than that is read as empty. An
   open heading is closed by the next heading start tag, an open `<p>` by the
   next block start, and a repeated `<li>`, `<button>`, `<a>`, `<label>`,
@@ -133,9 +136,11 @@ the page's own markup. A claim written in the page answers for that page,
 including a finding in a stylesheet it links; a second page linking the same
 sheet without answering still reports it, so the sheet's finding may print
 once waived and once at ask, each from its own page. In a directory of
-components (`--scope component`) each file's claim answers for that file
-alone and is weighed against that file's own text; a sibling component is not
-covered. Two claims on one line are both read. A blocking copy
+components (under either scope) each file's claim answers for that file alone,
+weighed against that file's own text and its own suspected rules, so a sibling
+component is never covered and a sibling that measures a blocking rule does
+not turn this file's suspected finding into the Floor; a stylesheet beside the
+components answers for itself as on a page. Two claims on one line are both read. A blocking copy
 tell (`generic-hero-copy`) is the Floor inside the hero, the section or header
 that holds the h1; the same line, or a "Meet <Name>" or three-word triad
 heading, in body copy further down is suspected and reported at ask, so a
@@ -149,7 +154,7 @@ waiver can answer it.
 | `gradient-text` | ask | 2b | gradient text | solid ink; carry emphasis with weight or a display face |
 | `pure-black-white` | blocks | 7a | #000 or #fff as a colour outside the token block | tint toward the anchor hue: chroma 0.005 or more |
 | `absolute-surface-token` | ask | 7b | a surface token that resolves to pure black or white | tint the paper |
-| `zero-chroma-neutrals` | ask | 22 | zero-chroma neutrals on a page with an anchor hue | give the neutrals chroma 0.005 or more |
+| `zero-chroma-neutrals` | ask | 22 | zero-chroma oklch() neutrals | give the neutrals chroma 0.005 or more |
 | `accent-footprint` | ask | 23 | accent colour past about 5% of a viewport | retreat the accent to actions and one signal |
 | `glow-wash` | ask | 29 | glow and wash: blurred orbs, a radial halo or a zero-offset coloured glow | a solid or grained surface; elevation by lightness, shadows with offset and blur |
 | `cream-palette` | ask | 65 | the cream paper, serif display and terracotta accent look | move one axis: the accent first, the paper second, the display last |
@@ -191,7 +196,7 @@ waiver can answer it.
 | `empty-picture` | ask | 81 | a slot or gradient block of 300x200px or more showing nothing but its wash (render) | the user's image, a credited photograph, or the product at full fidelity |
 | `counting-marks` | ask | 82 | 24 or more identical marks standing for a quantity (render) | set the number in type |
 | `photo-wall` | ask | 83 | photographs cover more than a third of the page below the hero (render) | keep the strongest pictures, set big; carry the rest in type, figures, the product, a table |
-| `email-band-close` | ask | 85 | the page ends on an email sign-up form on a page whose job is not subscribe, join, attend, listen or visit | end on what the visitor came to do, or on the last strong section |
+| `email-band-close` | ask | 85 | the page ends on an email sign-up form (one or two fields, one of them the email; never a form with a password or a sign-in button) on a page whose job is not subscribe, join, attend, listen or visit | end on what the visitor came to do, or on the last strong section |
 | `aphoristic-cadence` | blocks | 19 | the rebuttal cadence three or more times ("Not a feature. A platform.") | say what the product does, in its own nouns |
 | `generic-hero-copy` | blocks | 19 | a filler opener ("Built for the modern team", "In today's landscape"), "quietly trusted by", or the catalog's "Welcome to" and "all-in-one solution" | say what the product does, in its own nouns |
 | `generic-cta-copy` | ask | 19/42 | a stock second action beside the primary (Learn more, Get started, Book a demo) | one action, or a second that names where it goes |
@@ -292,6 +297,17 @@ literal on a page with no tokens bypasses nothing). A project that names its
 tokens `--bg` or `--brand` gets none of those checks and no signal that they
 did not run; Phase 2 reads the roles from DESIGN.md.
 
+The token block is `:root`, `html`, a `[data-theme|mode|scheme]` scope, `@theme`,
+`@font-face` and anything in a `tokens.css`. Its values are read in one mode:
+the base block's last declaration wins, and a mode override (a token rule under
+`@media (prefers-color-scheme: …)` or a `[data-theme=…]` scope) only supplies
+tokens the base block never declares, so a page that carries both a light and
+a dark palette is measured in the mode it declares first, never a mix of the
+two. A custom property declared in any other scope (`.dark { --color-paper: … }`,
+a component-local `--accent`) is a token definition, not a literal, so
+`literal-outside-tokens` does not report it; the dark values of a class-scoped
+theme are not read either.
+
 ## What the lint does not cover
 
 A clean `LINT_SUMMARY` is not the whole design checklist. These checklist and
@@ -332,8 +348,10 @@ deduplicated at the end, so forty pages on one bundle cost forty passes over
 it. `overused-font` and `banned-font` match a catalog stem to the whole
 family name or its first words (`Cormorant Garamond`, `DM Serif Display`,
 `Comic Sans MS`), never to a longer word (`Interstate` is not `Inter`).
-Three checklist items are read more narrowly here than the LLM pass reads
-them: `missing-focus-visible` reports a removed outline only when no
+Four checklist items are read more narrowly here than the LLM pass reads
+them: `zero-chroma-neutrals` reports every opaque `oklch(L 0 H)` literal
+whether or not the page has an anchor hue (hallmark's stamp carried the hue;
+a deliberately monochrome page waives it on the record); `missing-focus-visible` reports a removed outline only when no
 `:focus` rule anywhere on the page draws a ring (the per-element check is the
 render tier's focus walk); `off-scale-spacing` holds every px length to the
 4px scale whether or not DESIGN.md declares one (`raw-spacing` is the rule
