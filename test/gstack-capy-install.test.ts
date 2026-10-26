@@ -329,7 +329,8 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
   };
   const verdicts = (f: ReturnType<typeof fixture>) => {
     const dir = path.join(f.home, '.gstack-state/install-verdicts');
-    return fs.existsSync(dir) ? fs.readdirSync(dir).flatMap(n => fs.statSync(path.join(dir, n)).isDirectory() ? fs.readdirSync(path.join(dir, n)).map(m => path.join(dir, n, m)) : [path.join(dir, n)]) : [];
+    // Verdicts only: the launch file (<verdict>.env, GSTA-104) and the launch directory sit beside them.
+    return fs.existsSync(dir) ? fs.readdirSync(dir).flatMap(n => fs.statSync(path.join(dir, n)).isDirectory() ? fs.readdirSync(path.join(dir, n)).map(m => path.join(dir, n, m)) : [path.join(dir, n)]).filter(p => p.endsWith('.json')) : [];
   };
 
   test.skipIf(process.platform !== 'linux')('after installing Bun the launch line carries its PATH; a second run reuses it (one download) and skips setup on the same HEAD', () => {
@@ -420,6 +421,8 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     const files = verdicts(f);
     expect(files).toHaveLength(1);
     expect(r.stdout).toContain(`GSTACK_INSTALL_VERDICT=${files[0]}`);
+    expect(r.stdout).toContain(`GSTACK_LAUNCH_FILE: ${files[0].replace(/\.json$/, '.env')}`);
+    expect(fs.readFileSync(files[0].replace(/\.json$/, '.env'), 'utf8')).toContain(`export GSTACK_INSTALL_VERDICT='${files[0]}'`);
     const v = JSON.parse(fs.readFileSync(files[0], 'utf8'));
     expect(v).toMatchObject({ schema_version: 2, checkout: f.root, head: sh('git rev-parse HEAD', f.root).stdout.trim(), for: 'autoplan', ok: true, trailer: 'gstack: ok 1.2.3 for=autoplan',
       project: '', bun_path: path.join(f.stub, 'bun'), bun_version: '1.4.2', bun_rule: 'PATH' });
