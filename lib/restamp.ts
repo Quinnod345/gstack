@@ -380,9 +380,19 @@ function runStages(o: RestampOptions, plan: Plan, staging: string, since: string
     const r = reheadChangelog(fs.readFileSync(clPath, 'utf8'), { from, to: plan.newVersion, date, file: clRel! });
     if (r.error) { cl.status = 'failed'; cl.detail = r.error.message; throw new Refusal(r.error.code, `${clRel}: ${r.error.message}; nothing written to the branch`); }
     if (r.moved) fs.writeFileSync(clPath, r.text);
-    const check = checkChangelog(fs.readFileSync(clPath, 'utf8'), plan.newVersion, clRel!);
-    if (check.length) { cl.status = 'failed'; cl.detail = check[0]!.message; throw new Refusal(check[0]!.code, `${check[0]!.path}: ${check[0]!.message}; nothing written to the branch`); }
-    cl.status = 'done'; cl.detail = r.moved ? `${r.from} -> ${r.to}` : `already headed ${plan.newVersion}`;
+    // Inherited duplicates are allowed at the larger count of two base readings: the base tip and
+    // `since`, the commit the branch's own lines are counted from (its fork point, or the predecessor's
+    // head in a gate-ahead stamp), so neither a duplicate main collapsed after the fork nor one it
+    // gained since refuses the PR. A reading the base cannot show (the PR adds the file) is named.
+    const readings = [...new Set([plan.baseSha, since])].map(sha => ({ sha, cl: git(o.repoRoot, ['show', `${sha}:${clRel}`]) }));
+    const readable = readings.filter(x => x.cl.ok);
+    const unreadable = readings.filter(x => !x.cl.ok).map(x => `${x.sha.slice(0, 12)}:${clRel}`);
+    const baseNote = unreadable.length === 0 ? '' : readable.length === 0
+      ? `; base ${clRel} unreadable at ${unreadable.join(', ')}, so every duplicate heading counts`
+      : `; base ${clRel} unreadable at ${unreadable.join(', ')}, inherited headings counted at ${readable.map(x => x.sha.slice(0, 12)).join(', ')} only`;
+    const check = checkChangelog(fs.readFileSync(clPath, 'utf8'), plan.newVersion, clRel!, readable.map(x => x.cl.out + '\n'));
+    if (check.length) { cl.status = 'failed'; cl.detail = check[0]!.message + baseNote; throw new Refusal(check[0]!.code, `${check[0]!.path}: ${check[0]!.message}${baseNote}; nothing written to the branch`); }
+    cl.status = 'done'; cl.detail = (r.moved ? `${r.from} -> ${r.to}` : `already headed ${plan.newVersion}`) + baseNote;
   } else { cl.status = 'skipped'; cl.detail = clRel ? `${clRel} absent` : 'changelog: null'; }
   injected('changelog');
 

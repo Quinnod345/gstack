@@ -435,6 +435,28 @@ describe('evals-main-backstop.yml', () => {
     expect(policy.run).not.toContain('bun');
     const gate = job.steps.find(st => st.name === 'Gate main unless a green train covers its tree')!;
     expect(gate.if).toBe("steps.policy.outputs.train == 'true'");
+    expect(gate.id).toBe('gate');
     expect(gate.run).toContain('scripts/train-backstop.ts run --repo "$GITHUB_REPOSITORY" --branch "$GITHUB_REF_NAME" --sha "$GITHUB_SHA"');
+    expect(gate.run).toContain('--outputs "$GITHUB_OUTPUT"');
+    expect(job.outputs).toEqual({ action: '${{ steps.gate.outputs.action }}' });
+  });
+
+  // The weekly release (scripts/release-cut.ts) reads the per-commit verdict as
+  // the main-backstop check run: a superseded push exits 0 but is neutral there.
+  test('the main-backstop check run is published from its own code-free job: success for covered|gated, neutral for inert|superseded|deferred, failure otherwise', () => {
+    const job = backstopWf.jobs['backstop-check']!;
+    expect(job.needs).toBe('backstop');
+    expect(job.if).toBe("${{ !cancelled() && needs.backstop.outputs.action != '' }}");
+    expect(job.permissions).toEqual({ checks: 'write' });
+    expect(job.steps.map(st => st.uses).filter(Boolean)).toEqual([]);
+    expect(job.steps).toHaveLength(1);
+    const publish = job.steps[0]!;
+    expect(publish.env).toEqual({ GH_TOKEN: '${{ github.token }}', ACTION: '${{ needs.backstop.outputs.action }}' });
+    expect(publish.run).toContain('covered|gated) conclusion=success ;;');
+    expect(publish.run).toContain('inert|superseded|deferred) conclusion=neutral ;;');
+    expect(publish.run).toContain('frozen|failed) conclusion=failure ;;');
+    expect(publish.run).toContain('*) echo "::error::unknown backstop action');
+    expect(publish.run).toContain('-f name=main-backstop -f head_sha="$GITHUB_SHA" -f status=completed -f conclusion="$conclusion"');
+    expect(publish.run).not.toContain('bun');
   });
 });

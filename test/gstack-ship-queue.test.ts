@@ -20,6 +20,7 @@ import { applyStampPatch } from '../lib/ship-queue-gate';
 import type { TreeReceipt } from '../lib/tree-receipt';
 import { BASE_POLICY, BIN, cleanup, makeFixtureRepo, makePr, mergeMain, mergeToMain, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 import { coordinatorClone, ghQueueShim } from './helpers/ship-queue-fixture';
+import { shippedBody } from './helpers/ship-queue-train-fixture';
 
 const repos: FixtureRepo[] = [];
 const fixture = (policy?: Record<string, unknown>, prefix?: string) => { const r = makeFixtureRepo({ ...(policy ? { policy } : {}), ...(prefix ? { prefix } : {}) }); repos.push(r); return r; };
@@ -258,7 +259,7 @@ describe('ready', () => {
     const repo = fixture();
     const head = makePr(repo, 'pr-a');
     const pregate = pregateFor(repo, head);
-    const shim = (prHead: string, checks: unknown) => ghQueueShim(repo, { prs: { '1': { headRefOid: prHead, url: 'https://github.com/o/r/pull/1', body: 'no receipt' } }, checks: { [head]: checks } });
+    const shim = (prHead: string, checks: unknown, body = shippedBody('1', head)) => ghQueueShim(repo, { prs: { '1': { headRefOid: prHead, url: 'https://github.com/o/r/pull/1', body } }, checks: { [head]: checks } });
     const ok = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], shim(head, green));
     expect(ok.status).toBe(EXIT.ok);
     const lines = ok.out.split('\n');
@@ -266,8 +267,20 @@ describe('ready', () => {
     expect(lines.slice(1, 9)).toEqual([
       'pr: https://github.com/o/r/pull/1', `head: ${head}`, 'version: unstamped', `base: origin/main@${repo.git('rev-parse', 'origin/main')}`,
       `ci: green at ${head.slice(0, 12)} (passed=1 failed=0 pending=0 skipped=1)`, expect.stringMatching(/^PREGATE: pass tree=[0-9a-f]{12} head=[0-9a-f]{12} checks=1$/),
-      'gate: command=none full_e2e=no gate-ahead=none', 'SHIP_RECEIPT: none in the PR body',
+      'gate: command=none full_e2e=no gate-ahead=none', `SHIP_RECEIPT: pr=1 head=${head.slice(0, 12)} version=- base=main`,
     ]);
+    const unshipped = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], shim(head, green, 'no receipt'));
+    expect(unshipped.status).toBe(EXIT.refused);
+    expect(unshipped.out).toContain('SHIP_RECEIPT: none in the PR body');
+    expect(unshipped.err).toMatch(/PR #1's body carries no ship receipt; fix: run \/ship on the branch .*\(QUEUE_RECEIPT_MISSING\)/);
+    const broken = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], shim(head, green, '```gstack-ship-receipt\n{"schema_version":1}\n```\n'));
+    expect(broken.status).toBe(EXIT.refused);
+    expect(broken.out).toContain('SHIP_RECEIPT: invalid in the PR body');
+    expect(broken.err).toMatch(/ship receipt is invalid \(.*head.*\).*\(QUEUE_RECEIPT_MISSING\)/);
+    const stale = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], shim(head, green, shippedBody('1', 'e'.repeat(40))));
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.out).toContain(`SHIP_RECEIPT: pr=1 head=eeeeeeeeeeee version=- base=main`);
+    expect(stale.err).toMatch(new RegExp(`PR #1's ship receipt is for eeeeeeeeeeee, not the head ${head.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`));
     const unpushed = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], shim('f'.repeat(40), green));
     expect(unpushed.status).toBe(EXIT.refused);
     expect(unpushed.err).toMatch(/is not PR #1's pushed head ffffffffffff.*\(QUEUE_NOT_READY\)/);
@@ -276,11 +289,69 @@ describe('ready', () => {
     fs.appendFileSync(path.join(repo.work, 'pr-a.txt'), 'more\n');
     repo.git('commit', '-qam', 'more');
     const moved = repo.git('rev-parse', 'HEAD');
-    const stale = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: '' } }, checks: { [moved]: green } }));
-    expect(stale.status).toBe(EXIT.refused);
-    expect(stale.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
+    const stalePregate = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } }));
+    expect(stalePregate.status).toBe(EXIT.refused);
+    expect(stalePregate.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
     fs.appendFileSync(path.join(repo.work, 'pr-a.txt'), 'dirty\n');
     expect(queue(repo, ['ready', '--pr', '1'], shim(moved, green)).err).toMatch(/uncommitted tracked changes: pr-a\.txt.*\(QUEUE_NOT_READY\)/);
+  }, 180_000);
+
+  // Value: protects=the re-READY after a slot's stamp push accepts the receipt /ship wrote for the pinned head, and only then;
+  // fails_when=ready binds the receipt to HEAD alone (every stamped READY turns QUEUE_RECEIPT_STALE) or accepts any ancestor's receipt;
+  // why_new=the READY test above binds receipts to the exact head only; seam=none; no_claim=real gh and CI (shims; unit only)
+  test('ready at the stamp commit accepts the receipt written for the pinned head; a real edit on top of the pin, a bare merge of main, or an edit on the pin side under the slot-2 stamp is stale', () => {
+    const repo = fixture();
+    const pin = makePr(repo, 'pr-s');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.4.0\n');
+    repo.git('commit', '-qam', 'v1.2.4.0 stamp');
+    const stamped = repo.git('rev-parse', 'HEAD');
+    const shim = (prHead: string, body: string) => ghQueueShim(repo, { prs: { '1': { headRefOid: prHead, url: 'https://github.com/o/r/pull/1', body } }, checks: { [prHead]: green } });
+    const ok = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, stamped)], shim(stamped, shippedBody('1', pin)));
+    expect([ok.status, ok.err]).toEqual([EXIT.ok, '']);
+    expect(ok.out.split('\n')[0]).toBe(`READY #1 ${stamped} STAMP_VERSION=1.2.4.0`);
+    expect(ok.out).toContain(`SHIP_RECEIPT: pr=1 head=${pin.slice(0, 12)} version=- base=main`);
+    repo.git('checkout', '-q', 'origin/main', '-B', 'main-moves');
+    fs.writeFileSync(path.join(repo.work, 'other.txt'), 'another PR landed\n');
+    repo.git('add', 'other.txt');
+    repo.git('commit', '-qm', 'other PR');
+    repo.git('push', '-q', 'origin', 'HEAD:main');
+    repo.git('fetch', '-q', 'origin');
+    repo.git('checkout', '-q', 'pr-s');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+    repo.git('commit', '-qam', 'v1.2.5.0 stamp');
+    const slot2 = repo.git('rev-parse', 'HEAD');
+    const merged = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, slot2)], shim(slot2, shippedBody('1', pin)));
+    expect([merged.status, merged.err]).toEqual([EXIT.ok, '']);
+    expect(merged.out).toContain(`SHIP_RECEIPT: pr=1 head=${pin.slice(0, 12)} version=- base=main`);
+    const staleRe = (h: string) => new RegExp(`PR #1's ship receipt is for ${pin.slice(0, 12)}, not the head ${h.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`);
+    const bareMerge = repo.git('rev-parse', 'HEAD^1');
+    repo.git('reset', '-q', '--hard', bareMerge);
+    const bare = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, bareMerge)], shim(bareMerge, shippedBody('1', pin)));
+    expect(bare.status).toBe(EXIT.refused);
+    expect(bare.err).toMatch(staleRe(bareMerge));
+    repo.git('commit', '-q', '--allow-empty', '-m', 'empty commit is not a stamp');
+    const emptyOnMerge = repo.git('rev-parse', 'HEAD');
+    const empty = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, emptyOnMerge)], shim(emptyOnMerge, shippedBody('1', pin)));
+    expect(empty.status).toBe(EXIT.refused);
+    expect(empty.err).toMatch(staleRe(emptyOnMerge));
+    repo.git('reset', '-q', '--hard', pin);
+    fs.appendFileSync(path.join(repo.work, 'pr-s.txt'), 'real change before the merge\n');
+    repo.git('commit', '-qam', 'edit on the pin side');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+    repo.git('commit', '-qam', 'v1.2.5.0 stamp');
+    const editedPin = repo.git('rev-parse', 'HEAD');
+    const pinEdit = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, editedPin)], shim(editedPin, shippedBody('1', pin)));
+    expect(pinEdit.status).toBe(EXIT.refused);
+    expect(pinEdit.err).toMatch(staleRe(editedPin));
+    repo.git('reset', '-q', '--hard', stamped);
+    fs.appendFileSync(path.join(repo.work, 'pr-s.txt'), 'real change after /ship\n');
+    repo.git('commit', '-qam', 'more');
+    const edited = repo.git('rev-parse', 'HEAD');
+    const stale = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, edited)], shim(edited, shippedBody('1', pin)));
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toMatch(new RegExp(`PR #1's ship receipt is for ${pin.slice(0, 12)}, not the head ${edited.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`));
   }, 180_000);
 });
 
@@ -330,7 +401,7 @@ describe('full_e2e gate evidence (review #3235 P1-1)', () => {
     const tree = runBin(repo, 'gstack-wtree', []).out.trim();
     const pregate = path.join(repo.root, 'pregate.json');
     fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
-    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: '' } }, checks: { [head]: { check_runs: [{ status: 'completed', conclusion: 'success' }] } } });
+    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: shippedBody('1', head) } }, checks: { [head]: { check_runs: [{ status: 'completed', conclusion: 'success' }] } } });
     const missing = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], gh);
     expect(missing.status).toBe(EXIT.refused);
     expect(missing.out).toContain(`gate-evidence: missing for ${head.slice(0, 12)}`);
@@ -352,7 +423,7 @@ describe('ready reads all of CI at the head (review #3235 P1-5)', () => {
     const tree = runBin(repo, 'gstack-wtree', []).out.trim();
     const pregate = path.join(repo.root, 'pregate.json');
     fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
-    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: '' } }, checks: { [head]: checks }, ...(statuses ? { statuses: { [head]: statuses } } : {}) });
+    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: shippedBody('1', head) } }, checks: { [head]: checks }, ...(statuses ? { statuses: { [head]: statuses } } : {}) });
     return { r: queue(repo, ['ready', '--pr', '1', '--pregate', pregate], gh), at: head.slice(0, 12) };
   }
 
@@ -370,11 +441,83 @@ describe('ready reads all of CI at the head (review #3235 P1-5)', () => {
     expect(line(pending.r.out, 'ci: ')).toBe(`ci: pending at ${pending.at} (passed=1 failed=0 pending=1 skipped=0)`);
   }, 120_000);
 
+  test('a superseded run of a check is judged by its latest run, as GitHub\'s rollup counts (gbrain: a cancelled contributor-gate beside later passes)', () => {
+    const older = { id: 1, name: 'contributor-gate', status: 'completed', conclusion: 'cancelled', completed_at: '2026-10-26T01:00:00Z' };
+    const newer = { id: 2, name: 'contributor-gate', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:10:00Z' };
+    const other = { id: 3, name: 'free-tests', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:05:00Z' };
+    const ok = readyWith({ check_runs: [older, newer, other] });
+    expect(ok.r.status).toBe(EXIT.ok);
+    expect(line(ok.r.out, 'ci: ')).toBe(`ci: green at ${ok.at} (passed=2 failed=0 pending=0 skipped=0)`);
+    const reversed = readyWith({ check_runs: [newer, older, other] });
+    expect(line(reversed.r.out, 'ci: ')).toBe(`ci: green at ${reversed.at} (passed=2 failed=0 pending=0 skipped=0)`);
+    const latestFailed = readyWith({ check_runs: [{ ...older, conclusion: 'success' }, { ...newer, conclusion: 'failure' }, other] });
+    expect(latestFailed.r.status).toBe(EXIT.refused);
+    expect(line(latestFailed.r.out, 'ci: ')).toBe(`ci: red at ${latestFailed.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const rerunning = readyWith({ check_runs: [{ ...older, conclusion: 'failure' }, { id: 4, name: 'contributor-gate', status: 'in_progress' }, other] });
+    expect(line(rerunning.r.out, 'ci: ')).toBe(`ci: pending at ${rerunning.at} (passed=1 failed=0 pending=1 skipped=0)`);
+    const sameTime = readyWith({ check_runs: [{ ...older, id: 9, completed_at: newer.completed_at }, newer, other] });
+    expect(line(sameTime.r.out, 'ci: ')).toBe(`ci: red at ${sameTime.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const unnamed = readyWith({ check_runs: [{ status: 'completed', conclusion: 'cancelled' }, { status: 'completed', conclusion: 'success' }] });
+    expect(line(unnamed.r.out, 'ci: ')).toBe(`ci: red at ${unnamed.at} (passed=1 failed=1 pending=0 skipped=0)`);
+    const twoApps = readyWith({ check_runs: [{ ...older, conclusion: 'failure', app: { id: 1 } }, { ...newer, app: { id: 2 } }, other] });
+    expect(line(twoApps.r.out, 'ci: ')).toBe(`ci: red at ${twoApps.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const undated = readyWith({ check_runs: [{ id: 5, name: 'contributor-gate', status: 'completed', conclusion: 'failure' }, newer, other] });
+    expect(line(undated.r.out, 'ci: ')).toBe(`ci: red at ${undated.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const queued = readyWith({ check_runs: [{ ...older, conclusion: 'failure' }, { id: 6, name: 'contributor-gate', status: 'queued' }, other] });
+    expect(line(queued.r.out, 'ci: ')).toBe(`ci: pending at ${queued.at} (passed=1 failed=0 pending=1 skipped=0)`);
+    const nullConclusion = readyWith({ check_runs: [{ ...newer, conclusion: null }, other] });
+    expect(line(nullConclusion.r.out, 'ci: ')).toBe(`ci: red at ${nullConclusion.at} (passed=1 failed=1 pending=0 skipped=0)`);
+  }, 240_000);
+
+  test('a commit-status context is never collapsed with a check run of the same name', () => {
+    const r = readyWith({ check_runs: [{ id: 1, name: 'deploy', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' }] }, { state: 'failure', statuses: [{ context: 'deploy', state: 'failure' }] });
+    expect(line(r.r.out, 'ci: ')).toBe(`ci: red at ${r.at} (passed=1 failed=1 pending=0 skipped=0)`);
+  }, 120_000);
+
   test('incomplete pagination is unknown, never green', () => {
     const { r, at } = readyWith({ total_count: 101, check_runs: hundred });
     expect(r.status).toBe(EXIT.refused);
     expect(line(r.out, 'ci: ')).toBe(`ci: unknown at ${at} (check_runs: read 100 of total_count=101)`);
   }, 120_000);
+});
+
+describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, rule 14)', () => {
+  const pass = { id: 1, name: 'Free Tests', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' };
+  function readyWith(mergeable: string, checks: unknown, pr: Record<string, unknown> = {}) {
+    const repo = fixture();
+    const head = makePr(repo, 'pr-a');
+    const tree = runBin(repo, 'gstack-wtree', []).out.trim();
+    const pregate = path.join(repo.root, 'pregate.json');
+    fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
+    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: shippedBody('1', head), mergeable, headRefName: 'pr-a', ...pr } }, checks: { [head]: checks } });
+    return { r: queue(repo, ['ready', '--pr', '1', '--pregate', pregate], gh), at: head.slice(0, 12) };
+  }
+
+  test('no CI at the head and a conflict: the refusal names the workflow_dispatch procedure', () => {
+    const { r, at } = readyWith('CONFLICTING', { check_runs: [] });
+    expect(r.status).toBe(EXIT.refused);
+    expect(line(r.out, 'ci: ')).toBe(`ci: none at ${at} (passed=0 failed=0 pending=0 skipped=0)`);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${at}); dispatch the free workflows on the branch (gh workflow run free-tests.yml --ref pr-a && gh workflow run windows-free-tests.yml --ref pr-a), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready (advisory)`);
+    for (const name of ['x;$(curl evil)', '--field']) {
+      const odd = readyWith('CONFLICTING', { check_runs: [] }, { headRefName: name });
+      expect(line(odd.r.out, 'ci-hint: ')).toContain('gh workflow run free-tests.yml --ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>');
+    }
+    const fork = readyWith('CONFLICTING', { check_runs: [] }, { isCrossRepository: true });
+    expect(line(fork.r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${fork.at}) and its head is on a fork, so the free workflows cannot be dispatched here; the coordinator decides (advisory)`);
+  }, 240_000);
+
+  test('dispatched runs green at the head and a conflict: READY, with the hint saying the dispatched runs count', () => {
+    const { r, at } = readyWith('CONFLICTING', { check_runs: [pass] });
+    expect(r.status).toBe(EXIT.ok);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were not pull_request runs (dispatched on the branch, or push-triggered), and they count (advisory)`);
+  }, 120_000);
+
+  test('no hint without a conflict, and none while the dispatched runs are red or pending', () => {
+    expect(readyWith('MERGEABLE', { check_runs: [] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('MERGEABLE', { check_runs: [pass] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('CONFLICTING', { check_runs: [{ ...pass, conclusion: 'failure' }] }).r.out).not.toContain('ci-hint:');
+    expect(readyWith('CONFLICTING', { check_runs: [{ ...pass, status: 'in_progress' }] }).r.out).not.toContain('ci-hint:');
+  }, 240_000);
 });
 
 describe('printed gate-ahead command (review #3235 P2-1)', () => {

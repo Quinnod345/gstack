@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { SIGNAL_MAP, normalizeToDimensionValue } from '../scripts/psychographic-signals';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN_DEV = path.join(ROOT, 'bin', 'gstack-developer-profile');
@@ -47,7 +48,9 @@ function runDev(...args: string[]): { stdout: string; stderr: string; status: nu
 
 function logQuestion(payload: Record<string, unknown>): number {
   const res = spawnSync(BIN_LOG, [JSON.stringify(payload)], {
-    env: { ...process.env, GSTACK_HOME: tmpHome },
+    // gstack-question-log fires `--derive` in the background after every
+    // append, which races the explicit runDev('--derive') a test then makes.
+    env: { ...process.env, GSTACK_HOME: tmpHome, GSTACK_QUESTION_LOG_NO_DERIVE: '1' },
     encoding: 'utf-8',
     cwd: ROOT,
     timeout: 30_000,
@@ -307,6 +310,197 @@ describe('gstack-developer-profile --derive', () => {
     // Sample size counts the log entry, but no signal delta applied
     expect(p.inferred.sample_size).toBe(1);
     expect(p.inferred.values.scope_appetite).toBeCloseTo(0.5, 2);
+  });
+
+  test('contributing_events counts unique rows per dimension (#2625)', () => {
+    // plan-eng-review-arch-finding → fix-now writes architecture_care AND
+    // risk_tolerance from one row; an ad-hoc row writes nothing.
+    for (let i = 0; i < 2; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: `s${i}` });
+    }
+    logQuestion({ skill: 'plan-eng-review', question_id: 'adhoc-unregistered-question', question_summary: 'x', user_choice: 'fix-now', session_id: 's9' });
+    runDev('--derive');
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number } };
+    expect(p.inferred.contributing_events).toEqual({
+      scope_appetite: 0,
+      risk_tolerance: 2,
+      detail_preference: 0,
+      autonomy: 0,
+      architecture_care: 2,
+    });
+    expect(p.inferred.signal_events).toBe(2);
+  });
+
+  test('contributing_events is all zero when no answer matches a signal', () => {
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'not-a-mapped-option', session_id: 's1' });
+    runDev('--derive');
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; sample_size: number } };
+    expect(p.inferred.sample_size).toBe(1);
+    expect(p.inferred.contributing_events).toEqual({
+      scope_appetite: 0,
+      risk_tolerance: 0,
+      detail_preference: 0,
+      autonomy: 0,
+      architecture_care: 0,
+    });
+  });
+
+  test('a choice named after an Object.prototype member or a non-object line is ignored, not fatal', () => {
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'constructor', session_id: 's1' });
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: 's2' });
+    const projects = path.join(tmpHome, 'projects');
+    for (const slug of fs.readdirSync(projects)) {
+      const log = path.join(projects, slug, 'question-log.jsonl');
+      if (!fs.existsSync(log)) continue;
+      fs.appendFileSync(log, 'null\n');
+      fs.appendFileSync(log, JSON.stringify({ skill: 'plan-eng-review', question_id: ['plan-eng-review-arch-finding'], user_choice: 'fix-now' }) + '\n');
+      fs.appendFileSync(log, JSON.stringify({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', user_choice: ['fix-now'] }) + '\n');
+    }
+    const r = runDev('--derive');
+    expect(r.status).toBe(0);
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number; sample_size: number } };
+    expect(p.inferred.sample_size).toBe(2);
+    expect(p.inferred.signal_events).toBe(1);
+    expect(p.inferred.contributing_events.architecture_care).toBe(1);
+    expect(runDev('--trace', 'architecture_care').stdout).toContain('1 events for architecture_care');
+  });
+});
+
+// -----------------------------------------------------------------------
+// Per-day bound (#2623): one UTC day moves a dimension at most as far as the
+// largest single delta in SIGNAL_MAP, whatever session_id the writers log.
+// -----------------------------------------------------------------------
+
+describe('gstack-developer-profile per-day bound', () => {
+  const CAP = Math.max(...Object.values(SIGNAL_MAP).flatMap((byChoice) => Object.values(byChoice).flat().map((d) => Math.abs(d.delta))));
+  const arch = (day: number, user_choice = 'fix-now', extra: Record<string, unknown> = {}) =>
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice, ts: `2026-04-${String(day).padStart(2, '0')}T10:00:00Z`, ...extra });
+  const inferred = () => (readProfile() as { inferred: { values: Record<string, number>; contributing_events: Record<string, number> } }).inferred;
+  const value = (total: number) => +normalizeToDimensionValue(total).toFixed(3);
+
+  test('the bound is the largest single delta in the signal map', () => {
+    expect(CAP).toBe(0.06);
+  });
+
+  test('five answers on one day move a dimension by the bound, not by their sum', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: 'one-review' });
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect(inferred().values.risk_tolerance).toBe(value(-CAP));
+    expect(inferred().contributing_events.architecture_care).toBe(5);
+  });
+
+  test('the same five answers on five days are not bounded (negative control)', () => {
+    for (let i = 0; i < 5; i++) arch(i + 1, 'fix-now', { session_id: 'one-review' });
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(5 * 0.05));
+  });
+
+  test('a second day still moves the dimension after the first day is capped (negative control)', () => {
+    for (let i = 0; i < 5; i++) arch(1);
+    for (let i = 0; i < 5; i++) arch(2);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(2 * CAP));
+  });
+
+  test('distinct session_ids on one day share the day bound', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: `s${i}` });
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+  });
+
+  test('an unsubstituted SESSION_ID placeholder is bounded per day like any other id', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: 'SESSION_ID' });
+    for (let i = 0; i < 3; i++) arch(i + 2, 'fix-now', { session_id: 'SESSION_ID' });
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(CAP + 3 * 0.05));
+  });
+
+  test('one review logged by both the hook and the agent is bounded once per day', () => {
+    for (let i = 0; i < 5; i++) {
+      arch(1, 'fix-now', { source: 'hook', tool_use_id: `t${i}`, session_id: 'claude-conversation-uuid' });
+      arch(1, 'fix-now', { session_id: '1234-1700000000-ab' });
+    }
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect(inferred().contributing_events.architecture_care).toBe(10);
+  });
+
+  const deriveWestOfUtc = () => {
+    const res = spawnSync(BIN_DEV, ['--derive'], {
+      env: { ...process.env, GSTACK_HOME: tmpHome, TZ: 'America/Los_Angeles' },
+      encoding: 'utf-8',
+      cwd: ROOT,
+      timeout: 30_000,
+    });
+    expect(res.status).toBe(0);
+  };
+  const atTs = (ts: unknown) =>
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts });
+
+  test('the day is the UTC day of ts, not the local day', () => {
+    arch(1, 'fix-now');
+    atTs('2026-04-01T20:00:00-08:00');
+    deriveWestOfUtc();
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
+  });
+
+  test('a ts without a zone is read as UTC', () => {
+    atTs('2026-04-01T23:30:00');
+    atTs('2026-04-02T00:30:00Z');
+    deriveWestOfUtc();
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
+  });
+
+  test('a ts with a space separator and no zone is read as UTC', () => {
+    atTs('2026-04-01 23:30:00');
+    atTs('2026-04-02T00:30:00Z');
+    deriveWestOfUtc();
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
+  });
+
+  test('rows without an ISO 8601 string ts share one undated bucket', () => {
+    const junk: unknown[] = ['not-a-date', 'TS', 'junk 1', 'foo 12', 1775000000];
+    for (const ts of junk) expect(atTs(ts)).toBe(0);
+    runDev('--derive');
+    const p = readProfile() as { inferred: { sample_size: number; contributing_events: Record<string, number>; diversity: { days_span: number } } };
+    expect(p.inferred.sample_size).toBe(junk.length);
+    expect(p.inferred.contributing_events.architecture_care).toBe(junk.length);
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect(p.inferred.diversity.days_span).toBe(0);
+  });
+
+  test('answers on one day net out before the bound applies', () => {
+    arch(1, 'fix-now');
+    arch(1, 'accept-risk');
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(0.05 - 0.04));
+  });
+
+  test('--trace shows the capped day and a total that matches --derive', () => {
+    for (let i = 0; i < 5; i++) arch(1);
+    arch(7, 'defer');
+    runDev('--derive');
+    const r = runDev('--trace', 'architecture_care');
+    expect(r.stdout).toContain('6 events for architecture_care');
+    expect(r.stdout).toContain('day 2026-04-01: +0.250 capped to +0.060');
+    expect(r.stdout).not.toContain('day 2026-04-07');
+    expect(r.stdout).toContain(`TOTAL: +0.040 (each UTC day capped at ±${CAP}) → ${inferred().values.architecture_care.toFixed(3)}`);
+    const risk = runDev('--trace', 'risk_tolerance');
+    expect(risk.stdout).toContain('day 2026-04-01: -0.100 capped to -0.060');
+  });
+
+  test('--trace replaces control characters in logged fields', () => {
+    for (let i = 0; i < 2; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: '\u001b\u007f\u009b\nTOTAL: +9.999' });
+    }
+    const r = runDev('--trace', 'architecture_care');
+    expect(r.stdout.split('\n').filter((l) => l.startsWith('TOTAL:'))).toHaveLength(1);
+    expect(r.stdout).toContain('  ????TOTAL: +9.999  plan-eng-review-arch-finding');
+    expect(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(r.stdout)).toBe(false);
   });
 });
 

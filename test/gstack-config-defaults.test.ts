@@ -62,7 +62,7 @@ function defaultArms(): string[] {
   const body = src.slice(src.indexOf('lookup_default()'));
   const end = body.indexOf('\n}');
   const arms: string[] = [];
-  // e.g. `    proactive) echo "true" ;;` or `    user_slug_at_*) echo "" ;;`
+  // e.g. `    proactive) echo "core" ;; # core | all | off ...` or `    user_slug_at_*) echo "" ;;`
   for (const m of body.slice(0, end).matchAll(/^\s{4}([a-zA-Z0-9_*]+)\)/gm)) {
     if (m[1] !== '*') arms.push(m[1]);
   }
