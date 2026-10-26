@@ -84,3 +84,42 @@ describe('proactive core set: the one-time prompt and the registry', () => {
     expect(QUESTIONS['preamble-proactive-behavior'].options).toEqual(['core', 'all', 'off']);
   });
 });
+
+/**
+ * Value: protects=the core four and the three proactive values agree across
+ * the config header, the default table, the router, the preamble, the one-time
+ * prompt and the docs; fails_when=the core set or a value name changes on one
+ * surface only; why_new=the tests above pin the template, preamble and prompt
+ * options but not the docs, nor the skill names the prompt and header speak;
+ * seam=none; no_claim=none beyond protects (static text, no model run)
+ */
+describe('proactive core set: every surface names the same four skills and three values', () => {
+  const configSrc = fs.readFileSync(path.join(ROOT, 'bin', 'gstack-config'), 'utf-8');
+  const promptAt = skillStart.indexOf('_emit_block proactive-prompt');
+  const docsSkills = fs.readFileSync(path.join(ROOT, 'docs', 'skills.md'), 'utf-8');
+  const docsSkillsAt = docsSkills.indexOf('## Proactive skill suggestions');
+  const surfaces: Record<string, string> = {
+    'bin/gstack-config header': configSrc.slice(configSrc.indexOf('# proactive:'), configSrc.indexOf('# routing_declined:')),
+    'bin/gstack-config lookup_default': configSrc.slice(configSrc.indexOf('lookup_default()')).match(/^\s*proactive\).*$/m)?.[0] ?? '',
+    'SKILL.md.tmpl core block': routerTmpl.slice(routerTmpl.indexOf('If `PROACTIVE` is `core` (default)'), routerTmpl.indexOf('If `PROACTIVE` is `all`')),
+    'preamble rule': generateUpgradeCheck({ paths: { skillRoot: '~/.claude/skills/gstack' } } as never),
+    'gstack-skill-start prompt': skillStart.slice(promptAt, skillStart.indexOf('.proactive-prompted"\\`', promptAt)),
+    'docs/proactive.md': fs.readFileSync(path.join(ROOT, 'docs', 'proactive.md'), 'utf-8'),
+    'docs/skills.md section': docsSkills.slice(docsSkillsAt, docsSkills.indexOf('\n## ', docsSkillsAt + 1)),
+  };
+
+  test.each(Object.entries(surfaces))('%s names the core four and no sampled non-core skill', (name, text) => {
+    expect(text.length, name).toBeGreaterThan(20);
+    for (const skill of CORE) expect(text, `${name} lacks ${skill}`).toContain(skill);
+    for (const skill of NON_CORE_SAMPLE) expect(text, `${name} names ${skill}`).not.toContain(skill);
+  });
+
+  test('the docs and the config header spell the three values, and the router names the restore-default command', () => {
+    for (const name of ['docs/proactive.md', 'docs/skills.md section', 'bin/gstack-config header']) {
+      for (const value of ['core', 'all', 'off']) expect(surfaces[name], `${name} lacks ${value}`).toMatch(new RegExp(`\\b${value}\\b`));
+    }
+    expect(surfaces['docs/proactive.md']).toContain('`true` and `false`');
+    for (const value of ['all', 'off', 'core']) expect(surfaces['docs/proactive.md']).toContain(`gstack-config set proactive ${value}`);
+    expect(routerTmpl.replace(/\s+/g, ' ')).toContain('`gstack-config set proactive core` restores the default');
+  });
+});
