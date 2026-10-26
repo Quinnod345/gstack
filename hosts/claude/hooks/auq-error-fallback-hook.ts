@@ -153,7 +153,7 @@ export function directiveFor(kind: SessionKind): string {
         'with kind "auto"; do not emit prose, do not BLOCK. A question with no recommendation, a consent, ' +
         'a destructive or irreversible option, or an approval gate is appended with kind "approval" and status ' +
         '"pending" — never chosen, never approved — and the skill ends at its next gate with ' +
-        'GSTACK_RESULT status=gate_pending (Unattended session block).'
+        'GSTACK_RESULT status=gate_pending.'
       );
     case 'headless':
       // #2733 review (multi-specialist): a spawned-marked subagent under a
