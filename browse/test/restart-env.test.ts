@@ -38,9 +38,10 @@ describe("buildRestartEnv (#1781 headed persistence)", () => {
     expect(env.BROWSE_CONFIG_HASH).toBe("d");
   });
 
-  test("explicit direct falls back to persisted state, so a plain command's restart never flips to the system proxy", () => {
-    expect(buildRestartEnv({} as any, { ...launchedState, proxyDirect: true } as any).BROWSE_PROXY_URL).toBe("direct");
-    expect(buildRestartEnv({} as any, launchedState as any).BROWSE_PROXY_URL).toBeUndefined();
+  test("explicit direct falls back to persisted state only when no invocation flags exist, so the env never contradicts the hash", () => {
+    expect(buildRestartEnv(null, { ...launchedState, proxyDirect: true } as any).BROWSE_PROXY_URL).toBe("direct");
+    expect(buildRestartEnv(null, launchedState as any).BROWSE_PROXY_URL).toBeUndefined();
+    expect(buildRestartEnv({ explicitDirect: false, configHash: "plain" } as any, { ...launchedState, proxyDirect: true } as any).BROWSE_PROXY_URL).toBeUndefined();
   });
 
   test("a proxied invocation wins over a persisted explicit direct", () => {

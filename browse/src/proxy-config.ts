@@ -319,7 +319,7 @@ export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): Re
     } catch (err) {
       if (!(err instanceof ProxyConfigError)) throw err;
       return direct(`${source} is not a proxy URL browse can use (${err.message}; ${err.hint}), so browse connects directly. ` +
-        `fix: export ${source}=http://host:port (or socks5://), or set BROWSE_PROXY_URL=direct to silence this. see ${PROXY_TROUBLESHOOTING}`);
+        `fix: export ${source}=http://host:port (or socks5://), or set BROWSE_PROXY_URL=direct to silence this (on macOS and Windows that also makes Chromium bypass the system proxy settings). see ${PROXY_TROUBLESHOOTING}`);
     }
   }
   const parsed = parseProxyConfig({ proxyUrl: raw, envUser: env.BROWSE_PROXY_USER, envPass: env.BROWSE_PROXY_PASS, source });

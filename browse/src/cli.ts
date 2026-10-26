@@ -539,7 +539,7 @@ export function buildRestartEnv(
   oldState: ServerState | null,
 ): Record<string, string> {
   const env: Record<string, string> = proxyServerEnv(globalFlags);
-  if (!globalFlags?.proxyUrl && oldState?.proxyDirect) env.BROWSE_PROXY_URL = 'direct';
+  if (!globalFlags && oldState?.proxyDirect) env.BROWSE_PROXY_URL = 'direct';
   if (globalFlags?.headed || oldState?.mode === 'headed') env.BROWSE_HEADED = '1';
   const configHash = globalFlags?.configHash || oldState?.configHash;
   if (configHash) env.BROWSE_CONFIG_HASH = configHash;
@@ -943,8 +943,8 @@ async function ensureServer(flags?: GlobalFlags): Promise<ServerState> {
     // Same path: existing daemon is plain (no flags) but caller passes
     // --proxy/--headed. Refuse for the same reason — apply explicitly via
     // disconnect+reconnect.
-    if (desiredHash && !state.configHash && (flags?.proxyUrl || flags?.headed)) {
-      console.error(`[browse] existing daemon was started without --proxy/--headed.`);
+    if (desiredHash && !state.configHash && (flags?.proxyUrl || flags?.headed || flags?.explicitDirect)) {
+      console.error(`[browse] existing daemon was started without --proxy/--headed${flags?.explicitDirect ? ' or BROWSE_PROXY_URL=direct' : ''}.`);
       console.error(`[browse] run 'browse disconnect' first to apply new flags.`);
       process.exit(1);
     }

@@ -993,7 +993,10 @@ daemon log (`browse-daemon.log` next to the state file) records the
 effective mode each time the daemon starts, as `[proxy] using <url> from
 <source>`, `[proxy] none: direct connection (--proxy-server=direct://;
 ignoring HTTPS_PROXY)` (on macOS and Windows, `ignoring the system proxy
-settings`), or `[proxy] none: system proxy settings`.
+settings`), or `[proxy] none: system proxy settings`. A managed Chromium
+proxy policy (`ProxyMode`/`ProxySettings`) still overrides the switch; `$B`
+cannot see it, so on a managed machine the log line describes what `$B`
+asked for, not what the policy enforces.
 
 Values from the environment follow the same credential policy as `--proxy`.
 `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
@@ -1009,7 +1012,8 @@ where it came from, with credentials redacted.
   unsupported scheme, or a bad port. `$B` connects directly (on Linux,
   Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
-  or set `BROWSE_PROXY_URL=direct` to silence the warning. A bad `--proxy` or
+  or set `BROWSE_PROXY_URL=direct` to silence the warning (on macOS and
+  Windows that also makes Chromium bypass the system proxy settings). A bad `--proxy` or
   `BROWSE_PROXY_URL` is still an error, because those are explicit browse
   settings and a silent direct connection could expose your real IP address.
 - **`the running browse daemon was started with different proxy settings (<VAR> differs), so it was not reused.`**
