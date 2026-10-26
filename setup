@@ -1716,8 +1716,10 @@ bun_cmd() {
 # nothing setup, the build or an installed skill runs needs them. Bun never
 # prunes packages that are already installed, so a contributor's full
 # `bun install` (CONTRIBUTING.md, bin/dev-setup, CI) survives a later ./setup.
+# Bun's --production implies a frozen lockfile, so when bun.lock is out of date
+# (a fork or a local edit) refresh it first, then install production-only again.
 install_runtime_deps() {
-  bun_cmd install --production --frozen-lockfile 2>/dev/null || bun_cmd install --production
+  bun_cmd install --production --frozen-lockfile 2>/dev/null || { bun_cmd install --lockfile-only && bun_cmd install --production --frozen-lockfile; }
 }
 
 cleanup_copied_bun() {
