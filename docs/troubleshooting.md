@@ -4076,9 +4076,11 @@ skips `plan-slices` and uploads no `paid-plan` artifact, and a manifest with
 nothing planned counts the same. `ready --screen` dispatches a fresh one and
 `train build` prints `SCREEN: #<n> run <id> planned no cases (no paid-plan
 artifact; …)` or `… planned no cases (an empty plan manifest; …)`, each
-ending `; counted as not-run`, and seats the slot unscreened. A plan it cannot
-read (an expired artifact, an unreadable manifest) keeps the slot screened and
-prints `SCREEN: #<n> run <id> … unreadable; counted as screened, unverified`.
+ending `; counted as not-run, the slot rides unscreened`. A plan it cannot
+read (`… paid-plan artifact has expired`, `… manifest.json is unreadable`, an
+unreadable run or artifact list) keeps the slot screened and prints
+`SCREEN: #<n> run <id> …; counted as screened, unverified`; `ready --screen`
+follows such a run.
 
 **Fix.** Resolve the conflict with the base branch (or wait for GitHub to
 recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>

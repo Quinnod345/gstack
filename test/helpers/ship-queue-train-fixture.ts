@@ -29,6 +29,8 @@ export interface Rule {
   record?: { panels: unknown[]; census?: unknown; verdict?: 'GREEN' | 'RED'; nonce?: string };
   /** The run's paid-plan manifest: planned entries (default 1), or a raw manifest object; null uploads no paid-plan artifact, as a superseded screen does. */
   plan?: { planned: number } | { manifest: unknown } | null;
+  /** Marks every artifact of runs dispatched under this rule expired in the artifacts listing. */
+  expired?: boolean;
   check?: string | null;
   bisect?: { prefixes: string[]; patterns: Record<string, string>; costUsd?: number };
 }
@@ -156,7 +158,7 @@ function shimSource(): string {
     "  const id = d.nextId++; const head = rule.headSha || inputs.expected_sha || rev('refs/heads/' + ref) || rev(ref);",
     "  const run = { databaseId: id, workflow: w, headBranch: ref, headSha: head, status: rule.status || 'completed', conclusion: rule.conclusion === undefined ? 'success' : rule.conclusion,",
     "    url: 'https://example.invalid/runs/' + id, event: rule.event || 'workflow_dispatch', displayTitle: inputs.nonce ? 'E2E Evals [eval-bg ' + inputs.nonce + ']' : w, inputs };",
-    "  d.runs.push(run); d.artifacts[id] = {};",
+    "  d.runs.push(run); d.artifacts[id] = {}; if (rule.expired) (d.expired = d.expired || {})[id] = true;",
     "  if (rule.plan !== null) d.artifacts[id]['paid-plan'] = rule.plan && rule.plan.manifest ? rule.plan.manifest : { tier: 'gate', sliceCount: 1, entries: Array.from({ length: rule.plan ? rule.plan.planned : 1 }, (_, i) => ({ file: 'test/case-' + i + '.test.ts', status: 'planned' })) };",
     "  if (rule.record && !inputs.prefix_shas) d.artifacts[id][d.artifact] = { schema: 1, kind: 'train-gate', nonce: rule.record.nonce || inputs.nonce, head_sha: head, tree: rev(head + '^{tree}'),",
     "    verdict: rule.record.verdict || 'GREEN', census: rule.record.census, panels: rule.record.panels };",
@@ -181,7 +183,7 @@ function shimSource(): string {
     "}",
     "if (a[0] === 'api') {",
     "  const arts = /actions\\/runs\\/(\\d+)\\/artifacts(?:\\?name=([^&]+))?/.exec(a[1] || '');",
-    "  if (arts) { const names = Object.keys(d.artifacts[arts[1]] || {}).filter(n => !arts[2] || n === decodeURIComponent(arts[2])); out({ total_count: names.length, artifacts: names.map(name => ({ name, expired: false })) }); }",
+    "  if (arts) { const names = Object.keys(d.artifacts[arts[1]] || {}).filter(n => !arts[2] || n === decodeURIComponent(arts[2])); out({ total_count: names.length, artifacts: names.map(name => ({ name, expired: !!(d.expired || {})[arts[1]] })) }); }",
     "  const named = /commits\\/([0-9a-f]+)\\/check-runs\\?check_name=([^&]+)/.exec(a[1] || '');",
     "  if (named) { const list = (d.checks[named[1]] || []).filter(c => c.name === decodeURIComponent(named[2])); out({ total_count: list.length, check_runs: list }); }",
     "  const paged = /commits\\/([0-9a-f]+)\\/(check-runs|status)\\?.*page=(\\d+)/.exec(a[1] || '');",

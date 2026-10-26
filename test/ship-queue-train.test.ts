@@ -271,6 +271,12 @@ describe('ready under a train policy: the screen choice', () => {
     expect([unreadable.status, line(unreadable.out, 'ORDER:'), line(unreadable.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan manifest.json is unreadable; counted as screened, unverified"]);
     const stillFollowed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(line(stillFollowed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
+    fx.write(d => { (d as any).expired = { '103': true }; });
+    const expired = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([expired.status, line(expired.out, 'ORDER:'), line(expired.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan artifact has expired; counted as screened, unverified"]);
+    fx.write(d => { (d as any).expired = {}; d.runs = d.runs.filter(r => (r as any).databaseId !== 103); });
+    const gone = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([gone.status, line(gone.out, 'ORDER:'), line(gone.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 run 103 is unreadable; counted as screened, unverified']);
   }, 120_000);
 });
 
