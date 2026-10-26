@@ -1002,12 +1002,16 @@ asked for, not what the policy enforces.
 
 Values from the environment follow the same credential policy as `--proxy`.
 A variable without a scheme (curl-style `host:port` or `user:pass@host:port`)
-is read as `http://host:port` (port 80 when none is given), the way
-Chromium's own environment reader took it, so a value Chromium on Linux used
-to pick up by itself now reaches the same proxy through `$B`; on macOS and
+is read as `http://host:port` (port 80 when none is given). For `host:port`
+that is what Chromium's own environment reader took it as, so a value
+Chromium on Linux used to pick up by itself now reaches the same proxy
+through `$B`; `user:pass@host:port` follows curl's reading and is newly
+proxied, because Chromium rejects any proxy spec with a userinfo. On macOS and
 Windows such a value is now a configured proxy too, where it used to be
 ignored with a warning in favour of the system proxy settings. `--proxy` and
-`BROWSE_PROXY_URL` still require the scheme. `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
+`BROWSE_PROXY_URL` still require the scheme.
+
+`socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
 resolves names through the proxy. `NO_PROXY` (or `no_proxy`) is translated to
 Chromium's bypass list: `example.com` and `.example.com` cover the domain and
 its subdomains, and CIDR blocks and `host:port` entries pass through.

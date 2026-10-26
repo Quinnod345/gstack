@@ -79,7 +79,7 @@ describe.skipIf(process.platform !== 'linux')('#3440 item 8: direct mode never l
   }, 120_000);
 
   // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
-  // Value: protects=a scheme-less HTTPS_PROXY (host:port, what Chromium's own environment reader took as an HTTP proxy before the launch was explicit) still reaches that proxy, now through browse's own configuration;
+  // Value: protects=a scheme-less HTTPS_PROXY (host:port, what Chromium's own environment reader took as an HTTP proxy before the launch was explicit; a user:pass@ shape is newly proxied, Chromium rejected it) still reaches that proxy, now through browse's own configuration;
   //   fails_when=resolveProxy stops reading scheme-less variables as http:// and the session goes direct with only a warning; why_new=proxy-env-daemon's scheme-less case targets loopback, which Chromium bypasses anyway; seam=none
   test('a scheme-less HTTPS_PROXY is the configured proxy and the CONNECT reaches the host:port Chromium would have used by itself', async () => {
     const envProxy = await connectProxy();

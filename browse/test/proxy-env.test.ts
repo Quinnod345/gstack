@@ -85,7 +85,7 @@ describe('resolveProxy precedence', () => {
     expect(resolveProxy(null, { HTTPS_PROXY: '1234' }).warning).toStartWith('HTTPS_PROXY is not a proxy URL browse can use (');
   });
 
-  test('a scheme-less password that would spill past the userinfo, or that is not percent-encoded, warns instead of leaking or crashing', () => {
+  test('a scheme-less value whose credential holds / \\ ? # or bad percent-encoding is not rewritten to http:// and warns without echoing the password or crashing', () => {
     for (const value of ['bob:1234?x@proxy.corp:3128', 'bob:1234#x@proxy.corp:3128', 'bob:1234/x@proxy.corp:3128', 'CORP\\jdoe:1234@proxy.corp:3128', 'bob:\\1234@proxy.corp:3128', 'bob:1234\\abc@proxy.corp:3128']) {
       const resolved = resolveProxy(null, { HTTPS_PROXY: value });
       expect(resolved.url, value).toBeNull();

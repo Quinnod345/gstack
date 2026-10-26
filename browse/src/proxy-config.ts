@@ -344,10 +344,11 @@ const LEADING_SCHEME_RE = /^(?:https?|socks5h?):/i;
  * Resolve the proxy for this invocation (#915). Env URLs go through
  * parseProxyConfig, so the cred policy applies. A standard variable in a
  * scheme-less shape (curl-style `host:port` or `user:pass@host:port`,
- * SCHEMELESS_PROXY_RE) is read as an `http://` proxy, the way curl and
- * Chromium's own environment reader take it, so a session that worked through
- * Chromium reading the variable keeps working now that the launch is explicit
- * (#3440). One that still does not parse (an unsupported scheme, a bad port,
+ * SCHEMELESS_PROXY_RE) is read as an `http://` proxy, the way curl takes it.
+ * For `host:port` that is also what Chromium's own environment reader did,
+ * so a session that worked through Chromium reading the variable keeps
+ * working now that the launch is explicit (#3440); `user:pass@host:port` is
+ * newly proxied, because Chromium rejects any proxy spec with a userinfo. One that still does not parse (an unsupported scheme, a bad port,
  * a missing host) is ignored with a warning instead of failing every command;
  * --proxy and BROWSE_PROXY_URL are explicit browse settings and still fail
  * closed, scheme required.
