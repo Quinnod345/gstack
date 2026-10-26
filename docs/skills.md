@@ -894,14 +894,14 @@ runner destroys its VM on every exit path only while it is alive.
 ```
 You:   /ubicloud run the full verify
 
-Claude: UBICLOUD_API_KEY: set; UBI_OWNER=gsta114
+Claude: UBICLOUD_API_KEY: set; UBI_OWNER=lane7
         gstack-ubi verify  (.gstack/ubicloud.json: bootstrap.sh, "bash scripts/verify.sh", standard-16)
         ubi-runner: reap: no expired VMs
-        ubi-runner: creating eu-central-h1/ubirun-gsta114-1761500000-9f3a2c10-t4 (standard-16)
-        ubi-runner: ubirun-gsta114-1761500000-9f3a2c10-t4 carries a 4h TTL (any later run of this script reaps it); if this process dies first: gstack-ubi down ubirun-gsta114-1761500000-9f3a2c10-t4
+        ubi-runner: creating eu-central-h1/ubirun-lane7-1761500000-9f3a2c10-t4 (standard-16)
+        ubi-runner: ubirun-lane7-1761500000-9f3a2c10-t4 carries a 4h TTL (any later run of this script reaps it); if this process dies first: gstack-ubi down ubirun-lane7-1761500000-9f3a2c10-t4
         ubi-runner: heartbeat: command 300s elapsed, last output 2s ago
         ubi-runner: command exited 0 after 1140s
-        ubi-runner: destroyed eu-central-h1/ubirun-gsta114-1761500000-9f3a2c10-t4
+        ubi-runner: destroyed eu-central-h1/ubirun-lane7-1761500000-9f3a2c10-t4
 ```
 
 ---

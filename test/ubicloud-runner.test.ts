@@ -6,7 +6,7 @@
  * call when the token is absent.
  */
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -333,6 +333,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       '  *"cat > ~/.ubirun-env"*) cat > "$root/ubirun-env" ;;\n' +
       '  *"cat > ~/.ubirun-setup.sh"*) cat > "$root/ubirun-setup.sh" ;;\n' +
       '  *"tar -xzf -"*) cat > /dev/null ;;\n' +
+      '  *"tar -czf -"*) base=${cmd##* }; tar -czf - -C "$root/remote-fs" "$base" ;;\n' +
       '  *"bash -l ~/.ubirun-setup.sh"*) echo "setup start"; if [ "$(cat "$root/setup-mode")" = hang ]; then sleep 20; fi; echo "setup done" ;;\n' +
       '  *"bash -lc "*) if [ -f "$root/command-mode" ]; then bash -c "$(cat "$root/command-mode")"; else echo "ran: $cmd"; fi ;;\n' +
       '  *) : ;;\n' +
@@ -372,7 +373,8 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       expect(err).toContain('setup failed (exit 124)');
       expect(f.ssh()).not.toContain('bash -lc');
       expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toMatch(/cat ~\/\.ubirun-setup-\d+\.sid/);
-      expect(f.ssh()).toMatch(/setsid -w bash -c 'printf %s \$\$ >~\/\.ubirun-setup-\d+\.sid; cd work\/[^ ]+ && \. ~\/\.ubirun-env && bash -l ~\/\.ubirun-setup\.sh'; else bash -c '[^']*'; fi; rc=\$\?; rm -f ~\/\.ubirun-setup-\d+\.sid; exit \$rc/);
+      expect(f.ssh()).toMatch(/setsid -w bash -c 'printf %s \$\$ >~\/\.ubirun-setup-\d+\.sid; cd work\/[^ ]+ && \. ~\/\.ubirun-env && bash -l ~\/\.ubirun-setup\.sh'; else bash -c '[^']*'; fi$/m);
+      expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toMatch(/rm -f ~\/\.ubirun-setup-\d+\.sid; \[ -z "\$sid" \] \|\| \{ pkill -TERM -s "\$sid"; sleep 2; pkill -KILL -s "\$sid"; \}/);
       expect(f.calls()).toContain('destroy');
       expect(err).toMatch(/destroyed eu-central-h1\/ubirun-thrd1-\d{10}-[0-9a-f]{8}-t4/);
       expect(f.listed()).toBe('');
@@ -440,6 +442,13 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       const trusted = run(f, ['verify', '--src', dir, '--trust-config'], { UBI_TEST_TOKEN: 'trusted value' });
       expect(trusted.exitCode).toBe(0);
       expect(readFileSync(join(f.root, 'ubirun-env'), 'utf8')).toContain('export UBI_TEST_TOKEN=trusted\\ value');
+      rmSync(join(f.root, 'ubirun-env'));
+      const asValue = run(f, ['verify', '--src', dir, '--dest', '--trust-config', '--keep', '--dest', 'work/safe'], { UBI_TEST_TOKEN: 'x' });
+      expect(asValue.exitCode).toBe(1);
+      expect(asValue.stderr.toString()).toContain('asks to forward local UBI_TEST_TOKEN');
+      expect(existsSync(join(f.root, 'ubirun-env'))).toBe(false);
+      expect(run(f, ['verify', '--src', dir, '--pass']).stderr.toString()).toContain('verify: --pass needs a value');
+      expect(run(f, ['verify', '--src', dir, '--bogus']).stderr.toString()).toContain('verify: unknown option --bogus');
       writeFileSync(join(dir, '.gstack/ubicloud.json'), JSON.stringify({ command: 'make verify', pass: ['UBICLOUD_API_KEY'] }));
       const before = f.calls();
       const key = run(f, ['verify', '--src', dir, '--trust-config']);
@@ -477,6 +486,23 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       expect(f.ssh()).toContain('ls -d -- logs');
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   }, 90_000);
+
+  test('verify rechecks every pull destination at pull time: a symlink an earlier pull planted cannot redirect a later pull outside --src', () => {
+    const f = fakeVm();
+    try {
+      const dir = src(f, { command: 'make verify', pull: ['work/repo/escape:.', 'work/repo/artifacts:escape'] });
+      const victim = join(f.root, 'victim'); mkdirSync(victim);
+      mkdirSync(join(f.root, 'remote-fs/artifacts'), { recursive: true });
+      writeFileSync(join(f.root, 'remote-fs/artifacts/authorized_keys'), 'ssh-ed25519 AAAA attacker\n');
+      symlinkSync(victim, join(f.root, 'remote-fs/escape'));
+      const r = run(f, ['verify', '--src', dir]);
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr.toString()).toMatch(/pull refused: .*\/repo\/escape resolves outside .*\/repo/);
+      expect(lstatSync(join(dir, 'escape')).isSymbolicLink()).toBe(true);
+      expect(readdirSync(victim)).toEqual([]);
+      expect(f.calls()).toContain('destroy');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }, 60_000);
 
   test('quota: a refusal caches the maximum, the cache drives the preflight for a day and is dropped after; UBI_QUOTA_WAIT waits before refusing', () => {
     const refuse = fakeVm({ refuse: 'Validation failed for following fields: Requested vCPU count: 16, currently used vCPU count: 32, maximum allowed vCPU count: 32' });

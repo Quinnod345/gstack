@@ -144,7 +144,8 @@ $U verify -- 'pnpm e2e'              # a different command on the same bootstrap
 The file is repository content, so it gets no reach beyond the checkout on its
 own: `setup` and the local side of each `pull` must be relative paths that
 resolve inside `--src` (absolute, `~` and `..` paths are refused before any
-API call), and a name under `pass` is forwarded only when your command line
+API call, and each destination is resolved again right before its pull), and a
+name under `pass` is forwarded only when your command line
 grants it with `--pass NAME` or `--trust-config`. Run `verify` only on a tree
 you have reviewed: its bootstrap and command run on the VM with whatever you
 granted.

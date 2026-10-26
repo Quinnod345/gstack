@@ -23,7 +23,7 @@
 # Needs only bash, curl, python3, ssh, ssh-keygen, and tar locally, so it works
 # from dev boxes, containers, and cloud sandboxes.
 #
-# Ownership: VMs are named ubirun-<owner>-<epoch>-<suffix>. <owner> is UBI_OWNER
+# Ownership: VMs are named ubirun-<owner>-<epoch>-<suffix>[-t<hours>]. <owner> is UBI_OWNER
 # (lowercased, letters and digits only, at most 12 characters, starting with a
 # letter) or a random per-machine id kept in $STATE_ROOT/owner-id. Ubicloud names
 # allow 63 characters of [a-z0-9-], so a full name stays under 40.
@@ -188,7 +188,7 @@ sq() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 # writes to the closed channel.
 remote_cancel() {
   local name=$1 sidf=$2 cpid i=0
-  remote "$name" "sid=\$(cat $sidf 2>/dev/null); [ -z \"\$sid\" ] || { pkill -TERM -s \"\$sid\"; sleep 2; pkill -KILL -s \"\$sid\"; }; true" >/dev/null 2>&1 </dev/null &
+  remote "$name" "sid=\$(cat $sidf 2>/dev/null); rm -f $sidf; [ -z \"\$sid\" ] || { pkill -TERM -s \"\$sid\"; sleep 2; pkill -KILL -s \"\$sid\"; }; true" >/dev/null 2>&1 </dev/null &
   cpid=$!
   while kill -0 "$cpid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 1; i=$(( i + 1 )); done
   kill "$cpid" 2>/dev/null || true
@@ -211,7 +211,10 @@ watched() {
   out="$(state_dir "$name")/$phase.log"
   : >"$out"
   inner=$(sq "printf %s \$\$ >$sidf; $cmd")
-  cmd="if command -v setsid >/dev/null 2>&1; then setsid -w bash -c $inner; else bash -c $inner; fi; rc=\$?; rm -f $sidf; exit \$rc"
+  # The sid file outlives the command on purpose: a background child it left
+  # behind keeps the ssh channel open after the wrapper exits, and remote_cancel
+  # still needs the session id to end it. remote_cancel removes the file.
+  cmd="if command -v setsid >/dev/null 2>&1; then setsid -w bash -c $inner; else bash -c $inner; fi"
   # The caller's stdin is handed to the background ssh explicitly (a background
   # job in a non-interactive shell would otherwise read /dev/null), so piped
   # input reaches the remote command as it did before the watchdog.
@@ -245,8 +248,14 @@ watched() {
       log "watchdog: $phase $why; killing it. Last output:"
       tail -n 40 "$out" >&2
       kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || rc=$?
       trap - INT TERM; eval "$old_traps"
+      # A command killed by the watchdog never exits 0; a 0 here means it
+      # finished in the instant before the kill, and that result stands.
+      if [ "$rc" -eq 0 ]; then
+        log "watchdog: $phase finished before it could be killed; its exit 0 stands"
+        return 0
+      fi
       remote_cancel "$name" "$sidf"
       return 124
     fi
@@ -632,6 +641,19 @@ pass_name() {
   case $1 in UBICLOUD_*) die "--pass $1: the runner never forwards its own Ubicloud credentials to a VM" ;; esac
 }
 
+# inside_dir DIR ROOT: DIR exists (created if needed) and resolves, symlinks
+# followed, to ROOT or below it.
+inside_dir() {
+  local a b
+  mkdir -p "$1" 2>/dev/null || return 1
+  a=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  b=$(cd "$2" 2>/dev/null && pwd -P) || return 1
+  [ "$a" = "$b" ] || [[ "$a" = "$b"/* ]]
+}
+
+# PULL_ROOT: set by verify; every pull destination must resolve inside it at
+# pull time (an earlier pull may have placed a symlink where a later one lands).
+PULL_ROOT=""
 cmd_run() {
   local up_args=() src=. dest="" setup="" keep=0 pulls=() envs=()
   while [ $# -gt 0 ]; do
@@ -696,6 +718,11 @@ cmd_run() {
 
   local p
   for p in ${pulls[@]+"${pulls[@]}"}; do
+    if [ -n "$PULL_ROOT" ] && ! inside_dir "${p#*:}" "$PULL_ROOT"; then
+      log "pull refused: ${p#*:} resolves outside $PULL_ROOT"
+      [ "$rc" -ne 0 ] || rc=1
+      continue
+    fi
     cmd_pull "$name" "${p%%:*}" "${p#*:}" || log "pull failed: $p"
   done
   return "$rc"
@@ -762,12 +789,16 @@ print("cfg_cmd=" + q(c.get("command", "")))
   rm -f "$err"
   eval "$parsed"
   while [ $# -gt 0 ]; do
-    if [ "$1" = -- ]; then shift; user_cmd=("$@"); break; fi
     case $1 in
-      --trust-config) trust=1; shift; continue ;;
-      --pass) granted+=("${2:-}") ;;
+      --) shift; user_cmd=("$@"); break ;;
+      --trust-config) trust=1; shift ;;
+      --keep) user_pre+=("$1"); shift ;;
+      --pass|-S|--storage|-s|--size|-l|--location|-n|--name|-b|--image|--src|--dest|--setup|--env|--pull)
+        [ $# -ge 2 ] || die "verify: $1 needs a value"
+        [ "$1" != --pass ] || granted+=("$2")
+        user_pre+=("$1" "$2"); shift 2 ;;
+      *) die "verify: unknown option $1" ;;
     esac
-    user_pre+=("$1"); shift
   done
   for n in ${cfg_pass[@]+"${cfg_pass[@]}"}; do
     pass_name "$n"
@@ -779,6 +810,7 @@ print("cfg_cmd=" + q(c.get("command", "")))
   [ ${#user_cmd[@]} -gt 0 ] || [ -n "$cfg_cmd" ] || die "verify: $cfg names no command and none was given after --"
   [ ${#user_cmd[@]} -gt 0 ] || user_cmd=("$cfg_cmd")
   log "verify: $cfg"
+  PULL_ROOT=$(cd "$src" && pwd)
   cmd_run ${cfg_args[@]+"${cfg_args[@]}"} ${cfg_setup:+--setup "$cfg_setup"} --src "$src" ${user_pre[@]+"${user_pre[@]}"} -- "${user_cmd[@]}"
 }
 
@@ -791,8 +823,9 @@ usage: ubi-runner.sh <command> [args]
                          up + sync + setup + command + pull + destroy; exits with COMMAND's status
   verify [run opts] [--trust-config] [-- COMMAND]
                          run the repository's committed verify (.gstack/ubicloud.json under --src);
-                         its setup and pull paths stay inside --src, and its pass names are
-                         forwarded only when granted here (--pass NAME, or all: --trust-config)
+                         its setup script and every pull destination stay inside --src (checked
+                         again at pull time), and its pass names are forwarded only when granted
+                         here (--pass NAME, or all: --trust-config)
   up [-s SIZE] [-l LOCATION] [-n NAME] [-S STORAGE_GIB] [-b IMAGE]
                          create a VM and wait for SSH; prints its name
                          (STORAGE_GIB: one of $ALLOWED_STORAGE)
