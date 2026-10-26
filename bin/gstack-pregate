@@ -75,7 +75,7 @@ const HELP = `gstack-pregate — cheap checks before anything paid or remote (do
                                 PREGATE_REMOTE: tree=<tested tree> tests=<n> failed=0 line with n > 0
   --spend-cap <usd>             the cap --remote passes to the gate (default \$GSTACK_SPEND_CAP_USD); spend is reported as
                                 spent, reserved and unknown
-  --run <id>                    the run label recorded in pregate.json and the name of this run's scratch directory
+  --run <id>                    the run label recorded in pregate.json and the name of this run's scratch directory (a taken name gets a numbered sibling, <id>-2 … -9)
                                 (<state root>/projects/<slug>/pregate/runs/<id>: lane and guard logs, scan files; default a unique id)
   --explain                     print each selected test's provenance and each uncertain mapping
   --json                        one JSON object on stdout; a refusal before any check runs (unavailable base, invalid pin

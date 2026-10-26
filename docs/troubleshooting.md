@@ -2997,7 +2997,11 @@ names it).
 `secret` category, in the lines this branch adds.
 
 **Fix.** Rotate the credential, remove it from the added lines (history
-included), rerun. Not downgradable.
+included), rerun. Not downgradable. A benign finding (a dummy token, a run id
+read as a phone number, a vendor's public key) is named in the policy's
+`allowlist` by finding id or non-secret category with a path glob or an
+anchored pattern and a reason ([docs/pregate.md](pregate.md#allowlist));
+`env.value`, the whole `secret` category and `engine.*` never.
 
 <a id="pregate-strays"></a>
 ### `PREGATE_STRAYS`
@@ -3141,20 +3145,27 @@ diff: a runner or guard binary missing from PATH (exit 127, `command not
 found`, a tool `not on PATH`), a network error or a quota refusal before any
 test was counted, a full disk, an unverified runtime, or gstack's own scanner
 not finishing. The check is `incomplete` (never pass) with `cause:
-"environment"` and `environment: { kind, evidence }` in `pregate.json`, and
-the table prints `environment: <kind> — <evidence>`. A test that failed and
+"environment"` and `environment: { kind, evidence, proof }` in `pregate.json`,
+and the table prints `environment: <kind> — <evidence>`. A test that failed and
 whose log also names a connection error is **not** this code: the runner's own
 summary counted a failure, so it is `PREGATE_LANE_FAILED` with `cause:
-"diff"`. Kinds and the rule: [docs/pregate.md](pregate.md#environment).
+"diff"`; nor is a runner, guard or gate script whose own binary is present but
+exits 127. `proof: "launch"` is certain (the command could not start, its
+binary is off PATH, the runtime or a gstack tool refused); `proof: "output"`
+means a rule matched the command's text before any test was counted, which the
+diff's own output could have written, so the line says `(inferred from output)`
+and the fix asks for confirmation elsewhere. Kinds and the rule:
+[docs/pregate.md](pregate.md#environment).
 
 **Fix.** Repair what the `environment:` line names on this machine (install the
 tool, restore the network or the quota, free the disk, repair the runtime), or
 run the lane where it can run: `gstack-pregate --stage tests --remote
 --spend-cap <usd> --allow-repo-commands`, or the CI job and `gstack-pregate
 clear --remote <workflow.yml/job> --run-url <url>`. A lane that waives the run
-cites the kind and the evidence, never a test name; `verify` prints
+cites the kind, the evidence and the proof, never a test name; `verify` prints
 `PREGATE_ENVIRONMENT: <n> check(s) blocked by the environment (<kinds>), not by
-the diff` so a coordinator can tell the two apart.
+the diff`, naming any check inferred from output alone, so a coordinator can
+tell the two apart and knows which to confirm elsewhere first.
 
 <a id="pregate-stale"></a>
 ### `PREGATE_STALE`
@@ -3397,7 +3408,10 @@ CLI golden test) from the base branch's `.gstack/pregate.json`, or from the
 user-owned file when the base carries none, matched a
 file the branch touched and exited non-zero. Guards cover what the import graph
 cannot see: manifests, subprocess goldens, registries. They cannot be
-downgraded to warn.
+downgraded to warn. A guard that could not start, or whose own binary is off
+PATH (exit 127), is the machine's: `PREGATE_ENVIRONMENT` (`incomplete`), not
+this code; a guard whose binary is present but whose script exits 127 is this
+code.
 
 **Fix.** Read the guard's lines in the table (exit code, output tail, log path)
 and do what its `fix` line says, commit, then rerun

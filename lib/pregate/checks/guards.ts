@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { matchesAny } from '../../ship-policy';
 import type { Guard } from '../config';
 import { baseInputs, sha256 } from '../context';
-import { classifyEnvironment, environmentLine, environmentResult } from '../environment';
+import { classifyCommandEnvironment, classifyEnvironment, environmentLine, environmentResult, launchCause } from '../environment';
 import { launchRuntime } from '../runtime';
 import { checkScratch } from '../run-scratch';
 import { readRange, supervise } from '../supervise';
@@ -32,9 +32,9 @@ async function runGuard(ctx: PregateContext, guard: Guard, env: NodeJS.ProcessEn
   fs.writeFileSync(log, '');
   const r = await supervise({ command: guard.command, cwd: ctx.repoRoot, env: { ...env, CI: env.CI ?? '1' }, log, deadline: Date.now() + timeoutMs, stallMs: ctx.stallTimeoutMs, label: `guard ${guard.id}`, progress: ctx.progress });
   const output = readRange(log, r.start, r.end).trim();
-  // A guard that could not start, or whose shell found no such command (exit 127), is the machine's failure; a guard that ran and said no is the diff's,
-  // whatever its output mentions (a test about rate limits must not read as a quota refusal).
-  const environment = r.outcome === 'spawn-failed' ? classifyEnvironment(r.error ?? '', null) ?? { kind: 'missing-binary' as const, evidence: r.error ?? 'the guard could not be started' } : r.outcome === 'exited' && r.exit === 127 ? classifyEnvironment(output, r.exit) : null;
+  // A guard that could not start, or whose own binary is off PATH (exit 127), is the machine's failure; a guard that ran and said no is the diff's,
+  // whatever its output mentions (a test about rate limits must not read as a quota refusal, and a `bun run lint` whose script names a missing tool is the diff's).
+  const environment = r.outcome === 'spawn-failed' ? { ...(classifyEnvironment(r.error ?? '', null) ?? launchCause('missing-binary', r.error ?? 'the guard could not be started')), proof: 'launch' as const } : r.outcome === 'exited' && r.exit === 127 ? classifyCommandEnvironment(guard.command, output, r.exit, env) : null;
   return { guard, exit: r.exit, timedOut: r.outcome !== 'exited' && r.outcome !== 'spawn-failed', stalled: r.outcome === 'stalled', tail: output ? output.split('\n').slice(-15) : [], log, environment };
 }
 
@@ -50,7 +50,7 @@ async function run(ctx: PregateContext): Promise<CheckResult> {
     return { ...base, status: 'incomplete', code: 'REPO_COMMANDS_NOT_ALLOWED', lines: listed, detail: `${selected.length} guard(s) not run (pass --allow-repo-commands): ${selected.map(g => g.id).join(', ')}`, fix: 'rerun with --allow-repo-commands (what a lane runs before reporting done, and what /ship passes)' };
   }
   const runtime = launchRuntime(ctx.repoRoot, ctx.env);
-  if (runtime.refusal) return { ...base, ...runtime.refusal, cause: 'environment', environment: { kind: 'runtime', evidence: runtime.refusal.detail }, lines: [`runtime: ${runtime.label}`, environmentLine({ kind: 'runtime', evidence: runtime.refusal.detail })] };
+  if (runtime.refusal) return { ...base, ...runtime.refusal, cause: 'environment', environment: launchCause('runtime', runtime.refusal.detail), lines: [`runtime: ${runtime.label}`, environmentLine(launchCause('runtime', runtime.refusal.detail))] };
   const dir = checkScratch(ctx.scratch, 'guards');
   const runs: GuardRun[] = [];
   for (const g of selected) runs.push(await runGuard(ctx, g, runtime.env, dir));

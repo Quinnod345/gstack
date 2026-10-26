@@ -3,9 +3,10 @@
  * (Lane D, GSTA-112): `<state root>/projects/<slug>/pregate/runs/<run id>/`.
  * Every check keeps its working files there (the secrets scan's added-line
  * copies, the lane and guard logs, the remote gate's file list) instead of
- * os.tmpdir(): two pregates running at once never share a path, and the log a
- * `fix:` line names survives a host that wipes /tmp between wakes (gbrain 16).
- * The record names the directory. Runs older than the retention are pruned
+ * os.tmpdir(): two pregates running at once never share a path (a taken
+ * `--run <id>` takes a numbered sibling), and the log a `fix:` line names
+ * survives a host that wipes /tmp between wakes (gbrain 16). The record names
+ * the directory. Runs older than the retention are pruned
  * best-effort when a new run starts; the current run is never pruned.
  */
 import { randomBytes } from 'node:crypto';
@@ -23,14 +24,26 @@ export function scratchRunId(requested?: string, pid: number = process.pid): str
   return `${stamp}-${pid}-${randomBytes(2).toString('hex')}`;
 }
 
-/** `<runsRoot>/<run id>`, created 0700 (and its parents), after pruning old siblings. */
+/** How many numbered siblings a taken run id may fall back to before the run refuses. */
+const MAX_RUN_ID_SIBLINGS = 9;
+
+/**
+ * `<runsRoot>/<run id>`, created 0700 (and its parents), after pruning old
+ * siblings. The leaf is created without `recursive`, so a directory that
+ * already exists (a second `--run <id>` beside a live run, or a finished one
+ * under the same name) is never shared: the run takes `<run id>-2` … `-9`
+ * instead, and the record names the directory it got.
+ */
 export function createScratch(runsRoot: string, runId: string): string {
   fs.mkdirSync(runsRoot, { recursive: true, mode: 0o700 });
   pruneScratch(runsRoot, runId);
-  const dir = path.join(runsRoot, runId);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try { fs.chmodSync(dir, 0o700); } catch { /* best effort on hosts without POSIX modes */ }
-  return dir;
+  for (let n = 1; n <= MAX_RUN_ID_SIBLINGS; n++) {
+    const dir = path.join(runsRoot, n === 1 ? runId : `${runId}-${n}`);
+    try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (e: any) { if (e?.code === 'EEXIST') continue; throw e; }
+    try { fs.chmodSync(dir, 0o700); } catch { /* best effort on hosts without POSIX modes */ }
+    return dir;
+  }
+  throw new Error(`run directory ${path.join(runsRoot, runId)} and its ${MAX_RUN_ID_SIBLINGS - 1} numbered siblings all exist; choose another --run id`);
 }
 
 /** Remove sibling run directories older than the retention, never `keep` (the current run); every failure is ignored. */

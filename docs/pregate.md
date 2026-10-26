@@ -136,7 +136,7 @@ Review each entry before committing the file on the base branch.
 
 ```
 gstack-pregate [--stage preflight|tests|all] [--only <check,..>] [--allow-repo-commands] [--policy-from base|head]
-               [--timeout <s>] [--stall-timeout <s>] [--remote --spend-cap <usd>] [--explain] [--json]
+               [--timeout <s>] [--stall-timeout <s>] [--remote --spend-cap <usd>] [--run <id>] [--explain] [--json]
 gstack-pregate verify | clear --remote <workflow.yml/job> --run-url <url> | lanes | validate | init
 ```
 
@@ -168,7 +168,9 @@ Two stages with separate clocks, both printed:
   touched file (renames included) runs its `command` in its own process, under
   the verified launch Bun, with its own `timeout_s` (default `--timeout`). A
   non-zero exit fails pregate naming the guard and its `fix`
-  (`PREGATE_GUARD_FAILED`); a timeout is `incomplete`; without
+  (`PREGATE_GUARD_FAILED`); a guard that could not start, or whose own binary
+  is off PATH (exit 127), is the machine's, `PREGATE_ENVIRONMENT`
+  (`incomplete`), not a guard failure; a timeout is `incomplete`; without
   `--allow-repo-commands` the selected guards are listed and the check is
   `incomplete`. Guards are read from the base branch's copy (or the
   user-owned file when the base carries none) and cannot be
@@ -197,8 +199,11 @@ Two stages with separate clocks, both printed:
   `baseUrl`) tries the exact path, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
   `.cjs`, `.mts`, `.cts`, then `index.ts`, `index.tsx`, `index.js`, `index.jsx`
   and `index.mjs` inside the directory; the first file that exists wins.
-  A touched source file with no lane is `FAIL lanes — <file> has no test lane`,
-  never a pass. Markdown that no test depends on is a docs/no-tests empty lane
+  A touched source file with no lane is `FAIL lanes — <file> has no test lane`
+  once any policy exists (the base copy, the user-owned file or `--policy-from
+  head`); with no policy anywhere it is the `warn` `PREGATE_NO_POLICY` with a
+  starter printed ([no policy](#no-policy)); never a pass. Markdown that no
+  test depends on is a docs/no-tests empty lane
   instead (`docs/no-tests: N documentation file(s)`), including when the base
   branch has no `.gstack/pregate.json`. The dependency is the same import graph
   as every other file, so a test that reads the Markdown (a fixture or a doc)
@@ -286,7 +291,8 @@ The record is `.gstack/tmp/pregate.json` (`gstack-artifact validate --as pregate
 **Publication.** `gstack-ship-receipt write --pregate .gstack/tmp/pregate.json`
 (Step 18) refuses unless the record is current for the tree being published
 (`PREGATE_STALE`: rerun after the final stamp), green (`PREGATE_LANE_FAILED`,
-`PREGATE_INCOMPLETE`) and every `requires-remote` obligation carries a receipt
+`PREGATE_INCOMPLETE`, or `PREGATE_ENVIRONMENT` when every incomplete check is
+the machine's) and every `requires-remote` obligation carries a receipt
 (`PREGATE_REMOTE_UNCLEARED`: dispatch the job, then
 `gstack-pregate clear --remote <workflow.yml/job> --run-url <url>`). The ship
 receipt then carries `pregate` and `requires_remote`. `gstack-pregate verify`
@@ -475,7 +481,13 @@ those, each with its scope and its reason:
   credential-named variable of the environment pregate ran in (#3449), found in
   the added lines whatever its shape. Validation refuses an entry naming it
   (`PREGATE_CONFIG_INVALID`), and the matcher never consults the list for it,
-  so a stale or hand-edited policy cannot silence it either.
+  so a stale or hand-edited policy cannot silence it either. The scanner's own
+  `engine.*` refusals (an oversize input fails closed) are refused and kept the
+  same way: they are the scanner declining its input, not a finding in it.
+- A `pattern` entry needs the finding's position. When the scanner gave none,
+  the entry is inert for that finding and the row says so (`allowlist[0]
+  env.kv not tested on env.kv (<file>): the scanner gave no position for its
+  pattern; the finding is kept`) rather than silently keeping it.
 
 The `secrets` row says `N allowlisted (<ids>)` and lists each allowlisted
 finding with the entry (`allowlisted env.kv (evals/receipts/t1.json, added line
@@ -493,7 +505,7 @@ its command because of the machine (truther #617: a root runner with a vitest
 config that found no file, a corpus fetch that stalled on one host and passed
 on another), the check is `incomplete` under its own code,
 **`PREGATE_ENVIRONMENT`**, with `cause: "environment"` and an
-`environment: { kind, evidence }` object in `pregate.json`, an
+`environment: { kind, evidence, proof }` object in `pregate.json`, an
 `environment: <kind> — <evidence>` table line, and a fix that says so. A
 failure the branch caused carries `cause: "diff"` (`PREGATE_LANE_FAILED`,
 `PREGATE_GUARD_FAILED`, `PREGATE_SECRETS`). Kinds:
@@ -508,23 +520,38 @@ failure the branch caused carries `cause: "diff"` (`PREGATE_LANE_FAILED`,
 | `tool` | gstack's own scanner (gstack-redact) did not finish or exited outside its contract |
 
 The classifier is conservative. A local lane that exited non-zero is read from
-its output **only when its runner reported no test summary** (nothing ran); a
-run whose summary counts `N ran, M failed` is the diff's failure whatever its
-log says, so a test that failed on `ECONNREFUSED` is still a red test. A
-remote gate that exited without a `PREGATE_REMOTE:` line and whose output
-names a quota or network error never ran the tests, so it is environment and
-the obligation stays uncleared. A guard that ran and said no is the diff's; a
-guard whose command the shell could not find is the machine's. A stall or a
-timeout keeps `PREGATE_STALLED` / `PREGATE_INCOMPLETE`: a hang has no
-single cause.
+its output **only when its runner reported no test summary** (nothing ran) and
+the runner was not seen starting a test file; a run whose summary counts `N
+ran, M failed` is the diff's failure whatever its log says, so a test that
+failed on `ECONNREFUSED` is still a red test. A remote gate that exited
+without a `PREGATE_REMOTE:` line is read from its **preamble only** (its first
+40 lines, before any test output could stream): a VM refused for quota or an
+unreachable API there never ran the tests, so it is environment and the
+obligation stays uncleared, while a `quota` in a streamed test name is not. A
+guard that ran and said no is the diff's. Exit 127 and `command not found`
+count as `missing-binary` only when the command's **own** binary is off
+PATH: a runner, guard or gate script the diff controls that exits 127 (a
+package script naming a tool that is not installed) is the diff's failure. A
+stall or a timeout keeps `PREGATE_STALLED` / `PREGATE_INCOMPLETE`: a hang
+has no single cause, and so does a runner killed by a signal.
+
+`proof` records how the cause was established. `launch` is certain: the
+command could not start, its binary is off PATH, the runtime or a gstack tool
+refused; the fix ends `the diff is not at fault`. `output` means a rule
+matched the command's text before any test was counted, which the diff's own
+output could have written (a test that prints `fetch failed` and exits the
+process before the summary); the table line says `(inferred from output)` and
+the fix asks for confirmation on another machine or with `--remote` before
+the diff is treated as clear. Neither proof ever passes the check.
 
 `gstack-pregate verify` reports `PREGATE_ENVIRONMENT: <n> check(s) blocked by
 the environment (<kinds>), not by the diff` when every incomplete check is
-environment-caused, and names the kinds beside the generic
-`PREGATE_INCOMPLETE` otherwise; `--json` carries `cause` and `environment`
-per check. A lane that waives such a run cites the kind and the evidence, not a
-test name, and clears the lane remotely (`--remote`, or `gstack-pregate clear`
-with a run URL) rather than on the broken machine. Incomplete never passes.
+environment-caused, naming any check whose cause was inferred from output
+alone, and names the kinds beside the generic `PREGATE_INCOMPLETE` otherwise;
+`--json` carries `cause` and `environment` per check. A lane that waives such
+a run cites the kind, the evidence and the proof, not a test name, and clears
+the lane remotely (`--remote`, or `gstack-pregate clear` with a run URL)
+rather than on the broken machine. Incomplete never passes.
 
 <a id="scratch"></a>
 ## Scratch: one directory per run, under the state root
@@ -537,8 +564,11 @@ guard's log (`guards/<id>.log`) and the remote gate's log and file list
 (`remote/`) live there, never under `os.tmpdir()`: two pregates in parallel
 (two lanes on one machine, a subagent beside its parent) never share a path,
 and the log a `fix:` line names survives a host that wipes `/tmp` between
-wakes. `pregate.json` records the directory as `scratch`, the table prints
-`scratch: <dir>`, and `--explain` names it. Runs older than 7 days under the
+wakes. `pregate.json` records the directory as `scratch` and the table prints
+`scratch: <dir>`. A `--run <id>` whose directory already exists (a finished run
+under the same name, or a second run beside a live one) is never shared, since
+a second run would truncate the first's logs: the run takes `<id>-2` … `-9`
+and the record names the directory it got. Runs older than 7 days under the
 same project are pruned when a new run starts (the current run never is). An
 unwritable state root falls back to a private directory under `os.tmpdir()`,
 still one per run, and `--explain` says so.

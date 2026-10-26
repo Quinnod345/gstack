@@ -8,9 +8,15 @@
  * branch's fault. The classifier reads a command's output and exit code only;
  * the caller decides when to ask it: a local lane whose runner printed a test
  * summary is the diff's failure whatever its log says, and only a run with no
- * summary (nothing ran) is classified from its output.
+ * summary (nothing ran) is classified from its output, and only before any
+ * test file started. A missing binary is the machine's only when the command's
+ * own binary is off PATH: a script the diff controls that exits 127 or prints
+ * "command not found" is the diff's failure (`classifyCommandEnvironment`).
  */
 import type { CheckResult, EnvironmentCause, EnvironmentKind } from './types';
+
+/** A cause established at launch: a spawn failure, a binary off PATH, a runtime or tool refusal. */
+export const launchCause = (kind: EnvironmentKind, evidence: string): EnvironmentCause => ({ kind, evidence, proof: 'launch' });
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 /** The shell's own "no such command" text (POSIX and cmd.exe); exit 127 says the same without text. */
@@ -33,28 +39,54 @@ function evidenceLine(text: string, re: RegExp): string {
  * ordinary failure. Exit 127 (the shell found no such command) is
  * missing-binary with or without text; a disk rule outranks quota (EDQUOT is a
  * disk quota); otherwise the first rule in order whose text appears wins.
+ * Exit 127 is proved at launch; a text match is `proof: 'output'`, which the
+ * diff's own output could have written, and the fix says so.
  */
 export function classifyEnvironment(output: string, exit: number | null): EnvironmentCause | null {
   const text = output.replace(ANSI, '');
-  if (exit === 127 || NOT_FOUND.test(text)) return { kind: 'missing-binary', evidence: evidenceLine(text, RULES[0]!.re) || 'exit 127: the shell found no such command' };
+  if (exit === 127 || NOT_FOUND.test(text)) return { kind: 'missing-binary', evidence: evidenceLine(text, RULES[0]!.re) || 'exit 127: the shell found no such command', proof: exit === 127 ? 'launch' : 'output' };
   const disk = RULES.find(r => r.kind === 'disk')!;
-  if (disk.re.test(text)) return { kind: 'disk', evidence: evidenceLine(text, disk.re) };
-  for (const rule of RULES) if (rule.kind !== 'disk' && rule.re.test(text)) return { kind: rule.kind, evidence: evidenceLine(text, rule.re) };
+  if (disk.re.test(text)) return { kind: 'disk', evidence: evidenceLine(text, disk.re), proof: 'output' };
+  for (const rule of RULES) if (rule.kind !== 'disk' && rule.re.test(text)) return { kind: rule.kind, evidence: evidenceLine(text, rule.re), proof: 'output' };
   return null;
 }
 
+/** The binary a shell command runs: the first word after a leading `(cd … &&` and any `NAME=value` assignments. */
+export function commandBinary(command: string): string | null {
+  const words = command.replace(/^\(\s*cd\s+(?:'[^']*'|"[^"]*"|\S+)\s*&&\s*/, '').trim().split(/\s+/);
+  return words.find(w => w && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ?? null;
+}
+
+/**
+ * `classifyEnvironment` for a command that started and exited: missing-binary
+ * holds only when the command's own binary is off `env.PATH`. A runner or
+ * guard that resolved and then exited 127, or printed "command not found" from
+ * a script the diff controls, is the diff's failure.
+ */
+export function classifyCommandEnvironment(command: string, output: string, exit: number | null, env: NodeJS.ProcessEnv): EnvironmentCause | null {
+  const cause = classifyEnvironment(output, exit);
+  if (cause?.kind !== 'missing-binary') return cause;
+  const bin = commandBinary(command);
+  return bin && Bun.which(bin, { PATH: env.PATH ?? '' }) ? null : { ...cause, proof: 'launch' };
+}
+
 const FIX: Record<EnvironmentKind, string> = {
-  'missing-binary': 'install the named tool on this machine (or put it on PATH), or run the lane remotely (--remote, or clear it with a run URL); the diff is not at fault',
-  network: 'check the network, proxy or registry this machine reaches, then rerun; or run the lane remotely; the diff is not at fault',
-  quota: 'wait for the quota or raise it, free the backend\'s capacity, then rerun; the diff is not at fault',
-  disk: 'free disk space (or move the state root) and rerun; the diff is not at fault',
-  runtime: 'repair the runtime the line names (the install verdict or the pinned Bun), then rerun; the diff is not at fault',
-  tool: 'repair or reinstall the named gstack tool, then rerun; the diff is not at fault',
+  'missing-binary': 'install the named tool on this machine (or put it on PATH), or run the lane remotely (--remote, or clear it with a run URL)',
+  network: 'check the network, proxy or registry this machine reaches, then rerun; or run the lane remotely',
+  quota: 'wait for the quota or raise it, free the backend\'s capacity, then rerun',
+  disk: 'free disk space (or move the state root) and rerun',
+  runtime: 'repair the runtime the line names (the install verdict or the pinned Bun), then rerun',
+  tool: 'repair or reinstall the named gstack tool, then rerun',
 };
+/** The fix's last clause: a launch-proved cause clears the diff; an output-inferred one asks for confirmation elsewhere, since the diff's own output could have written the line. */
+export const PROOF_NOTE = {
+  launch: 'the diff is not at fault',
+  output: 'inferred from the output alone (no test was counted), which the diff could have written: confirm on another machine or with --remote before treating the diff as clear',
+} as const;
 
 /** An `incomplete` result under PREGATE_ENVIRONMENT: cause, kind, evidence, an `environment:` line and the kind's fix. */
 export function environmentResult(base: CheckResult, cause: EnvironmentCause, detail: string): CheckResult {
-  return { ...base, status: 'incomplete', code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment: cause, detail, fix: FIX[cause.kind], lines: [...(base.lines ?? []), environmentLine(cause)] };
+  return { ...base, status: 'incomplete', code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment: cause, detail, fix: `${FIX[cause.kind]}; ${PROOF_NOTE[cause.proof]}`, lines: [...(base.lines ?? []), environmentLine(cause)] };
 }
 
-export const environmentLine = (cause: EnvironmentCause) => `environment: ${cause.kind} — ${cause.evidence}`;
+export const environmentLine = (cause: EnvironmentCause) => `environment: ${cause.kind} — ${cause.evidence}${cause.proof === 'output' ? ' (inferred from output)' : ''}`;

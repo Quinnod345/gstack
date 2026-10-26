@@ -46,9 +46,15 @@ describe('allowlist: policy validation', () => {
     expect(codes({ allowlist: [{ finding: 'env.kv', pattern: 'a'.repeat(257), reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].pattern']);
     // A pattern entry never covers a finding the scanner gave no position; a paths-only entry does.
     const positionless: AllowlistFinding = { id: 'env.kv', category: 'secret', severity: 'MEDIUM', file: 'evals/x.json' };
-    expect(applyAllowlist([positionless], [TRIAL_ENTRY]).kept).toHaveLength(1);
+    const inert = applyAllowlist([positionless], [TRIAL_ENTRY]);
+    expect(inert.kept).toHaveLength(1);
+    expect(inert.untested.map(u => [u.index, u.finding.id])).toEqual([[0, 'env.kv']]);
     expect(applyAllowlist([positionless], [{ finding: 'env.kv', paths: ['evals/**'], reason: 'r' }]).allowlisted).toHaveLength(1);
     expect(NON_ALLOWLISTABLE).toContain('env.value');
+    // The scanner's own refusal (an oversize input fails closed) is never a benign finding: refused by validation, kept by the matcher.
+    expect(codes({ allowlist: [{ finding: 'engine.input_too_large', paths: ['**'], reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].finding']);
+    const refusal: AllowlistFinding = { id: 'engine.input_too_large', category: 'engine', severity: 'HIGH', file: 'big.json' };
+    expect(applyAllowlist([refusal], [{ finding: 'engine.input_too_large', paths: ['**'], reason: 'x' }]).kept).toHaveLength(1);
   });
 });
 

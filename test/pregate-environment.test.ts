@@ -12,7 +12,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { classifyEnvironment } from '../lib/pregate/environment';
+import { classifyCommandEnvironment, classifyEnvironment, commandBinary } from '../lib/pregate/environment';
 import { verifyPregate } from '../lib/pregate/index';
 import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
@@ -30,16 +30,30 @@ describe('classifyEnvironment', () => {
   //   seam=none; no_claim=completeness of the vocabulary
   test('names missing-binary, network, quota and disk, and stays null for an ordinary failure', () => {
     expect(classifyEnvironment('bash: line 1: vitest: command not found', 127)?.kind).toBe('missing-binary');
-    expect(classifyEnvironment('', 127)).toEqual({ kind: 'missing-binary', evidence: 'exit 127: the shell found no such command' });
-    expect(classifyEnvironment('write failed: Disk quota exceeded (EDQUOT)', 1)).toEqual({ kind: 'disk', evidence: 'write failed: Disk quota exceeded (EDQUOT)' });
+    expect(classifyEnvironment('', 127)).toEqual({ kind: 'missing-binary', evidence: 'exit 127: the shell found no such command', proof: 'launch' });
+    expect(classifyEnvironment('write failed: Disk quota exceeded (EDQUOT)', 1)).toEqual({ kind: 'disk', evidence: 'write failed: Disk quota exceeded (EDQUOT)', proof: 'output' });
     expect(classifyEnvironment("'nope' is not recognized as an internal or external command", 1)?.kind).toBe('missing-binary');
-    expect(classifyEnvironment('Error: getaddrinfo ENOTFOUND registry.example.invalid', 1)).toEqual({ kind: 'network', evidence: 'getaddrinfo ENOTFOUND registry.example.invalid' });
+    expect(classifyEnvironment('Error: getaddrinfo ENOTFOUND registry.example.invalid', 1)).toEqual({ kind: 'network', evidence: 'getaddrinfo ENOTFOUND registry.example.invalid', proof: 'output' });
     expect(classifyEnvironment('curl: (7) Failed to connect to host port 443: Connection refused', 7)?.kind).toBe('network');
     expect(classifyEnvironment('ubicloud: vcpu quota exceeded (528/512)', 1)?.kind).toBe('quota');
     expect(classifyEnvironment('HTTP 429 Too Many Requests', 1)?.kind).toBe('quota');
     expect(classifyEnvironment('ENOSPC: no space left on device, write', 1)?.kind).toBe('disk');
     expect(classifyEnvironment('AssertionError: expected 3 to be 4', 1)).toBeNull();
     expect(classifyEnvironment('✖ fetches the thing\n  ECONNREFUSED 127.0.0.1:3000\nℹ tests 1\nℹ fail 1', 1)?.kind).toBe('network');
+  });
+
+  // Value: protects=exit 127 (or "command not found" text) is the machine's only when the command's own binary is off PATH: a script
+  //   the diff controls that exits 127 is the diff's; fails_when=a present runner exiting 127 reads as missing-binary; why_new=the veto
+  //   is new (adversarial review); seam=none; no_claim=none
+  test('a missing binary is the machine\'s only when the command\'s own binary is off PATH', () => {
+    expect(commandBinary("(cd 'pkg' && UBI_OWNER=x node run.js a b)")).toBe('node');
+    expect(commandBinary('FOO=1 BAR=2 bun test x')).toBe('bun');
+    expect(commandBinary('')).toBeNull();
+    const env = { PATH: process.env.PATH };
+    expect(classifyCommandEnvironment('node scripts/x.js', '', 127, env)).toBeNull();
+    expect(classifyCommandEnvironment('node scripts/x.js', 'bash: vitest: command not found', 127, env)).toBeNull();
+    expect(classifyCommandEnvironment('gstack-fixture-runner-that-does-not-exist x', '', 127, env)).toMatchObject({ kind: 'missing-binary', proof: 'launch' });
+    expect(classifyCommandEnvironment('node scripts/x.js', 'Error: getaddrinfo ENOTFOUND registry.example.invalid', 1, env)).toMatchObject({ kind: 'network', proof: 'output' });
   });
 });
 
@@ -55,8 +69,9 @@ describe('environment failures are reported apart from diff failures', () => {
     expect(r.err).toContain('(PREGATE_ENVIRONMENT)');
     expect(r.err).not.toContain('PREGATE_LANE_FAILED');
     const c = check(repo, 'lanes');
-    expect([c.status, c.code, c.cause, c.environment.kind]).toEqual(['incomplete', 'PREGATE_ENVIRONMENT', 'environment', 'missing-binary']);
+    expect([c.status, c.code, c.cause, c.environment.kind, c.environment.proof]).toEqual(['incomplete', 'PREGATE_ENVIRONMENT', 'environment', 'missing-binary', 'launch']);
     expect(c.environment.evidence).toContain('gstack-fixture-runner-that-does-not-exist');
+    expect(c.fix).toContain('the diff is not at fault');
     expect(r.out).toContain('environment: missing-binary');
     const verify = runBin(repo, 'gstack-pregate', ['verify']);
     expect(verify.status).toBe(EXIT.fail);
@@ -80,6 +95,41 @@ describe('environment failures are reported apart from diff failures', () => {
     const d = check(diff, 'lanes');
     expect([d.status, d.code, d.cause]).toEqual(['fail', 'PREGATE_LANE_FAILED', 'diff']);
     expect(d.environment).toBeUndefined();
+  });
+
+  // Value: protects=a test in the diff cannot clear itself: a runner whose binary is present but exits 127 is PREGATE_LANE_FAILED
+  //   (diff), and a bun test that prints a network line and exits the process before the summary is at most an output-inferred
+  //   environment cause whose fix and verify message ask for confirmation elsewhere, never "the diff is not at fault";
+  //   fails_when=exit 127 from a present runner reads as missing-binary, or the spoof's fix clears the diff; why_new=the binary veto
+  //   and the launch/output proof are new (adversarial review); seam=none; no_claim=a spoof with no summary cannot be told from a
+  //   real network failure by the output alone, which is exactly what the proof records
+  test('a present runner that exits 127 is the diff\'s; a test that exits with a network line is only an output-inferred cause', () => {
+    const exit127 = fixture({ ...BASE_PREGATE, runner: 'node scripts/x.js {files}' }, { 'scripts/x.js': 'process.exit(127);\n' });
+    commit(exit127, UTIL_EDIT);
+    pregate(exit127, []);
+    const c = check(exit127, 'lanes');
+    expect([c.status, c.code, c.cause, c.environment]).toEqual(['fail', 'PREGATE_LANE_FAILED', 'diff', undefined]);
+    if (!Bun.which('bun')) return;
+    const spoof = fixture({ ...BASE_PREGATE, runner: 'bun test {files}' }, { 'test/util.test.js': "const { test } = require('bun:test');\nrequire('../lib/util.js');\ntest('spoof', () => { console.log('Received: fetch failed'); process.exit(1); });\n" });
+    commit(spoof, UTIL_EDIT);
+    pregate(spoof, []);
+    const s = check(spoof, 'lanes');
+    expect([s.status, s.code, s.environment.kind, s.environment.proof]).toEqual(['incomplete', 'PREGATE_ENVIRONMENT', 'network', 'output']);
+    expect(s.fix).not.toContain('the diff is not at fault');
+    expect(s.fix).toContain('confirm on another machine or with --remote');
+    expect(s.lines.join('\n')).toContain('environment: network — Received: fetch failed (inferred from output)');
+    const verify = runBin(spoof, 'gstack-pregate', ['verify']);
+    expect(verify.err).toContain('lanes inferred from output alone');
+  });
+
+  // Value: protects=a remote gate is classified from its preamble only: quota text streamed from the tests past the first lines
+  //   is not the environment; fails_when=a test name with "quota" waives the gate; why_new=new (adversarial review); seam=none; no_claim=none
+  test('a remote gate whose test stream names a quota past the preamble is PREGATE_INCOMPLETE, not environment', () => {
+    const repo = fixture({ ...BASE_PREGATE, remote_gate: 'node scripts/gate.js' }, { 'scripts/gate.js': "for (let i = 0; i < 60; i++) console.log('ok test ' + i);\nconsole.log('✗ billing > enforces quota per user');\nprocess.exit(1);\n" });
+    commit(repo, UTIL_EDIT);
+    pregate(repo, ['--remote', '--spend-cap', '1']);
+    const c = check(repo, 'lanes');
+    expect([c.status, c.code, c.environment]).toEqual(['incomplete', 'PREGATE_INCOMPLETE', undefined]);
   });
 
   // Value: protects=a remote gate refused by a quota (no PREGATE_REMOTE line) is environment/quota and the obligation stays
@@ -107,6 +157,12 @@ describe('environment failures are reported apart from diff failures', () => {
     expect([g.status, g.code, g.cause]).toEqual(['fail', 'PREGATE_GUARD_FAILED', 'diff']);
     expect(g.lines.join('\n')).toContain('environment: missing-binary');
     expect(g.lines.join('\n')).not.toContain('red environment:');
+    // A guard whose own binary is present but whose script exits 127 (a package script naming a missing tool) is the diff's.
+    const present = fixture({ ...BASE_PREGATE, guards: [{ id: 'script', when: ['lib/**'], command: 'node -e "process.exit(127)"', fix: 'fix it' }] });
+    commit(present, UTIL_EDIT);
+    pregate(present, ['--only', 'guards']);
+    const p = check(present, 'guards');
+    expect([p.status, p.code, p.cause, p.environment]).toEqual(['fail', 'PREGATE_GUARD_FAILED', 'diff', undefined]);
     const only = fixture({ ...BASE_PREGATE, guards: [{ id: 'absent', when: ['lib/**'], command: 'gstack-fixture-guard-that-does-not-exist --check' }] });
     commit(only, UTIL_EDIT);
     pregate(only, ['--only', 'guards']);

@@ -43,6 +43,11 @@ describe('per-run scratch under the state root', () => {
     pregate(repo, ['--run', 'run-b', '--only', 'lanes']);
     expect(readOut(repo).scratch).toBe(path.join(runsDir(repo), 'run-b'));
     expect(fs.existsSync(path.join(dirA, 'lanes', 'lanes.log'))).toBe(true);
+    // A taken --run id is never shared (a second run would truncate the first's logs): it takes a numbered sibling and the record names it.
+    const again = pregate(repo, ['--run', 'run-a', '--only', 'lanes']);
+    expect(readOut(repo).scratch).toBe(`${dirA}-2`);
+    expect(again.out).toContain(`scratch: ${dirA}-2`);
+    expect(fs.existsSync(path.join(dirA, 'guards', 'echo.log'))).toBe(true);
   });
 
   // Value: protects=without --run the id is unique per process and the secrets scan files are gone after the scan; fails_when=two

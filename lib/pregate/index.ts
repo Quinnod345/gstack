@@ -139,7 +139,11 @@ export function verifyPregate(repoRoot: string, file: PregateFile, treeNow: Wtre
   const incomplete = file.checks.filter(c => c.status === 'incomplete' || c.status === 'not_installed');
   // An environment cause is named apart from the diff: a lane waives it by kind, never by test name.
   const environment = incomplete.filter(c => c.cause === 'environment');
-  if (environment.length === incomplete.length && environment.length) return { ok: false, code: 'PREGATE_ENVIRONMENT', message: `${environment.length} check(s) blocked by the environment (${[...new Set(environment.map(c => c.environment?.kind ?? 'unknown'))].join(', ')}), not by the diff: ${environment.map(c => `${c.id}: ${c.environment?.evidence ?? c.detail}`).join('; ')}`, current, uncleared };
+  if (environment.length === incomplete.length && environment.length) {
+    const inferred = environment.filter(c => c.environment?.proof === 'output');
+    const caveat = inferred.length ? `; ${inferred.map(c => c.id).join(', ')} inferred from output alone (no test was counted): confirm on another machine or with --remote before treating the diff as clear` : '';
+    return { ok: false, code: 'PREGATE_ENVIRONMENT', message: `${environment.length} check(s) blocked by the environment (${[...new Set(environment.map(c => c.environment?.kind ?? 'unknown'))].join(', ')}), not by the diff: ${environment.map(c => `${c.id}: ${c.environment?.evidence ?? c.detail}`).join('; ')}${caveat}`, current, uncleared };
+  }
   if (incomplete.length) return { ok: false, code: 'PREGATE_INCOMPLETE', message: `${incomplete.length} check(s) incomplete: ${incomplete.map(c => c.id).join(', ')}${environment.length ? ` (blocked by the environment: ${environment.map(c => `${c.id} ${c.environment?.kind}`).join(', ')})` : ''}`, current, uncleared };
   if (uncleared.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${uncleared.length} requires-remote obligation(s) without a receipt: ${uncleared.map(r => r.lane).join(', ')}`, current, uncleared };
   return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}`, current, uncleared };

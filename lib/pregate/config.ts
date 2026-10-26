@@ -58,6 +58,8 @@ export const PREGATE_CONFIG_SCHEMA = 'https://github.com/garrytan/gstack/docs/pr
 export const NON_DOWNGRADABLE = ['secrets', 'guards'] as const;
 /** Finding ids (or categories) no allowlist entry may name: the real value of a credential-named environment variable (#3449), and the secret wildcard. */
 export const NON_ALLOWLISTABLE = ['env.value', 'secret'] as const;
+/** Whether no entry may name this finding id: the list above, plus the scanner's own `engine.*` refusals (an oversize input fails closed and is never benign). */
+export const nonAllowlistable = (id: string) => (NON_ALLOWLISTABLE as readonly string[]).includes(id) || id.startsWith('engine.');
 /** Categories an allowlist entry may name whole; a secret is always named by its id. */
 export const ALLOWLISTABLE_CATEGORIES = ['pii', 'internal', 'hygiene', 'legal'] as const;
 export const DEFAULT_SERIAL_PATTERNS = ['**/*.serial.test.*'];
@@ -139,7 +141,7 @@ function allowlistErrors(raw: unknown, errors: ConfigError[]): void {
     const o = e as Record<string, unknown>;
     for (const k of Object.keys(o)) if (!ALLOWLIST_KEYS.includes(k)) bad(`${at}.${k}`, `unknown key; valid keys: ${ALLOWLIST_KEYS.join(', ')}`);
     if (typeof o.finding !== 'string' || !FINDING_ID.test(o.finding)) bad(`${at}.finding`, 'must be a gstack-redact finding id (env.kv, google.api_key, pii.phone.e164, …) or one of the categories pii, internal, hygiene, legal');
-    else if ((NON_ALLOWLISTABLE as readonly string[]).includes(o.finding)) bad(`${at}.finding`, `${o.finding} cannot be allowlisted (${o.finding === 'env.value' ? 'the real value of a credential-named environment variable is never benign' : 'name the secret finding by its id, never the whole category'})`);
+    else if (nonAllowlistable(o.finding)) bad(`${at}.finding`, `${o.finding} cannot be allowlisted (${o.finding === 'env.value' ? 'the real value of a credential-named environment variable is never benign' : o.finding === 'secret' ? 'name the secret finding by its id, never the whole category' : 'an engine.* finding is the scanner refusing its input, not a finding in it'})`);
     if (!('paths' in o) && !('pattern' in o)) bad(at, 'needs paths, pattern or both: an entry with no scope would allowlist every finding of that kind');
     if ('paths' in o) {
       if (!Array.isArray(o.paths) || o.paths.length === 0 || o.paths.some(p => typeof p !== 'string')) bad(`${at}.paths`, 'must be a non-empty array of globs');
@@ -323,7 +325,7 @@ export function explainConfig(): string {
     'price_file: repo-relative path of the GSTACK_EVAL_CALLS v1 call-plan file `gstack-eval-plan price-gate` prices a paid gate from; never executed (docs/eval-calls.md)',
     'stall_timeout_s: seconds without test output before the lanes check kills the runner\'s process group and records it incomplete (default 300; 0 disables; --stall-timeout overrides)',
     'remote_gate: the repo\'s remote test gate command; under 8 cores the test tier becomes a requires-remote obligation naming it, and gstack-pregate --remote runs it (it must print PREGATE_REMOTE: tree=<tree> tests=<n> failed=<n>) (docs/pregate.md#remote-gate)',
-    `allowlist: [{ finding, paths?, pattern?, reason }]: benign findings the secrets check accepts and names as allowlisted. finding is a gstack-redact id (env.kv, google.api_key, pii.phone.e164, …) or a category (${ALLOWLISTABLE_CATEGORIES.join(', ')}); paths are globs; pattern is a regex matched at the finding's position in the added line; one of the two is required, reason always. Never ${NON_ALLOWLISTABLE.join(' or ')} (docs/pregate.md#allowlist)`,
+    `allowlist: [{ finding, paths?, pattern?, reason }]: benign findings the secrets check accepts and names as allowlisted. finding is a gstack-redact id (env.kv, google.api_key, pii.phone.e164, …) or a category (${ALLOWLISTABLE_CATEGORIES.join(', ')}); paths are globs; pattern is a regex matched at the finding's position in the added line; one of the two is required, reason always. Never ${NON_ALLOWLISTABLE.join(' or ')} or engine.* (docs/pregate.md#allowlist)`,
     'no .gstack/pregate.json on the base: <state root>/projects/<slug>/pregate.json is read instead (state root: GSTACK_STATE_ROOT, else GSTACK_HOME, else GSTACK_STATE_DIR, else a gstack plugin data dir, else ~/.gstack, per docs/state-root.md; run --explain prints the resolved path; outside the repo, so a PR cannot reach it; a path inside the checkout is ignored)',
   ].join('\n') + '\n';
 }

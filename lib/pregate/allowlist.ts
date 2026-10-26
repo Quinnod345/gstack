@@ -11,7 +11,7 @@
  */
 import { matchesAny } from '../ship-policy';
 import { sha256 } from './context';
-import { ALLOWLISTABLE_CATEGORIES, NON_ALLOWLISTABLE, type AllowlistEntry } from './config';
+import { ALLOWLISTABLE_CATEGORIES, nonAllowlistable, type AllowlistEntry } from './config';
 
 export interface AllowlistFinding {
   id: string; category: string; severity: string; file: string; line?: number; col?: number;
@@ -26,30 +26,47 @@ function names(entry: AllowlistEntry, f: AllowlistFinding): boolean {
   return (ALLOWLISTABLE_CATEGORIES as readonly string[]).includes(entry.finding) && entry.finding === f.category;
 }
 
+/** Whether a finding has the position a `pattern` needs: the added line and a 1-based column. */
+const positioned = (f: AllowlistFinding) => f.lineText !== undefined && !!f.col;
+
 /** The pattern, anchored at the finding's column in its added line and ending at a token boundary (so a short pattern never covers the head of a longer value); a finding with no position never matches a pattern. */
 function patternHits(entry: AllowlistEntry, f: AllowlistFinding): boolean {
   if (entry.pattern === undefined) return true;
-  if (f.lineText === undefined || !f.col) return false;
+  if (!positioned(f)) return false;
   let re: RegExp;
   try { re = new RegExp(`^(?:${entry.pattern})(?![\\w-])`); } catch { return false; }
-  return re.test(f.lineText.slice(f.col - 1));
+  return re.test(f.lineText!.slice(f.col! - 1));
 }
 
-/** Split findings into the ones an entry covers (with the entry) and the ones kept; env.value is always kept. */
-export function applyAllowlist<F extends AllowlistFinding>(findings: readonly F[], entries: readonly AllowlistEntry[]): { kept: F[]; allowlisted: Allowlisted<F>[] } {
+/**
+ * Split findings into the ones an entry covers (with the entry) and the ones
+ * kept; env.value and engine.* are always kept. `untested` lists kept findings
+ * that a pattern entry named by id and path but could not test because the
+ * scanner gave no position, so the table says why the entry was inert.
+ */
+export function applyAllowlist<F extends AllowlistFinding>(findings: readonly F[], entries: readonly AllowlistEntry[]): { kept: F[]; allowlisted: Allowlisted<F>[]; untested: Allowlisted<F>[] } {
   const kept: F[] = [];
   const allowlisted: Allowlisted<F>[] = [];
+  const untested: Allowlisted<F>[] = [];
   for (const f of findings) {
-    const index = (NON_ALLOWLISTABLE as readonly string[]).includes(f.id) ? -1
-      : entries.findIndex(e => names(e, f) && (!e.paths || matchesAny(e.paths, f.file)) && patternHits(e, f));
-    if (index < 0) kept.push(f);
-    else allowlisted.push({ finding: f, index, entry: entries[index]! });
+    const scoped = (e: AllowlistEntry) => names(e, f) && (!e.paths || matchesAny(e.paths, f.file));
+    const index = nonAllowlistable(f.id) ? -1 : entries.findIndex(e => scoped(e) && patternHits(e, f));
+    if (index >= 0) { allowlisted.push({ finding: f, index, entry: entries[index]! }); continue; }
+    kept.push(f);
+    if (nonAllowlistable(f.id) || positioned(f)) continue;
+    const named = entries.findIndex(e => e.pattern !== undefined && scoped(e));
+    if (named >= 0) untested.push({ finding: f, index: named, entry: entries[named]! });
   }
-  return { kept, allowlisted };
+  return { kept, allowlisted, untested };
 }
 
 /** sha256 of the entries, for the check's `inputs.allowlist`. */
 export const allowlistDigest = (entries: readonly AllowlistEntry[]) => sha256(JSON.stringify(entries));
+
+/** One table line per finding a pattern entry named but could not test: the finding is kept. */
+export function describeUntested(a: Allowlisted): string {
+  return `allowlist[${a.index}] ${a.entry.finding} not tested on ${a.finding.id} (${a.finding.file}): the scanner gave no position for its pattern; the finding is kept`;
+}
 
 /** One table line per allowlisted finding: what, where, and which entry (with its reason) covered it. */
 export function describeAllowlisted(a: Allowlisted): string {

@@ -68,7 +68,7 @@ export interface PregateCheck {
   // C-pregate (C8): stage, the input identity the check ran against, the fix clause and result code, and per-item lines.
   stage?: 'preflight' | 'tests'; inputs?: Record<string, string>; fix?: string; code?: string; lines?: string[];
   // Lane D (GSTA-112): a non-pass names its cause; an environment cause carries its kind and evidence.
-  cause?: 'diff' | 'environment'; environment?: { kind: string; evidence: string };
+  cause?: 'diff' | 'environment'; environment?: { kind: string; evidence: string; proof?: 'launch' | 'output' };
 }
 export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string; command?: string }
 export interface PregateFile {

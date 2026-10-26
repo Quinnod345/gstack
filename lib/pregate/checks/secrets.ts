@@ -11,9 +11,9 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runScriptSync } from '../../script-invocation';
-import { allowlistDigest, applyAllowlist, describeAllowlisted, type AllowlistFinding } from '../allowlist';
+import { allowlistDigest, applyAllowlist, describeAllowlisted, describeUntested, type AllowlistFinding } from '../allowlist';
 import { baseInputs, sha256 } from '../context';
-import { environmentResult } from '../environment';
+import { environmentResult, launchCause } from '../environment';
 import { checkScratch } from '../run-scratch';
 import type { CheckDef, CheckResult, PregateContext } from '../types';
 
@@ -71,19 +71,19 @@ function run(ctx: PregateContext): CheckResult {
       fs.mkdirSync(path.dirname(file), { mode: 0o700 });
       fs.writeFileSync(file, part.text, { mode: 0o600 });
       const r = runScriptSync(path.join(BIN_DIR, 'gstack-redact'), ['--from-file', file, '--json', '--max-bytes', String(64 * 1024 * 1024)], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: Math.min(ctx.timeoutMs, 300_000), maxBuffer: 64 * 1024 * 1024, env: ctx.env });
-      if (r.error || r.status === null) return environmentResult(base, { kind: 'tool', evidence: `gstack-redact did not finish on ${part.file || 'added lines'} (${r.error?.message ?? 'killed'})` }, `gstack-redact did not finish on ${part.file || 'added lines'}; an incomplete scan never passes`);
-      if (r.status !== 0 && r.status !== 2 && r.status !== 3) return environmentResult(base, { kind: 'tool', evidence: `gstack-redact exited ${r.status} on ${part.file || 'added lines'}: ${(r.stderr ?? '').trim().split('\n').pop() ?? ''}` }, `gstack-redact exited ${r.status}; an incomplete scan never passes`);
+      if (r.error || r.status === null) return environmentResult(base, launchCause('tool', `gstack-redact did not finish on ${part.file || 'added lines'} (${r.error?.message ?? 'killed'})`), `gstack-redact did not finish on ${part.file || 'added lines'}; an incomplete scan never passes`);
+      if (r.status !== 0 && r.status !== 2 && r.status !== 3) return environmentResult(base, launchCause('tool', `gstack-redact exited ${r.status} on ${part.file || 'added lines'}: ${(r.stderr ?? '').trim().split('\n').pop() ?? ''}`), `gstack-redact exited ${r.status}; an incomplete scan never passes`);
       high ||= r.status === 3;
       medium ||= r.status === 2;
       const lines = part.text.split('\n');
       try { findings.push(...(JSON.parse(r.stdout).findings ?? []).map((f: Omit<Finding, 'file'>) => ({ ...f, id: f.id ?? 'finding', category: f.category ?? '?', severity: f.severity ?? '?', file: part.file, lineText: f.line ? lines[f.line - 1] : undefined }))); } catch { parsedAll = false; }
     }
     // The allowlist applies only to findings the scanner reported in full; an unparsed report keeps its exit-code verdict.
-    const applied = parsedAll && ctx.config.allowlist.length ? applyAllowlist(findings, ctx.config.allowlist) : { kept: findings, allowlisted: [] };
+    const applied = parsedAll && ctx.config.allowlist.length ? applyAllowlist(findings, ctx.config.allowlist) : { kept: findings, allowlisted: [], untested: [] };
     const kept = applied.kept;
     if (parsedAll) { high = kept.some(f => f.severity === 'HIGH'); medium = kept.some(f => f.severity === 'MEDIUM'); }
     const render = (f: Scanned) => `${f.severity} ${f.id} [${f.category}]: ${f.description ?? ''}${f.line ? ` (${f.file ? `${f.file}, ` : ''}added line ${f.line})` : ''}`;
-    const allowLines = applied.allowlisted.map(describeAllowlisted);
+    const allowLines = [...applied.allowlisted.map(describeAllowlisted), ...applied.untested.map(describeUntested)];
     const allowNote = applied.allowlisted.length ? `; ${applied.allowlisted.length} allowlisted (${[...new Set(applied.allowlisted.map(a => a.finding.id))].join(', ')})` : '';
     // HIGH and any MEDIUM credential fail; a MEDIUM hygiene/internal/pii/legal
     // hit in code (a `.local` property reads as a hostname) is listed as warn:

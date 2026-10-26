@@ -21,7 +21,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { baseInputs, sha256 } from '../context';
 import { PREGATE_CONFIG_PATH } from '../config';
-import { classifyEnvironment, environmentLine, environmentResult } from '../environment';
+import { classifyCommandEnvironment, classifyEnvironment, environmentLine, environmentResult, launchCause } from '../environment';
 import { checkScratch } from '../run-scratch';
 import { starterPolicy } from '../starter';
 import { isDeviceDart, listRepoFiles, readRepoFile } from '../import-graph';
@@ -228,7 +228,7 @@ function planGap(ctx: PregateContext, plan: RunPlan, total: number): Pick<CheckR
   const { unclaimed, missing, noPubspec } = plan;
   const detail = `no test runner detected for ${unclaimed.length} of ${total} selected file(s): ${unclaimed.slice(0, 8).join(' ')}${unclaimed.length > 8 ? ' …' : ''}${missing.length ? `; not on PATH: ${missing.join(', ')}` : ''}${noPubspec.length ? `; no pubspec.yaml above ${noPubspec.length} .dart file(s)` : ''}`;
   // A tool missing from PATH is this machine's gap, not the diff's; no runner declared or no pubspec is the repo's.
-  if (missing.length) return { code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment: { kind: 'missing-binary', evidence: `not on PATH: ${missing.join(', ')}` }, detail, fix: `install ${missing.join(' and ')}${fvmPinnedFor(ctx.repoRoot, unclaimed) ? ' (or fvm, which this repo pins)' : ''} on this machine and rerun, or run the lane remotely; the diff is not at fault` };
+  if (missing.length) return { code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment: launchCause('missing-binary', `not on PATH: ${missing.join(', ')}`), detail, fix: `install ${missing.join(' and ')}${fvmPinnedFor(ctx.repoRoot, unclaimed) ? ' (or fvm, which this repo pins)' : ''} on this machine and rerun, or run the lane remotely; the diff is not at fault` };
   const fix = noPubspec.length ? `commit the Dart package's pubspec.yaml, or declare \`runner\` (with {files}) in ${ctx.configFile}`
     : `declare \`runner\` (with {files}) in ${ctx.configFile}`;
   return { code: 'PREGATE_INCOMPLETE', detail, fix };
@@ -276,7 +276,7 @@ export function parseSummary(raw: string, runner = ''): RunnerSummary {
   return (dartRun ? null : parseDart(output)) ?? parseBats(output) ?? { ran: null, failed: null };
 }
 
-interface LocalRun { exit: number | null; outcome: Supervised['outcome']; ran: number | null; failed: number | null; tail: string[]; command: string; files: string[]; lastFile: string | null; ms: number; error?: string }
+interface LocalRun { exit: number | null; outcome: Supervised['outcome']; signal: string | null; observedStart: boolean; ran: number | null; failed: number | null; tail: string[]; runner: string; command: string; files: string[]; lastFile: string | null; ms: number; error?: string }
 
 const quote = (f: string) => `'${f.replace(/'/g, `'\\''`)}'`;
 
@@ -288,7 +288,7 @@ async function runOnce(ctx: PregateContext, env: NodeJS.ProcessEnv, g: RunGroup,
   const r = await supervise({ command: run, cwd: path.join(ctx.repoRoot, g.cwd), env: { ...env, CI: env.CI ?? '1' }, log, deadline: Date.now() + ctx.timeoutMs, stallMs: ctx.stallTimeoutMs, label: `lanes (${shown.length === 1 ? shown[0] : `${shown.length} files`})`, files, adapter: adapterFor(g.runner), counter, progress: ctx.progress });
   const output = readRange(log, r.start, r.end);
   const summary = parseSummary(output, g.runner);
-  return { exit: r.exit, outcome: r.outcome, ...summary, tail: output.trim().split('\n').slice(-25), command, files: shown, lastFile: r.lastFile && g.cwd ? `${g.cwd}/${r.lastFile}` : r.lastFile, ms: r.ms, ...(r.error ? { error: r.error } : {}) };
+  return { exit: r.exit, outcome: r.outcome, signal: r.signal, observedStart: r.observedStart, ...summary, tail: output.trim().split('\n').slice(-25), runner: g.runner, command, files: shown, lastFile: r.lastFile && g.cwd ? `${g.cwd}/${r.lastFile}` : r.lastFile, ms: r.ms, ...(r.error ? { error: r.error } : {}) };
 }
 
 /**
@@ -329,10 +329,15 @@ function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>
   if (stalled.length) {
     return { code: 'PREGATE_STALLED', detail: `no test output for ${ctx.stallTimeoutMs / 1000} s; process group killed; last file started: ${stalled.map(x => x.lastFile ?? `(none reported; ${x.files.length} file(s))`).join(', ')}${rest}`, fix: `read ${r.log} for the stalled file; fix the hang, or raise --stall-timeout (stall_timeout_s in ${ctx.configFile}; 0 disables) for a test that is quiet for longer` };
   }
-  if (!timedOut.length) {
-    const launch = r.runs.find(x => x.outcome === 'spawn-failed');
-    const environment = classifyEnvironment(launch?.error ?? '', null) ?? { kind: 'missing-binary' as const, evidence: launch?.error ?? 'the runner could not be started' };
+  const launch = r.runs.find(x => x.outcome === 'spawn-failed');
+  if (launch) {
+    const environment = { ...(classifyEnvironment(launch.error ?? '', null) ?? launchCause('missing-binary', launch.error ?? 'the runner could not be started')), proof: 'launch' as const };
     return { environment, detail: `the runner could not be launched (${total} files${rest}): ${environment.evidence}` };
+  }
+  if (!timedOut.length) {
+    // The runner started and died without an exit code (a signal: OOM kill, SIGSEGV, an outside kill): incomplete, not the machine's missing binary.
+    const killed = r.runs.find(x => x.outcome === 'exited' && x.exit === null);
+    return { code: 'PREGATE_INCOMPLETE', detail: `the runner process ended without an exit code (killed by ${killed?.signal ?? 'a signal'}; ${total} files; last file started: ${killed?.lastFile ?? 'none reported'}${rest})`, fix: `read ${r.log}; a runner killed by a signal (out of memory, an outside kill) never passes; rerun, or split the selection` };
   }
   return { code: 'PREGATE_INCOMPLETE', detail: `a runner process timed out after ${ctx.timeoutMs} ms (--timeout applies to each runner process; ${total} files; last file started: ${timedOut.map(x => x.lastFile ?? `(none reported; ${x.files.length} file(s))`).join(', ')}${rest})`, fix: 'raise --timeout or split the selection; a timed-out lane never passes' };
 }
@@ -365,6 +370,8 @@ function remoteObligation(ctx: PregateContext, sel: Selection): RemoteObligation
 }
 
 export const REMOTE_GATE_LANE = 'pregate.json/remote_gate';
+/** How many leading lines of a remote gate's output are read for an environment cause: its preamble, before any test output could stream. */
+export const REMOTE_PREAMBLE_LINES = 40;
 /** The `clear` command for an obligation: the remote gate's own output for remote_gate, a run URL otherwise. */
 export const clearHint = (lane: string) => `gstack-pregate clear --remote ${lane} ${lane === REMOTE_GATE_LANE ? '--receipt <gate output file>' : '--run-url <url>'}`;
 export interface RemoteReport { tree: string; tests: number; failed: number; spent?: string }
@@ -412,8 +419,11 @@ async function runRemote(ctx: PregateContext, sel: Selection, base: CheckResult)
   const why = r.outcome !== 'exited' ? `the remote gate did not finish (${r.outcome === 'stalled' ? `no output for ${ctx.stallTimeoutMs / 1000} s` : r.outcome})`
     : !reported ? `the remote gate exited ${r.exit} without a PREGATE_REMOTE: line`
     : remoteReportProblem(reported, ctx.wtree) ?? (r.exit !== 0 ? `the remote gate exited ${r.exit}` : null);
-  // A gate that printed no report and names a quota, network or missing-tool error never ran the tests: the environment, not the diff.
-  const environment = why && !reported && r.outcome !== 'stalled' && r.outcome !== 'timeout' ? classifyEnvironment(r.outcome === 'spawn-failed' ? r.error ?? '' : output, r.exit) : null;
+  // A gate that printed no report and names a quota, network or missing-tool error in its preamble never ran the tests: the environment, not the diff.
+  // Only the gate's first lines are read (a VM refusal or a network error comes before any test streams); exit 127 counts only when the gate's own binary is off PATH.
+  const environment = why && !reported && r.outcome !== 'stalled' && r.outcome !== 'timeout'
+    ? r.outcome === 'spawn-failed' ? { ...(classifyEnvironment(r.error ?? '', null) ?? launchCause('missing-binary', r.error ?? 'the remote gate could not be started')), proof: 'launch' as const } : classifyCommandEnvironment(obligation.command!, output.split('\n').slice(0, REMOTE_PREAMBLE_LINES).join('\n'), r.exit, ctx.env)
+    : null;
   if (environment) return environmentResult({ ...base, inputs, lines: runLines, remote: [...sel.remote, obligation] }, environment, `${why}; requires-remote ${obligation.lane} stays uncleared`);
   if (why) return { ...base, inputs, lines: runLines, status: 'incomplete', remote: [...sel.remote, obligation], code: r.outcome === 'stalled' ? 'PREGATE_STALLED' : 'PREGATE_INCOMPLETE', detail: `${why}; requires-remote ${obligation.lane} stays uncleared`, fix: `read ${log}; the obligation clears only on PREGATE_REMOTE: tree=${ctx.wtree.slice(0, 12)}… tests>0 failed=0 with exit 0` };
   const cleared = { ...obligation, receipt: `remote-gate tree=${ctx.wtree.slice(0, 12)} tests=${reported!.tests}`, cleared_by: `gstack-pregate --remote ${new Date().toISOString()}` };
@@ -445,7 +455,7 @@ async function runSelected(ctx: PregateContext, sel: Selection, base: CheckResul
   const { groups } = plan;
   const total = groups.reduce((n, g) => n + g.files.length, 0);
   const runtime = launchRuntime(ctx.repoRoot, ctx.env);
-  if (runtime.refusal) return { ...base, ...runtime.refusal, cause: 'environment', environment: { kind: 'runtime', evidence: runtime.refusal.detail }, lines: [`runtime: ${runtime.label}`, environmentLine({ kind: 'runtime', evidence: runtime.refusal.detail })] };
+  if (runtime.refusal) return { ...base, ...runtime.refusal, cause: 'environment', environment: launchCause('runtime', runtime.refusal.detail), lines: [`runtime: ${runtime.label}`, environmentLine(launchCause('runtime', runtime.refusal.detail))] };
   const r = await runLocal(ctx, runtime.env, groups);
   const adapters = [...new Set(groups.map(g => adapterFor(g.runner)).filter(Boolean))];
   const runLines = [...lines, `runtime: ${runtime.label}`, `progress: ${adapters.join(', ') || 'none (no progress adapter for this runner; serial files and heartbeats only)'}`, `ran: ${r.command.length > 200 ? `${r.command.slice(0, 200)}…` : r.command}`, `log: ${r.log}`, ...r.tail.map(l => `  ${l}`)];
@@ -455,8 +465,10 @@ async function runSelected(ctx: PregateContext, sel: Selection, base: CheckResul
     return why.environment ? environmentResult(withRun, why.environment, why.detail!) : { ...withRun, status: 'incomplete', ...why };
   }
   if (r.exit !== 0) {
-    // The runner's own summary decides: a counted failure is the diff's. Only a run that reported no test at all is read from its output.
-    const environment = r.ran === null ? classifyEnvironment(r.tail.join('\n'), r.exit) : null;
+    // The runner's own summary decides: a counted failure is the diff's. Only a run that reported no test at all, and whose runner was not seen
+    // starting a test file (a test that exits the process before the summary cannot relabel itself), is read from its output; exit 127 counts
+    // only when the runner's binary is off PATH.
+    const environment = r.ran === null && r.bad && !r.bad.observedStart ? classifyCommandEnvironment(r.bad.runner, r.tail.join('\n'), r.exit, runtime.env) : null;
     if (environment) return environmentResult(withRun, environment, `the runner exited ${r.exit} before any test was counted (${total} files): ${environment.evidence}`);
     return { ...withRun, status: 'fail', cause: 'diff', code: 'PREGATE_LANE_FAILED', detail: `local lane exited ${r.exit} (${r.failed ?? '?'} failed of ${r.ran ?? '?'} ran; ${total} files; pipefail)`, fix: `read ${r.log}, fix the in-branch failure, rerun gstack-pregate --stage tests` };
   }
