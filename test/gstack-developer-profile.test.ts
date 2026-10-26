@@ -345,9 +345,14 @@ describe('gstack-developer-profile --derive', () => {
     });
   });
 
-  test('a choice named after an Object.prototype member is ignored, not fatal', () => {
+  test('a choice named after an Object.prototype member or a non-object line is ignored, not fatal', () => {
     logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'constructor', session_id: 's1' });
     logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: 's2' });
+    const projects = path.join(tmpHome, 'projects');
+    for (const slug of fs.readdirSync(projects)) {
+      const log = path.join(projects, slug, 'question-log.jsonl');
+      if (fs.existsSync(log)) fs.appendFileSync(log, 'null\n');
+    }
     const r = runDev('--derive');
     expect(r.status).toBe(0);
     const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number } };
@@ -392,6 +397,12 @@ describe('gstack-developer-profile per-session bound', () => {
     expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
   });
 
+  test('rows with an unsubstituted SESSION_ID placeholder each count as their own session', () => {
+    for (let i = 0; i < 3; i++) arch('SESSION_ID', 'fix-now', i);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+  });
+
   test('rows with an empty session_id each count as their own session', () => {
     for (let i = 0; i < 3; i++) {
       logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: '' });
@@ -421,11 +432,11 @@ describe('gstack-developer-profile per-session bound', () => {
   });
 
   test('--trace replaces control characters in logged fields', () => {
-    for (let i = 0; i < 5; i++) arch('a\nTOTAL: +9.999 \u001b[31mforged', 'fix-now', i);
+    for (let i = 0; i < 5; i++) arch('a\nTOTAL: +9.999 \u001b[31mforged\u007f\u009b', 'fix-now', i);
     const r = runDev('--trace', 'architecture_care');
     expect(r.stdout.split('\n').filter((l) => l.startsWith('TOTAL:'))).toHaveLength(1);
-    expect(r.stdout).toContain('session a?TOTAL: +9.999 ?[31mforged: +0.250 capped to +0.060');
-    expect(/[\x00-\x08\x0b-\x1f\x7f]/.test(r.stdout)).toBe(false);
+    expect(r.stdout).toContain('session a?TOTAL: +9.999 ?[31mforged??: +0.250 capped to +0.060');
+    expect(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(r.stdout)).toBe(false);
   });
 });
 
