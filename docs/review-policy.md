@@ -54,9 +54,13 @@ incomplete coverage, which blocks until the reviewer is rerun.
    `kind`, `blocking` and `scope`. Findings in the diff are `fix`. A blocking
    finding in code the PR did not change is `defer`: `gstack-review-scope defer`
    files it as a GitHub issue (one per finding, reused across reruns through an
-   `<!-- gstack-deferred-finding: <fingerprint> -->` marker; `unfiled (<reason>)`
-   when `gh` is unavailable or its search fails, still exit 0) and the PR body
-   lists it under `## Deferred findings`.
+   `<!-- gstack-deferred-finding: <fingerprint> -->` marker; the issue text is
+   scanned like the PR body before anything is posted, so a finding that quotes a
+   secret is `unfiled (publication scan refused: …)`; `unfiled (<reason>)` when
+   `gh` is unavailable or its search fails; every unfiled case still exits 0)
+   and the PR body lists it under `## Deferred findings`. A finding's `cause`
+   (the changed line behind a defect reported elsewhere, a deleted file included)
+   places it in the diff.
    Below-floor findings outside the diff are `note`, listed under `## Review notes`.
 2. **Pass 2 and later review only the range since the previous pass.** Each pass
    saves its head; the next pass diffs `RANGE_BASE..HEAD` for every reviewer (the

@@ -163,19 +163,37 @@ export interface CarryPlanInput {
 export interface CarryRecord { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[] }
 export type CarryPlan = { ok: true; carry: CarryRecord } | { ok: false; code: 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_CARRY_REFUSED'; message: string };
 
+/** The file's text at the reviewed head and at HEAD, with the release version each head carries (from `VERSION`, else `package.json`). */
+export interface CarryChange { before: string | null; after: string | null; oldVersion?: string | null; newVersion?: string | null }
+
 /**
- * One changed path's carry class. A default-metadata manifest (`package.json`,
- * `VERSION`) is metadata only while its from..head change is a version stamp
- * and nothing else (`versionStampOnly`): a dependency, a script or a new key is
- * product. `change` carries the file's text at both heads; without it the
- * default lists decide (the paths a policy names are the repo's own call).
+ * A policy-named stamp path's change is a stamp when the new text reads as the
+ * old text once every new version in it is the old one: the rule the tree receipt
+ * applies to the same `stamp_paths`, `stamp_files` and `release_outputs` before
+ * the train accepts a stamp commit. No version change, or a file missing on
+ * either side, is not a stamp.
  */
-export function classifyCarryPath(rel: string, extra: { metadata?: readonly string[] } = {}, change?: { before: string | null; after: string | null }): CarryClass {
-  if (matchesAny(extra.metadata ?? [], rel)) return 'metadata';
-  if (matchesAny(CARRY_METADATA_GLOBS, rel)) {
-    if (change && stampFileKind(rel) && !versionStampOnly(rel, change.before, change.after).stampOnly) return 'product';
-    return 'metadata';
-  }
+export function stampOnlyText(change: CarryChange): boolean {
+  const { before, after, oldVersion, newVersion } = change;
+  if (before === null || after === null || !oldVersion || !newVersion || oldVersion === newVersion) return false;
+  return after.split(newVersion).join(oldVersion) === before;
+}
+
+/**
+ * One changed path's carry class. The changelog and the agents digest are
+ * metadata. A manifest (`package.json`, `VERSION`) is metadata only while its
+ * from..head change is a version stamp and nothing else (`versionStampOnly`): a
+ * dependency, a script or a new key is product. A path the policy names under
+ * `stamp_files`, `stamp_paths` or `release_outputs` is metadata only while its
+ * change is a stamp (`versionStampOnly` for a manifest kind, `stampOnlyText`
+ * otherwise): a logic change in a stamped source file is product, as it is for
+ * the tree receipt. `change` carries the texts; a caller without them gets the
+ * list-only answer.
+ */
+export function classifyCarryPath(rel: string, extra: { metadata?: readonly string[] } = {}, change?: CarryChange): CarryClass {
+  const stamp = () => !change || (stampFileKind(rel) ? versionStampOnly(rel, change.before, change.after).stampOnly : stampOnlyText(change));
+  if (matchesAny(CARRY_METADATA_GLOBS, rel)) return !change || !stampFileKind(rel) || versionStampOnly(rel, change.before, change.after).stampOnly ? 'metadata' : 'product';
+  if (matchesAny(extra.metadata ?? [], rel)) return stamp() ? 'metadata' : 'product';
   if (matchesAny(CARRY_TEST_GLOBS, rel)) return 'test';
   return 'product';
 }

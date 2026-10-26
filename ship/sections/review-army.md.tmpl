@@ -120,8 +120,9 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
 3.5. **Defer and note the rest.** Run
    `~/.claude/skills/gstack/bin/gstack-review-scope defer --findings <classified> --pr <pr-number> --out <deferred.json>`
    (omit `--pr` before a PR exists). It files one issue per `scope: defer` finding,
-   reusing an open issue that carries the finding's marker, and prints `DEFERRED:`
-   lines; `unfiled (<reason>)` keeps the finding deferred when gh cannot file it,
+   reusing an open issue that carries the finding's marker, scanning the issue text
+   as the PR body is scanned, and prints `DEFERRED:` lines; `unfiled (<reason>)`
+   keeps the finding deferred when gh cannot file it or the scan refuses the text,
    and the command still exits 0: the PR body carries the reason.
    Then `gstack-review-scope render --deferred <deferred.json> --findings <classified>`
    prints the `## Deferred findings` and `## Review notes` sections: save them for

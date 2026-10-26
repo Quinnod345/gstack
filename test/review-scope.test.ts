@@ -30,12 +30,22 @@ const DIFF = [
 ].join('\n');
 
 describe('hunk parsing and locus', () => {
-  test('parseHunks reads new-side ranges, whole added files, untracked files, and drops deleted files', () => {
+  test('parseHunks reads new-side ranges, whole added files, untracked files, and keeps a deleted file as a whole changed location', () => {
     const hunks = parseHunks(DIFF, ['scratch/untracked.ts']);
     expect(hunks['src/auth.ts']).toEqual([[10, 13], [42, 42]]);
     expect(hunks['src/new.ts']).toBe('whole');
     expect(hunks['scratch/untracked.ts']).toBe('whole');
-    expect(hunks['src/gone.ts']).toBeUndefined();
+    expect(hunks['src/gone.ts']).toBe('whole');
+  });
+
+  // A removed export is a changed location: a caller it breaks reports the caller's path with a cause
+  // in the deleted file, and the pass-4 outside review showed that anchor landed outside and deferred.
+  test('a cause anchored in a deleted file is the diff, so the broken caller is fixed here, not deferred', () => {
+    const diff = parseHunks(DIFF);
+    expect(locusOf({ path: 'src/consumer.ts', line: 80, cause: { path: 'src/gone.ts', line: 2 } }, diff, null)).toBe('diff');
+    const [scoped] = scopeFindings([{ fingerprint: 'src/consumer.ts:80:api', path: 'src/consumer.ts', line: 80, severity: 'CRITICAL', cause: { path: 'src/gone.ts' } }], { policy: 'frozen', pass: 1, diffHunks: diff, rangeHunks: null });
+    expect(scoped!.locus).toBe('diff');
+    expect(scoped!.scope).toBe('fix');
   });
 
   test('locusOf: inside a hunk or within 3 lines is the diff, farther is outside, an added file is whole, the range wins over the diff', () => {
@@ -179,14 +189,16 @@ describe('loop summary', () => {
 
   // A pass logged without the template's timestamp (the logger stamps review_binding.started_at, never
   // timestamp) is still this invocation's pass; dropping it silently under-reported passes on #3481.
-  test('a row with no timestamp dates from its binding start; a row with neither is not counted', () => {
+  test('a row dates from the logger\'s binding start before the writer\'s timestamp; a row with neither is not counted', () => {
     const rows = [
       { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:00:00Z', review_scope: 'frozen', findings: [{ fingerprint: 'a:1:x', blocking: true, action: 'auto-fixed' }] },
       { skill: 'review', via: 'ship', review_scope: 'frozen', review_binding: { state: 'changed', started_at: '2026-10-26T10:30:00.000Z' }, findings: [{ fingerprint: 'c:1:z', action: 'noted' }] },
+      // A writer-typed date-only timestamp parses as midnight, before --since; the logger's start keeps the pass.
+      { skill: 'review', via: 'ship', timestamp: '2026-10-26', review_binding: { state: 'verified', started_at: '2026-10-26T10:45:00.000Z' }, findings: [{ fingerprint: 'd:1:w', action: 'noted' }] },
       { skill: 'review', via: 'ship', review_binding: { state: 'changed', started_at: '2026-10-26T09:00:00.000Z' }, findings: [{ fingerprint: 'old:1:q', action: 'noted' }] },
       { skill: 'review', via: 'ship', findings: [{ fingerprint: 'undated:1:q', action: 'noted' }] },
     ];
-    expect(summarizeReviewLoop(rows, '2026-10-26T09:30:00Z')).toEqual({ passes: 2, blocking_found: 1, deferred: 0, noted: 1, fixed: 1, scope: 'frozen' });
+    expect(summarizeReviewLoop(rows, '2026-10-26T09:30:00Z')).toEqual({ passes: 3, blocking_found: 1, deferred: 0, noted: 2, fixed: 1, scope: 'frozen' });
   });
 });
 
@@ -212,6 +224,8 @@ describe('gstack-review-scope (bin)', () => {
     ]);
     const f = path.join(repo.root, 'findings.json');
     fs.writeFileSync(f, findings);
+    // diff.mnemonicPrefix prints c/ and w/ instead of a/ and b/; classify pins the prefixes, so the user's git config cannot send every finding outside.
+    repo.git('config', 'diff.mnemonicPrefix', 'true');
     const p1 = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', '--pass', '1', '--findings', f, '--json']);
     expect(p1.status).toBe(EXIT.ok);
     expect(p1.err.trim()).toBe('REVIEW_SCOPE: policy=frozen pass=1 findings=4 fix=1 defer=2 note=1 blocking=3');
@@ -329,20 +343,27 @@ describe('gstack-review-scope (bin)', () => {
     fs.writeFileSync(classified, JSON.stringify([
       { fingerprint: 'lib/legacy.ts:7:data-loss', path: 'lib/legacy.ts', line: 7, severity: 'CRITICAL', category: 'data-loss', summary: 'Unbounded delete', locus: 'outside', kind: 'defect', blocking: true, scope: 'defer' },
       { fingerprint: 'lib/old.ts:1:auth', path: 'lib/old.ts', line: 1, severity: 'CRITICAL', category: 'auth', summary: 'Missing owner check', fix: 'check owner', locus: 'outside', kind: 'defect', blocking: true, scope: 'defer' },
+      // Reviewer text is untrusted: a security finding that quotes the credential it found must not reach a public issue.
+      { fingerprint: 'lib/keys.ts:3:security', path: 'lib/keys.ts', line: 3, severity: 'CRITICAL', category: 'security', summary: 'Hardcoded token ghp_' + 'Qm4zR7tK2wX9pL5vN8sD1fG6hJ3yB0cA7eU2', locus: 'outside', kind: 'defect', blocking: true, scope: 'defer' },
     ]));
     const r = runBin(repo, 'gstack-review-scope', ['defer', '--findings', classified, '--pr', '42', '--repo', 'acme/app', '--json'], { PATH: `${shim}:${process.env.PATH}` });
     expect(r.status).toBe(EXIT.ok);
-    expect(JSON.parse(r.out)).toEqual([
+    const records = JSON.parse(r.out);
+    expect(records.slice(0, 2)).toEqual([
       { fingerprint: 'lib/legacy.ts:7:data-loss', path: 'lib/legacy.ts:7', severity: 'CRITICAL', summary: 'Unbounded delete', issue: 9, url: 'https://example.test/acme/app/issues/9', reason: 'already filed' },
       { fingerprint: 'lib/old.ts:1:auth', path: 'lib/old.ts:1', severity: 'CRITICAL', summary: 'Missing owner check', issue: 10, url: 'https://example.test/acme/app/issues/10' },
     ]);
+    expect(records[2].issue).toBeNull();
+    expect(records[2].reason).toMatch(/^publication scan refused: HIGH /);
     expect(r.err).toContain('DEFERRED: #9 CRITICAL lib/legacy.ts:7');
     expect(r.err).toContain('DEFERRED: #10 CRITICAL lib/old.ts:1');
+    expect(r.err).toContain('DEFERRED: unfiled (publication scan refused: HIGH ');
     const calls = fs.readFileSync(log, 'utf8');
     expect(calls.match(/^issue create /gm)?.length).toBe(1);
     expect(calls.match(/^issue list /gm)?.length).toBe(1);
     expect(calls).toContain('--search "gstack-deferred-finding" in:body');
-    expect(calls).toContain('issue create --repo acme/app --title Deferred review finding: lib/old.ts:1 — Missing owner check --body-file');
+    expect(calls).toContain('issue create --title=Deferred review finding: lib/old.ts:1 — Missing owner check --body-file=- --repo acme/app');
+    expect(calls).not.toContain('Qm4zR7tK2wX9pL5vN8sD1fG6hJ3yB0cA7eU2');
   });
 
   // Generated by /ship Step 7 (coverage audit of the harness lane E diff).

@@ -35,17 +35,28 @@ export interface ScopedFinding extends ScopeFinding { locus: Locus; kind: Kind; 
 /** Per path, the new-side line ranges a diff touched; `'whole'` for an added or untracked file. */
 export type HunkMap = Record<string, Array<[number, number]> | 'whole'>;
 
-/** Parse `git diff -U0` output (plus untracked paths as whole files) into a hunk map. */
+/**
+ * Parse `git diff -U0` output (plus untracked paths as whole files) into a hunk
+ * map. The diff must be produced with `--src-prefix=a/ --dst-prefix=b/` (the
+ * `diff.mnemonicPrefix` setting prints `c/` and `w/` otherwise, and no path
+ * would match a finding). A deleted file is a whole changed location too: a
+ * finding whose `cause` is a removed export anchors there.
+ */
 export function parseHunks(diff: string, untracked: readonly string[] = []): HunkMap {
   const map: HunkMap = {};
   let current: string | null = null;
   let added = false;
+  let removed: string | null = null;
   for (const raw of diff.split('\n')) {
     const line = raw.replace(/\r$/, '');
-    if (line.startsWith('diff --git ')) { current = null; added = false; continue; }
-    if (line.startsWith('--- ')) { added = line === '--- /dev/null'; continue; }
+    if (line.startsWith('diff --git ')) { current = null; added = false; removed = null; continue; }
+    if (line.startsWith('--- ')) {
+      added = line === '--- /dev/null';
+      removed = added ? null : line.replace(/^--- (?:a\/)?/, '').replace(/\t.*$/, '');
+      continue;
+    }
     if (line.startsWith('+++ ')) {
-      if (line === '+++ /dev/null') { current = null; continue; }
+      if (line === '+++ /dev/null') { if (removed) map[removed] = 'whole'; current = null; continue; }
       current = line.replace(/^\+\+\+ (?:b\/)?/, '').replace(/\t.*$/, '');
       if (added) map[current] = 'whole';
       else if (!(current in map)) map[current] = [];
@@ -224,9 +235,14 @@ export function renderDeferredSection(deferred: readonly DeferredRecord[], noted
 export interface ReviewLoopSummary { passes: number; blocking_found: number; deferred: number; noted: number; fixed: number; scope: ReviewScopePolicy | 'unknown' }
 
 /** Review-log rows of one /ship invocation (skill review, via ship, at or after `since`) → the loop summary. */
-/** When a review-log row was written: its `timestamp`, else the start of the pass the logger bound it to (the row's writer fills `timestamp`; the logger does not). */
+/**
+ * When a review-log row's pass started: the logger's own `review_binding.started_at`
+ * first, and the writer-typed `timestamp` only when the logger stamped nothing. The
+ * writer fills `timestamp` by hand, so a date-only or guessed value could otherwise
+ * sort a real pass before `--since` and leave the receipt without a loop to record.
+ */
 function rowTime(row: Record<string, any>): number {
-  for (const value of [row.timestamp, row.review_binding?.started_at]) {
+  for (const value of [row.review_binding?.started_at, row.timestamp]) {
     const ms = typeof value === 'string' ? Date.parse(value) : NaN;
     if (Number.isFinite(ms)) return ms;
   }

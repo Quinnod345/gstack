@@ -35,7 +35,7 @@ import { EXIT, exitTableHelp, type ShipReceipt } from '../lib/headless-artifacts
 import { resultLine, resultLineWithDocs } from '../lib/result-codes';
 import { versionAtRef } from '../lib/restamp';
 import { readPregateFile, verifyPregate } from '../lib/pregate/index';
-import { isUnavailable, loadPolicyFromBase, resolveBaseBranch } from '../lib/ship-policy';
+import { isUnavailable, loadPolicyFromBase, matchesAny, resolveBaseBranch } from '../lib/ship-policy';
 import { approvalForReceipt } from '../lib/approval-citations';
 import {
   CARRY_METADATA_GLOBS, CARRY_TEST_GLOBS,
@@ -369,13 +369,22 @@ function cmdCarry(rest: string[], json: boolean): number {
   const extra = { metadata: [...(policy?.stamp_files ?? []), ...(policy?.stamp_paths ?? []), ...(policy?.release_outputs ?? []), ...(policy?.changelog ? [policy.changelog] : [])] };
   const changedRaw = git(['diff', '--name-only', from, head], repoRoot);
   if (changedRaw === undefined) return refused('RECEIPT_CARRY_REFUSED', `git diff ${from.slice(0, 12)} ${head.slice(0, 12)} failed`);
-  // A default-metadata manifest is read at both heads: only a version stamp keeps it out of the product patch.
+  // Every metadata-listed path is read at both heads: only a stamp keeps it out of the product patch.
   const blobAt = (ref: string, p: string): string | null => { const r = spawnSync('git', ['show', `${ref}:${p}`], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }); return r.status === 0 ? r.stdout : null; };
-  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra, CARRY_METADATA_GLOBS.includes(p) ? { before: blobAt(from, p), after: blobAt(head, p) } : undefined) }));
+  const versionAt = (ref: string): string | null => {
+    const file = blobAt(ref, 'VERSION');
+    if (file !== null) return file.trim() || null;
+    try { const v = JSON.parse(blobAt(ref, 'package.json') ?? 'null')?.version; return typeof v === 'string' ? v : null; } catch { return null; }
+  };
+  const oldVersion = versionAt(from);
+  const newVersion = versionAt(head);
+  const allMetadataGlobs = [...CARRY_METADATA_GLOBS, ...extra.metadata];
+  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra, matchesAny(allMetadataGlobs, p) ? { before: blobAt(from, p), after: blobAt(head, p), oldVersion, newVersion } : undefined) }));
   // Pathspecs by class: tests and metadata are excluded from the product patch; the test patch is the tests alone.
+  // A metadata-listed path whose change was not a stamp stays in the product patch: every glob that matches it is dropped from the exclusion.
   const excludeGlobs = (globs: readonly string[]) => globs.map(g => `:(exclude,glob)${g}`);
-  const demoted = new Set(changed.filter(c => c.class === 'product' && CARRY_METADATA_GLOBS.includes(c.path)).map(c => c.path));
-  const metadataGlobs = [...CARRY_METADATA_GLOBS.filter(g => !demoted.has(g)), ...extra.metadata];
+  const demoted = changed.filter(c => c.class === 'product' && matchesAny(allMetadataGlobs, c.path)).map(c => c.path);
+  const metadataGlobs = allMetadataGlobs.filter(g => !demoted.some(p => matchesAny([g], p)));
   const productSpec = ['.', ...excludeGlobs(CARRY_TEST_GLOBS), ...excludeGlobs(metadataGlobs)];
   const testSpec = [...CARRY_TEST_GLOBS.map(g => `:(glob)${g}`), ...excludeGlobs(metadataGlobs)];
   const productFrom = patchId(repoRoot, fromBase, from, productSpec);

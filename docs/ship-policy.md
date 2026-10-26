@@ -593,7 +593,9 @@ construction:
    the diff (`scope: fix`). A blocking finding in code the PR did not change is
    `scope: defer`: `gstack-review-scope defer` files it as a GitHub issue (reusing
    an open issue that carries the same `<!-- gstack-deferred-finding: <fingerprint> -->`
-   marker; `unfiled (<reason>)` without `gh`) and `render` writes it under
+   marker; the title and body go through the same publication scan as the PR
+   body, so a finding that quotes a credential stays `unfiled (publication scan
+   refused: …)`; `unfiled (<reason>)` without `gh`) and `render` writes it under
    `## Deferred findings` in the PR body. Below-floor findings outside the diff,
    and every below-floor finding from pass 2 on, are `scope: note` and go under
    `## Review notes` in the PR body.
@@ -643,11 +645,15 @@ base is the same at both heads (verbatim: whitespace counts, hunk line numbers
 do not). Product means every changed path that is not test code (`test/**`,
 `spec/**`, `e2e/**`, `**/*.test.<code ext>`, `**/*.spec.<code ext>` and the
 other `CARRY_TEST_GLOBS` in `lib/ship-receipt.ts`; an `openapi.spec.yaml` is
-product) or release metadata (`CHANGELOG.md`, `agents-digest/**`, the paths the
-policy's `stamp_files`, `stamp_paths`, `release_outputs` and `changelog` name,
-and `VERSION` or `package.json` only while the change is a version stamp and
-nothing else: a dependency, a script or a new key makes them product). Lockfiles
-are product unless the policy names them. A base merge contributes no product
+product) or release metadata (`CHANGELOG.md`, `agents-digest/**`, and `VERSION`
+or `package.json` only while the change is a version stamp and nothing else: a
+dependency, a script or a new key makes them product). A path the policy's
+`stamp_files`, `stamp_paths` or `release_outputs` name is metadata only while
+its change is a stamp, the rule the tree receipt applies to the same paths: a
+manifest by its version key, any other file when its new text reads as the old
+once the new release version is replaced by the old one. A logic change in a
+stamped source file is product. Lockfiles are product unless the policy names
+them. A base merge contributes no product
 change of its own. A receipt carried twice keeps the reviewed head as
 `carry.from` and adds up the merges and paths. The carried receipt records
 `carry: { from, reason, product_patch_id, changed_paths, merge_commits,
