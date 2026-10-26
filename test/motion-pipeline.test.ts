@@ -96,7 +96,8 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       expect(fs.readdirSync(cap).filter(f => f.startsWith('.partial-'))).toEqual([]);
       const drift = run([ENCODE, 'export', cap, '--name', 'pipe', '--formats', 'loop', '--gif-fps', '7']);
       expect(drift.code).toBe(2);
-      expect(drift.err).toContain('does not give a whole number of frames per 0.5 s cycle');
+      expect(drift.err).toContain('must be a whole fps from 1 to 50');
+      expect(run([ENCODE, 'export', cap, '--name', 'pipe', '--formats', '800', '--small-fps', '60']).code).toBe(2);
       expect(exp.out).toContain(`EXPORT_OK ${path.join(cap, 'pipe-x.mp4')}`);
       expect(exp.out).toContain(`EXPORT_OK ${path.join(cap, 'pipe-800x500.gif')}`);
       const probe = run([FFPROBE!, '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames', '-of', 'csv=p=0', path.join(cap, 'pipe-x.mp4')]);
@@ -188,20 +189,25 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
     }
   }, 240_000);
 
-  // Value: protects=a mask that paints the whole frame reports overflow as not checked instead of blacking out every pixel and passing,
-  //   and a --mask that matches nothing stops the capture instead of blaming the page; fails_when=the coverage guard or the empty-mask
-  //   check is dropped; why_new=adversarial review reproduced both; seam=none; no_claim=only a full-frame mask; the 90% line is not swept
-  test('a mask that covers the frame is not checked, and an empty mask stops the capture', () => {
+  // Value: protects=a mask that paints the whole frame fails overflow in a cards layout and is reported as not checked only for an app
+  //   frame, instead of blacking out every pixel and passing; a --mask that matches nothing stops the capture before any frame;
+  //   fails_when=the coverage guard, its app-only skip or the empty-mask check is dropped; why_new=adversarial review reproduced each;
+  //   seam=none; no_claim=only a full-frame mask; the 90% line and a grow-driven failure are not swept
+  test('a mask that covers the frame fails cards and is not checked for an app frame; an empty mask stops the capture', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
     try {
       expect(capture(dir, page({ loops: true }), { mask: 'html' }).code).toBe(0);
-      const check = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES]);
-      expect(check.code, check.out + check.err).toBe(0);
-      expect(check.out).toMatch(/MOTION_CHECK: overflow skipped \(the grown mask covers \d+% of the frame/);
-      expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: clean (overflow not checked)');
+      const cards = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES]);
+      expect(cards.code).toBe(1);
+      expect(cards.out).toMatch(/MOTION_CHECK: overflow fail the mask covers \d+% of the frame; in a cards layout mark only the card containers/);
+      const app = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES, '--layout', 'app']);
+      expect(app.code, app.out + app.err).toBe(0);
+      expect(app.out).toMatch(/MOTION_CHECK: overflow skipped \(the app frame's surfaces cover \d+% of the frame/);
+      expect(app.out.trim().split('\n').pop()).toBe('MOTION_RESULT: clean (overflow not checked)');
       const empty = capture(dir, page({ loops: true }), { mask: '[data-nope]' });
       expect(empty.code).toBe(1);
       expect(empty.err).toContain("MOTION_MASK_EMPTY: --mask '[data-nope]' matches no element");
+      expect(fs.readdirSync(path.join(dir, 'cap', 'frames'))).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

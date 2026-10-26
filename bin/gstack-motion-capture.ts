@@ -94,6 +94,9 @@ try {
     const page = await openPage('capture', scale);
     const contract = await page.evaluate(() => typeof (window as any).__start === 'function' && typeof (window as any).__tick === 'function');
     if (!contract) die(1, `MOTION_CONTRACT_MISSING: ${opts.target}?capture does not expose window.__start() and window.__tick(dt); add the capture mode before recording`);
+    if (opts.mask && await page.evaluate(selector => document.querySelectorAll(selector).length, opts.mask) === 0) {
+      die(1, `MOTION_MASK_EMPTY: --mask '${opts.mask}' matches no element on ${opts.target}; mark each clip container with data-motion-clip or fix the selector`);
+    }
     const loopTime: number[] = [];
     for (let i = 0; i < plan.frames; i++) {
       const dt = stepMs(i);
@@ -118,8 +121,6 @@ try {
     const still = await openPage('still', scale);
     await still.screenshot({ path: path.join(out, 'still.png'), animations: 'disabled' });
     if (opts.mask) {
-      const matched = await still.evaluate(selector => document.querySelectorAll(selector).length, opts.mask);
-      if (matched === 0) die(1, `MOTION_MASK_EMPTY: --mask '${opts.mask}' matches no element on ${opts.target}?still; mark each clip container with data-motion-clip or fix the selector`);
       await still.addStyleTag({ content: maskCss(opts.mask) });
       await still.screenshot({ path: path.join(out, 'mask.png'), animations: 'disabled' });
     }
