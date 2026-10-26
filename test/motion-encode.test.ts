@@ -208,6 +208,7 @@ describe('ffmpeg is optional and named when missing', () => {
       const r = Bun.spawnSync([BIN, 'check', dir], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000, env: { ...process.env, GSTACK_FFMPEG: path.join(dir, 'no-ffmpeg') } });
       expect(r.exitCode).toBe(3);
       expect(r.stdout.toString().trim()).toBe(FFMPEG_MISSING);
+      expect(r.stderr.toString()).toContain(`GSTACK_FFMPEG=${path.join(dir, 'no-ffmpeg')} does not exist`);
       expect(FFMPEG_MISSING).toContain('brew install ffmpeg');
       expect(FFMPEG_MISSING).toContain('apt-get install -y ffmpeg');
       expect(FFMPEG_MISSING).toContain('winget install');

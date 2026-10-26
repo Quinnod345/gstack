@@ -61,7 +61,8 @@ function capture(dir: string, html: string, o: { mask?: string | false } = {}) {
 
 describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', () => {
   // Value: protects=a looping page captures 54 frames whose manifest, still and mask the encoder accepts, checks clean and exports a one-cycle MP4;
-  //   fails_when=frame naming, start frame, tick units, still/mask scale or the export window drift between the two bins; why_new=only the paid marathon case runs both bins;
+  //   fails_when=frame naming, start frame, tick units, still/mask scale or the export window drift between the two bins, a failed re-export
+  //   truncates the last good file, or a GIF fps that drifts against the cycle is accepted; why_new=only the paid marathon case runs both bins;
   //   seam=none; no_claim=a 0.5 s synthetic loop stands in for an agent-built page; GIF quality and X upload acceptance are not checked
   test('a looping page captures, checks clean and exports one cycle', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
@@ -87,6 +88,15 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
 
       const exp = run([ENCODE, 'export', cap, '--name', 'pipe', '--formats', 'mp4,800', '--pad', '#f4f1ea']);
       expect(exp.code, exp.out + exp.err).toBe(0);
+      const gifSize = fs.statSync(path.join(cap, 'pipe-800x500.gif')).size;
+      const broken = run([ENCODE, 'export', cap, '--name', 'pipe', '--formats', '800', '--crop', '4000:2500:0:0']);
+      expect(broken.code).toBe(1);
+      expect(broken.out).toContain('EXPORT_FAILED pipe-800x500.gif');
+      expect(fs.statSync(path.join(cap, 'pipe-800x500.gif')).size).toBe(gifSize);
+      expect(fs.readdirSync(cap).filter(f => f.startsWith('.partial-'))).toEqual([]);
+      const drift = run([ENCODE, 'export', cap, '--name', 'pipe', '--formats', 'loop', '--gif-fps', '7']);
+      expect(drift.code).toBe(2);
+      expect(drift.err).toContain('does not give a whole number of frames per 0.5 s cycle');
       expect(exp.out).toContain(`EXPORT_OK ${path.join(cap, 'pipe-x.mp4')}`);
       expect(exp.out).toContain(`EXPORT_OK ${path.join(cap, 'pipe-800x500.gif')}`);
       const probe = run([FFPROBE!, '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames', '-of', 'csv=p=0', path.join(cap, 'pipe-x.mp4')]);
@@ -178,21 +188,38 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
     }
   }, 240_000);
 
-  // Value: protects=a mask that paints the whole frame fails overflow instead of blacking out every pixel on both sides and passing;
-  //   fails_when=the mask-coverage guard is dropped; why_new=adversarial review reproduced a vacuous overflow pass; seam=none;
-  //   no_claim=only a full-frame mask; the 90% threshold itself is not swept
-  test('a mask that covers the frame fails overflow', () => {
+  // Value: protects=a mask that paints the whole frame reports overflow as not checked instead of blacking out every pixel and passing,
+  //   and a --mask that matches nothing stops the capture instead of blaming the page; fails_when=the coverage guard or the empty-mask
+  //   check is dropped; why_new=adversarial review reproduced both; seam=none; no_claim=only a full-frame mask; the 90% line is not swept
+  test('a mask that covers the frame is not checked, and an empty mask stops the capture', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
     try {
       expect(capture(dir, page({ loops: true }), { mask: 'html' }).code).toBe(0);
       const check = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES]);
-      expect(check.code).toBe(1);
-      expect(check.out).toMatch(/MOTION_CHECK: overflow fail the mask covers \d+% of the frame/);
-      expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: 1 failed');
+      expect(check.code, check.out + check.err).toBe(0);
+      expect(check.out).toMatch(/MOTION_CHECK: overflow skipped \(the grown mask covers \d+% of the frame/);
+      expect(check.out.trim().split('\n').pop()).toBe('MOTION_RESULT: clean (overflow not checked)');
+      const empty = capture(dir, page({ loops: true }), { mask: '[data-nope]' });
+      expect(empty.code).toBe(1);
+      expect(empty.err).toContain("MOTION_MASK_EMPTY: --mask '[data-nope]' matches no element");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 240_000);
+
+  // Value: protects=a page whose __tick never returns stops with MOTION_CAPTURE_FAILED instead of hanging the capture forever;
+  //   fails_when=the per-frame 10 s bound is dropped; why_new=adversarial probe hung at 100% renderer CPU; seam=none;
+  //   no_claim=only a spinning __tick; a hung screenshot is not bounded
+  test('a __tick that never returns fails the capture', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
+    try {
+      const c = capture(dir, '<!doctype html><body><script>window.__lt = 0; window.__start = () => {}; window.__tick = dt => { window.__lt += dt; if (window.__lt > 0.05) for (;;) {} };</script></body>', { mask: false });
+      expect(c.code).toBe(1);
+      expect(c.err).toMatch(/MOTION_CAPTURE_FAILED: frame \d+ took longer than 10 s/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   // Value: protects=an offscreen loading=lazy image no longer hangs the still render (img.decode() never settles on it), and --still writes
   //   one PNG at --scale (the Step 3 fidelity reference);

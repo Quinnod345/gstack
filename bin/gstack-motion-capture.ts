@@ -97,8 +97,11 @@ try {
     const loopTime: number[] = [];
     for (let i = 0; i < plan.frames; i++) {
       const dt = stepMs(i);
-      await page.clock.runFor(dt);
-      loopTime.push(await page.evaluate(([i, pre, dt]) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const stuck = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`frame ${i} took longer than 10 s; a __tick, timer or animation callback never returned`)), 10_000);
+      });
+      loopTime.push(await Promise.race([stuck, page.clock.runFor(dt).then(() => page.evaluate(([i, pre, dt]) => {
         const w = window as any;
         if (i === pre) w.__start();
         if (i >= pre) w.__tick(dt / 1000);
@@ -109,12 +112,14 @@ try {
           a.currentTime = Math.max(0, now - a.__m);
         }
         return i >= pre ? Number(w.__lt) || 0 : 0;
-      }, [i, plan.pre, dt] as const));
+      }, [i, plan.pre, dt] as const))]).finally(() => clearTimeout(timer)));
       await page.screenshot({ path: path.join(out, 'frames', `${String(i).padStart(5, '0')}.png`) });
     }
     const still = await openPage('still', scale);
     await still.screenshot({ path: path.join(out, 'still.png'), animations: 'disabled' });
     if (opts.mask) {
+      const matched = await still.evaluate(selector => document.querySelectorAll(selector).length, opts.mask);
+      if (matched === 0) die(1, `MOTION_MASK_EMPTY: --mask '${opts.mask}' matches no element on ${opts.target}?still; mark each clip container with data-motion-clip or fix the selector`);
       await still.addStyleTag({ content: maskCss(opts.mask) });
       await still.screenshot({ path: path.join(out, 'mask.png'), animations: 'disabled' });
     }
