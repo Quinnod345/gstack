@@ -171,7 +171,8 @@ SHIP_RECEIPT: pr=42 head=<head12> …
 CI's Version Gate (`scripts/compare-pr-version.ts`) accepts that head as
 unstamped when `VERSION` and `package.json`'s version match its merge base, the
 CHANGELOG change is confined to `[Unreleased]`, and any changed release output
-is byte for byte what `release_tool` generates at the base's `VERSION`, so a
+is byte for byte what `release_tool` generates at the head's merge base
+`VERSION` (the head's own, so a later stamp on main changes nothing), so a
 generator change ships with its regenerated output and the slot's restamp
 regenerates it again. A release output that differs from that (a hand edit, one generated at a
 bumped version, or one the tool never writes), a `VERSION` bump or a

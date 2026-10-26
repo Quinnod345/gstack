@@ -183,6 +183,39 @@ describe('version gate: unstamped heads under a train policy', () => {
       expect(r.git('worktree', 'list').trim().split('\n')).toHaveLength(1);
     });
 
+    test('a regenerated output stays unstamped after main stamps again (the regeneration is at the merge base VERSION, not the base tip)', () => {
+      const r = fixture();
+      branch(r);
+      gen(r, 'reworded body');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'reword the digest');
+      r.git('checkout', '-q', 'main');
+      write(r, 'VERSION', '1.2.4.0\n');
+      write(r, 'generated/digest.md', '# digest v1.2.4.0\nbody\n');
+      write(r, 'CHANGELOG.md', read(r, 'CHANGELOG.md').replace('# Changelog\n\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-02\n\n- another release\n\n'));
+      commit(r, 'release 1.2.4.0');
+      r.git('push', '-q', 'origin', 'main');
+      r.git('fetch', '-q', 'origin');
+      const res = run(r, head, '1.2.3.0');
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('a tool whose background child outlives it does not hold the gate open', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', "const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\nreworded body\\n');require('child_process').spawn('sleep',['20'],{stdio:'inherit'}).unref();\n");
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'tool with a lingering child');
+      const started = Date.now();
+      const res = run(r, head);
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
     test('the tool runs without the gate\'s tokens, and an output the tool never writes still counts as a stamp', () => {
       const r = fixture();
       branch(r);

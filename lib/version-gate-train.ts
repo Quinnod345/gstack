@@ -36,9 +36,12 @@ export function bumpVersion(version: string, level: string): string | null {
 /**
  * An unstamped head may regenerate a release output (a generator change, for
  * example) as long as what it committed is exactly what the policy's
- * release_tool produces at the base's VERSION: the slot's restamp regenerates
- * it anyway. Runs the head's tool in a throwaway worktree with VERSION set to
- * the base's and compares each changed output byte for byte. A stamp (new
+ * release_tool produces at its merge base's VERSION (the head's own, since
+ * VERSION is unchanged on this path; the base tip may have stamped since):
+ * the slot's restamp regenerates it anyway. Runs the head's tool in a
+ * throwaway worktree with that VERSION and compares each changed output byte
+ * for byte, reading the tool's output from a file so a lingering child cannot
+ * hold the gate open. A stamp (new
  * VERSION inside the output) differs, so it still classifies as stamped, and
  * so does an output the tool never writes (it is removed before the run).
  * The tool is head code: it runs with a bare environment (no tokens), no
@@ -47,20 +50,25 @@ export function bumpVersion(version: string, level: string): string | null {
  */
 const TOOL_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'BUN_INSTALL', 'SystemRoot', 'TEMP', 'TMP'];
 function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: string; tool: string; outputs: string[] }): { kind: 'same' } | { kind: 'differs'; files: string[] } | { kind: 'error'; reason: string } {
-  if (!o.baseVersion.trim()) return { kind: 'error', reason: 'the base has no VERSION to regenerate the release outputs at' };
+  if (!o.baseVersion.trim()) return { kind: 'error', reason: 'the merge base has no VERSION to regenerate the release outputs at' };
   let staging: string;
   try { staging = fs.mkdtempSync(path.join(os.tmpdir(), 'version-gate-regen-')); } catch (e) { return { kind: 'error', reason: `cannot create a staging directory to regenerate the release outputs: ${e instanceof Error ? e.message : String(e)}` }; }
   try {
-    const add = spawnSync('git', ['worktree', 'add', '--detach', '-q', staging, o.head], { cwd: o.repoRoot, encoding: 'utf8', timeout: 60_000 });
+    const add = spawnSync('git', ['worktree', 'add', '--detach', '-q', staging, o.head], { cwd: o.repoRoot, encoding: 'utf8', timeout: 30_000 });
     if (add.status !== 0) return { kind: 'error', reason: `cannot stage ${o.head.slice(0, 12)} to regenerate its release outputs: ${(add.stderr || '').trim().slice(0, 200)}` };
+    fs.rmSync(path.join(staging, 'VERSION'), { force: true });
     fs.writeFileSync(path.join(staging, 'VERSION'), o.baseVersion);
     for (const f of o.outputs) fs.rmSync(path.join(staging, f), { force: true });
     const env: NodeJS.ProcessEnv = { GSTACK_RESTAMP_VERSION: o.baseVersion.trim(), GSTACK_RESTAMP_STAGING: '1' };
     for (const key of TOOL_ENV_KEYS) if (process.env[key] !== undefined) env[key] = process.env[key];
-    const run = spawnSync('sh', ['-c', o.tool], { cwd: staging, encoding: 'utf8', timeout: 120_000, env });
+    const logPath = path.join(os.tmpdir(), path.basename(staging) + '.log');
+    const log = fs.openSync(logPath, 'w');
+    let run: ReturnType<typeof spawnSync>;
+    try { run = spawnSync('sh', ['-c', o.tool], { cwd: staging, stdio: ['ignore', log, log], timeout: 120_000, env }); } finally { fs.closeSync(log); }
+    const output = (() => { try { return fs.readFileSync(logPath, 'utf8'); } catch { return ''; } finally { fs.rmSync(logPath, { force: true }); } })();
     if (run.status !== 0) {
       const how = run.status === null ? (run.error ? run.error.message : `was killed by ${run.signal ?? 'a signal'} (120s limit)`) : `exited ${run.status}`;
-      return { kind: 'error', reason: `release_tool \`${o.tool}\` ${how} at ${o.head.slice(0, 12)} with the base's VERSION, so its release outputs cannot be told from a stamp: ${(run.stderr || run.stdout || '').trim().slice(0, 200)}` };
+      return { kind: 'error', reason: `release_tool \`${o.tool}\` ${how} at ${o.head.slice(0, 12)} with its merge base's VERSION, so its release outputs cannot be told from a stamp: ${output.trim().slice(0, 200)}` };
     }
     const files = o.outputs.filter(f => {
       const committed = spawnSync('git', ['show', `${o.head}:${f}`], { cwd: o.repoRoot, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
@@ -70,9 +78,9 @@ function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: str
     });
     return files.length ? { kind: 'differs', files } : { kind: 'same' };
   } finally {
-    spawnSync('git', ['worktree', 'remove', '--force', staging], { cwd: o.repoRoot, timeout: 60_000 });
+    spawnSync('git', ['worktree', 'remove', '--force', staging], { cwd: o.repoRoot, timeout: 30_000 });
     fs.rmSync(staging, { recursive: true, force: true });
-    spawnSync('git', ['worktree', 'prune'], { cwd: o.repoRoot, timeout: 60_000 });
+    spawnSync('git', ['worktree', 'prune'], { cwd: o.repoRoot, timeout: 30_000 });
   }
 }
 
@@ -92,13 +100,15 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
   const touched: string[] = changed.filter(f => f === 'VERSION');
   if (npmVersion(mergeBase) !== npmVersion(o.head)) touched.push('package.json version');
   const outputs = changed.filter(f => matchesAny(releaseOutputs, f));
+  const baseVersion = show(base, 'VERSION') ?? '';
   if (!touched.length && outputs.length && typeof policy.release_tool === 'string') {
-    const regen = regeneratedAtBase({ repoRoot: o.repoRoot, head: o.head, baseVersion: show(base, 'VERSION') ?? '', tool: policy.release_tool, outputs });
+    // the head's VERSION is its merge base's (unchanged on this path); the base tip may have stamped since
+    const regen = regeneratedAtBase({ repoRoot: o.repoRoot, head: o.head, baseVersion: show(mergeBase, 'VERSION') ?? '', tool: policy.release_tool, outputs });
     if (regen.kind === 'error') return { kind: 'invalid', reason: regen.reason };
     if (regen.kind === 'differs') touched.push(...regen.files);
   } else touched.push(...outputs);
   if (touched.length) {
-    const expected = bumpVersion(show(base, 'VERSION') ?? '', policy.bump ?? 'patch');
+    const expected = bumpVersion(baseVersion, policy.bump ?? 'patch');
     return expected ? { kind: 'stamped', expected } : { kind: 'invalid', reason: `${base}:VERSION is not a 4-part version` };
   }
 
