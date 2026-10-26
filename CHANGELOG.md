@@ -7,8 +7,10 @@
 ### Changed
 - **`bin/gstack-config`**: `proactive` defaults to `core`; `set proactive` accepts `core`, `all`, `off`, `true` and `false` and warns on anything else, storing `core`. The config header documents the three values.
 - **`SKILL.md.tmpl`** (the router): three branches, `off`, `core` and `all`; under `core` only the four core routing rules auto-invoke and a skill the user names is always invoked. The opt-out line writes `off`, and `all` and `core` have their own lines.
-- **Every skill's preamble** (`scripts/resolvers/preamble/generate-upgrade-check.ts`): the steady-state rule names `core` as the default with the four skills. The rule is two characters shorter than before, so the 89 size pins in `test/fixtures/skill-md-size-allowlist.json` move down by 2; none goes up.
+- **Every skill's preamble** (`scripts/resolvers/preamble/generate-upgrade-check.ts`): the steady-state rule names the four core skills under `core`, scopes the setting to unasked suggestions ("This skill's steps still run", so a handoff or a dispatched `/document-release` inside an invoked skill is not a suggestion), and is exactly as long as before, so the 89 size pins in `test/fixtures/skill-md-size-allowlist.json` are unchanged.
 - **`bin/gstack-skill-start`**: the one-time prompt offers "Keep the core four (recommended)", "Suggest every matching skill" and "Turn it off", writing `core`, `all` or `off`. `scripts/question-registry.ts` lists the same three options.
+- **`bin/gstack-skill-start`**: the `PROACTIVE:` STATUS fallback when `gstack-config` is missing is `core`, not `true` (found by /ship's coverage audit, red at the first head); a stored value gstack does not know reads as `core`; the first-run and first-loop tips name only core skills and stay quiet under `off`.
+- **`office-hours/sections/design-and-handoff.md.tmpl`**: the next-review handoff takes the recommend-only path under `off` as well as the legacy `false` (found by /ship's review); under `core` it still offers the review, because a step inside an invoked skill is part of that skill, which the router now says in so many words.
 
 ### Added
 - **`docs/proactive.md`**: the three values, who each is for, the legacy spellings, the commands, and the approved fallback (`off` if collisions continue). Linked from docs/skills.md.
@@ -16,9 +18,11 @@
 ### Tests
 - `test/proactive-config.test.ts`: the default in get, list and defaults; the five accepted values stored verbatim; the warning and `core` fallback on an unknown value (negative control: `on`); the header names the four skills.
 - `test/proactive-core-set.test.ts`: the router template and its render name `core` as the default and exactly the four core skills (negative control: no non-core skill in the core block, `true` is no longer "the default", no `set proactive false` left); the preamble rule carries the same four and did not grow past the old line; the prompt and registry agree on `core`, `all`, `off`.
+- `test/proactive-skill-start.test.ts`: the `PROACTIVE:` STATUS line carries the stored value, `core` when unset or unknown, and the missing-`gstack-config` fallback equals the config default (regression test: failed at the first head). `test/proactive-core-set.test.ts` also checks every surface (config header and default, router, preamble, prompt, docs) for the same four skills and three values, the office-hours gate, the router's in-skill carve-out, and the tips.
+- Known gap, follow-up: the `## Skill routing` section gstack injects into a project's CLAUDE.md, and the "Proactively suggest" sentences in non-core skill descriptions (full catalog mode), still route every skill; docs/proactive.md says so.
 
 ### Gate integrity
-- No threshold, budget, timeout, trial count or case kind changed. Size pins only went down (89 pins, each by 2).
+- No threshold, budget, timeout, trial count or case kind changed. Size pins unchanged (the preamble is byte-for-byte the same length).
 
 ## [1.91.221.0] - 2026-10-25
 
