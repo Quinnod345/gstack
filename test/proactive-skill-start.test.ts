@@ -4,25 +4,25 @@
  * bin/gstack-config and falls back to a literal when the config binary is
  * missing. The default moved from `true` to `core`.
  *
- * Value: protects=the PROACTIVE STATUS line a skill reads carries the stored
- * proactive value, core when unset, and core for a value the router does not
- * know; fails_when=gstack-skill-start stops consulting gstack-config for
- * proactive, the default moves back to true, or a hand-edited junk value leaks
- * into STATUS; why_new=proactive-config.test.ts exercises gstack-config alone and
- * gstack-skill-start.test.ts asserts only that the key is emitted; seam=none;
- * no_claim=how the model applies the value (prose, not executed here)
- *
- * The fallback test: a broken install (no gstack-config beside the script)
- * must report the same mode as the config default.
- * Value: protects=a skill run whose bin has no gstack-config reports the same
- * proactive mode as the config default; fails_when=lookup_default moves (true
- * to core) without the skill-start fallback literal following; why_new=no test
- * ran skill-start without gstack-config beside it; seam=none (the script is
- * copied next to an empty bin, the OV4 sanitize test's pattern); no_claim=how
- * the model applies the value (prose, not executed here)
- * Regression proof — fails at HEAD (b115142): yes · passes at base: yes · passes after fix (9e22d7f): yes
+ * Value: protects=the PROACTIVE STATUS line a skill reads is one of core | all
+ * | off: the stored value, core when unset, all/off for the legacy true/false
+ * (quotes, case and a trailing comment tolerated), core for a value gstack does
+ * not know, and the config default when gstack-config is missing beside the
+ * script; and the off-only surfaces (the first-run and first-loop tips, the
+ * CLAUDE.md routing offer) fire under core and not under off, by running the
+ * script; fails_when=gstack-skill-start stops consulting gstack-config, the
+ * default moves back to true, a legacy or junk value leaks into STATUS, the
+ * missing-config fallback literal drifts from lookup_default, or a tip or the
+ * routing offer fires under off; why_new=proactive-config.test.ts exercises
+ * gstack-config alone, gstack-skill-start.test.ts asserts only that the key is
+ * emitted, and no test ran skill-start without gstack-config beside it;
+ * seam=none (the fallback test copies the script next to an empty bin, the OV4
+ * sanitize test's pattern); no_claim=how the model applies the value (prose,
+ * not executed here)
+ * Regression proof — fails at HEAD: yes · passes at base: yes · passes after fix: yes
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -48,9 +48,9 @@ function freshState(config: string): string {
   return state;
 }
 
-function runStart(script: string, state: string): string {
+function runStart(script: string, state: string, cwd = tmpHome): string {
   const r = runBin(script, ['--skill', 'testskill'], {
-    cwd: tmpHome,
+    cwd,
     timeoutMs: 30_000,
     env: {
       PATH: process.env.PATH,
@@ -67,12 +67,15 @@ function runStart(script: string, state: string): string {
 const proactiveLine = (out: string) => out.match(/^PROACTIVE: (.*)$/m)?.[1];
 
 describe('gstack-skill-start PROACTIVE status line', () => {
-  test('carries core when nothing is stored, and the stored value (new or legacy spelling) otherwise', () => {
+  test('carries core when nothing is stored, the stored value otherwise, the legacy true/false as all/off, a quoted or upper-case hand edit normalized, and anything unknown as core', () => {
     const cases: Array<[string, string]> = [
       ['update_check: false\n', 'core'],
       ['update_check: false\nproactive: all\n', 'all'],
       ['update_check: false\nproactive: off\n', 'off'],
-      ['update_check: false\nproactive: true\n', 'true'],
+      ['update_check: false\nproactive: true\n', 'all'],
+      ['update_check: false\nproactive: false\n', 'off'],
+      ['update_check: false\nproactive: "off"\n', 'off'],
+      ['update_check: false\nproactive: OFF # typed by hand\n', 'off'],
       ['update_check: false\nproactive: on\n', 'core'],
     ];
     for (const [config, expected] of cases) {
@@ -83,7 +86,7 @@ describe('gstack-skill-start PROACTIVE status line', () => {
         fs.rmSync(state, { recursive: true, force: true });
       }
     }
-  });
+  }, 60_000);
 
   test('the CLAUDE.md routing offer fires under core and not under off (the routing rules are the auto-invocation off turns off)', () => {
     const cases: Array<[string, boolean]> = [
@@ -103,6 +106,30 @@ describe('gstack-skill-start PROACTIVE status line', () => {
       }
     }
   });
+
+  test('the first-run and first-loop tips are shown under core and suppressed under off/false (the marker is not written either)', () => {
+    const cases: Array<[string, boolean]> = [
+      ['update_check: false\n', true],
+      ['update_check: false\nproactive: off\n', false],
+      ['update_check: false\nproactive: false\n', false],
+    ];
+    for (const [config, shown] of cases) {
+      const state = freshState(config);
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-proactive-ss-repo-'));
+      execFileSync('git', ['init', '-q'], { cwd: repo });
+      try {
+        const first = runStart(path.join(BIN, 'gstack-skill-start'), state, repo);
+        expect(first, config).toContain('FIRST_TASK: greenfield');
+        expect(first.includes('GSTACK_INSTRUCTION_BEGIN: first-run-tip'), config).toBe(shown);
+        const second = runStart(path.join(BIN, 'gstack-skill-start'), state, repo);
+        expect(second.includes('GSTACK_INSTRUCTION_BEGIN: first-loop-tip'), config).toBe(shown);
+        expect(fs.existsSync(path.join(state, '.first-loop-tip-shown')), config).toBe(shown);
+      } finally {
+        fs.rmSync(state, { recursive: true, force: true });
+        fs.rmSync(repo, { recursive: true, force: true });
+      }
+    }
+  }, 60_000);
 
   test('regression: with no gstack-config beside it, the fallback reports the config default, not a stale literal', () => {
     const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-proactive-ss-bin-'));

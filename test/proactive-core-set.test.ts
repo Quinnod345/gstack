@@ -47,12 +47,13 @@ describe('proactive core set: the router', () => {
 describe('proactive core set: every skill preamble', () => {
   const line = generateUpgradeCheck({ paths: { skillRoot: '~/.claude/skills/gstack' } } as never);
 
-  test('the steady-state rule names the four core skills under core, scopes the setting to unasked suggestions, and keeps the false marker the order test reads', () => {
-    expect(line).toMatch(/^If `PROACTIVE` is `false`\/`off`/);
+  test('the steady-state rule names the four core skills under core, scopes the setting to unasked suggestions, carves out only named skills, and keeps the marker the order test reads', () => {
+    expect(line).toMatch(/^If `PROACTIVE` is `off`/);
     expect(line).toContain('`core`: only /office-hours, /review, /qa, /ship');
-    expect(line).toContain('`all`/`true`: any');
-    expect(line).toContain('suggest no skill unasked, nor ask to');
-    expect(line).toContain("This skill's steps still run");
+    expect(line).toContain('`all`: any');
+    expect(line).toContain('suggest no skill unasked, nor ask');
+    expect(line).toContain("Skills the user or this skill's steps name run");
+    expect(line.split('\n')[0]).not.toContain('true');
     for (const skill of NON_CORE_SAMPLE) expect(line).not.toContain(skill);
   });
 
@@ -80,12 +81,10 @@ describe('proactive core set: the one-time prompt and the registry', () => {
     expect(QUESTIONS['preamble-proactive-behavior'].options).toEqual(['core', 'all', 'off']);
   });
 
-  test('the first-run and first-loop tips name only core skills, and both are skipped under off (negative control: no /spec or /investigate tip)', () => {
+  test('the first-run and first-loop tips name only core skills (negative control: no /spec or /investigate tip; the off gating is proven by running the script in proactive-skill-start.test.ts)', () => {
     const tips = skillStart.slice(skillStart.indexOf('if [ "$_ACTIVATED" = "no" ]; then'), skillStart.indexOf('# Routing injection'));
     for (const skill of NON_CORE_SAMPLE.concat(['/spec', '/plan-eng-review'])) expect(tips).not.toContain(skill);
     for (const skill of CORE) expect(tips).toContain(skill);
-    expect(tips).toContain('case "$_PROACTIVE" in off|false) _FT_TIP="" ;; esac');
-    expect(tips).toContain('if [ "$_PROACTIVE" != "off" ] && [ "$_PROACTIVE" != "false" ]; then');
   });
 });
 

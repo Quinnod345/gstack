@@ -11,7 +11,9 @@ its slash command. The `proactive` config key says how far that goes.
 | `off` | Nothing. gstack never suggests or auto-invokes a skill, not even by asking "want me to run /X?". | You type every command yourself. |
 
 `true` and `false` still work as the older spellings of `all` and `off`, so a
-config written before the `core` default keeps its behavior.
+config written before the `core` default keeps its behavior; `gstack-skill-start`
+reports them to the skill as `all` and `off`, and it also tolerates a quoted,
+upper-case or commented hand edit (`proactive: "OFF" # mine`).
 
 ```bash
 gstack-config get proactive          # core, all, off (or a legacy true/false)

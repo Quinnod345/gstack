@@ -133,9 +133,13 @@ find "$_GH/sessions" -mmin +120 -type f -exec rm {} + 2>/dev/null || true
 _SESSIONS=$(find "$_GH/sessions" -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
 
 _PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "core")
-# A hand-edited config can hold anything; the router and preambles only know
-# core | all | off (true = all, false = off), so anything else reads as core.
-case "$_PROACTIVE" in core|all|off|true|false) ;; *) _PROACTIVE="core" ;; esac
+# A hand-edited config can hold anything: drop quotes and a trailing comment,
+# lowercase, read the legacy true/false as all/off, and anything else as core,
+# so STATUS only ever says core | all | off.
+_PROACTIVE=$(printf '%s' "$_PROACTIVE" | sed -e 's/[[:space:]]*#.*$//' -e "s/^[[:space:]]*[\"']*//" -e "s/[\"']*[[:space:]]*$//" | tr '[:upper:]' '[:lower:]')
+case "$_PROACTIVE" in true) _PROACTIVE="all" ;; false) _PROACTIVE="off" ;; core|all|off) ;; *) _PROACTIVE="core" ;; esac
+# off silences every unasked surface below: the tips and the CLAUDE.md routing offer.
+case "$_PROACTIVE" in off) _PROACTIVE_OFF="yes" ;; *) _PROACTIVE_OFF="no" ;; esac
 _PROACTIVE_PROMPTED=$([ -f "$_GH/.proactive-prompted" ] && echo "yes" || echo "no")
 # Branch name is embedded in concatenated JSON below; strip anything outside
 # the gstack-slug BRANCH alphabet so a hostile ref name can't forge fields.
@@ -572,7 +576,7 @@ if [ "$_ACTIVATED" = "no" ]; then
     clean_default) _FT_TIP="Pick one: \`/office-hours\`, \`/qa\`, or \`/review\`." ;;
   esac
   # Under off the tips are the suggestions the user turned off.
-  case "$_PROACTIVE" in off|false) _FT_TIP="" ;; esac
+  [ "$_PROACTIVE_OFF" = "yes" ] && _FT_TIP=""
   if [ -n "$_FT_TIP" ]; then
     _emit_block first-run-tip <<EOI
 Show this one project-specific line as a heads-up, then CONTINUE with whatever the user actually asked — do NOT halt their task: $_FT_TIP
@@ -581,7 +585,7 @@ EOI
   fi
   touch "$_GH/.activated" 2>/dev/null || true
 elif [ "$_FIRST_LOOP_SHOWN" = "no" ]; then
-  if [ "$_PROACTIVE" != "off" ] && [ "$_PROACTIVE" != "false" ]; then
+  if [ "$_PROACTIVE_OFF" = "no" ]; then
     _emit_block first-loop-tip <<EOI
 Say once as a heads-up (then continue): Tip: gstack pays off when you complete one loop — **plan → review → ship**. A common first loop: \`/office-hours\` to shape it, \`/review\` to check it, then \`/ship\`.
 EOI
@@ -593,8 +597,7 @@ fi
 # is a quoted heredoc (markdown backticks must stay literal), so the resolved
 # bin path is substituted via sed on the __BIN__ placeholder. Under off the
 # routing rules are the auto-invocation the user turned off, so no offer.
-case "$_PROACTIVE" in off|false) _ROUTING_OFFER="no" ;; *) _ROUTING_OFFER="yes" ;; esac
-if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_ROUTING_OFFER" = "yes" ]; then
+if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_PROACTIVE_OFF" = "no" ]; then
   sed "s|__BIN__|$_BIN|g" <<'EOI' | _emit_block routing-injection
 gstack works best when the project CLAUDE.md includes skill routing rules. If no CLAUDE.md exists in the project root, create it. Use AskUserQuestion:
 
