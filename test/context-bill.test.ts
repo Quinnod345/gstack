@@ -1266,7 +1266,6 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.mkdirSync(path.join(tmp, "alpha"));
     fs.writeFileSync(path.join(tmp, "alpha", "SKILL.md"), "---\nname: alpha\ndescription: d\n---\n# alpha\n");
     fs.writeFileSync(path.join(tmp, "alpha", "empty.md"), "");
-    fs.writeFileSync(path.join(tmp, "alpha", "blank.md"), " \n");
     fs.mkdirSync(path.join(tmp, "beta"));
     fs.writeFileSync(path.join(tmp, "beta", "SKILL.md"), "# beta has no frontmatter\n");
     const inner = fakeFetch() as unknown as (u: string, i: { body: string }) => Promise<unknown>;
@@ -1282,29 +1281,102 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(bill.tokenSource).toBe("count_tokens (m)");
   });
 
-  it("sends nothing and writes no receipt when every billed file is blank", async () => {
+  it("sends nothing and writes no receipt when every file it could send is blank", async () => {
+    if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-blank-"));
-    fs.mkdirSync(path.join(tmp, "skills", "qa"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "skills", "qa", "SKILL.md"), "\n");
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "qa", "SKILL.md"), "");
     const home = path.join(tmp, "egress");
     const calls: { body: string }[] = [];
-    const measured = await measureExactTokens(path.join(tmp, "skills"), { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome: home });
-    const stderr = capture();
-    const code = await contextBillMain([path.join(tmp, "skills"), "--exact", "--json"], {
-      stdout: capture().stream,
-      stderr: stderr.stream,
-      apiKey: "sk-test",
-      fetchImpl: fakeFetch(calls),
-      egressHome: home,
-    });
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome: home });
+    buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource, missedKeys: measured.missedKeys });
+    const run = async () => {
+      const stderr = capture();
+      const code = await contextBillMain([skills, "--exact", "--json"], {
+        stdout: capture().stream,
+        stderr: stderr.stream,
+        apiKey: "sk-test",
+        fetchImpl: fakeFetch(calls),
+        egressHome: home,
+      });
+      return { code, err: stderr.text() };
+    };
+    const blank = await run();
+    fs.mkdirSync(path.join(tmp, "outside"));
+    fs.writeFileSync(path.join(tmp, "outside", "doc.md"), "OUTSIDE-DOC");
+    fs.symlinkSync(path.join(tmp, "outside"), path.join(skills, "qa", "notes"));
+    const withRefused = await run();
     const receipts = listReceipts(home).length;
     fs.rmSync(tmp, { recursive: true, force: true });
     expect(calls).toEqual([]);
     expect(receipts).toBe(0);
     expect([...measured.missedKeys]).toEqual([]);
+    expect(blank.code).toBe(0);
+    expect(blank.err).not.toContain("sending the content");
+    expect(blank.err).toContain(`every .md file --exact could send under ${skills} is blank; nothing was sent`);
+    expect(withRefused.code).toBe(0);
+    expect(withRefused.err).toContain(`is blank, and the rest are outside the folders it sends from; nothing was sent`);
+  });
+
+  it("estimates a whitespace-only file instead of sending it, and counts only the files it sends", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-whitespace-"));
+    fs.mkdirSync(path.join(tmp, "qa"));
+    fs.writeFileSync(path.join(tmp, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(tmp, "qa", "spaces.md"), " \n".repeat(4_000));
+    const calls: { body: string }[] = [];
+    const inner = fakeFetch(calls) as unknown as (u: string, i: { body: string }) => Promise<unknown>;
+    const strict = (async (u: string, i: { body: string }) =>
+      !/\S/.test(JSON.parse(i.body).messages[0].content)
+        ? { ok: false, status: 400, text: async () => "messages: text content blocks must contain non-whitespace text" }
+        : inner(u, i)) as never;
+    const stdout = capture();
+    const stderr = capture();
+    const code = await contextBillMain([tmp, "--exact", "--json"], {
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: strict,
+      egressHome,
+    });
+    const measured = await measureExactTokens(tmp, { model: "m", apiKey: "sk-test", fetchImpl: strict, egressHome });
+    fs.rmSync(tmp, { recursive: true, force: true });
     expect(code).toBe(0);
-    expect(stderr.text()).not.toContain("sending the content");
-    expect(stderr.text()).toContain("nothing was sent");
+    expect(stderr.text()).toContain("sending the content of 1 .md file(s)");
+    const bill = JSON.parse(stdout.text());
+    expect(bill.tokenSource).toStartWith("mixed: ");
+    expect(bill.skills[0].totalMdTokens).toBeGreaterThan(1_000);
+    expect(measured.measuredFiles).toBe(2);
+  });
+
+  it("trusts $GSTACK_STATE_ROOT/render when no state root is passed in", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-render-env-"));
+    const saved = process.env.GSTACK_STATE_ROOT;
+    const calls: { body: string }[] = [];
+    const stderr = capture();
+    let code: number;
+    try {
+      process.env.GSTACK_STATE_ROOT = path.join(tmp, "state");
+      const rendered = path.join(tmp, "state", "render", "claude", "qa");
+      fs.mkdirSync(rendered, { recursive: true });
+      fs.writeFileSync(path.join(rendered, "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# RENDER-ENV\n");
+      fs.mkdirSync(path.join(tmp, "skills", "qa"), { recursive: true });
+      fs.symlinkSync(path.join(rendered, "SKILL.md"), path.join(tmp, "skills", "qa", "SKILL.md"));
+      code = await contextBillMain([path.join(tmp, "skills"), "--exact", "--json"], {
+        stdout: capture().stream,
+        stderr: stderr.stream,
+        apiKey: "sk-test",
+        fetchImpl: fakeFetch(calls),
+        egressHome,
+      });
+    } finally {
+      process.env.GSTACK_STATE_ROOT = saved;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.body.includes("RENDER-ENV"))).toBe(true);
+    expect(stderr.text()).toContain("in gstack's render folder");
   });
 
   it("still bills the tree when the state root is not a readable directory", async () => {

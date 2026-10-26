@@ -981,6 +981,7 @@ function fileIdentity(real: string, { dev, ino, size, mtimeMs }: { dev: number; 
 export interface ExactMeasurement {
   tokenSource: string;
   tokensOf: TokensOf;
+  /** Texts sent to count_tokens (file bodies plus frontmatter blocks). */
   measuredFiles: number;
   counts: Map<string, number>;
   /** The realpath each measured file was read from, by its key. */
@@ -1026,9 +1027,11 @@ export async function measureExactTokens(
   const opts: CountTokensOptions = { model, apiKey, fetchImpl };
 
   const texts = new Map<string, string>();
-  // Blank texts are not sent (count_tokens rejects content with no
-  // non-whitespace text); they are measured as zero tokens. When nothing is
-  // left to send, no receipt is written and no request is made.
+  // count_tokens rejects content with no non-whitespace text, so such texts
+  // are not sent: an empty one is measured as zero tokens, and a
+  // whitespace-only one is left unmeasured, so the bill estimates it and says
+  // so. When nothing is left to send, no receipt is written and no request is
+  // made.
   const counts = new Map<string, number>();
   // The send set holds each real file once, so each is sent once. The bill keys
   // the same file by every lexical path it is billed under; measuredAs maps a
@@ -1043,7 +1046,7 @@ export async function measureExactTokens(
     measuredAs.set(fileIdentity(real, walked), file);
     realOf.set(file, real);
     if (/\S/.test(text)) texts.set(file, text);
-    else counts.set(file, 0);
+    else if (text === "") counts.set(file, 0);
     if (!frontmatter.has(real)) continue;
     const fm = parseFrontmatter(text);
     if (fm.block) texts.set(frontmatterKey(file), fm.block);
@@ -1124,7 +1127,7 @@ export async function measureExactTokens(
     }
   };
   await Promise.all(Array.from({ length: Math.min(EXACT_CONCURRENCY, keys.length) }, worker));
-  measurement.measuredFiles = counts.size;
+  measurement.measuredFiles = texts.size;
   return measurement;
 }
 
@@ -1320,7 +1323,11 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
         egressHome: options.egressHome,
       });
       if (!announced) {
-        stderr.write(`--exact: every billed .md file under ${tree} is blank; nothing was sent, so the bill uses the offline estimate.\n`);
+        stderr.write(
+          `--exact: every .md file --exact could send under ${tree} is blank` +
+            (set.refused.length ? `, and the rest are outside the folders it sends from` : "") +
+            `; nothing was sent, so the bill uses the offline estimate.\n`,
+        );
         return {};
       }
       return {
