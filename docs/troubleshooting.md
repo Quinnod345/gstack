@@ -3031,6 +3031,20 @@ test. An unmapped source or code file still fails. A file under a test
 directory is not this empty lane. Images, fonts and media, and
 allowlisted tool config no test names, are the assets-and-tool-config empty lane,
 not this error.
+A release manifest the branch only re-stamped is not this error either: when a
+touched `*.json`, `*.plist`, `VERSION` or `VERSION.txt` file differs from the
+merge base in nothing but its version values, `lanes` waives it as
+version-stamp-only and prints `version-stamp-only (no lane needed): <files>`.
+The exact per-kind rule (the document's top-level `version` in JSON of the
+same shape and text, the two bundle version keys in a plist, one bare version
+in a VERSION file) is in [docs/pregate.md](pregate.md#gstack-pregate). A
+restamp PR on a base whose policy declares no lane for its manifests (gbrain's
+`release:restamp` and its plugin manifests) therefore passes without a
+policy change. A manifest whose description, keys, key order, nested
+versions, line endings or any non-version byte changed, one under a test,
+fixture, golden, `.gstack/` or workflow tree, or one added, deleted, renamed
+or re-moded, is still this error; `--explain` prints `not version-stamp-only (<reason>)`
+for it.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
 for files with no behaviour) under `dependencies` in `.gstack/pregate.json` (or the user-owned file the message names).

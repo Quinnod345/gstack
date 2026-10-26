@@ -7,6 +7,9 @@
  * with no lane is `FAIL lanes — <file> has no test lane`, never a pass.
  * Markdown no test depends on is the docs/no-tests empty lane instead
  * (lib/pregate/docs-lane.ts): it does not fail, and unmapped code still does.
+ * A release manifest whose diff against the merge base changes only version
+ * values is waived as version-stamp-only (lib/pregate/stamp-only.ts) and named
+ * on its own line; any other change to it still needs a lane.
  * A test that reads the file still selects that test.
  * Incidents: p0-4-pipe-hidden-failure (`false | tail` read as green),
  * p0-4-windows-lane-unrun (a Windows-only change merged with its lane unrun).
@@ -328,6 +331,7 @@ function describe(sel: Selection): string[] {
   const lines = sel.noLane.map(f => `FAIL lanes — ${f} has no test lane`);
   if (sel.emptyLane.length) lines.push(`docs/no-tests (empty lane): ${sel.emptyLane.join(' ')}`);
   if (sel.inert.length) lines.push(`no-tests (assets and tool config): ${sel.inert.join(' ')}`);
+  if (sel.stampOnly.length) lines.push(`version-stamp-only (no lane needed): ${sel.stampOnly.join(' ')} — only version values changed against the merge base; a manifest whose other content changed still needs a lane`);
   for (const r of sel.remote) lines.push(`requires-remote ${r.lane} (${r.platform}): ${r.tests.length} test(s) — ${r.tests.slice(0, 8).join(' ')}${r.tests.length > 8 ? ' …' : ''}`);
   lines.push(`Tiers ran: ${sel.tiersRan.join(' ') || '(none)'}; requires-remote: ${[...new Set(sel.remote.map(r => r.platform))].join(' ') || 'none'}`);
   return lines;
@@ -414,10 +418,9 @@ async function run(ctx: PregateContext): Promise<CheckResult> {
     return { ...base, status: 'fail', code: 'PREGATE_NO_LANE', detail: `${sel.noLane.length} touched file(s) with no test lane: ${sel.noLane.join(' ')}`, fix: noLaneFix(ctx, sel.noLane) };
   }
   if (sel.tests.length === 0) {
-    const inert = sel.inert.length ? `${sel.inert.length} asset or tool-config file(s)` : '';
-    const detail = sel.emptyLane.length
-      ? `docs/no-tests: ${sel.emptyLane.length} documentation file(s)${inert ? ` and ${inert}` : ''}; nothing touched selects a test`
-      : inert ? `no-tests: ${inert}; nothing touched selects a test`
+    const classes = [sel.emptyLane.length ? `${sel.emptyLane.length} documentation file(s)` : '', sel.inert.length ? `${sel.inert.length} asset or tool-config file(s)` : '', sel.stampOnly.length ? `${sel.stampOnly.length} version-stamp-only manifest(s)` : ''].filter(Boolean);
+    const label = sel.emptyLane.length ? 'docs/no-tests' : sel.inert.length ? 'no-tests' : 'version-stamp-only';
+    const detail = classes.length ? `${label}: ${classes.join(' and ')}; nothing touched selects a test`
       : ctx.touched.length ? 'nothing touched selects a test' : 'no touched files';
     return { ...base, detail };
   }
