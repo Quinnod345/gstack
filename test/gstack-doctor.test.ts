@@ -673,9 +673,10 @@ describe('gstack-doctor --check', () => {
     write(path.join(project, '.gstack/ship-policy.json'), '{\n  "bump": "patch",\n  "min_gstack_version": null\n}\n');
     expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets no min_gstack_version (null or absent))` });
     // A present value that is not a dotted version is named as such, never read as "absent"; the shell never evaluates it.
-    write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "1.2.3-rc1; $(touch /tmp/pwned)"\n}\n');
+    const marker = path.join(project, 'evaluated-marker');
+    write(path.join(project, '.gstack/ship-policy.json'), `{\n  "min_gstack_version": "1.2.3-rc1; $(touch ${marker})"\n}\n`);
     expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets min_gstack_version to something other than a plain dotted version)` });
-    expect(fs.existsSync('/tmp/pwned')).toBe(false);
+    expect(fs.existsSync(marker)).toBe(false);
     write(path.join(project, '.gstack/ship-policy.json'), `{\n  "min_gstack_version": "${VERSION}"\n}\n`);
     const met = row(f, ['--project', project]);
     expect(met.rows.floor).toEqual({ status: 'PASS', rest: `${VERSION} declared by ${project}/.gstack/ship-policy.json (installed ${VERSION})` });
