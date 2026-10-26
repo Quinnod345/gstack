@@ -43,6 +43,8 @@ const PROSE_REF = /`(references\/[^`<>]+\.md)`/g;
 const ROUTER_KEYS = new Set(["name", "description", "version", "allowed-tools", "triggers", "preamble-tier"]);
 // Skill-shaped files other hosts drop into scanner scope.
 const FOREIGN_SKILL_FILE = /^(skill\.(ya?ml|json)|agents?\.md|\.cursorrules|\.windsurfrules)$/i;
+/** Directory entries one walkMd call may examine before it refuses the tree. */
+const WALK_ENTRY_CAP = 200_000;
 
 /**
  * Bytes per token, per content class, fitted to real count_tokens measurements.
@@ -233,11 +235,13 @@ function encloses(outer: string, inner: string): boolean {
  *
  * Symlinked files and directories are followed, and every returned path stays
  * the lexical path under `dir`, so buildBill and --exact key the same files.
- * Two links to one directory are both walked (each is real scanner load), so
- * the result never depends on readdir order. A directory that is already on
- * the current walk (a loop) or that encloses `dir` is never entered. A link
- * named *.md counts only when its target is a .md file too, so --exact never
- * sends a non-markdown file through a markdown-named link.
+ * Each real directory is expanded once and each real file returned once per
+ * walk, under the first lexical path reached with entries in sorted order: a
+ * skill loads a file once however many links reach it, and links that fan out
+ * into each other cannot multiply the walk. A directory that encloses `dir` is
+ * never entered. A link named *.md counts only when its target is a .md file
+ * too, so --exact never sends a non-markdown file through a markdown-named
+ * link. More than WALK_ENTRY_CAP entries is an error, never a silent cut.
  */
 export function walkMd(dir: string): string[] {
   const out: string[] = [];
@@ -247,41 +251,46 @@ export function walkMd(dir: string): string[] {
   } catch {
     return out;
   }
-  const walk = (current: string, ancestors: string[]) => {
+  const seen = new Set<string>([rootReal]);
+  let entryCount = 0;
+  const walk = (current: string) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(current, { withFileTypes: true });
     } catch {
       return;
     }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
+      if (++entryCount > WALK_ENTRY_CAP) {
+        throw new Error(
+          `${dir} has more than ${WALK_ENTRY_CAP} entries to walk; a symlink in it probably points at a large tree. ` +
+            `Nothing was billed or sent. Remove or narrow that link and run again.`,
+        );
+      }
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const p = path.join(current, e.name);
       const kind = entryKind(p, e);
-      if (kind === "file") {
-        if (!e.name.endsWith(".md")) continue;
-        if (e.isSymbolicLink()) {
-          try {
-            if (!fs.realpathSync(p).endsWith(".md")) continue;
-          } catch {
-            continue;
-          }
-        }
-        out.push(p);
-        continue;
-      }
-      if (kind !== "dir" || fs.existsSync(path.join(p, ".git"))) continue;
+      if (kind === "file" ? !e.name.endsWith(".md") : kind !== "dir" || fs.existsSync(path.join(p, ".git"))) continue;
       let real: string;
       try {
         real = fs.realpathSync(p);
       } catch {
         continue;
       }
-      if (ancestors.includes(real) || encloses(real, rootReal)) continue;
-      walk(p, [...ancestors, real]);
+      if (seen.has(real)) continue;
+      if (kind === "file") {
+        if (!real.endsWith(".md")) continue;
+        seen.add(real);
+        out.push(p);
+        continue;
+      }
+      if (encloses(real, rootReal)) continue;
+      seen.add(real);
+      walk(p);
     }
   };
-  walk(dir, [rootReal]);
+  walk(dir);
   return out;
 }
 
@@ -799,12 +808,17 @@ export async function measureExactTokens(
   const opts: CountTokensOptions = { model, apiKey, fetchImpl };
 
   const texts = new Map<string, string>();
+  // The walk returns each real file once, so each is sent once. The bill keys
+  // the same file by every lexical path it is billed under; lexicalOf maps a
+  // real file back to the one key that was measured.
+  const lexicalOf = new Map<string, string>();
   // Resolve before keying. buildBill resolves its root, so a relative root here
   // would produce keys that never match and every lookup would fall back to the
   // estimate -- exact mode silently degrading to the thing it replaces.
   for (const file of walkMd(path.resolve(root))) {
     const text = fs.readFileSync(file, "utf8");
     texts.set(file, text);
+    lexicalOf.set(fs.realpathSync(file), file);
     if (path.basename(file) === "SKILL.md") {
       const fm = parseFrontmatter(text);
       if (fm.block) texts.set(frontmatterKey(file), fm.block);
@@ -852,8 +866,21 @@ export async function measureExactTokens(
   // estimate rather than billing zero. Misses are counted, not swallowed: a bill
   // that is part-measured and part-estimated must not present itself as measured.
   const missed = new Set<string>();
+  const fmSuffix = frontmatterKey("");
+  const measuredKey = (key: string): string | undefined => {
+    const isFm = key.endsWith(fmSuffix);
+    let real: string;
+    try {
+      real = fs.realpathSync(isFm ? key.slice(0, -fmSuffix.length) : key);
+    } catch {
+      return undefined;
+    }
+    const lexical = lexicalOf.get(real);
+    return lexical === undefined ? undefined : isFm ? frontmatterKey(lexical) : lexical;
+  };
   const tokensOf: TokensOf = (key, bytes) => {
-    const exact = counts.get(key);
+    const alias = counts.has(key) ? key : measuredKey(key);
+    const exact = alias === undefined ? undefined : counts.get(alias);
     if (exact !== undefined) return exact;
     missed.add(key);
     return estimateTokensOf(key, bytes);

@@ -273,13 +273,13 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     }
     // Every path the bill (and --exact) keys on stays under the skills root.
     for (const file of walkMd(skills)) expect(file.startsWith(skills + path.sep)).toBe(true);
-    // dirlink/SKILL.md links to review/sections, so its file is walked under both names.
+    // dirlink/SKILL.md links to review/sections: the one real file is walked
+    // once, under the first name reached in sorted order.
     expect(walkMd(skills).map((f) => path.relative(skills, f)).sort()).toEqual([
       path.join("dirlink", "SKILL.md", "flow.md"),
       path.join("office-hours", "SKILL.md"),
       path.join("office-hours", "sections", "flow.md"),
       path.join("review", "SKILL.md"),
-      path.join("review", "sections", "flow.md"),
     ]);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
@@ -328,6 +328,29 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     ]);
     const bill = buildBill(root);
     expect(bill.totals.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + fileBytes(root, "qa", "references", "guide.md"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("walks a fan-out of links once per real directory and file", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fanout-"));
+    // L0..L19 sit outside the root; each level holds two links to the next, so
+    // a walk that expands every link reaches leaf.md by 2^20 paths.
+    const depth = 20;
+    for (let d = 0; d <= depth; d++) fs.mkdirSync(path.join(tmp, `L${d}`));
+    fs.writeFileSync(path.join(tmp, `L${depth}`, "leaf.md"), "l".repeat(300));
+    for (let d = 0; d < depth; d++) {
+      for (const name of ["a", "b"]) fs.symlinkSync(path.join(tmp, `L${d + 1}`), path.join(tmp, `L${d}`, name));
+    }
+    const root = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(root, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(root, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(path.join(tmp, "L0"), path.join(root, "qa", "refs"));
+
+    const leaf = path.join("qa", "refs", ...Array(depth).fill("a"), "leaf.md");
+    expect(walkMd(root).map((f) => path.relative(root, f))).toEqual([path.join("qa", "SKILL.md"), leaf]);
+    const bill = buildBill(root);
+    expect(bill.totals.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + 300);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -691,6 +714,34 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
     expect(bill.skills.map((s) => s.name)).toEqual(["qa"]);
     expect([...measured.missedKeys]).toEqual([]);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("sends each real file once and prices every link to it with that measurement", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-exact-once-"));
+    const checkout = path.join(tmp, "checkout");
+    fs.mkdirSync(path.join(checkout, "shared"), { recursive: true });
+    fs.writeFileSync(path.join(checkout, "SKILL.md"), "---\nname: twin\ndescription: d\n---\n# twin\n");
+    fs.writeFileSync(path.join(checkout, "shared", "guide.md"), "SHARED-GUIDE ".repeat(20));
+    const skills = path.join(tmp, "skills");
+    for (const name of ["a", "b"]) {
+      fs.mkdirSync(path.join(skills, name), { recursive: true });
+      fs.symlinkSync(path.join(checkout, "SKILL.md"), path.join(skills, name, "SKILL.md"));
+      fs.symlinkSync(path.join(checkout, "shared"), path.join(skills, name, "refs"));
+    }
+
+    const calls: { body: string }[] = [];
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
+    const sent = calls.map((c) => JSON.parse(c.body).messages[0].content as string);
+    expect(sent.filter((t) => t.startsWith("SHARED-GUIDE")).length).toBe(1);
+    expect(sent.filter((t) => t.includes("# twin")).length).toBe(1);
+    const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
+    expect(bill.skills.map((s) => s.name)).toEqual(["a", "b"]);
+    expect([...measured.missedKeys]).toEqual([]);
+    const [a, b] = bill.skills;
+    expect(a.totalMdTokens).toBe(b.totalMdTokens);
+    expect(a.frontmatterTokens).toBe(b.frontmatterTokens);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
