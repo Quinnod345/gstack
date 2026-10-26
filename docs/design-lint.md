@@ -37,7 +37,8 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   relative stylesheet href may not climb out of the project (the nearest
   directory holding a `package.json` or `.git`), by its path and by its real
   path, so a symlink inside the project that points outside it is not read
-  either; outside any project it is bounded only by the disk, and only `.css`
+  either; outside any project it is bounded by the working directory the
+  lint runs in, and only `.css`
   files are read.
 - Markup inside an HTML comment is dead for every rule, a commented-out
   `<style>` or `<script>` included; a comment that never closes runs to the
@@ -54,6 +55,8 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   descendant-joined) up to 8192 characters, and a sheet may store at most
   four times its length plus 64 KB of expanded selectors; past either bound
   the nested selector stands as written, so a sheet costs its length too.
+  Nesting is read 64 levels deep; a rule nested below that is dropped, not
+  parsed.
 - A page is linted with the stylesheets it links (`<link rel=stylesheet>`,
   `@import`, and anything they reach); a directory of components shares the
   project's tokens and global state styles, so a focus ring declared once in

@@ -17,7 +17,7 @@
 - `test/design-lint.test.ts`: the parsers (nested CSS, tokens, var() fallbacks, colour spaces, JSX pseudo-HTML), the rule table against `docs/design-lint.md`, the output lines and exit codes, waiver acceptance and every refusal reason, the waiver fixture. One test per rule family (`test/design-lint-<family>.test.ts`) holds a negative control and a planted positive for every rule id. `test/design-lint-render.test.ts` drives the browse daemon when it is built and skips with a named reason otherwise. `test/design-lint-recorded.test.ts` lints the repository's recorded design slop page (the review eval's ground truth) and pins which rule answers each annotated issue, the same gate set hallmark's sloplint reports on the same files.
 
 ### Gate integrity
-- No threshold, budget, timeout, trial count or assertion was weakened. New code only; no template, catalog or eval changed.
+- No threshold, budget, timeout, trial count or assertion was weakened. No template, catalog or eval changed. Gate edits in the diff: `test/fixtures/module-size-ratchet.json` registers the 27 new `lib/design-lint` modules under the existing 800-line cap, and `test/helpers/free-fixtures-data.ts` maps `test/fixtures/design-lint/**` to the design-lint test files; `lib/aside-render.ts` gains the viewport on eval steps and http(s) `file`, described above.
 
 ## [1.91.229.0] - 2026-10-26
 

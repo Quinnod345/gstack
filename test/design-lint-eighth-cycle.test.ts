@@ -297,6 +297,34 @@ describe('design-lint eighth cycle: rule judgements', () => {
     expect(stripTags(' '.repeat(5000) + 'hello world', false, 4).trim()).toBe('hello');
   }, 60_000);
 
+  test('an escaped quote does not rewrite the rest of a sheet, and a declaration string may hold ; or }', () => {
+    const rules = parseCss('.q::before { content: "\\""; } .a { color: red } .b { content: "a;b}c"; color: blue } .c {}', 'x.css');
+    expect(rules.map((x) => x.selector)).toEqual(['.q::before', '.a', '.b', '.c']);
+    expect(rules[2].decls.map((d) => d.prop + '=' + d.value)).toEqual(['content="a;b}c"', 'color=blue']);
+    expect(parseCss(".x { font-family: 'It\\'s'; } .y { color: red }", 'y.css').map((x) => x.selector)).toEqual(['.x', '.y']);
+  });
+
+  test('a @starting-style block waives content-hidden-at-rest only for the selectors it names, whole', () => {
+    const sheet = '@starting-style { .reveal-wrap { opacity: 0 } } .reveal { opacity: 0; transform: translateY(24px) } .reveal-wrap { opacity: 0; transform: translateY(24px) } .fade { opacity: 0; transform: translateY(8px); @starting-style { opacity: 0 } }';
+    const { findings } = lintDir({ 'theme.css': TOKENS + '\n' + sheet, 'index.html': HEAD + '<link rel="stylesheet" href="theme.css"></head><body><main><h1>The ledger</h1><p class="reveal">a</p><p class="reveal-wrap">b</p><p class="fade">c</p></main></body></html>' });
+    expect(only(findings, 'content-hidden-at-rest').map((x) => x.evidence.split(' ')[0])).toEqual(['.reveal']);
+  });
+
+  test('aria-hidden must be "true" to count as hidden decoration', () => {
+    const page = (hidden: string) => HEAD + '</head><body><main><h1>The ledger</h1><svg ' + hidden + ' width="10" height="10"></svg></main></body></html>';
+    expect(only(lintDir({ 'index.html': page('aria-hidden="false"') }).findings, 'unlabeled-decoration').length).toBe(1);
+    expect(only(lintDir({ 'index.html': page('aria-hidden="true"') }).findings, 'unlabeled-decoration').length).toBe(0);
+  });
+
+  test('outside any project a relative stylesheet href is bounded by the working directory', () => {
+    const base = tree({ 'outside/secret.css': '.leak { color: #000; background: #fff }', 'site/index.html': HEAD + '<link rel="stylesheet" href="../outside/secret.css"></head><body><main><h1>The ledger</h1></main></body></html>' });
+    const site = path.join(base, 'site');
+    expect(lintStatic([site], { cwd: site, ...quiet }).findings.some((x) => x.file.includes('secret.css'))).toBe(false);
+    expect(lintStatic([site], { cwd: base, ...quiet }).findings.some((x) => x.file.includes('secret.css'))).toBe(true);
+    const inside = tree({ 'site/css/a.css': '.leak { color: #000; background: #fff }', 'site/index.html': HEAD + '<link rel="stylesheet" href="css/a.css"></head><body><main><h1>The ledger</h1></main></body></html>' });
+    expect(lintStatic([path.join(inside, 'site')], { cwd: path.join(inside, 'site'), ...quiet }).findings.some((x) => x.file.includes('a.css'))).toBe(true);
+  });
+
   test('the emoji classes spell their variation selector and joiner as escapes', () => {
     expect(fs.readFileSync(path.join(import.meta.dir, '../lib/design-lint/rules/assets.ts'), 'utf8')).not.toMatch(/[\uFE0F\u200D]/);
   });
