@@ -199,11 +199,11 @@ clears no lane and refuses (`QUEUE_NOT_READY`); a fork head is never dispatched
 here (`QUEUE_TRAIN_UNTRUSTED`). By hand the same four steps are `gh workflow
 run <wf> --ref <branch>`, wait, `gstack-pregate clear --remote <lane> --run-url
 <run>`, rerun `ready`. The `ci-hint:` line is advisory text for the lane;
-nothing parses it. `ready --screen` on such a
-PR refuses, because there is no merge ref to screen (`QUEUE_SCREEN_STALE_REF`,
-`<remote> has no refs/pull/<n>/merge`); that refusal's "merge <base> into the
-branch" advice does not apply to a CHANGELOG-only conflict, so the lane READYs
-with `--no-screen` after the skill's own paid cases ran focused.
+nothing parses it. `ready --screen` on such a PR has no merge ref to screen,
+so it builds the scratch merge described below (`SCREEN_MERGE:`, pushed as
+`screen/<pr>-<head12>`) and screens that; only a real conflict with the base
+is `QUEUE_SCREEN_STALE_REF`. A CHANGELOG-only conflict is screenable, and a
+lane whose skill's own paid cases ran focused may still READY with `--no-screen`.
 
 `ci:` counts the latest run per check (one app's check name), as GitHub's
 rollup does: a check that was re-run or superseded on the same commit (a
@@ -398,7 +398,7 @@ explicit choice:
 ```bash
 gstack-ship-queue ready --pr 42                    # prints SCREEN: lines and the recommendation, refuses
 gstack-ship-queue ready --pr 42 --no-screen        # READY receipt; the PR rides unscreened
-gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (QUEUE_SCREEN_STALE_REF when GitHub's merge ref lags the head)
+gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (a scratch merge when GitHub's merge ref lags the head; QUEUE_SCREEN_STALE_REF only on a real conflict)
 ```
 
 Without a choice it prints the `SCREEN:` selection (with
@@ -415,10 +415,13 @@ the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
 it. Before dispatching, `ready` fetches the merge ref and requires its second
-parent to be the PR head: a missing or lagging merge ref (GitHub stops
-recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
-included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
-no cases and reports success. A finished screen that planned no cases (no
+parent to be the PR head and its first parent the current base: a missing,
+lagging or unfetchable merge ref (GitHub stops recomputing it while the PR
+conflicts with the base, CHANGELOG-only conflicts included) is replaced by a
+scratch merge of the head onto the base, pushed as `screen/<pr>-<head12>`
+(the `SCREEN_MERGE:` line says which); a screen dispatched on a stale ref would
+plan no cases and report success. Only a real conflict with the base is
+`QUEUE_SCREEN_STALE_REF`. A finished screen that planned no cases (no
 `paid-plan` artifact, which a superseded run never uploads, or a plan manifest
 with nothing planned) is never followed as a screen: `ready --screen`
 dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
