@@ -373,6 +373,24 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("keeps a container skill's own files when a nested skill sorted first links to them", () => {
+    if (process.platform === "win32") return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-container-"));
+    fs.writeFileSync(path.join(root, "SKILL.md"), "---\nname: c\ndescription: d\n---\n# c\n");
+    fs.mkdirSync(path.join(root, "shared"));
+    fs.writeFileSync(path.join(root, "shared", "big.md"), "b".repeat(4_000));
+    fs.mkdirSync(path.join(root, "a-skill"));
+    fs.writeFileSync(path.join(root, "a-skill", "SKILL.md"), "---\nname: a\ndescription: d\n---\n# a\n");
+    fs.symlinkSync(path.join(root, "shared"), path.join(root, "a-skill", "shared"));
+
+    const bill = buildBill(root);
+    const container = bill.skills.find((s) => s.name === path.basename(root))!;
+    const nested = bill.skills.find((s) => s.name === "a-skill")!;
+    expect(container.totalMdBytes).toBe(fileBytes(root, "SKILL.md") + 4_000);
+    expect(nested.totalMdBytes).toBe(fileBytes(root, "a-skill", "SKILL.md") + 4_000);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it("refuses a parent link when the root's own name starts with '..'", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-dotdot-"));

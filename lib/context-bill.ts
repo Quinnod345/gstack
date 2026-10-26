@@ -241,15 +241,20 @@ function encloses(outer: string, inner: string): boolean {
  * into each other cannot multiply the walk. A directory that encloses `dir`,
  * or `billedRoot` (the tree a skill is billed under), is never entered. A link
  * named *.md counts only when its target is a .md file too, so --exact never
- * sends a non-markdown file through a markdown-named link. More than WALK_ENTRY_CAP entries is an error, never a silent cut.
+ * sends a non-markdown file through a markdown-named link. More than
+ * WALK_ENTRY_CAP entries is an error, never a silent cut.
+ *
+ * With `skipNestedSkills`, a top-level subdirectory holding its own SKILL.md is
+ * not entered, so a container skill keeps the files it shares with a nested
+ * skill instead of losing them to whichever path sorted first.
  */
-export function walkMd(dir: string, billedRoot: string = dir): string[] {
+export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkills?: boolean } = {}): string[] {
   const out: string[] = [];
   let rootReal: string;
   let billedReal: string;
   try {
     rootReal = fs.realpathSync(dir);
-    billedReal = fs.realpathSync(billedRoot);
+    billedReal = fs.realpathSync(opts.billedRoot ?? dir);
   } catch {
     return out;
   }
@@ -275,7 +280,11 @@ export function walkMd(dir: string, billedRoot: string = dir): string[] {
       const kind = entryKind(p, e);
       if (kind === "file") {
         if (!e.name.endsWith(".md")) continue;
-      } else if (kind !== "dir" || fs.existsSync(path.join(p, ".git"))) {
+      } else if (
+        kind !== "dir" ||
+        fs.existsSync(path.join(p, ".git")) ||
+        (opts.skipNestedSkills && current === dir && fs.existsSync(path.join(p, "SKILL.md")))
+      ) {
         continue;
       }
       let real: string;
@@ -303,21 +312,12 @@ export function walkMd(dir: string, billedRoot: string = dir): string[] {
 function totalMd(dir: string, tokensOf: TokensOf, billedRoot: string): { bytes: number; tokens: number } {
   let bytes = 0;
   let tokens = 0;
-  for (const p of walkMd(dir, billedRoot)) {
-    // A skill dir that CONTAINS other skill dirs (the gstack root skill wraps
-    // the whole tree) must not swallow its children's files: each nested
-    // skill reports its own totalMd, and the grand total sums per-skill
-    // figures — counting them here again double-counted every nested skill
-    // in the TOTAL line (v1.63 deferred polish, fixed in fork port wave 2).
-    const rel = path.relative(dir, p);
-    const topSeg = rel.split(path.sep)[0];
-    if (
-      topSeg &&
-      topSeg !== rel && // p is inside a subdirectory
-      fs.existsSync(path.join(dir, topSeg, "SKILL.md"))
-    ) {
-      continue;
-    }
+  // A skill dir that CONTAINS other skill dirs (the gstack root skill wraps
+  // the whole tree) must not swallow its children's files: each nested
+  // skill reports its own totalMd, and the grand total sums per-skill
+  // figures — counting them here again double-counted every nested skill
+  // in the TOTAL line (v1.63 deferred polish, fixed in fork port wave 2).
+  for (const p of walkMd(dir, { billedRoot, skipNestedSkills: true })) {
     const b = bytesOf(p) ?? 0;
     bytes += b;
     tokens += tokensOf(p, b);
