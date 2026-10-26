@@ -176,6 +176,8 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
         expect(bad).toMatchObject({ code: 2, out: run(page).out });
         expect(bad.err).toContain('checked with none accepted');
       }
+      fs.writeFileSync(page, CLEAN);
+      expect(run(page, '--accepted', path.join(dir, 'broken.json'))).toMatchObject({ code: 2, out: 'CRAFT_RESULT: clean\n' });
       expect(run(page, '--accepted').code).toBe(2);
       expect(run(page, '--strict').code).toBe(2);
       expect(run(page, '--accepted', record, 'extra').code).toBe(2);
