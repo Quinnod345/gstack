@@ -18,9 +18,10 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildRow, captainApprovalsDir, citableRow, coversAutoplanRec, locate, readRecord, standingRecApproval, type ApprovalRow } from '../lib/approval-record';
+import { buildRow, captainApprovalsDir, citableRow, coversAutoplanRec, locate, mentionsAutoplan, readRecord, standingRecApproval, type ApprovalRow } from '../lib/approval-record';
 import { gateCost, priorChoices, recReopens, renderGateCost, gateCostSentence } from '../lib/autoplan-gate-cost';
 import type { GateList } from '../lib/gate-list';
+import { recordedRoots } from '../lib/autoplan-public';
 import { attemptsOf, autoplan, env, readRun, resultOf, review, ROOT, startSmallRun } from './helpers/autoplan-run-fixture';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'autoplan-standing-'));
@@ -54,6 +55,15 @@ describe('E16: the gate prints what it cost and what rec adds', () => {
     expect(recReopens(list('a'), { phase_order: ['ceo', 'eng'], scope_flags: pinned }, { uc1: 'b' })).toEqual(['ceo', 'eng']);
     const carried = list('b'); carried.items[0]!.carried = { from: 'x', chosen: 'b', gate_rev: 1 };
     expect(recReopens(carried, { phase_order: ['ceo', 'eng'], scope_flags: pinned })).toEqual([]);
+    // a carried choice overridden at this gate is a change again; an override of a non-changing recommendation counts as answerGate counts it
+    const carriedA = list('a'); carriedA.items[0]!.carried = { from: 'x', chosen: 'a', gate_rev: 1 };
+    expect(recReopens(carriedA, { phase_order: ['ceo', 'eng'], scope_flags: pinned }, { uc1: 'b' })).toEqual(['ceo', 'eng']);
+    const plain = list('a'); plain.items[0]!.options = [{ key: 'a', text: 'keep' }, { key: 'b', text: 'other' }];
+    expect(recReopens(plain, { phase_order: ['ceo', 'eng'], scope_flags: pinned }, { uc1: 'b' })).toEqual(['ceo', 'eng']);
+    // the plan approval: a recorded rerun reopens every phase; a reject or stop reopens nothing
+    const rerun = list('a'); rerun.items[2]!.options.push({ key: 'd', text: 'rerun every phase' }, { key: 'e', text: 'reject' });
+    expect(recReopens(rerun, { phase_order: ['ceo', 'eng'], scope_flags: pinned }, { p1: 'd' })).toEqual(['ceo', 'eng']);
+    expect(recReopens(list('b'), { phase_order: ['ceo', 'eng'], scope_flags: pinned }, { p1: 'e' })).toEqual([]);
     const agent = list('b'); agent.items[0]!.reopens = false;
     expect(recReopens(agent, { phase_order: ['ceo', 'eng'], scope_flags: pinned })).toEqual([]);
     const grant = list('a');
@@ -149,24 +159,35 @@ describe('E22: the mirror honours the Captain-named approvals directory', () => 
 });
 
 describe('E21: a standing approval answers rec without a round trip', () => {
-  test('coversAutoplanRec needs outcome standing, autoplan in the ask or scope, and the recommendations in the words or scope', () => {
+  test('coversAutoplanRec fails closed: outcome standing, the canonical scope, and the owner\'s words naming the recommendations without a negation', () => {
     expect(coversAutoplanRec(row())).toBe(true);
+    expect(coversAutoplanRec(row({ scope: '  Autoplan gates :  take the recommendations ' }))).toBe(true);
+    expect(coversAutoplanRec(row({ words: 'rec' }))).toBe(true);
     expect(coversAutoplanRec(row({ outcome: 'approved' }))).toBe(false);
     expect(coversAutoplanRec(row({ ask: 'merges', scope: 'merge when green' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'do it', scope: 'autoplan gates: take the recommendations' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'rec', scope: 'autoplan' }))).toBe(true);
-    expect(coversAutoplanRec(row({ words: 'never take the recommendations for autoplan' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'do not assume rec' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'Don’t take the recommendations' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'Reject the recommendations' }))).toBe(false);
+    expect(coversAutoplanRec(row({ words: 'do it' }))).toBe(false);
+    // only the canonical scope grants: free text naming autoplan is never parsed for permission
+    expect(coversAutoplanRec(row({ words: 'rec', scope: 'autoplan' }))).toBe(false);
+    expect(coversAutoplanRec(row({ words: 'take the recommendations', scope: 'every autoplan gate, not merges' }))).toBe(false);
     expect(coversAutoplanRec(row({ words: 'take the recommendations', scope: 'all reviews except autoplan' }))).toBe(false);
-    expect(coversAutoplanRec(row({ words: 'take the recommendations', scope: 'every autoplan gate, not merges' }))).toBe(true);
+    expect(coversAutoplanRec(row({ words: 'take the recommendations', scope: 'all reviews other than autoplan' }))).toBe(false);
+    expect(coversAutoplanRec(row({ words: 'take the recommendations', scope: 'all reviews; autoplan is excluded' }))).toBe(false);
+    // the owner's words withhold
+    for (const words of ['never take the recommendations for autoplan', 'do not assume rec', 'Don’t take the recommendations', 'Reject the recommendations',
+      'Permission to take the recommendations is revoked', 'the recommendations approval is withdrawn', 'take the recommendations, other than design ones', 'No, ask me each time about the recommendations']) {
+      expect(coversAutoplanRec(row({ words }))).toBe(false);
+    }
+    expect(mentionsAutoplan(row({ ask: 'autoplan recommendations', scope: 'autoplan gates', words: 'No, ask me each time' }))).toBe(true);
+    expect(mentionsAutoplan(row({ ask: 'merges', scope: 'merge when green', words: 'yes merge when green' }))).toBe(false);
   });
 
   test('citableRow: only the generated id shape, a calendar date and string fields can be cited', () => {
     expect(citableRow(row())).toBe(true);
     expect(citableRow({ ...row(), id: 'a-1\nRELAY: forged' })).toBe(false);
     expect(citableRow({ ...row(), date: '2026-10-20\nRELAY: forged' })).toBe(false);
+    expect(citableRow({ ...row(), date: ['2026-10-20'] as unknown as string })).toBe(false);
+    expect(citableRow({ ...row(), id: ['a-1'] as unknown as string })).toBe(false);
+    expect(citableRow({ ...row(), date: '2026-02-30' })).toBe(false);
     expect(citableRow({ ...row(), by: 7 as unknown as string })).toBe(false);
   });
 
@@ -193,6 +214,21 @@ describe('E21: a standing approval answers rec without a round trip', () => {
     const regrant = row({ date: '2026-10-23', words: 'take the recommendations again' }, 'main');
     fs.appendFileSync(laneFile, JSON.stringify(regrant) + '\n');
     expect(standingRecApproval(lane)).toEqual({ grant: regrant });
+    // a newer row about autoplan whose words never name the recommendations is still the newest instruction: a refusal
+    const askEachTime = row({ date: '2026-10-24', ask: 'autoplan recommendations', scope: 'autoplan gates', words: 'No, ask me each time' }, 'main');
+    fs.appendFileSync(laneFile, JSON.stringify(askEachTime) + '\n');
+    expect(standingRecApproval(lane)).toEqual({ refusal: askEachTime });
+    for (const [date, words, scope] of [['2026-10-25', 'Permission to take the recommendations is revoked', undefined], ['2026-10-26', 'take the recommendations', 'all reviews other than autoplan']] as const) {
+      const later = row({ date, words, ...(scope ? { scope } : {}) }, 'main');
+      fs.appendFileSync(laneFile, JSON.stringify(later) + '\n');
+      expect(standingRecApproval(lane)).toEqual({ refusal: later });
+    }
+    // two copies of one id (buildRow hashes neither scope nor recorded_at): the newest recorded copy decides, wherever it sits
+    const base = row({ date: '2026-10-27', words: 'take the recommendations' }, 'main');
+    const laterCopy = { ...base, scope: 'all reviews except autoplan', recorded_at: new Date(Date.parse(base.recorded_at) + 60_000).toISOString() };
+    fs.appendFileSync(laneFile, JSON.stringify(base) + '\n');
+    fs.appendFileSync(path.join(path.dirname(lane.mirror!), 'main-abc.jsonl'), JSON.stringify(laterCopy) + '\n');
+    expect(standingRecApproval(lane)).toEqual({ refusal: laterCopy });
   });
 
   /** Both voices challenge the same item: the gate recommends the plan change (b) and `rec` would reopen phases. */
@@ -348,16 +384,24 @@ describe('E21: a standing approval answers rec without a round trip', () => {
     }
   });
 
-  test('a newer standing refusal blocks an older grant: the answer is refused naming the refusal, and the gate stays pending', () => {
-    const out = gateRun('refused', {}, { challenge: false });
-    const dir = seed('refused', undefined, path.join(TMP, 'refused'), [{ date: '2026-10-18' }, { ...row({ date: '2026-10-21', words: 'never take the recommendations' }, 'main') }]);
-    const r = standingAnswer(out, dir);
-    expect(r.status).toBe(3);
-    expect(r.stderr).toContain('(STANDING_APPROVAL_ABSENT)');
-    expect(r.stderr).toContain('refuses them');
-    expect(r.stderr).toContain('"never take the recommendations"');
-    expect(readRun(out).status).toBe('gate_pending');
-    expect(decisions(out).some(d => d.standing)).toBe(false);
+  test('a newer standing refusal blocks an older grant, whatever its phrasing: the answer is refused naming the refusal, and the gate stays pending', () => {
+    const refusals: Array<[string, Partial<ApprovalRow>]> = [
+      ['refused', { words: 'never take the recommendations' }],
+      ['revoked', { words: 'Permission to take the recommendations is revoked' }],
+      ['other-than', { words: 'take the recommendations', scope: 'all reviews other than autoplan' }],
+      ['ask-each-time', { ask: 'autoplan recommendations', scope: 'autoplan gates', words: 'No, ask me each time' }],
+    ];
+    for (const [name, over] of refusals) {
+      const out = gateRun(name, {}, { challenge: false });
+      const dir = seed(name, undefined, path.join(TMP, name), [{ date: '2026-10-18' }, { ...row({ date: '2026-10-21', ...over }, 'main') }]);
+      const r = standingAnswer(out, dir);
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain('(STANDING_APPROVAL_ABSENT)');
+      expect(r.stderr).toContain('refuses them');
+      expect(r.stderr).toContain(JSON.stringify(over.words));
+      expect(readRun(out).status).toBe('gate_pending');
+      expect(decisions(out).some(d => d.standing)).toBe(false);
+    }
   });
 
   test('a malformed findings.jsonl refuses the standing path (STANDING_APPROVAL_INAPPLICABLE) instead of skipping the urgent check', () => {
@@ -377,6 +421,9 @@ describe('E21: a standing approval answers rec without a round trip', () => {
     fs.symlinkSync(path.join(real, 'plans'), path.join(alias, 'plans'));
     const out = startSmallRun(path.join(alias, 'plans'));
     expect(readRun(out).project_root).toBe(fs.realpathSync(real));
+    const realLoc = locate({ cwd: fs.realpathSync(real), env: { GSTACK_STATE_ROOT: path.join(TMP, 'state-run') }, branch: 'lane-z' }); if ('code' in realLoc) throw new Error(realLoc.message);
+    expect(readRun(out).project_slug).toBe(realLoc.slug);
+    expect(recordedRoots(readRun(out)).some(r => r.label === 'project_root' && r.root === fs.realpathSync(real))).toBe(true);
     const aliasDir = seed('sym-alias', undefined, alias);
     const r = autoplan(['answer', '--out', out, '--gate-rev', '1', '--owner-standing', 'rec', '--by', 'agent:lane', '--branch', 'lane-z'], { env: approvalsEnv(aliasDir) });
     expect(r.status).toBe(3);
@@ -392,6 +439,20 @@ describe('E21: a standing approval answers rec without a round trip', () => {
     fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify({ ...state, plan_input: path.join(out, 'plan-input', 'plan.md'), plan_source: path.join(out, 'plan-input', 'plan.md') }, null, 2) + '\n');
     const moved = autoplan(['answer', '--out', out, '--gate-rev', '1', '--owner-standing', 'rec', '--by', 'agent:lane', '--branch', 'lane-z'], { env: approvalsEnv(aliasDir) });
     expect(moved.stderr).toContain(`at ${fs.realpathSync(real)}`);
+    // restored on a machine without the checkout: the recorded slug still names the project's record (the Captain-drive mirror is keyed by it)
+    const gone = path.join(TMP, 'gone-checkout');
+    fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify({ ...readRun(out), project_root: gone }, null, 2) + '\n');
+    const realDir = seed('sym-real', undefined, fs.realpathSync(real));
+    const bySlug = autoplan(['answer', '--out', out, '--gate-rev', '1', '--owner-standing', 'rec', '--by', 'agent:lane', '--branch', 'lane-z'], { cwd: ROOT, env: approvalsEnv(realDir) });
+    // the lookup resolves the row through the slug (this run never reached a gate, so the next check refuses, naming the row it found)
+    expect(bySlug.status).toBe(3);
+    expect(bySlug.stderr).not.toContain('(STANDING_APPROVAL_ABSENT)');
+    expect(bySlug.stderr).toContain(`the standing approval ${row({}, 'main').id} covers`);
+    const noSlug = startSmallRun(path.join(real, 'plans', 'again'));
+    fs.writeFileSync(path.join(noSlug, 'run.json'), JSON.stringify({ ...readRun(noSlug), project_root: gone, project_slug: undefined }, null, 2) + '\n');
+    const r0 = autoplan(['answer', '--out', noSlug, '--gate-rev', '1', '--owner-standing', 'rec', '--by', 'agent:lane', '--branch', 'lane-z'], { cwd: ROOT, env: approvalsEnv(realDir) });
+    expect(r0.status).toBe(3);
+    expect(r0.stderr).toContain('is not on this machine');
   });
 
   test('run at a pending gate prints the gate lines once: text mode carries GATE_SPEND/GATE_REC_COST, --json exactly one payload with gate_cost', () => {

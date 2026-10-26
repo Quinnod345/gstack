@@ -33,6 +33,8 @@ import { familyConflict, modelFamily } from './outside-voice-runner';
 import { renderSpend, reserve, settle, summarize, readLedger } from './spend-ledger';
 import { DEFAULT_MAX_ROUNDS, attemptEstimate, overCap, resumeStop, roundCap, roundOf, roundsLine, stopForBudget, stopLines } from './autoplan-budget';
 import { annotateConfirm, confirmBlock } from './autoplan-confirm';
+import { slugFromEnvironment } from './bin-context';
+import { resolveStateRoot } from './state-root';
 
 /** An unreadable run.lock younger than this is a lock some other gstack is still writing, never a stale one. */
 const LOCK_WRITE_GRACE_MS = 30_000;
@@ -121,7 +123,7 @@ export function initRun(o: InitOptions, lines: string[] = []): RunState {
     deviations: ['autoplan guard: not enforced by this host; publication order is unverified (GUARD_NOT_INSTALLED)'],
     ...(o.deadlineMin ? { deadline_at: new Date(Date.now() + o.deadlineMin * 60_000).toISOString() } : {}),
     ...(o.light ? { light: true } : {}),
-    gstack_version: GSTACK_VERSION, plan_input: input, scope_flags: { ...(o.scope ?? {}) }, ...(projectRoot ? { project_root: projectRoot } : {}),
+    gstack_version: GSTACK_VERSION, plan_input: input, scope_flags: { ...(o.scope ?? {}) }, ...(projectRoot ? { project_root: projectRoot, project_slug: slugFromEnvironment(resolveStateRoot(process.env), projectRoot) } : {}),
     ...(o.planHeading ? { plan_heading: o.planHeading } : {}), ...(scaffolded ? { scaffolded: true } : {}),
   };
   fs.writeFileSync(path.join(out, 'timing.json'), JSON.stringify({ schema_version: 1, run, phases: [], started_at: now(), session_kind: state.session_kind }, null, 2) + '\n');

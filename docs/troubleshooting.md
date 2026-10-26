@@ -1711,21 +1711,25 @@ import again. Imports are idempotent, so a retry never records an answer twice.
 ### `gstack-autoplan answer: ... (STANDING_APPROVAL_ABSENT)`
 
 **Meaning.** `answer --owner-standing rec` looked for a standing approval covering autoplan
-recommendations (a `gstack-approvals` row with outcome `standing`, scope or ask naming
-`autoplan`, words or scope naming `rec` or the recommendations) in this project's records,
-local and mirror, every branch, and found none that applies: either no such row exists, the
-newest row about autoplan recommendations refuses them (`never take the recommendations`, a
-scope that carves autoplan out; the line quotes it, and a later grant supersedes it), or the
-run's plan is not inside a git repository, so no project record can be named (the project is
-the repository the plan's physical path was in at init). A row whose id or date is not the
-recorded shape is never cited. The gate stays pending; nothing was applied. Exit 3.
+recommendations in this project's records (local and mirror, every branch) and found none that
+applies. The grammar fails closed: the newest standing row that mentions autoplan anywhere
+(ask, scope or words) decides, and it grants only when its scope is the canonical
+`autoplan gates: take the recommendations` and its words, the owner's own, name the
+recommendations without a negation. Any other newest row about autoplan is a refusal
+(`never take the recommendations`, `Permission ... is revoked`, `all reviews other than
+autoplan`, `No, ask me each time`): the line quotes it, and only a later grant supersedes it.
+Other causes: the run's plan is not inside a git repository (the project is the repository
+the plan's physical path was in at init, recorded as `project_root` and `project_slug`), or a
+restored run whose checkout is not on this machine recorded no slug. A row whose id or date is
+not the recorded shape is never cited. The gate stays pending; nothing was applied. Exit 3.
 
 **Fix.** Relay the gate to the owner (or Captain) and answer with their reply through
 `--reply` and `--owner-reply`. For the next gate, the Captain records the owner's standing
 words once: `gstack-approvals add --outcome standing --ask "autoplan gates" --words "<the
-owner's exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"`;
-on Capy the row lands in the crew-readable mirror, so every lane's `--owner-standing rec`
-finds it.
+owner's exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"`
+(that scope, exactly; a standing row recorded later about autoplan with any other scope
+revokes it); on Capy the row lands in the crew-readable mirror, so every lane's
+`--owner-standing rec` finds it.
 
 <a id="standing-approval-inapplicable"></a>
 ### `gstack-autoplan answer: ... (STANDING_APPROVAL_INAPPLICABLE)`

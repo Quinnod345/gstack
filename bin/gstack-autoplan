@@ -378,7 +378,10 @@ async function main(argv: string[]): Promise<number> {
           const planFile = state.plan_input ?? state.plan_source;
           const runRepo = state.project_root ?? (planFile && fs.existsSync(planFile) ? repoRoot(path.dirname(fs.realpathSync(planFile))) : undefined);
           if (!runRepo) throw new RunError('STANDING_APPROVAL_ABSENT', `the run's plan (${planFile ?? 'unknown'}) is not inside a git repository, so no project approval record can be resolved for it`, 3);
-          const loc = locate({ cwd: runRepo, env: process.env, branch: flag(rest, '--branch') });
+          // A restored run on another machine has no checkout at project_root: its recorded slug still names the record.
+          const rootHere = fs.existsSync(runRepo);
+          if (!rootHere && !state.project_slug) throw new RunError('STANDING_APPROVAL_ABSENT', `the run's project checkout ${runRepo} is not on this machine and the run recorded no project slug, so no project approval record can be resolved for it`, 3);
+          const loc = locate({ cwd: rootHere ? runRepo : process.cwd(), slug: state.project_slug, env: process.env, branch: flag(rest, '--branch') });
           if ('code' in loc) throw new RunError(loc.code, loc.message, 3);
           const found = standingRecApproval(loc);
           const where = `${[loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : []).join(' or ')} (project ${loc.slug} at ${runRepo}, branch ${loc.branch})`;

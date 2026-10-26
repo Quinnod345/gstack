@@ -59,8 +59,8 @@ export interface RunState extends RunManifest {
   gstack_version?: string;
   /** The --plan file the owner edits (drift hints, revise), the --plan-heading it was cut from, and the scope flags revise re-detects with. */
   plan_input?: string; plan_heading?: string; scope_flags?: Record<string, boolean | undefined>; scaffolded?: boolean;
-  /** The repository the plan lived in at init (physical path), kept across checkpoint restores so the run's project never follows a relocated copy. */
-  project_root?: string;
+  /** The repository the plan lived in at init (physical path) and its state-root slug, kept across checkpoint restores so the run's project never follows a relocated copy; the slug names the record when the path is gone (another machine). */
+  project_root?: string; project_slug?: string;
   plan_revision?: number; amendments?: Amendment[];
   plan_reality?: { plan_sha256: string; checker: string; verdict: string; line: string };
   /** Review rounds per phase (null: uncapped); round_grants are the owner's per-phase raises at the gate. */

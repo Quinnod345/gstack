@@ -15,8 +15,10 @@
  * GSTACK_APPROVALS_DIR, else the `approvals/` directory a Captain created in
  * its drive (readable by the whole crew), else the private project-user Drive
  * folder. Every field is secret-scanned before it is written. A row with
- * `--outcome standing` whose scope names autoplan and whose words or scope name
- * the recommendations is what `gstack-autoplan answer --owner-standing rec` cites.
+ * `--outcome standing` with the scope `autoplan gates: take the recommendations`
+ * and the owner's words naming the recommendations is what `gstack-autoplan
+ * answer --owner-standing rec` cites; any newer standing row mentioning autoplan
+ * that is not that grant refuses it.
  * `render` prints the `## Approvals` section /ship puts in the PR body. Logic:
  * lib/approval-record.ts.
  */

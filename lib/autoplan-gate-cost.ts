@@ -34,8 +34,10 @@ const usd = (n: number) => n.toFixed(2);
 
 /**
  * The phases a `rec` can reopen, as an upper bound from the answer and revise rules. The effective
- * choice per item is what `rec` would record: an answer already given at this gate revision
- * (`prior`, as answerGate reads it from decisions.jsonl) wins over the recommendation. A plan
+ * choice per item is what `rec` would record (parseReply's order): an answer already given at this
+ * gate revision (`prior`, as answerGate reads it from decisions.jsonl), else the carried choice,
+ * else the recommendation. A recorded plan rerun (`p1d`) reopens every phase; a reject or stop
+ * (`p1c`/`p1e`) reopens nothing; an override of the recommendation counts as answerGate counts it. A plan
  * change is absorbed by `revise`, which reopens every phase whose snapshot the edited plan changes
  * and re-detects scope, so it can add a phase the run skipped: every phase the scope flags do not
  * pin off is counted (`--no-ui` keeps Design out, `--no-dx` keeps DX out). A round grant (`cap`
@@ -45,13 +47,19 @@ const usd = (n: number) => n.toFixed(2);
 export function recReopens(list: GateList, run: Pick<GateCostRun, 'phase_order' | 'scope_flags'>, prior: Record<string, string> = {}): string[] {
   const flags = run.scope_flags ?? {};
   const bound = PHASES.filter(p => run.phase_order.includes(p) || (p === 'design' ? flags.ui !== false : p === 'dx' ? flags.dx !== false : true));
-  const named = new Set<string>();
+  // The effective choice is parseReply's: an answer recorded at this gate, else the carried choice, else the recommendation.
+  const choiceOf = (item: GateList['items'][number]) => prior[item.id] ?? item.carried?.chosen ?? item.recommended;
+  const plan = list.items.find(i => i.id === 'p1');
+  const planChoice = plan ? choiceOf(plan) : undefined;
+  if (planChoice === 'c' || planChoice === 'e') return [];
+  const named = new Set<string>(planChoice === 'd' ? run.phase_order : []);
   for (const item of list.items) {
-    if (item.id === 'p1' || item.carried) continue;
-    const choice = prior[item.id] ?? item.recommended;
+    if (item.id === 'p1') continue;
+    const choice = choiceOf(item);
+    if (item.carried && choice === item.carried.chosen) continue;
     if (item.cap && choice === 'b') { named.add(item.cap.phase); if (run.phase_order.includes('eng')) named.add('eng'); continue; }
     if (item.reopens === false) continue;
-    if (item.options.find(o => o.key === choice)?.changes_plan) for (const p of bound) named.add(p);
+    if (item.options.find(o => o.key === choice)?.changes_plan ?? choice !== item.recommended) for (const p of bound) named.add(p);
   }
   return PHASES.filter(p => named.has(p));
 }
