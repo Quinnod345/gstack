@@ -95,7 +95,7 @@ export function generateSkillPreamble(ctx: TemplateContext): string {
   });
   const pointer = `## Shared preamble (load first)
 
-This skill follows gstack shared preamble \`${sharedId(ctx, shared)}\` (AskUserQuestion format, voice, writing, completeness and completion rules). If that file, whose first heading names this id, is still in context, do not read it again; otherwise Read ${sharedPath(ctx)} in full before the command below. A section or subsection here with a shared heading replaces the shared one.`;
+This skill follows gstack shared preamble \`${sharedId(ctx, shared)}\` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read ${sharedPath(ctx)} in full before the command below. A section or subsection here with a shared heading replaces the shared one.`;
   return [pointer, ...inline].join('\n\n');
 }
 
