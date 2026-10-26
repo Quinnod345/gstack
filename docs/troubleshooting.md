@@ -2503,7 +2503,9 @@ or corrupt object) that `git ls-tree` cannot confirm is absent; it never falls
 through to the user-owned file. It also refuses when Bun loaded a `.env` file
 from the working directory (a bare `bun gstack-pregate`), since a branch could
 then pick the user policy: run `gstack-pregate` directly or as
-`bun --no-env-file`.
+`bun --no-env-file`. `gstack-ship-queue ready` under a train policy fetches
+`origin/<base>` first and refuses with this code, quoting git's error, when
+that fetch fails.
 
 **Fix.** `git fetch origin <base> --depth=1`, then rerun. To run against the
 branch's own file deliberately, pass `--policy-from head --allow-repo-commands`;
@@ -3834,8 +3836,13 @@ which line is not yet true.
 input does not match: the gated head is not a commit here, HEAD differs from
 the gated head beyond stamps (the gate never covered this tree), an earlier
 stamp with other inputs is unfinished, the stamp journal's head moved, or a
-gate-ahead merge could not be recomputed with `git merge-tree`. Nothing was
-written unless the `QUEUE_STAMP_REFUSED:` line says `committed=yes`.
+gate-ahead merge could not be recomputed with `git merge-tree`. The train
+commands use it too: `train forget` on a record that does not exist or on a
+train still building, running or merging, `train watch` on an unknown record,
+`verify --pr <n> --screen` on a run with no verdict to read (an INCOMPLETE or
+unreadable run), and `ready --screen` when the scratch merge branch cannot be
+pushed. Nothing was written unless the `QUEUE_STAMP_REFUSED:` line says
+`committed=yes`.
 
 **Fix.** Supply the named input (fetch the gated head, pass the current base
 sha), or regate the tree you mean to stamp. For an unfinished stamp, rerun the

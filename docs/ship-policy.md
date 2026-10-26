@@ -605,7 +605,8 @@ prose, and record it in the READY receipt (`screen.verdict`): `SCREEN_VERDICT:
 no verdict (its report job did not finish): `ready --screen` dispatches afresh
 instead of following it, `verify --screen` refuses it (`QUEUE_PROOF_MISSING`)
 and `train build` seats the pin unscreened, as for `NOT-RUN`. A RED screen refuses `ready` under
-either choice and is never re-dispatched at the same merge SHA
+either choice, is never re-dispatched at the same merge SHA and is not seated
+by `train build`, whose `NEXT:` names the build without that PR
 (`QUEUE_SCREEN_RED`); a run that concluded success with no slice (its route
 job found the head superseded or the plan selected nothing) is `NOT-RUN`:
 `verify --screen` refuses with `QUEUE_SCREEN_NOT_RUN`, `ready --screen`
