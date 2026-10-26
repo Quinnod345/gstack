@@ -14,7 +14,7 @@ GSTACK_DOCTOR_HELPERS="gstack-pregate gstack-plan-reality gstack-artifact gstack
 GSTACK_DOCTOR_NOT_NEEDED="none"
 GSTACK_DOCTOR_NOT_NEEDED_REVISION="not-needed"
 GSTACK_PROJECT_FLOOR_FILE=".gstack/ship-policy.json"
-GSTACK_PROJECT_FLOOR_KEY="min_gstack_version"
+GSTACK_PROJECT_FLOOR_FIELD="min_gstack_version"
 
 # gstack_doctor_component_title ID — the human title; returns 1 for an unknown id.
 gstack_doctor_component_title() {

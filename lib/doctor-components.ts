@@ -101,7 +101,7 @@ export const NOT_NEEDED_REVISION = 'not-needed';
 
 /** The project file and key the `floor` row reads (the same key gstack-ship-queue validates). */
 export const PROJECT_FLOOR_FILE = '.gstack/ship-policy.json';
-export const PROJECT_FLOOR_KEY = 'min_gstack_version';
+export const PROJECT_FLOOR_FIELD = 'min_gstack_version';
 
 /** The read-only helpers the `helpers` row launches (`<bin> --help` loads each module graph with the launch Bun). */
 export const REVIEW_VOICE_HELPERS: readonly string[] = ['gstack-pregate', 'gstack-plan-reality', 'gstack-artifact', 'gstack-autoplan'];
@@ -242,7 +242,7 @@ export function renderDoctorComponentsSh(): string {
     `GSTACK_DOCTOR_NOT_NEEDED="${NOT_NEEDED_PROFILE}"`,
     `GSTACK_DOCTOR_NOT_NEEDED_REVISION="${NOT_NEEDED_REVISION}"`,
     `GSTACK_PROJECT_FLOOR_FILE="${PROJECT_FLOOR_FILE}"`,
-    `GSTACK_PROJECT_FLOOR_KEY="${PROJECT_FLOOR_KEY}"`,
+    `GSTACK_PROJECT_FLOOR_FIELD="${PROJECT_FLOOR_FIELD}"`,
     '',
     '# gstack_doctor_component_title ID — the human title; returns 1 for an unknown id.',
     'gstack_doctor_component_title() {',

@@ -471,7 +471,7 @@ _dc_check_revision() {
 }
 
 # _dc_check_floor — the project's own gstack floor: `min_gstack_version` in
-# its .gstack/ship-policy.json (GSTACK_PROJECT_FLOOR_FILE/KEY, the key
+# its .gstack/ship-policy.json (GSTACK_PROJECT_FLOOR_FILE/FIELD, the field
 # gstack-ship-queue already validates). A consuming repo raises it in one
 # commit instead of broadcasting a minimum to every thread; the next session
 # check on each machine then WARNs with the upgrade as its fix. It is a
@@ -489,12 +489,12 @@ _dc_check_floor() {
   fi
   file="$project/$GSTACK_PROJECT_FLOOR_FILE"
   if [ ! -f "$file" ]; then
-    _dc_row SKIP floor "$project declares none ($GSTACK_PROJECT_FLOOR_FILE absent; set $GSTACK_PROJECT_FLOOR_KEY there to require a gstack version)"
+    _dc_row SKIP floor "$project declares none ($GSTACK_PROJECT_FLOOR_FILE absent; set $GSTACK_PROJECT_FLOOR_FIELD there to require a gstack version)"
     return
   fi
-  floor=$(sed -n 's/.*"'"$GSTACK_PROJECT_FLOOR_KEY"'"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$file" 2>/dev/null | head -1 | clamp '0-9.' 32)
+  floor=$(sed -n 's/.*"'"$GSTACK_PROJECT_FLOOR_FIELD"'"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$file" 2>/dev/null | head -1 | clamp '0-9.' 32)
   if [ -z "$floor" ]; then
-    _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_KEY (null or absent)"
+    _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_FIELD (null or absent)"
     return
   fi
   installed=$(head -1 "$ROOT/VERSION" 2>/dev/null | clamp '0-9A-Za-z.+-' 40)
@@ -504,7 +504,7 @@ _dc_check_floor() {
     else
       fix="$SRC/bin/gstack-upgrade (fast-forwards to the remote default branch, then reinstalls; interactive: /gstack-upgrade)"
     fi
-    _dc_row WARN floor "installed ${installed:-unknown} is below the floor $floor that $file declares ($GSTACK_PROJECT_FLOOR_KEY)" "fix: $fix" PROJECT_FLOOR_UNMET
+    _dc_row WARN floor "installed ${installed:-unknown} is below the floor $floor that $file declares ($GSTACK_PROJECT_FLOOR_FIELD)" "fix: $fix" PROJECT_FLOOR_UNMET
     return
   fi
   _dc_row PASS floor "$floor declared by $file (installed ${installed:-unknown})"
