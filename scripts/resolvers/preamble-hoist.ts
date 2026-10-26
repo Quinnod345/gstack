@@ -70,10 +70,14 @@ const headingOf = (section: string) => section.split('\n', 1)[0]!;
 function variantSubsections(own: string, shared: string): string | null {
   const ownParts = splitSections(own, '### ');
   const sharedParts = splitSections(shared, '### ');
-  if (ownParts.length < 2 || ownParts.length !== sharedParts.length || ownParts[0] !== sharedParts[0]) return null;
-  if (ownParts.some((part, i) => headingOf(part) !== headingOf(sharedParts[i]!))) return null;
-  const changed = ownParts.slice(1).filter((part, i) => part !== sharedParts[i + 1]);
-  return [`${headingOf(own)}\n\nOnly these subsections replace the shared ones; the rest of this section is shared.`, ...changed].join('\n\n');
+  if (ownParts.length < 2 || ownParts.length < sharedParts.length || ownParts[0] !== sharedParts[0]) return null;
+  if (sharedParts.some((part, i) => headingOf(part) !== headingOf(ownParts[i]!))) return null;
+  const changed = ownParts.slice(1, sharedParts.length).filter((part, i) => part !== sharedParts[i + 1]);
+  const added = ownParts.slice(sharedParts.length);
+  const note = added.length
+    ? 'Only these subsections replace the shared ones or, under a new heading, add to its end; the rest of this section is shared.'
+    : 'Only these subsections replace the shared ones; the rest of this section is shared.';
+  return [`${headingOf(own)}\n\n${note}`, ...changed, ...added].join('\n\n');
 }
 
 /** Where the installed SKILL.md finds its copy of the shared file. */
