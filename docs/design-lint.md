@@ -49,7 +49,11 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   open heading is closed by the next heading start tag, an open `<p>` by the
   next block start, and a repeated `<li>`, `<button>`, `<a>`, `<label>`,
   `<select>`, `<form>` or table cell by its next start tag, as the browser
-  does, so a page of unclosed elements costs its length to lint.
+  does, so a page of unclosed elements costs its length to lint. A nested
+  CSS selector is expanded against its parent (`&` replaced, a bare selector
+  descendant-joined) up to 8192 characters, and a sheet may store at most
+  four times its length plus 64 KB of expanded selectors; past either bound
+  the nested selector stands as written, so a sheet costs its length too.
 - A page is linted with the stylesheets it links (`<link rel=stylesheet>`,
   `@import`, and anything they reach); a directory of components shares the
   project's tokens and global state styles, so a focus ring declared once in
