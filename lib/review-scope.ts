@@ -224,10 +224,19 @@ export function renderDeferredSection(deferred: readonly DeferredRecord[], noted
 export interface ReviewLoopSummary { passes: number; blocking_found: number; deferred: number; noted: number; fixed: number; scope: ReviewScopePolicy | 'unknown' }
 
 /** Review-log rows of one /ship invocation (skill review, via ship, at or after `since`) → the loop summary. */
+/** When a review-log row was written: its `timestamp`, else the start of the pass the logger bound it to (the row's writer fills `timestamp`; the logger does not). */
+function rowTime(row: Record<string, any>): number {
+  for (const value of [row.timestamp, row.review_binding?.started_at]) {
+    const ms = typeof value === 'string' ? Date.parse(value) : NaN;
+    if (Number.isFinite(ms)) return ms;
+  }
+  return NaN;
+}
+
 export function summarizeReviewLoop(rows: readonly Record<string, any>[], since: string): ReviewLoopSummary {
   const sinceMs = Date.parse(since);
-  const passes = rows.filter(r => r && r.skill === 'review' && r.via === 'ship' && typeof r.timestamp === 'string'
-    && Number.isFinite(Date.parse(r.timestamp)) && (!Number.isFinite(sinceMs) || Date.parse(r.timestamp) >= sinceMs));
+  const passes = rows.filter(r => r && r.skill === 'review' && r.via === 'ship' && Number.isFinite(rowTime(r))
+    && (!Number.isFinite(sinceMs) || rowTime(r) >= sinceMs));
   const blocking = new Set<string>();
   const deferred = new Set<string>();
   const noted = new Set<string>();

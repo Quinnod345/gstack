@@ -176,6 +176,18 @@ describe('loop summary', () => {
     expect(s).toEqual({ passes: 2, blocking_found: 2, deferred: 1, noted: 1, fixed: 1, scope: 'frozen' });
     expect(reviewLoopLine(s)).toBe('REVIEW_LOOP: passes=2 blocking_found=2 deferred=1 noted=1 fixed=1 scope=frozen');
   });
+
+  // A pass logged without the template's timestamp (the logger stamps review_binding.started_at, never
+  // timestamp) is still this invocation's pass; dropping it silently under-reported passes on #3481.
+  test('a row with no timestamp dates from its binding start; a row with neither is not counted', () => {
+    const rows = [
+      { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:00:00Z', review_scope: 'frozen', findings: [{ fingerprint: 'a:1:x', blocking: true, action: 'auto-fixed' }] },
+      { skill: 'review', via: 'ship', review_scope: 'frozen', review_binding: { state: 'changed', started_at: '2026-10-26T10:30:00.000Z' }, findings: [{ fingerprint: 'c:1:z', action: 'noted' }] },
+      { skill: 'review', via: 'ship', review_binding: { state: 'changed', started_at: '2026-10-26T09:00:00.000Z' }, findings: [{ fingerprint: 'old:1:q', action: 'noted' }] },
+      { skill: 'review', via: 'ship', findings: [{ fingerprint: 'undated:1:q', action: 'noted' }] },
+    ];
+    expect(summarizeReviewLoop(rows, '2026-10-26T09:30:00Z')).toEqual({ passes: 2, blocking_found: 1, deferred: 0, noted: 1, fixed: 1, scope: 'frozen' });
+  });
 });
 
 describe('gstack-review-scope (bin)', () => {
