@@ -994,9 +994,13 @@ is killed with exit 124 and its last 40 lines on stderr, so a hung verify fails
 fast instead of holding the VM until its TTL. `verify` runs a repository's
 committed `.gstack/ubicloud.json` (setup, command, size, location, storage,
 image, env, pass, pull; flags and a trailing `-- COMMAND` override it) and
-refuses without the file, so every lane runs one definition. All of this is
-pinned offline in `test/ubicloud-runner.test.ts` against a fake API and a fake
-`ssh`.
+refuses without the file, so every lane runs one definition. The file is
+repository content: its setup script and pull destinations must resolve inside
+`--src`, and a name it lists under `pass` is forwarded only when the command
+line grants it (`--pass NAME`, or all of them with `--trust-config`); `--pass`
+never forwards `UBICLOUD_*`. All of this is pinned offline in
+`test/ubicloud-runner.test.ts` against a fake API and a fake `ssh`, including
+a fixture whose fake API creates, so `run` and `verify` execute end to end.
 
 Under 8 cores (`gstack-doctor`'s `cores` row says so), run the full unit and
 E2E tiers on a remote gate: `gstack-config set test_backend ubicloud` records

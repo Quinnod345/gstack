@@ -96,7 +96,7 @@ for bin in curl python3 ssh ssh-keygen tar; do
 done
 UBICLOUD_API_KEY="${UBICLOUD_API_KEY:-${UBICLOUD_API_TOKEN:-}}"
 [[ "$GC_HOURS" =~ ^[0-9]+$ ]] || die "UBI_GC_HOURS must be a whole number of hours (unset or 0 disables the sweep)"
-[[ "$TTL_HOURS" =~ ^[0-9]+$ ]] || die "UBI_TTL_HOURS must be a whole number of hours (0 names VMs without a TTL)"
+[[ "$TTL_HOURS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || die "UBI_TTL_HOURS must be a whole number of hours from 0 to 999 with no leading zero (0 names VMs without a TTL)"
 for v in IDLE_TIMEOUT RUN_TIMEOUT HEARTBEAT QUOTA_WAIT; do
   [[ "${!v}" =~ ^[0-9]+$ ]] || die "UBI_$v must be a whole number of seconds (0 disables it)"
 done
@@ -179,25 +179,54 @@ remote() {
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 
+# sq STRING: STRING as one single-quoted shell word.
+sq() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+
+# remote_cancel NAME PHASE: end the session a watched PHASE started on the VM
+# (its leader pid is in ~/.ubirun-PHASE.sid there), bounded to 20 seconds.
+# Killing the local ssh client alone leaves a silent remote command running
+# until it next writes to the closed channel.
+remote_cancel() {
+  local name=$1 phase=$2 cpid i=0
+  remote "$name" "sid=\$(cat ~/.ubirun-$phase.sid 2>/dev/null); [ -z \"\$sid\" ] || { pkill -TERM -s \"\$sid\"; sleep 2; pkill -KILL -s \"\$sid\"; }; true" >/dev/null 2>&1 </dev/null &
+  cpid=$!
+  while kill -0 "$cpid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 1; i=$(( i + 1 )); done
+  kill "$cpid" 2>/dev/null || true
+  wait "$cpid" 2>/dev/null || true
+}
+
 # watched NAME PHASE COMMAND: run COMMAND on the VM, streaming its output and
 # keeping a copy of both streams in the VM's state dir, with a heartbeat every HEARTBEAT
 # seconds and a watchdog that kills it after IDLE_TIMEOUT seconds of silence or
 # RUN_TIMEOUT seconds in total: exit 124, reason and the last 40 lines on
 # stderr. The ssh runs in its own session (python3's setsid) so the watchdog
-# kills it and anything it started, not just the shell that launched it.
+# kills it and anything it started, not just the shell that launched it; on
+# the VM the command runs in its own session too, whose leader pid is written
+# to ~/.ubirun-PHASE.sid so remote_cancel can end it when the client is killed.
 watched() {
-  local name=$1 phase=$2 cmd=$3 out pid rc=0 start now last_beat idle elapsed why=""
+  local name=$1 phase=$2 cmd=$3 out pid rc=0 start now last_beat idle elapsed why="" old_traps
   load "$name"
   out="$(state_dir "$name")/$phase.log"
   : >"$out"
+  cmd="setsid -w bash -c $(sq "printf %s \$\$ >~/.ubirun-$phase.sid; $cmd")"
+  # The caller's stdin is handed to the background ssh explicitly (a background
+  # job in a non-interactive shell would otherwise read /dev/null), so piped
+  # input reaches the remote command as it did before the watchdog.
+  exec 3<&0
   # shellcheck disable=SC2046
   ( exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-      ssh $(ssh_opts) "ubi@$IP" "umask 022; $cmd" ) > >(tee -a "$out") 2> >(tee -a "$out" >&2) &
+      ssh $(ssh_opts) "ubi@$IP" "umask 022; $cmd" ) <&3 > >(tee -a "$out") 2> >(tee -a "$out" >&2) &
   pid=$!
+  exec 3<&-
+  # A signal to this process takes the ssh session down with it, so Ctrl-C on
+  # `ssh NAME COMMAND` leaves no orphaned client behind.
+  old_traps=$(trap -p INT TERM)
+  trap 'kill -TERM -- "-$pid" 2>/dev/null; exit 130' INT TERM
   start=$(date +%s)
   last_beat=$start
-  while kill -0 "$pid" 2>/dev/null; do
-    sleep "$POLL"
+  while :; do
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || break
     now=$(date +%s)
     elapsed=$(( now - start ))
     idle=$(( now - $(mtime "$out") ))
@@ -207,10 +236,15 @@ watched() {
       why="ran ${elapsed}s (UBI_RUN_TIMEOUT=$RUN_TIMEOUT)"
     fi
     if [ -n "$why" ]; then
+      # The command may have finished while the clock was read; a finished
+      # command is never reported as a timeout.
+      kill -0 "$pid" 2>/dev/null || break
       log "watchdog: $phase $why; killing it. Last output:"
       tail -n 40 "$out" >&2
       kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
+      trap - INT TERM; eval "$old_traps"
+      remote_cancel "$name" "$phase"
       return 124
     fi
     if [ "$HEARTBEAT" -gt 0 ] && [ $(( now - last_beat )) -ge "$HEARTBEAT" ]; then
@@ -219,6 +253,7 @@ watched() {
     fi
   done
   wait "$pid" || rc=$?
+  trap - INT TERM; eval "$old_traps"
   return "$rc"
 }
 
@@ -234,8 +269,8 @@ vm_rows() {
     elif [[ "$name" =~ ^${PREFIX}-([0-9]{10})- ]]; then
       owner=- created=${BASH_REMATCH[1]}
     fi
-    if [ -n "$created" ] && [[ "$name" =~ -t([0-9]+)$ ]]; then
-      expires=$(( created + BASH_REMATCH[1] * 3600 ))
+    if [ -n "$created" ] && [[ "$name" =~ -t([0-9]{1,3})$ ]]; then
+      expires=$(( 10#$created + 10#${BASH_REMATCH[1]} * 3600 ))
     fi
     echo "$loc $name $owner $expires"
   done
@@ -245,16 +280,19 @@ vm_rows() {
 # REAP_GRACE seconds ago, whichever owner created it (the TTL is that owner's
 # own declaration). Names without a TTL are never touched.
 cmd_reap() {
-  local now loc name owner expires n=0
+  local now rows loc name owner expires n=0 failed=0
   now=$(date +%s)
+  rows=$(vm_rows) || { log "reap: could not list the project's VMs; nothing destroyed"; return 1; }
   while read -r loc name owner expires; do
+    [ -n "$name" ] || continue
     [ "$expires" != - ] || continue
     [ "$now" -ge $(( expires + REAP_GRACE )) ] || continue
     n=$(( n + 1 ))
     log "reaping expired $loc/$name (owner $owner; its TTL ended $(( (now - expires) / 60 )) min ago)"
-    cmd_down "$name" -l "$loc" || log "failed to reap $loc/$name"
-  done < <(vm_rows)
+    cmd_down "$name" -l "$loc" || { failed=$(( failed + 1 )); log "failed to reap $loc/$name"; }
+  done <<<"$rows"
   [ "$n" -gt 0 ] || log "reap: no expired VMs"
+  [ "$failed" -eq 0 ] || { log "reap: $failed of $n expired VMs could not be destroyed"; return 1; }
 }
 
 cmd_gc() {
@@ -341,23 +379,34 @@ vcpus() { [[ "$1" =~ -([0-9]+)$ ]] && echo "${BASH_REMATCH[1]}"; }
 # before the create request when the project's running VMs plus this size
 # exceed the known vCPU ceiling. The ceiling comes from UBI_QUOTA_VCPUS or the
 # maximum the last refusal printed; without either the API's own refusal rules.
+QUOTA_CACHE_MAX_AGE=86400
 quota_preflight() {
-  local location=$1 name=$2 size=$3 need max used wait_until
+  local location=$1 name=$2 size=$3 need max used wait_until remaining source="UBI_QUOTA_VCPUS" cache="$STATE_ROOT/quota-max"
   need=$(vcpus "$size") || return 0
-  max=${QUOTA_VCPUS:-$(cat "$STATE_ROOT/quota-max" 2>/dev/null || true)}
+  max=$QUOTA_VCPUS
+  if [ -z "$max" ] && [ -f "$cache" ]; then
+    # A refusal's maximum is remembered for a day: after that (a raised quota,
+    # another project's key) the API's own answer decides again.
+    if [ $(( $(date +%s) - $(mtime "$cache") )) -lt "$QUOTA_CACHE_MAX_AGE" ]; then
+      max=$(cat "$cache" 2>/dev/null || true); source="the last refusal, cached in $cache"
+    else
+      rm -f "$cache"
+    fi
+  fi
   [[ "$max" =~ ^[0-9]+$ ]] || return 0
   wait_until=$(( $(date +%s) + QUOTA_WAIT ))
   while :; do
     used=$(cmd_usage 2>/dev/null | awk '$1=="total" {print $3}')
     [[ "$used" =~ ^[0-9]+$ ]] || return 0
     [ $(( used + need )) -gt "$max" ] || return 0
-    if [ "$(date +%s)" -ge "$wait_until" ]; then
-      log "quota preflight refused $location/$name ($size): it needs $need vCPUs and the project's VMs already use $used of $max (ceiling from UBI_QUOTA_VCPUS or the last refusal; other usage such as managed runners counts on top)"
+    remaining=$(( wait_until - $(date +%s) ))
+    if [ "$remaining" -le 0 ]; then
+      log "quota preflight refused $location/$name ($size): it needs $need vCPUs and the project's VMs already use $used of $max (ceiling from $source; other usage such as managed runners counts on top)"
       cmd_usage >&2 || true
-      die "create refused before any request: vCPU quota full; wait for running VMs to finish (UBI_QUOTA_WAIT=<seconds> waits here), run $0 reap, or use a smaller size"
+      die "create refused before any request: vCPU quota exhausted (quota full); wait for running VMs to finish (UBI_QUOTA_WAIT=<seconds> waits here), run $0 reap, use a smaller size, or set UBI_QUOTA_VCPUS to the project's real ceiling"
     fi
-    log "quota: $used of $max vCPUs in use and $need needed; waiting up to $(( wait_until - $(date +%s) ))s more for room"
-    sleep 30
+    log "quota: $used of $max vCPUs in use and $need needed; waiting up to ${remaining}s more for room"
+    sleep $(( remaining < 30 ? remaining : 30 ))
   done
 }
 
@@ -573,6 +622,13 @@ cmd_pull() {
   remote "$name" "cd $dir && tar -czf - $(basename "$from")" | tar -xzf - -C "$to"
 }
 
+# pass_name NAME: a variable this runner may forward to a VM. Its own
+# credentials (UBICLOUD_*) never leave this machine, whoever asks.
+pass_name() {
+  [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "--pass $1: not a variable name"
+  case $1 in UBICLOUD_*) die "--pass $1: the runner never forwards its own Ubicloud credentials to a VM" ;; esac
+}
+
 cmd_run() {
   local up_args=() src=. dest="" setup="" keep=0 pulls=() envs=()
   while [ $# -gt 0 ]; do
@@ -583,7 +639,7 @@ cmd_run() {
       --dest) dest=$2; shift 2 ;;
       --setup) setup=$2; shift 2 ;;
       --env) envs+=("$2"); shift 2 ;;
-      --pass) [ -n "${!2+x}" ] || die "--pass $2: not set locally"; envs+=("$2=${!2}"); shift 2 ;;
+      --pass) pass_name "$2"; [ -n "${!2+x}" ] || die "--pass $2: not set locally"; envs+=("$2=${!2}"); shift 2 ;;
       --pull) pulls+=("$2"); shift 2 ;;
       --keep) keep=1; shift ;;
       --) shift; break ;;
@@ -621,15 +677,15 @@ cmd_run() {
     | remote "$name" 'umask 077 && cat > ~/.ubirun-env'
 
   cmd_sync "$name" "$src" "$dest"
-  local qdest
+  local qdest rc=0
   qdest=$(printf %q "$dest")
   if [ -n "$setup" ]; then
     remote "$name" 'cat > ~/.ubirun-setup.sh' <"$setup"
     log "running setup $(basename "$setup")"
-    watched "$name" setup "cd $qdest && . ~/.ubirun-env && bash -l ~/.ubirun-setup.sh" || die "setup failed (exit $?)"
+    watched "$name" setup "cd $qdest && . ~/.ubirun-env && bash -l ~/.ubirun-setup.sh" || { rc=$?; log "setup failed (exit $rc)"; exit "$rc"; }
   fi
 
-  local start rc=0
+  local start
   start=$(date +%s)
   log "running on $name: $*"
   watched "$name" command "cd $qdest && . ~/.ubirun-env && bash -lc $(printf %q "$*")" || rc=$?
@@ -642,39 +698,81 @@ cmd_run() {
   return "$rc"
 }
 
-# verify [run opts] [-- COMMAND]: run the repository's committed remote verify.
-# .gstack/ubicloud.json under --src (default .) supplies setup, command, size,
-# location, storage, image, env, pass and pull; flags given here and a trailing
-# -- COMMAND override it. Without the file it refuses, so every lane runs the
-# one committed definition instead of its own wrapper.
+# verify [run opts] [--trust-config] [-- COMMAND]: run the repository's
+# committed remote verify. .gstack/ubicloud.json under --src (default .)
+# supplies setup, command, size, location, storage, image, env, pass and pull;
+# flags given here and a trailing -- COMMAND override it. Without the file it
+# refuses, so every lane runs the one committed definition instead of its own
+# wrapper.
+#
+# The file is repository content and gets no reach beyond the checkout on its
+# own: its setup script and pull destinations must resolve inside --src, and a
+# local variable it lists under pass is forwarded only when this command line
+# also names it (--pass NAME) or grants every listed name (--trust-config).
 cmd_verify() {
-  local src=. i j cfg cfg_setup cfg_cmd user_pre=() user_cmd=()
+  local src=. i j g n cfg cfg_setup cfg_cmd parsed err rc=0 trust=0 cfg_args=() cfg_pass=() user_pre=() user_cmd=() granted=() missing=()
   for (( i = 1; i <= $#; i++ )); do
     [ "${!i}" = -- ] && break
     if [ "${!i}" = --src ]; then j=$(( i + 1 )); src=${!j}; fi
   done
   cfg="$src/.gstack/ubicloud.json"
   [ -f "$cfg" ] || die "verify: no $cfg; commit one ({\"setup\": \"scripts/ubicloud/bootstrap.sh\", \"command\": \"bash scripts/ubicloud/verify.sh\"}) so every lane runs the same verify instead of its own wrapper"
-  local cfg_args=() parsed
+  err=$(mktemp)
   parsed=$(python3 -c '
-import json, shlex, sys
-c = json.load(open(sys.argv[1]))
+import json, os, shlex, sys
+cfg, src = sys.argv[1], sys.argv[2]
+try:
+    c = json.load(open(cfg))
+except ValueError:
+    sys.exit(3)
+if not isinstance(c, dict):
+    sys.exit(3)
+base, root = os.path.abspath(src), os.path.realpath(src)
+def inside(rel, what):
+    if not isinstance(rel, str) or not rel or os.path.isabs(rel) or rel.startswith("~") or ".." in rel.replace("\\", "/").split("/"):
+        print("%s %r must be a relative path inside the checkout" % (what, rel), file=sys.stderr); sys.exit(2)
+    full = os.path.realpath(os.path.join(root, rel))
+    if full != root and not full.startswith(root + os.sep):
+        print("%s %r resolves outside the checkout (%s)" % (what, rel, full), file=sys.stderr); sys.exit(2)
+    return os.path.join(base, rel)
 q = lambda s: shlex.quote(str(s))
 args = []
 for key, flag in (("size", "-s"), ("location", "-l"), ("storage", "-S"), ("image", "-b")):
     if key in c: args += [flag, q(c[key])]
-for key, flag in (("env", "--env"), ("pass", "--pass"), ("pull", "--pull")):
-    for item in c.get(key, []): args += [flag, q(item)]
+for item in c.get("env", []): args += ["--env", q(item)]
+for item in c.get("pull", []):
+    remote, sep, local = str(item).partition(":")
+    if not sep or not remote:
+        print("pull entry %r must be REMOTE_GLOB:LOCAL_DIR" % (item,), file=sys.stderr); sys.exit(2)
+    args += ["--pull", q(remote + ":" + inside(local, "pull destination"))]
+setup = c.get("setup", "")
 print("cfg_args=(" + " ".join(args) + ")")
-print("cfg_setup=" + q(c.get("setup", "")))
+print("cfg_pass=(" + " ".join(q(x) for x in c.get("pass", [])) + ")")
+print("cfg_setup=" + q(inside(setup, "setup") if setup else ""))
 print("cfg_cmd=" + q(c.get("command", "")))
-' "$cfg" 2>/dev/null) || die "verify: $cfg is not valid JSON"
+' "$cfg" "$src" 2>"$err") || rc=$?
+  case $rc in
+    0) ;;
+    2) local why; why=$(cat "$err"); rm -f "$err"; die "verify: $cfg: $why" ;;
+    *) rm -f "$err"; die "verify: $cfg is not valid JSON" ;;
+  esac
+  rm -f "$err"
   eval "$parsed"
   while [ $# -gt 0 ]; do
     if [ "$1" = -- ]; then shift; user_cmd=("$@"); break; fi
+    case $1 in
+      --trust-config) trust=1; shift; continue ;;
+      --pass) granted+=("${2:-}") ;;
+    esac
     user_pre+=("$1"); shift
   done
-  [ -z "$cfg_setup" ] || [[ "$cfg_setup" = /* ]] || cfg_setup="$src/$cfg_setup"
+  for n in ${cfg_pass[@]+"${cfg_pass[@]}"}; do
+    pass_name "$n"
+    if [ "$trust" = 1 ]; then cfg_args+=(--pass "$n"); continue; fi
+    for g in ${granted[@]+"${granted[@]}"}; do [ "$g" = "$n" ] && continue 2; done
+    missing+=("$n")
+  done
+  [ ${#missing[@]} -eq 0 ] || die "verify: $cfg asks to forward local ${missing[*]}; grant each on this command line with --pass NAME, or every name it lists with --trust-config"
   [ ${#user_cmd[@]} -gt 0 ] || [ -n "$cfg_cmd" ] || die "verify: $cfg names no command and none was given after --"
   [ ${#user_cmd[@]} -gt 0 ] || user_cmd=("$cfg_cmd")
   log "verify: $cfg"
@@ -688,8 +786,10 @@ usage: ubi-runner.sh <command> [args]
   run [up opts] [--src DIR] [--dest PATH] [--setup FILE] [--env K=V]...
       [--pass NAME]... [--pull REMOTE_GLOB:LOCAL_DIR]... [--keep] -- COMMAND
                          up + sync + setup + command + pull + destroy; exits with COMMAND's status
-  verify [run opts] [-- COMMAND]
-                         run the repository's committed verify (.gstack/ubicloud.json under --src)
+  verify [run opts] [--trust-config] [-- COMMAND]
+                         run the repository's committed verify (.gstack/ubicloud.json under --src);
+                         its setup and pull paths stay inside --src, and its pass names are
+                         forwarded only when granted here (--pass NAME, or all: --trust-config)
   up [-s SIZE] [-l LOCATION] [-n NAME] [-S STORAGE_GIB] [-b IMAGE]
                          create a VM and wait for SSH; prints its name
                          (STORAGE_GIB: one of $ALLOWED_STORAGE)

@@ -884,7 +884,10 @@ watchdog kills a remote command silent for `UBI_IDLE_TIMEOUT` seconds (1800)
 with exit 124 and its last 40 lines, and prints a heartbeat every
 `UBI_HEARTBEAT` seconds; and `gstack-ubi verify` runs the repository's
 committed `.gstack/ubicloud.json` (setup, command, size, env, pass, pull)
-instead of a wrapper per lane. The skill insists on a watched launch (a
+instead of a wrapper per lane, with the file confined to the checkout: setup
+and pull paths resolve inside `--src`, and a `pass` name is forwarded only
+when the command line grants it (`--pass NAME` or `--trust-config`), never
+`UBICLOUD_*`. The skill insists on a watched launch (a
 background operation that is waited on, or `gstack-detach`), because the
 runner destroys its VM on every exit path only while it is alive.
 
