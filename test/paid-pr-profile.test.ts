@@ -113,6 +113,15 @@ describe('PR profile paid-runner integration', () => {
     expect(result.coverage?.needsFullValidation).toBe(false);
   });
 
+  test('a generated shared preamble inherits its skill template identity', () => {
+    const aliases = existingPromptSourceAliases(['ios-clean/sections/preamble.md', 'no-such-skill/sections/preamble.md']);
+    expect(aliases['ios-clean/sections/preamble.md']).toBe('ios-clean/SKILL.md.tmpl');
+    expect(aliases['no-such-skill/sections/preamble.md']).toBeUndefined();
+    const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['ios-clean/SKILL.md', 'ios-clean/sections/preamble.md'] });
+    expect(result.coverage?.deferredPromptFiles).toContain('ios-clean/sections/preamble.md');
+    expect(result.coverage?.needsFullValidation).toBe(false);
+  });
+
   test('F8 selects one judge and defers its two periodic readiness actors', () => {
     const selection = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [
       'sync-gbrain/SKILL.md.tmpl', 'bin/gstack-gbrain-read-capability.ts',
