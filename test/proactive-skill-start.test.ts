@@ -107,6 +107,24 @@ describe('gstack-skill-start PROACTIVE status line', () => {
     }
   });
 
+  test('a stored off answers the one-time proactive prompt: no prompt block, marker written; core still asks once telemetry was answered', () => {
+    const cases: Array<[string, boolean]> = [
+      ['update_check: false\ntelemetry: off\n', true],
+      ['update_check: false\ntelemetry: off\nproactive: off\n', false],
+    ];
+    for (const [config, asked] of cases) {
+      const state = freshState(config);
+      fs.writeFileSync(path.join(state, '.telemetry-prompted'), '');
+      try {
+        const out = runStart(path.join(BIN, 'gstack-skill-start'), state);
+        expect(out.includes('GSTACK_INSTRUCTION_BEGIN: proactive-prompt'), config).toBe(asked);
+        expect(fs.existsSync(path.join(state, '.proactive-prompted')), config).toBe(!asked);
+      } finally {
+        fs.rmSync(state, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('the first-run and first-loop tips are shown under core and suppressed under off/false (the marker is not written either)', () => {
     const cases: Array<[string, boolean]> = [
       ['update_check: false\n', true],

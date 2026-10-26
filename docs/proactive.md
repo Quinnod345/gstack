@@ -41,7 +41,8 @@ matching skill. If you accepted it before the `core` default, trim that section
 to the four core rules (or delete it and let gstack offer it again); making the
 offered section follow `core` is tracked in #3446.
 
-gstack asks once, after the telemetry question, which of the three you want.
+gstack asks once, after the telemetry question, which of the three you want;
+if you stored `off` before that, it takes the answer as given and does not ask.
 "Say stop suggesting" in a session runs `gstack-config set proactive off` for you.
 
 If collisions with other skill packs keep coming up under `core`, the fallback

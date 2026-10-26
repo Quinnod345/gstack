@@ -15,6 +15,8 @@ import { generateUpgradeCheck } from '../scripts/resolvers/preamble/generate-upg
 const ROOT = path.resolve(import.meta.dir, '..');
 const CORE = ['/office-hours', '/review', '/qa', '/ship'];
 const NON_CORE_SAMPLE = ['/investigate', '/plan-ceo-review', '/design-review', '/retro'];
+// The one place the core block may name non-core skills: the rule that says to name them for the user to type.
+const TYPE_IT_RULE = 'under `core`, name `/browse` or `/investigate` for the user to type instead of\ninvoking it.';
 
 const routerTmpl = fs.readFileSync(path.join(ROOT, 'SKILL.md.tmpl'), 'utf-8');
 const routerOut = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
@@ -25,7 +27,8 @@ describe('proactive core set: the router', () => {
     const block = routerTmpl.slice(routerTmpl.indexOf('If `PROACTIVE` is `core` (default)'), routerTmpl.indexOf('If `PROACTIVE` is `all`'));
     expect(block.length).toBeGreaterThan(50);
     for (const skill of CORE) expect(block).toContain(`\`${skill}\``);
-    for (const skill of NON_CORE_SAMPLE) expect(block).not.toContain(`\`${skill}\``);
+    expect(block).toContain(TYPE_IT_RULE);
+    for (const skill of NON_CORE_SAMPLE) expect(block.replace(TYPE_IT_RULE, '')).not.toContain(`\`${skill}\``);
     expect(block).toContain('A skill the user names is always invoked');
   });
 
@@ -126,7 +129,7 @@ describe('proactive core set: every surface names the same four skills and three
   const surfaces: Record<string, string> = {
     'bin/gstack-config header': configSrc.slice(configSrc.indexOf('# proactive:'), configSrc.indexOf('# routing_declined:')),
     'bin/gstack-config lookup_default': configSrc.slice(configSrc.indexOf('lookup_default()')).match(/^\s*proactive\).*$/m)?.[0] ?? '',
-    'SKILL.md.tmpl core block': routerTmpl.slice(routerTmpl.indexOf('If `PROACTIVE` is `core` (default)'), routerTmpl.indexOf('If `PROACTIVE` is `all`')),
+    'SKILL.md.tmpl core block': routerTmpl.slice(routerTmpl.indexOf('If `PROACTIVE` is `core` (default)'), routerTmpl.indexOf('If `PROACTIVE` is `all`')).replace(TYPE_IT_RULE, ''),
     'preamble rule': generateUpgradeCheck({ paths: { skillRoot: '~/.claude/skills/gstack' } } as never),
     'gstack-skill-start prompt': skillStart.slice(promptAt, skillStart.indexOf('.proactive-prompted"\\`', promptAt)),
     'docs/proactive.md': fs.readFileSync(path.join(ROOT, 'docs', 'proactive.md'), 'utf-8'),

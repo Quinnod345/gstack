@@ -551,7 +551,12 @@ Always run: \`touch "$_GH/.telemetry-prompted"\`.
 EOI
 fi
 
-# Proactive-suggestions opt-in (interactive).
+# Proactive-suggestions opt-in (interactive). A user who already stored off
+# has answered; record that instead of asking.
+if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_PROACTIVE_OFF" = "yes" ]; then
+  touch "$_GH/.proactive-prompted" 2>/dev/null || true
+  _PROACTIVE_PROMPTED="yes"
+fi
 if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_TEL_PROMPTED" = "yes" ]; then
   _emit_block proactive-prompt <<EOI
 Ask once:

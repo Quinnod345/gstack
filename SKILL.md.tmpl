@@ -54,7 +54,9 @@ Only run skills the user explicitly invokes. This preference persists across ses
 If `PROACTIVE` is `core` (default): **invoke the Skill tool** only for the four core
 skills when the user's request matches their rule below: `/office-hours`, `/review`,
 `/qa` and `/ship`. For every other rule, answer directly and do not suggest the skill;
-the user types it. A skill the user names is always invoked, whatever this setting says,
+the user types it. The browser step above and the **Failures** branches below follow the
+same rule: under `core`, name `/browse` or `/investigate` for the user to type instead of
+invoking it. A skill the user names is always invoked, whatever this setting says,
 and a step inside a skill that is already running (a handoff, a review gate, a subagent it
 dispatches) is part of that skill, not a suggestion.
 
