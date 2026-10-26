@@ -7,8 +7,10 @@
  * and a scripted gh; no network, no API spend.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { bunIsolationArgs } from '../lib/bun-isolation';
 import { loadPolicyFromHead } from '../lib/ship-policy';
 import { NOTES_REF, persist, repoIdentity } from '../lib/ship-queue-train-record';
 import type { GhRunner } from '../scripts/recover-receipts';
@@ -121,6 +123,21 @@ describe('backstop: inert without a train block', () => {
     expect(out.action).toBe('inert');
     expect(out.lines[0]).toContain('declares no train block');
     expect(calls).toEqual([]);
+  });
+
+  // evals-main-backstop.yml reads this step output and publishes the
+  // main-backstop check run the weekly release gates on (scripts/release-cut.ts).
+  test.skipIf(process.platform === 'win32')('the CLI appends action=<action> to --outputs and exits 0 when inert', () => {
+    const fx = trainFixture(BASE_POLICY);
+    const sha = squashMerge(fx.repo, 1);
+    const outputs = path.join(fx.repo.root, 'outputs.txt');
+    const summary = path.join(fx.repo.root, 'summary.md');
+    const r = spawnSync(process.execPath, [...bunIsolationArgs(), 'run', path.join(import.meta.dir, '..', 'scripts', 'train-backstop.ts'), 'run', '--repo', REPO, '--branch', 'main', '--sha', sha, '--summary', summary, '--outputs', outputs],
+      { cwd: fx.repo.work, encoding: 'utf8', timeout: 60_000, env: { ...process.env, GSTACK_STATE_ROOT: path.join(fx.repo.root, 'state') } });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toContain('BACKSTOP: inert');
+    expect(fs.readFileSync(outputs, 'utf8')).toBe('action=inert\n');
+    expect(fs.readFileSync(summary, 'utf8')).toContain('- BACKSTOP: inert');
   });
 });
 

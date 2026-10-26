@@ -14,6 +14,8 @@ bun install                    # install dependencies
 bin/dev-setup                  # activate dev mode
 ```
 
+`./setup` on its own installs production dependencies only. `bun install` (and `bin/dev-setup`, which runs it) adds the dev toolchain the tests and evals need: the Claude Agent SDK, TypeScript and Prettier. Once they are installed, a later `./setup` runs the full install too, so they stay at `bun.lock`'s versions.
+
 > **Full clone vs shallow.** The README's user-facing install uses `--depth 1` for speed. As a contributor, use a full clone (no `--depth` flag) — you'll need history for `git log`, `git blame`, `git bisect`, and reviewing PRs against earlier versions. If you already have a `--depth 1` clone from following the README, promote it to a full clone with `git fetch --unshallow`.
 
 ### First free check (no API key, no browser)
@@ -906,6 +908,14 @@ bun install && bun run build && ./setup
 ```
 
 This affects all projects. To revert: `git checkout main && git pull && bun run build && ./setup`.
+
+## Issue triage
+
+An issue is open, parked or closed, and closed means fixed, duplicate or won't
+fix, each with its reason in the closing comment. An issue we intend to fix
+later stays open under the `parked` label with one comment saying where it is
+tracked (a TODOS.md theme or a tracking issue) and what fixes it. The full rule,
+including the labels and the close reasons, is in [docs/triage.md](docs/triage.md).
 
 ## Community PR triage (wave process)
 
