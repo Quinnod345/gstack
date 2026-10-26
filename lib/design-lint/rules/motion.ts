@@ -159,10 +159,16 @@ function focusRingFade(ctx: LintContext, r: Reporter): void {
 // sloplint check17 (gate 17)
 function tooltipDelay(ctx: LintContext, r: Reporter): void {
   const tips = ctx.rules.filter((rule) => /tooltip|tip\b/i.test(rule.selector));
-  const delayed = (sel: RegExp) => tips.filter((rule) => sel.test(rule.selector)).map((rule) => rule.decls.find((d) => /^transition(-delay)?$/.test(d.prop) && /(\d{3,})ms|([1-9][\d.]*)s\b/.test(d.value))).find(Boolean);
-  const hover = delayed(/:hover/);
+  const delayed = (sel: RegExp): { file: string; line: number } | null => {
+    for (const rule of tips) {
+      if (!sel.test(rule.selector)) continue;
+      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && /(\d{3,})ms|([1-9][\d.]*)s\b/.test(x.value));
+      if (d) return { file: rule.file, line: d.line };
+    }
+    return null;
+  };
   const focus = delayed(/:focus/);
-  if (hover && focus) r.report('tooltip-focus-delay', tips[0].file, focus.line, 'the tooltip waits as long on focus as on hover', { suspected: true });
+  if (focus && delayed(/:hover/)) r.report('tooltip-focus-delay', focus.file, focus.line, 'the tooltip waits as long on focus as on hover', { suspected: true });
 }
 
 // sloplint check18 (gate 18)

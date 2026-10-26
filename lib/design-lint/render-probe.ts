@@ -112,7 +112,7 @@ export function probeScript(call: string): string {
   return '(() => { const P = ' + PROBE_GLOBAL + '; return Promise.resolve().then(() => (' + call + ')).then((v) => JSON.stringify(v), (e) => JSON.stringify({ error: String((e && e.stack) || e).slice(0, 300) })); })()';
 }
 
-// sloplint-render renderCheck's page preparation (settleImages, the quiet style, reduced motion)
+// sloplint-render renderCheck's page preparation: the quiet style, running animations finished through document.getAnimations(), lazy images eager-loaded and settled
 export async function glSetup(P: Probes): Promise<SetupReport> {
   const quiet = document.createElement('style');
   quiet.textContent = 'nextjs-portal, astro-dev-toolbar { display: none !important } * { transition: none !important } html, body { scroll-behavior: auto !important }';

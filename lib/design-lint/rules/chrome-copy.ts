@@ -24,6 +24,8 @@ const HERO_TELLS: Array<[RegExp, string]> = [
   [/\bno credit card required\b/i, 'a template line'],
   [/\beverything you need to\b/i, 'a stock line'],
   [/\ball in one place\b/i, 'a stock line'],
+  [/\ball-in-one solution\b/i, 'a stock line'],
+  [/\bwelcome to\b/i, 'a stock opener'],
   [/\bmade with\s*(?:♥|❤|\u{1f9e1}|\u{1f49b}|\u{1f49a}|\u{1f499}|\u{1f49c}|\u{1f5a4}|\u{1f90d}|&hearts;|&#9829;|&#10084;|<3)/iu, 'the made-with-a-heart line'],
 ];
 const FOOTER_LINE = /\ball rights reserved\b/i;
@@ -81,7 +83,7 @@ const CADENCE = /(^|[.!?]\s+)(not|no)\s+[a-z][^.!?\n]{0,40}[.]\s+(just|only|a|an
 function checkCadenceAndDashes(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     const prose = maskedProse(doc);
-    const dashes = [...prose.matchAll(DASH)];
+    const dashes = [...prose.matchAll(DASH)].filter((m) => !(/\d/.test(prose[m.index! - 1] || '') && /\d/.test(prose[m.index! + m[0].length] || '')));
     if (dashes.length >= 3) {
       const at = dashes[0].index ?? 0;
       const around = prose.slice(Math.max(0, at - 16), at + 16).replace(/\s+/g, ' ').trim();

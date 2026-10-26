@@ -257,7 +257,7 @@ function checkFakeSend(ctx: LintContext, r: Reporter): void {
       if (words.length >= 2 && SUCCESS.test(words.slice(0, 4).join(' ')) && !NEGATED.test(x[2])) { hit = x[0]; break; }
     }
     if (!hit || REQUEST.test(js)) continue;
-    const at = doc.src.indexOf(hit);
+    const at = (doc.scripts === doc.raw ? doc.raw : doc.src).indexOf(hit);
     r.report('fake-send', doc.file, doc.lineOf(at >= 0 ? at : 0), 'a script prints success ("' + trunc(hit.replace(/["'`]/g, ''), 30) + '") with no request behind it', { suspected: true });
   }
 }

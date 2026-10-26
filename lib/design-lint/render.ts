@@ -27,7 +27,6 @@ import { ruleMeta } from './rules/ids';
 export interface RenderOptions {
   cwd?: string;
   scope?: 'page' | 'component';
-  timeoutMs?: number;
   /** Replaces the engine choice (tests inject one); defaults to lib/aside-render's pickEngine. */
   engine?: () => EngineChoice;
   /** Replaces the page runner itself, so every answer the browser could give (none, null, malformed, a probe error) can be settled without a browser. */
@@ -43,6 +42,7 @@ export interface RenderResult {
 const WIDTHS = [320, 375, 414, 768, 1024, 1280, 1920];
 const LAPTOP = { width: 1440, height: 900 };
 const RING_FLOOR = 2.95;
+const RENDER_TIMEOUT_MS = 120_000;
 
 export type Runner = (spec: RenderSpec) => Promise<EngineResult>;
 
@@ -56,7 +56,7 @@ export async function lintRender(targets: string[], opts: RenderOptions = {}): P
   }
   const r = new Reporter(opts.scope ?? 'page', opts.cwd ?? process.cwd());
   for (const target of targets) {
-    try { await lintPage(target, r, run, opts.timeoutMs ?? 120_000); } catch (e) {
+    try { await lintPage(target, r, run); } catch (e) {
       r.report('render', isUrl(target) ? target : path.resolve(target), 1, `the page could not be measured: ${(e as Error).message}`, { source: 'render' });
     }
   }
@@ -134,7 +134,7 @@ const ringOk = (x: RingProbe): boolean => typeof x.key === 'string' && typeof x.
 
 interface Found extends ProbeFinding { label: string }
 
-async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: number): Promise<void> {
+async function lintPage(target: string, r: Reporter, run: Runner): Promise<void> {
   const file = isUrl(target) ? target : path.resolve(target);
   let lineAt: (i: number) => number = () => 1;
   const report = (f: Found | ProbeFinding, src: string | null) => {
@@ -155,7 +155,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   const plan = measures();
   const opening = openingSteps();
   const steps: RenderStep[] = [...opening, ...plan.map((m) => evalStep(m.call, m.width, m.height))];
-  const res = await run({ file, steps, timeoutMs });
+  const res = await run({ file, steps, timeoutMs: RENDER_TIMEOUT_MS });
   if (!res.ok) { report({ rule: 'render', grade: 'fail', evidence: `the page did not render: ${res.error ?? 'unknown error'}` }, null); return; }
 
   const setup = parsed<SetupReport>(res.evals[opening.length - 1]);
@@ -167,7 +167,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
 
   const found: Found[] = [];
   let rings: RingProbe[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, Found>();
   plan.forEach((m, i) => {
     const p = parsed<ProbeFinding[] | RingProbe[]>(res.evals[opening.length + i]);
     const list = 'error' in p ? null : (p.value as unknown);
@@ -181,9 +181,11 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
     for (const f of list as ProbeFinding[]) {
       if (typeof f.rule !== 'string' || typeof f.evidence !== 'string' || (f.grade !== 'fail' && f.grade !== 'warn') || !ruleMeta(f.rule)) { report({ rule: String(f.rule ?? '?'), grade: 'malformed' as ProbeFinding['grade'], evidence: '' }, null); continue; }
       const key = f.rule + '|' + f.evidence;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push({ ...f, label: m.label, probe: probeOk(f) ? f.probe : undefined });
+      const earlier = seen.get(key);
+      if (earlier) { if (f.grade === 'fail' && earlier.grade === 'warn') { earlier.grade = 'fail'; earlier.label = m.label; } continue; }
+      const item: Found = { ...f, fix: typeof f.fix === 'string' ? f.fix : undefined, label: m.label, probe: probeOk(f) ? f.probe : undefined };
+      seen.set(key, item);
+      found.push(item);
     }
   });
   const scrolls = found.filter((f) => f.rule === 'horizontal-scroll' && !f.at);
@@ -199,7 +201,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
 
   const textProbes = found.filter((f) => f.probe);
   const weakRings = rings.filter((x) => x.ratio != null && x.ratio < RING_FLOOR);
-  const confirmed = textProbes.length || weakRings.length ? await confirmPixels(file, run, timeoutMs, textProbes, weakRings).catch(() => null) : null;
+  const confirmed = textProbes.length || weakRings.length ? await confirmPixels(file, run, textProbes, weakRings).catch(() => null) : null;
   const dropped = new Set<string>();
   for (const f of textProbes) {
     const real = confirmed?.text.get(f.probe!.path);
@@ -217,7 +219,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
 interface Confirmed { text: Map<string, number>; ring: Map<string, number> }
 
 /** hallmark's pixelBehind and pixelsAroundRing: hide the ink, screenshot the whole page, sample the median colour behind each claim. */
-async function confirmPixels(file: string, run: Runner, timeoutMs: number, textProbes: Found[], weakRings: RingProbe[]): Promise<Confirmed | null> {
+async function confirmPixels(file: string, run: Runner, textProbes: Found[], weakRings: RingProbe[]): Promise<Confirmed | null> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-design-lint-'));
   try {
     const textItems: PixelItem[] = [...new Map(textProbes.map((f) => [f.probe!.path, { path: f.probe!.path, kind: 'text' as const }])).values()];
@@ -232,7 +234,7 @@ async function confirmPixels(file: string, run: Runner, timeoutMs: number, textP
       steps.push({ kind: 'screenshot', out: g.shot, width: g.width, height: g.height, deviceScaleFactor: 1, fullPage: true, type: 'png', mobile: false });
       steps.push(evalStep(`P.restore(P, ${JSON.stringify(g.items)})`, g.width, g.height));
     }
-    const res = await run({ file, steps, timeoutMs });
+    const res = await run({ file, steps, timeoutMs: RENDER_TIMEOUT_MS });
     if (!res.ok) return null;
     const out: Confirmed = { text: new Map(), ring: new Map() };
     groups.forEach((g) => {

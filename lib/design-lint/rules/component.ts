@@ -11,12 +11,12 @@ import { compInner, twEyebrow, twGlow, twGradient, twGroup, twMonoIsMaterial, tw
 
 const EMOJI_ICON = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
 
-/** The tells one class string carries on its own: motion, gradient, glow, literals, a moving image, tracked caps, the eyebrow, mono costume. */
 /** Findings already on the record, keyed rule|file|line, so a Tailwind tell on a line the stylesheet rules already reported is not repeated; O(1) per lookup however many labels a page holds. */
 function reported(r: Reporter): Set<string> {
   return new Set(r.findings.map((x) => `${x.rule}|${x.file}|${x.line}`));
 }
 
+/** The tells one class string carries on its own: motion, gradient, glow, literals, a moving image, tracked caps, the eyebrow, mono costume. */
 function reportItem(ctx: LintContext, r: Reporter, it: TwItem, monoOk: boolean, seen: Set<string>): void {
   const { doc, info: f } = it;
   const where = twWhere(it);

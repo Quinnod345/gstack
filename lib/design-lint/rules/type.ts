@@ -78,10 +78,19 @@ function check1(ctx: LintContext, r: Reporter): void {
   }
 }
 
-// sloplint shortProse (gate 25): every paragraph under the selector is one or two short sentences
+// sloplint shortProse (gate 25): every paragraph under the selector is one or two short sentences; answered once per class, since a sheet may name the same class in many rules
 function shortProse(ctx: LintContext, sel: string): boolean {
   const cls = [...sel.matchAll(/\.([\w-]+)/g)].map((m) => m[1]).pop();
   if (!cls) return false;
+  const known = memo(ctx, 'shortProse25', () => new Map<string, boolean>());
+  const hit = known.get(cls);
+  if (hit !== undefined) return hit;
+  const short = shortProseOf(ctx, cls);
+  known.set(cls, short);
+  return short;
+}
+
+function shortProseOf(ctx: LintContext, cls: string): boolean {
   const texts: string[] = [];
   for (const doc of ctx.docs) {
     for (const el of openTags(doc, /./, 0, doc.tags.length, (t) => (getAttr(t.attrs, 'class') || '').split(/\s+/).includes(cls))) {
@@ -102,6 +111,7 @@ function check25(ctx: LintContext, r: Reporter): void {
       const m = /^([\d.]+)ch$/.exec(resolveVars(d.value, ctx.tokens).trim());
       if (!m) continue;
       const ch = parseFloat(m[1]);
+      if (ch >= 45 && ch <= 75) continue;
       const floor = /lede|hero|caption|figcaption|__line|__sub|subhead|tagline/i.test(rule.selector) || shortProse(ctx, rule.selector) ? 28 : 45;
       if (ch < floor || ch > 75) {
         r.report('line-length', rule.file, d.line, `a measure of ${ch}ch on ${rule.selector} (${floor} to 75ch reads well)`,
@@ -131,8 +141,9 @@ function check37(ctx: LintContext, r: Reporter): void {
 
 // sloplint check38a (gates 38i, 38ii)
 function check38a(ctx: LintContext, r: Reporter): void {
+  const inlineLast = (sel: string) => sel.split(',').every((p) => /^(?:em|i|b|strong|span|mark)(?![\w-])/.test(baseSelector(p).split(/[\s>+~]+/).pop() || ''));
   for (const rule of ctx.rules) {
-    if (!HEADING_SEL.test(rule.selector)) continue;
+    if (!HEADING_SEL.test(rule.selector) || inlineLast(rule.selector)) continue;
     for (const d of rule.decls) {
       if (d.prop === 'font-style' && /italic|oblique/.test(d.value)) r.report('italic-serif-display', rule.file, d.line, `italic display type on ${rule.selector}`);
     }
@@ -144,10 +155,13 @@ function check38a(ctx: LintContext, r: Reporter): void {
     for (const head of openTags(doc, /^h[1-6]$/)) {
       const level = head.tag.name.slice(1);
       const classes = (getAttr(head.tag.attrs, 'class') || '').split(/\s+/).filter(Boolean);
-      const tag = openTags(doc, /^(em|i)$/, head.idx + 1, closeIndex(doc, head.idx), () => true, 1)[0];
-      if (!tag || normalised(level, classes)) continue;
-      const italic = textOf(doc, tag.idx);
-      if (!/[A-Za-z0-9]/.test(italic) || /aria-hidden/i.test(tag.tag.attrs) || italic.length >= 0.8 * textOf(doc, head.idx).length) continue;
+      if (normalised(level, classes)) continue;
+      const headLen = textOf(doc, head.idx).length;
+      const tag = openTags(doc, /^(em|i)$/, head.idx + 1, closeIndex(doc, head.idx)).find((t) => {
+        const italic = textOf(doc, t.idx);
+        return /[A-Za-z0-9]/.test(italic) && !/aria-hidden/i.test(t.tag.attrs) && italic.length < 0.8 * headLen;
+      });
+      if (!tag) continue;
       r.report('italic-word-in-heading', doc.file, head.tag.line, `an <${tag.tag.name}> inside an otherwise roman <h${level}>`);
     }
   }
@@ -228,7 +242,8 @@ function check55(ctx: LintContext, r: Reporter): void {
     if (!rule.decls.some((d) => d.prop === 'text-transform' && /uppercase/.test(d.value))) continue;
     const lhD = rule.decls.find((d) => d.prop === 'line-height');
     if (!lhD) continue;
-    const lh = parseFloat(resolveVars(lhD.value, ctx.tokens));
+    const lhV = resolveVars(lhD.value, ctx.tokens).trim();
+    const lh = /%$/.test(lhV) ? parseFloat(lhV) / 100 : /(?:px|r?em)$/i.test(lhV) ? NaN : parseFloat(lhV);
     if (Number.isNaN(lh) || lh >= 1.02) continue;
     const bigType = rule.decls.some((d) => d.prop === 'font-size' && (pxOf(resolveVars(d.value, ctx.tokens)) ?? 0) >= 28);
     if (!HEADING_SEL.test(rule.selector) && !bigType) continue;
@@ -244,7 +259,7 @@ function check64(ctx: LintContext, r: Reporter): void {
   if (twMonoIsMaterial(ctx.tokens)) return;
   const monoFam = (v: string) => MONO_FACE.test(firstFamily(resolveVars(v, ctx.tokens)));
   const LABELISH = /label|caption|meta|eyebrow|kicker|tag\b|badge|chip|small|folio|footnote|legend|\bth\b|thead|figcaption|overline|dateline|byline|credit|note\b/i;
-  const DATAISH = /code|pre\b|kbd|samp|num|figure|stat|price|value|data|tabular|counter|timer|clock|coord|amount|total|score|version|hash|\bid\b|sku|time|date|hour|utc|eta|lot\b|edition|ref\b|dimension|measure|reading|plate-?no|tag-?no|url|uri\b|path|endpoint|command|cmd|snippet|install/i;
+  const DATAISH = /code|pre\b|kbd|samp|num|figure|stat|price|value|data|tabular|counter|timer|clock|coord|amount|total|score|version|hash|\bid\b|sku|time|date|hour|utc|\beta\b|\blot\b|edition|ref\b|dimension|measure|reading|plate-?no|tag-?no|url|uri\b|path|endpoint|command|cmd|snippet|install/i;
   const seen = new Set<string>();
   for (const rule of ctx.rules) {
     if (rule.keyframes || rule.selector === '@font-face' || isTokenRule(rule)) continue;
@@ -289,26 +304,35 @@ function exempt67(sel: string): boolean {
   });
 }
 
-/** The merged rules that can pass a value down, each with its selector parts' bases computed once, so a stylesheet of many label rules is walked without re-splitting every selector per lookup. */
-interface Ancestors67 { rules: MergedRule[]; bases: string[][] }
+/** The merged rules that can pass a value down, indexed by each selector part's base, so a lookup probes the subject's own prefixes instead of walking every rule of the sheet. */
+type Ancestors67 = Map<string, MergedRule[]>;
 
 function ancestors67(bySel: MergedRule[]): Ancestors67 {
-  const rules = bySel.filter((o) => !/:hover|:focus|:active/.test(o.selector) && !(o.media && /max-width/i.test(o.media)));
-  return { rules, bases: rules.map((o) => o.selector.split(',').map(baseSelector)) };
+  const byBase: Ancestors67 = new Map();
+  for (const o of bySel) {
+    if (/:hover|:focus|:active/.test(o.selector) || (o.media && /max-width/i.test(o.media))) continue;
+    for (const ob of o.selector.split(',').map(baseSelector)) {
+      if (!ob) continue;
+      const list = byBase.get(ob);
+      if (list) list.push(o); else byBase.set(ob, [o]);
+    }
+  }
+  return byBase;
 }
 
-// sloplint inherited67 (gate 67): the nearest ancestor selector's value for a property
+// sloplint inherited67 (gate 67): the nearest ancestor selector's value for a property; the longest prefix of the subject that ends before a combinator and declares it
 function inherited67(up: Ancestors67, sel: string, prop: string): string | null {
   const base = baseSelector(sel);
-  let best: string | null = null, bestLen = 0;
-  up.rules.forEach((o, i) => {
-    for (const ob of up.bases[i]) {
-      if (!ob || ob === base || ob.length <= bestLen || !base.startsWith(ob) || !/[\s>+~]/.test(base[ob.length] || '')) continue;
+  for (let k = base.length - 1; k > 0; k--) {
+    if (!/[\s>+~]/.test(base[k])) continue;
+    const rules = up.get(base.slice(0, k));
+    if (!rules) continue;
+    for (const o of rules) {
       const d = o.decls.filter((x) => x.prop === prop).pop();
-      if (d) { best = d.value; bestLen = ob.length; }
+      if (d) return d.value;
     }
-  });
-  return best;
+  }
+  return null;
 }
 
 const isSmallCaps67 = (prop: string, v: string): boolean => (/^font-variant(-caps)?$/.test(prop) && /\b(all-)?(small|petite)-caps\b/.test(v))

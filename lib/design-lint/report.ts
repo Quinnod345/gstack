@@ -57,12 +57,15 @@ export class Reporter {
     this.findings.push({
       rule, tier, grade: tier,
       file: oneLine(relPath(file, this.cwd)), line: line || 1,
-      evidence: trunc(oneLine(String(evidence))),
-      fix: trunc(oneLine(String(opts.fix ?? meta.fix)), 240),
+      evidence: trunc(field(evidence)),
+      fix: trunc(field(opts.fix ?? meta.fix), 240),
       source: opts.source ?? (meta.render ? 'render' : 'static'),
     });
   }
 }
+
+/** One line, with the LINT line's own separator kept out of page-supplied text, so a parser splitting on the first ` | fix: ` reads the fix. */
+const field = (s: unknown): string => oneLine(String(s)).replace(/ \| fix: /g, ' / fix: ');
 
 const GRADE_RANK: Record<Grade, number> = { blocks: 0, ask: 1, waived: 2, polish: 3 };
 

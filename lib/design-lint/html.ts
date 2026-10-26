@@ -323,6 +323,8 @@ const CLASS_FN_CALL = new RegExp(`(?<![\\w$.])(?:${[...CLASS_FNS].join('|')})\\s
  */
 /** Failed element starts a component file may spend before the scanner stops pairing; jsScan carries the same budget. */
 const MAX_FAILED_TAGS = 500;
+/** An element whose content ran to the end of the file without any closer: no ancestor can close either, so each fails at once instead of rescanning the same text. */
+const JSX_EOF = -2;
 
 class JsxScanner {
   private readonly n: number;
@@ -514,7 +516,7 @@ class JsxScanner {
           if (name) this.paint(i, e + 1);
           return e + 1;
         }
-        if (/[A-Za-z_$>]/.test(src[i + 1] || '')) { const e = this.el(i); if (e > 0) { i = e; continue; } }
+        if (/[A-Za-z_$>]/.test(src[i + 1] || '')) { const e = this.el(i); if (e > 0) { i = e; continue; } if (e === JSX_EOF) return JSX_EOF; }
         i++;
         continue;
       }
@@ -522,7 +524,7 @@ class JsxScanner {
       if (i >= this.hi) this.hi = i + 1;
       i++;
     }
-    return -1;
+    return JSX_EOF;
   }
 }
 

@@ -1,7 +1,10 @@
 /**
  * The rule families of the static tier, in the order they run. Each family
  * module exports one `run(ctx, r)` that reads the context and reports by rule
- * id (lib/design-lint/rules/ids.ts). Add a family here, nowhere else.
+ * id (lib/design-lint/rules/ids.ts). Add a family here, nowhere else, and
+ * before `component`: it reconciles against what the stylesheet families
+ * already reported (a Tailwind tell on a line type or chrome named, an emoji
+ * tile assets saw), so it reads their findings and must run after them.
  */
 import type { LintContext } from '../context';
 import type { Reporter } from '../report';

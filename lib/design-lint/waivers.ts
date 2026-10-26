@@ -22,8 +22,7 @@
  * NOTICE.md); the guard evidence field is dropped because gstack has no theme
  * stamp to re-derive it from.
  */
-import type { Finding } from './report';
-import { oneLine, relPath, trunc } from './report';
+import { oneLine, relPath, Reporter, type Finding } from './report';
 import { lineIndex } from './css';
 import { ruleMeta } from './rules/ids';
 
@@ -34,21 +33,15 @@ export interface WaiverClaim {
   line: number;
 }
 
-export interface Waiver {
-  reason: string;
-  /** The stylesheet (as printed) a claim written in a stylesheet answers for; null for a claim in the page, which answers for the whole page. */
-  sheet: string | null;
-}
-
 export interface WaiverSet {
-  /** Waivers accepted, keyed by rule id for a page claim and by rule@sheet for a stylesheet claim (each linked sheet may answer for its own findings), each with its recorded reason. */
-  accepted: Map<string, Waiver>;
+  /** Waivers accepted, each with its recorded reason: keyed by rule id for a page claim, and by rule@file for a claim that answers for the file it is written in (a stylesheet, or a component), so two linked sheets may each waive the same rule for their own findings. */
+  accepted: Map<string, string>;
   /** Refused waivers, already shaped as findings. */
   refused: Finding[];
 }
 
-/** A page claim is keyed by its rule; a stylesheet claim by rule@sheet, so two linked sheets may each waive the same rule for their own findings. */
-const waiverKey = (rule: string, sheet: string | null): string => (sheet ? `${rule}@${sheet}` : rule);
+/** A page claim is keyed by its rule; a claim that answers for its own file by rule@file. */
+const waiverKey = (rule: string, file: string | null): string => (file ? `${rule}@${file}` : rule);
 
 export const WAIVER_MIN_REASON = 24;
 export const WAIVER_MAX = 3;
@@ -89,16 +82,6 @@ const pageWordsOf = (text: string): Set<string> =>
 export const FLOOR_REFUSAL = 'it blocks; the Floor is never waivable';
 export const OWN_RULE_REFUSAL = "the lint's own rule, never waivable";
 
-/** The `waiver` finding for a claim the lint refused. */
-function refusal(c: WaiverClaim, why: string, cwd = process.cwd()): Finding {
-  return {
-    rule: 'waiver', tier: 'ask', grade: 'ask', source: 'static',
-    file: relPath(c.file, cwd), line: c.line,
-    evidence: trunc(`waiver on ${c.rule} refused: ${why}`),
-    fix: 'fix the finding, or waive it with the rule id and a reason about this page (24 characters or more, not boilerplate)',
-  };
-}
-
 /** The blocking rules a set of findings only suspected: every finding of the rule sits at ask (report.ts demotes a suspected blocking finding), none was measured. */
 export function suspectedRules(findings: Finding[]): Set<string> {
   const measured = new Set(findings.filter((f) => f.tier === 'blocks').map((f) => f.rule));
@@ -114,49 +97,48 @@ export function suspectedRules(findings: Finding[]): Set<string> {
  * own, which has no prose). `suspected` names
  * the blocking rules this context could only suspect (reported at ask): a
  * waiver on one of them is weighed like any ask; a waiver on any other
- * blocking rule, measured or not found, is refused.
+ * blocking rule, measured or not found, is refused. With `ownFile`, every
+ * claim answers for the file it is written in (a component in a directory
+ * of components), keyed like a stylesheet claim and weighed against
+ * `pageText` as that file's own text.
  */
-export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = process.cwd(), suspected: ReadonlySet<string> = new Set()): WaiverSet {
-  const accepted = new Map<string, Waiver>();
-  const refused: Finding[] = [];
+export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = process.cwd(), suspected: ReadonlySet<string> = new Set(), ownFile = false): WaiverSet {
+  const accepted = new Map<string, string>();
+  const rep = new Reporter('page', cwd);
   const pageWords = pageWordsOf(pageText);
   const reasons = new Map<string, number>();
   for (const c of claims) reasons.set(c.reason.toLowerCase(), (reasons.get(c.reason.toLowerCase()) || 0) + 1);
-  const refuse = (c: WaiverClaim, why: string) => refused.push(refusal(c, why, cwd));
+  const refuse = (c: WaiverClaim, why: string) => rep.report('waiver', c.file, c.line, `waiver on ${c.rule} refused: ${why}`,
+    { fix: 'fix the finding, or waive it with the rule id and a reason about this page (24 characters or more, not boilerplate)' });
   for (const c of claims) {
     const meta = ruleMeta(c.rule);
     if (!meta) { refuse(c, 'no such rule'); continue; }
     if (meta.gate === 'waiver' || meta.gate === 'render' || meta.gate === 'lint') { refuse(c, OWN_RULE_REFUSAL); continue; }
     if (meta.tier === 'blocks' && !suspected.has(c.rule)) { refuse(c, FLOOR_REFUSAL); continue; }
-    const sheet = /\.css$/i.test(c.file) ? oneLine(relPath(c.file, cwd)) : null;
-    const key = waiverKey(c.rule, sheet);
+    const sheet = /\.css$/i.test(c.file);
+    const key = waiverKey(c.rule, sheet || ownFile ? oneLine(relPath(c.file, cwd)) : null);
     if (accepted.has(key)) { refuse(c, 'one waiver per rule'); continue; }
     if (c.reason.length < WAIVER_MIN_REASON) { refuse(c, `reason under ${WAIVER_MIN_REASON} characters`); continue; }
     if (reasonIsBoilerplate(c.reason)) { refuse(c, 'boilerplate reason'); continue; }
     if ((reasons.get(c.reason.toLowerCase()) || 0) > 1) { refuse(c, 'reason reused on another waiver'); continue; }
     const words = c.reason.toLowerCase().match(/[a-z]{4,}/g) || [];
     if (pageWords.size && !sheet && !words.some((w) => pageWords.has(w))) { refuse(c, 'reason shares no word with the page'); continue; }
-    accepted.set(key, { reason: c.reason, sheet });
+    accepted.set(key, c.reason);
   }
   const rulesWaived = [...new Set([...accepted.keys()].map((k) => k.split('@')[0]))];
   if (rulesWaived.length > WAIVER_MAX) {
-    const first = claims[0];
-    refused.push({
-      rule: 'house-style', tier: 'polish', grade: 'polish', source: 'static',
-      file: relPath(first.file, cwd), line: first.line,
-      evidence: trunc(`${rulesWaived.length} rules waived on one page (${rulesWaived.join(', ')}): that is a house style, not a set of exceptions`),
-      fix: 'lock the choices into DESIGN.md so later pages inherit them instead of re-arguing them',
-    });
+    rep.report('house-style', claims[0].file, claims[0].line, `${rulesWaived.length} rules waived on one page (${rulesWaived.join(', ')}): that is a house style, not a set of exceptions`,
+      { fix: 'lock the choices into DESIGN.md so later pages inherit them instead of re-arguing them' });
   }
-  return { accepted, refused };
+  return { accepted, refused: rep.findings };
 }
 
-/** Mark waived ask and polish findings; blocking findings never change, and a stylesheet's claim reaches only findings in that stylesheet. Returns the findings plus the refusals. */
+/** Mark waived ask and polish findings; blocking findings never change, and a claim keyed to its file reaches only findings in that file. Returns the findings plus the refusals. */
 export function applyWaivers(findings: Finding[], set: WaiverSet): Finding[] {
   const out = findings.map((f) => {
-    const w = set.accepted.get(f.rule) ?? set.accepted.get(waiverKey(f.rule, f.file));
-    if (f.tier === 'blocks' || !w || (w.sheet && f.file !== w.sheet)) return f;
-    return { ...f, grade: 'waived' as const, waiver: oneLine(w.reason) };
+    const reason = set.accepted.get(f.rule) ?? set.accepted.get(waiverKey(f.rule, f.file));
+    if (f.tier === 'blocks' || reason == null) return f;
+    return { ...f, grade: 'waived' as const, waiver: oneLine(reason) };
   });
   return [...out, ...set.refused];
 }

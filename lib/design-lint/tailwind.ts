@@ -35,14 +35,8 @@ const TW_COLOR_LIT = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([
 
 export interface TwParsed { variants: string[]; base: string; neg: boolean }
 
-const TW_PARSED = new Map<string, TwParsed>();
-/** Distinct class tokens kept parsed; arbitrary values make the key space unbounded, so the cache is emptied past this. */
-const TW_PARSED_MAX = 50_000;
-
 /** One utility split into its variants (group-/peer- prefixes and /names dropped), its base and a leading minus. */
 export function twParse(tok: string): TwParsed {
-  const cached = TW_PARSED.get(tok);
-  if (cached) return cached;
   const variants: string[] = [];
   let depth = 0, cur = '';
   for (const ch of tok) {
@@ -55,10 +49,7 @@ export function twParse(tok: string): TwParsed {
   if (base.endsWith('!')) base = base.slice(0, -1);
   const neg = base.length > 1 && base.startsWith('-');
   if (neg) base = base.slice(1);
-  const p = { variants: variants.map((v) => v.replace(/^(?:group|peer)-/, '').replace(/\/[\w-]+$/, '')), base, neg };
-  if (TW_PARSED.size >= TW_PARSED_MAX) TW_PARSED.clear();
-  TW_PARSED.set(tok, p);
-  return p;
+  return { variants: variants.map((v) => v.replace(/^(?:group|peer)-/, '').replace(/\/[\w-]+$/, '')), base, neg };
 }
 
 /** The tokens utilities resolve against: the project's shared tokens for a component directory, else the context's own. */

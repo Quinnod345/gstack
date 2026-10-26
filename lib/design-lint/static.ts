@@ -88,14 +88,18 @@ export function resolveRef(href: string | null, from: string, root: string | nul
   const ref = href.split(/[?#]/)[0];
   if (!ref) return null;
   const within = (abs: string, top: string) => abs === top || abs.startsWith(top + path.sep);
+  const inside = (abs: string, top: string) => {
+    if (!within(abs, top)) return false;
+    try { return within(fs.realpathSync(abs), realDir(top)); } catch { return true; }
+  };
   if (ref.startsWith('/')) {
     if (!root) return null;
     const abs = path.join(root, ref);
-    return within(abs, root) ? abs : null;
+    return inside(abs, root) ? abs : null;
   }
   const abs = path.resolve(from, ref);
   const project = projectRoot(from);
-  return project && !within(abs, project) ? null : abs;
+  return project && !inside(abs, project) ? null : abs;
 }
 
 export function importsOf(css: string, from: string, root: string | null = null): string[] {
@@ -287,13 +291,17 @@ export function shareProjects(contexts: LintContext[]): void {
   }
 }
 
-/** The waiver comments of a context, in its documents and every stylesheet it reads, weighed against what its rules found. A stylesheet's claims answer for that stylesheet on every page that links it. */
+/**
+ * The waiver comments of a context, in its documents and every stylesheet it reads, weighed against what its rules found.
+ * A stylesheet's claims answer for that stylesheet on every page that links it. In a component directory each file's
+ * claims answer for that file alone, weighed against its own text, with the house-style count per file.
+ */
 export function contextWaivers(ctx: LintContext, cwd: string, findings: Finding[] = []): WaiverSet {
-  const claims = [
-    ...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)),
-    ...ctx.cssFiles.flatMap((c) => findWaivers(c.file, c.raw)),
-  ];
-  return resolveWaivers(claims, ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
+  const suspected = suspectedRules(findings);
+  const sheets = ctx.cssFiles.flatMap((c) => findWaivers(c.file, c.raw));
+  if (ctx.scope !== 'component') return resolveWaivers([...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)), ...sheets], ctx.docs.map((d) => d.text).join(' '), cwd, suspected);
+  const sets = [...ctx.docs.map((d) => resolveWaivers(findWaivers(d.file, d.raw), d.text, cwd, suspected, true)), resolveWaivers(sheets, '', cwd, suspected)];
+  return { accepted: new Map(sets.flatMap((s) => [...s.accepted])), refused: sets.flatMap((s) => s.refused) };
 }
 
 /** A context's findings with its waivers applied: waived grades, refusals and the house-style note. */

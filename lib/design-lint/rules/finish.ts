@@ -14,7 +14,7 @@ import { twVariants } from '../tailwind';
 // sloplint maxPxIn
 function maxPxIn(value: string): number | null {
   let best: number | null = null;
-  for (const m of value.matchAll(/(-?\d+(?:\.\d+)?)(px|rem|em)/g)) {
+  for (const m of value.matchAll(/(-?\d*\.?\d+)(px|rem|em)/g)) {
     const px = m[2] === 'px' ? parseFloat(m[1]) : parseFloat(m[1]) * 16;
     if (best == null || px > best) best = px;
   }
@@ -317,8 +317,13 @@ function checkHairlineUnderShadow(ctx: LintContext, r: Reporter): void {
     if (edge) { r.report('hairline-under-shadow', rule.file, sh.line, 'a hairline border under a wide soft shadow on ' + rule.selector); return; }
   }
   for (const doc of ctx.docs) {
-    const m = /class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])border(?![\w-])[^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])|class(?:Name)?\s*=\s*["'][^"']*(?<![\w:-])shadow-(?:xl|2xl)(?![\w-])[^"']*(?<![\w:-])border(?![\w-])/.exec(doc.src);
-    if (m) { r.report('hairline-under-shadow', doc.file, doc.lineOf(m.index), 'a hairline border under a wide soft shadow (border with shadow-xl or shadow-2xl)'); return; }
+    for (const t of [...doc.tags, ...doc.comps]) {
+      if (t.close) continue;
+      const toks = (getAttr(t.attrs, 'class') ?? getAttr(t.attrs, 'className') ?? '').split(/\s+/);
+      if (!toks.includes('border') || !(toks.includes('shadow-xl') || toks.includes('shadow-2xl'))) continue;
+      r.report('hairline-under-shadow', doc.file, t.line, 'a hairline border under a wide soft shadow (border with shadow-xl or shadow-2xl)');
+      return;
+    }
   }
 }
 

@@ -46,7 +46,7 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
       flag(doc.lineOf(t.end + at), 'an emoji in <' + t.name + '> "' + trunc(text, 32) + '"');
     }
     const raw = doc.raw;
-    const body = doc.kind === 'html' ? doc.masked : raw;
+    const body = doc.masked;
     for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
     for (const m of body.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(doc.lineOf(m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"');
     if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️?)‍?){1,3})\s*\1/gu)) flag(doc.lineOf(m.index!), 'an emoji passed as an icon: ' + m[2]);
