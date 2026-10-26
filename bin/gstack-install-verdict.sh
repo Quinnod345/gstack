@@ -31,6 +31,8 @@
 # spawned sessions (ambient OpenClaw) only warn. GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1
 # admits anyway and says so.
 
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
+
 # gstack_source_root BIN_DIR — the source checkout behind an install: an
 # installed runtime root's recorded .source-path (setup _link_runtime_dists),
 # else BIN_DIR/.. resolved. Prints the realpath; returns 1 when unresolvable.
@@ -159,7 +161,7 @@ gstack_install_admission() {
       v_bun=$(gstack_install_verdict_field "$file" bun_path)
       if [ -z "$detail" ] && [ -n "$v_bun" ]; then
         running=$(gstack_realpath "$where" 2>/dev/null)
-        _gstack_bun_is_shim "$where" && running=$(bun --no-env-file --config=/dev/null -p process.execPath </dev/null 2>/dev/null | head -1)
+        _gstack_bun_is_shim "$where" && running=$(bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -p process.execPath </dev/null 2>/dev/null | head -1)
         if [ -n "$running" ] && [ "$running" != "$v_bun" ]; then
           _ia_status=runtime code=BUN_RESOLUTION_DRIFT
           detail="bun $found at $running is running, but the install verdict recorded bun $(gstack_install_verdict_field "$file" bun_version) at $v_bun"

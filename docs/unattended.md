@@ -88,9 +88,14 @@ Not every workflow writes this line or a run directory today:
   helper writes its `gate.json` yet (`gstack-gate` renders and parses a gate
   list; it does not create one). `/cso` skips the shared startup, so these
   session rules do not reach it at all. Read each skill's own record instead:
-  the ship receipt in the PR body (`gstack-ship-receipt read --pr <n> --json`)
-  for `/ship`, the review-log rows (`gstack-review-read`) for `/review`, and the
-  `qa-report-*.md` file for `/qa`.
+  the review-log rows (`gstack-review-read`) for `/review`, the
+  `qa-report-*.md` file for `/qa`, and the ship receipt for `/ship`. When
+  the run did not push (an unattended run must not), read the receipt file in
+  the child's checkout with `gstack-ship-receipt read --body .gstack/tmp/ship-receipt.md --json`;
+  use `gstack-ship-receipt read --pr <n> --json` only once a PR exists. In both
+  cases compare the receipt's `head` to the branch SHA (`git rev-parse HEAD` in
+  the child's checkout): `read` does not check that the receipt is current, so
+  an older PR's receipt reads as valid.
 
 Every workflow command shares one exit table: `0` ok, `1` fail, `2` usage,
 `3` refused or needs a flag. Error lines end with a result code in parentheses,

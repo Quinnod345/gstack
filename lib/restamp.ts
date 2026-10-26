@@ -68,7 +68,7 @@ export interface RestampResult {
 
 function sha256(buf: Buffer | string): string { return createHash('sha256').update(buf).digest('hex'); }
 function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): { ok: boolean; out: string; err: string; status: number | null } {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000, env: env ?? process.env });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000, env: env ?? process.env, maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: (r.stdout ?? '').replace(/\n$/, ''), err: (r.stderr ?? '').trim(), status: r.status };
 }
 class Refusal extends Error { constructor(public code: ResultCodeName, message: string, public extra: Partial<RestampResult> = {}) { super(message); } }
@@ -578,7 +578,9 @@ function gateAhead(o: RestampOptions, plan: Plan, stages: StageRecord[], common:
     if (resolvable) {
       for (const c of conflicts) {
         if (c === plan.policy.changelog) {
-          const merged = mergeChangelogs(git(dir, ['show', `:2:${c}`]).out + '\n', git(dir, ['show', `:3:${c}`]).out + '\n');
+          const stage = (n: number) => git(dir, ['show', `:${n}:${c}`]);
+          const [base, ours, theirs] = [stage(1), stage(2), stage(3)];
+          const merged = ours.ok && theirs.ok ? mergeChangelogs(ours.out + '\n', theirs.out + '\n', base.ok ? base.out + '\n' : undefined) : null;
           if (merged === null) { unresolved = [c]; break; }
           fs.writeFileSync(path.join(dir, c), merged);
         } else git(dir, ['checkout', '--theirs', '--', c]);
