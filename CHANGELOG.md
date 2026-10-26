@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.240.0] - 2026-10-26
 
 **Proactive skill suggestions default to the four core skills.** `proactive` now takes `core` (the default: only /office-hours, /review, /qa and /ship auto-invoke when a request matches), `all` (any matching skill, the old behavior) or `off`. `true` and `false` keep working as `all` and `off`. The sentiment research (GSTA-93) found auto-invocation of every skill is what makes gstack collide with other skill packs; the four core skills are where the praise is, so they keep the nudge. Garry, 2026-10-25: "do it".
 
