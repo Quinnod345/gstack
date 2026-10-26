@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.259.0] - 2026-10-26
 
 **New `/ubicloud` skill: the Ubicloud runner moves into gstack with the discipline a shared vCPU quota needs.** Crews ran heavy suites on Ubicloud through a user-scope skill and per-lane wrappers, and paid for it in stray VMs after a machine slept, a project quota at 528 of 512 vCPUs when lanes verified in parallel, verifies that hung for an hour before anyone noticed, and a stale wrapper that skipped a service start. `scripts/ubicloud/ubi-runner.sh` now carries the fixes and `ubicloud/SKILL.md` (entry point `bin/gstack-ubi`) teaches the watched launch; `bun run test:ubicloud` and the remote pregate are unchanged.
 
