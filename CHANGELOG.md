@@ -2,15 +2,18 @@
 
 ## [Unreleased]
 
-**/plan-eng-review no longer points its reader at three things its own text never defines.** The plan-eng-review sections judge marked down clarity and actionability for these references. All three live in shared resolvers, so the fixes reach every skill that renders them:
+**/plan-eng-review no longer points its reader at three things its own text never defines.** The plan-eng-review sections judge marked down clarity and actionability for these references. All three live in shared resolvers, so the fixes reach every skill that renders them. The Claude Code hook that backs up AskUserQuestion carried the same stale pointer, so it's fixed too:
 
 ### Fixed
 - **Claims Need Evidence kernel** (`scripts/resolvers/preamble/generate-evidence-directive.ts`): the evidence-kind bullet ended with "Reuse rules: Step 16." That step exists only in /ship, so in every other skill the pointer led nowhere. It's gone. /ship's Step 16 still states its own reuse rule ("Reuse a check when its inputs match"), and every tier's DONE line still asks you to name reuse.
 - **AskUserQuestion Tool resolution** (`generate-ask-user-format.ts`): "per its Unattended session block" read like a section of the skill, but the block is runtime output. Item 1 now names the `unattended-session` block that gstack-skill-start prints, which is the id on its `GSTACK_INSTRUCTION_BEGIN` line. The failure fallback's `unattended` branch dropped its repeat of that pointer, because item 1 already states the rule.
+- **AskUserQuestion fallback hook** (`hosts/claude/hooks/auq-error-fallback-hook.ts`): its unattended directive ended with "GSTACK_RESULT status=gate_pending (Unattended session block).", the same section-style pointer to runtime output. The parenthetical is gone; the directive itself already states the rule.
 - **Reality rows, eng/ceo branch** (`scripts/resolvers/plan-reality.ts`): the Completion Summary row and plan-eng-review's checklist ask for the `PLAN_REALITY` line, but the operative block never said where that line comes from. It now says `gstack-plan-reality check` prints it.
 
 ### Tests
 - `test/honesty-kernel.test.ts` no longer requires the Step 16 pointer. It now rejects any `Step <n>` cross-reference in the kernel, which every skill renders.
+- `test/resolver-ask-user-format.test.ts` checks across files that the unattended pointer names `unattended-session` and that gstack-skill-start really emits a block with that id, so renaming either side fails the test. `test/auq-error-fallback-hook.test.ts` asserts the hook's unattended directive no longer says "Unattended session block".
+- `test/plan-reality.test.ts` checks that the reality-rows block, generated for each of the eng, ceo and devex phases, says its `gstack-plan-reality check` line prints `PLAN_REALITY`.
 - Every changed SKILL.md shrank, so 89 pins in `test/fixtures/skill-md-size-allowlist.json` were lowered to their new exact sizes (a ratchet: nothing grew). The /ship goldens were regenerated.
 
 ### Gate integrity
