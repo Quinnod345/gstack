@@ -86,7 +86,7 @@ describe('resolveProxy precedence', () => {
   });
 
   test('a scheme-less password that would spill past the userinfo, or that is not percent-encoded, warns instead of leaking or crashing', () => {
-    for (const value of ['bob:1234?x@proxy.corp:3128', 'bob:1234#x@proxy.corp:3128', 'bob:1234/x@proxy.corp:3128']) {
+    for (const value of ['bob:1234?x@proxy.corp:3128', 'bob:1234#x@proxy.corp:3128', 'bob:1234/x@proxy.corp:3128', 'CORP\\jdoe:1234@proxy.corp:3128', 'bob:\\1234@proxy.corp:3128', 'bob:1234\\abc@proxy.corp:3128']) {
       const resolved = resolveProxy(null, { HTTPS_PROXY: value });
       expect(resolved.url, value).toBeNull();
       expect(resolved.warning, value).toStartWith('HTTPS_PROXY is not a proxy URL browse can use (');
@@ -97,6 +97,17 @@ describe('resolveProxy precedence', () => {
     expect(percent.warning).toContain('credentials are not valid percent-encoding');
     expect(percent.warning).not.toContain('100%');
     expect(() => resolveProxy(['http://bob', '100%@proxy.corp:3128'].join(':'), {})).toThrow(/percent-encoding/);
+  });
+
+  test('a proxy URL with a path, query or fragment is refused for every source, so a DOMAIN\\user login never prints its password', () => {
+    for (const value of [['http://CORP\\jdoe', '1234@proxy.corp:3128'].join(':'), 'http://proxy.corp:3128/path', 'http://proxy.corp:3128?x=1', 'socks5://proxy.corp:1080#f']) {
+      expect(() => resolveProxy(value, {}), value).toThrow(/unexpected path, query or fragment/);
+      const resolved = resolveProxy(null, { HTTPS_PROXY: value });
+      expect(resolved.url, value).toBeNull();
+      expect(resolved.warning, value).not.toContain('1234');
+    }
+    expect(resolveProxy('http://proxy.corp:3128/', {}).url).toBe('http://proxy.corp:3128/');
+    expect(resolveProxy('socks5://proxy.corp:1080', {}).url).toBe('socks5://proxy.corp:1080');
   });
 
   test('scheme-less and http:// spellings of the same proxy share a config hash, so either shell reuses the daemon', () => {

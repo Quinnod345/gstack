@@ -85,6 +85,17 @@ export function parseProxyConfig(opts: {
     );
   }
 
+  // A proxy address has no path, query or fragment. Anything the URL parser
+  // put there came from a value that was not a proxy URL (a backslash in a
+  // DOMAIN\user login, a '/' in a password) and would otherwise be printed
+  // in the clear, because only the userinfo is redacted.
+  if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) {
+    throw new ProxyConfigError(
+      'expected scheme://[user:pass@]host:port with no path; percent-encode any / \\ ? # @ in the credentials',
+      `invalid proxy URL — unexpected path, query or fragment`,
+    );
+  }
+
   const port = url.port
     ? parseInt(url.port, 10)
     : (scheme === 'http' ? 80 : scheme === 'https' ? 443 : 1080);
@@ -317,11 +328,12 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
  * The scheme-less proxy shapes curl and Chromium's environment reader take as
  * an HTTP proxy: `[user:pass@]host[:port]` with a name, dotted address or
  * bracketed IPv6 host. Anything else (a scheme, a path, query or fragment
- * character, whitespace inside, a bare number) goes to the URL parser as
- * written, so a typo such as `http:/host:3128` keeps the diagnostic it had
- * and no part of a password can land outside the redacted userinfo.
+ * character, a backslash, whitespace inside, a bare number) goes to the URL
+ * parser as written, so a typo such as `http:/host:3128` keeps the
+ * diagnostic it had; parseProxyConfig then rejects any path, query or
+ * fragment, so no part of a password can land outside the redacted userinfo.
  */
-const SCHEMELESS_PROXY_RE = /^(?:[^/?#@\s]+@)?(?:\[[0-9a-f:.]+\]|(?=[^:]*[a-z.])[^/?#@\s:[\]]+)(?::\d+)?$/i;
+const SCHEMELESS_PROXY_RE = /^(?:[^/\\?#@\s]+@)?(?:\[[0-9a-f:.]+\]|(?=[^:]*[a-z.])[^/\\?#@\s:[\]]+)(?::\d+)?$/i;
 
 /**
  * Resolve the proxy for this invocation (#915). Env URLs go through
