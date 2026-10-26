@@ -124,6 +124,12 @@ describe('design-craft check', () => {
     expect(checkCraft('<section><h2>Pricing</h2><a href="/buy">Start free trial</a></section>')).toEqual([]);
   });
 
+  test('markup rules skip script bodies, so a hydration payload that repeats the markup counts once', () => {
+    const page = '<div class="min-h-screen transition-all"><a href="#">x</a><img src="a.png"></div><script>self.__next_f.push([1,"<div class=\\"min-h-screen transition-all\\"><a href=\\"#\\">x</a><img src=\\"a.png\\"></div>"])</script>';
+    expect(checkCraft(page).map(f => `${f.id} ${f.count}`)).toEqual(['layout-transition 1', 'dead-link 1', 'img-no-alt 1', 'vh-height 1']);
+    expect(checkCraft('<p>Hi</p><button onclick="window.addEventListener(\'scroll\', f)">Go</button>').map(f => f.id)).toEqual(['scroll-listener']);
+  });
+
   test('the CLI prints CRAFT_CHECK lines and exits 1 on tells, 0 when clean, 2 on usage', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-craft-'));
     try {
@@ -141,6 +147,10 @@ describe('design-craft check', () => {
       expect(run(path.join(dir, 'empty.html')).code).toBe(2);
       fs.writeFileSync(path.join(dir, 'page.tsx'), 'export const P = () => <p>Acme</p>;');
       expect(run(path.join(dir, 'page.tsx'))).toMatchObject({ code: 2, out: '' });
+      fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><html><head><title>App</title></head><body>\n<div id="root"></div>\n<script type="module" src="/src/main.tsx"></script>\n</body></html>');
+      const shell = run(path.join(dir, 'index.html'));
+      expect(shell).toMatchObject({ code: 2, out: '' });
+      expect(shell.err).toContain('mount-node shell');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -158,6 +168,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
     expect(accepted).toEqual([{ id: 'placeholder-brand', count: 1, reason: 'Acme is the real customer' }, { id: 'scroll-listener', count: 1, reason: 'unused' }]);
     expect(issues.find(f => f.id === 'round-number')?.fix).toEndWith('(2 accepted earlier: supplied figures)');
     expect(issues).toHaveLength(findings.length - 2);
+    expect(acceptFindings([{ id: 'needs-proof', count: 1, fix: 'f' }], [{ id: 'needs-proof', count: 1, reason: 'awaiting logo' }])).toEqual({ issues: [], accepted: [{ id: 'needs-proof', count: 1, reason: 'awaiting logo' }] });
     expect(formatCraft([], accepted)).toBe('CRAFT_ACCEPTED: placeholder-brand 1 Acme is the real customer\nCRAFT_ACCEPTED: scroll-listener 1 unused\nCRAFT_RESULT: clean (2 accepted)');
     const carried = [{ id: 'round-number', count: 1, reason: 'first run' }, { id: 'round-number', count: 3, reason: 'supplied figures' }];
     for (const list of [carried, [...carried].reverse()]) {
@@ -222,6 +233,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
       fs.writeFileSync(page, CLEAN);
       fs.writeFileSync(record, JSON.stringify({ craft_exceptions: [{ id: 'placeholder-brand', count: 1, reason: 'Acme is the customer' }] }));
       expect(run(page, '--accepted', record)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n' });
+      expect(run(page)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n', err: '' });
       expect(acceptFindings([], [{ id: 'oops', count: 1, reason: 'x' }])).toEqual({ issues: [], accepted: [] });
       fs.writeFileSync(page, CLEAN.replace('Halvorsen Freight', 'Acme and Nexus'));
       expect(run(page)).toMatchObject({ code: 1, out: 'CRAFT_CHECK: placeholder-brand 2 use a supplied customer, or a fitting name in sample data\nCRAFT_RESULT: 1 issue(s)\n' });

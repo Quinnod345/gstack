@@ -24,7 +24,7 @@ export const DESIGN_CHECKLIST_SLOP_HEADING = 'AI Slop Detection';
 
 const TIER_ORDER: Record<DesignSlopEntry['confidence'], number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
-/** Category 1: slop entries a code reader can grep for, plus the legacy blacklist lines. */
+/** Category 1: rendered (non-checkerOnly) slop entries a code reader can grep for, plus the legacy blacklist lines. */
 export function checklistSlopEntries(): DesignSlopEntry[] {
   // Array.prototype.sort is stable, so catalog order survives within a tier.
   return RENDERED

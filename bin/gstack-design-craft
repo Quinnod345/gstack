@@ -1,5 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// gstack-design-craft — free craft check for a generated page (/design-html Step 4).
+// gstack-design-craft — free craft check for a page (/design-html Step 4,
+// /design-review craft audit).
 //
 // Usage: gstack-design-craft <file.html> [--accepted <finalized.json>]
 //
@@ -9,14 +10,15 @@
 // exception covers (same id, count at most the accepted count) prints as
 // "CRAFT_ACCEPTED: <id> <count> <reason>" and does not fail the check; the
 // result line then adds " (<k> accepted)" or ", <k> accepted".
-// Exit 2: usage error, a non-HTML file, or an unreadable or empty file, with
+// Exit 2: usage error, a non-HTML file, an unreadable or empty file, or a
+// framework mount-node shell (a document whose body has no visible text), with
 // nothing checked; or an unreadable or malformed exceptions file, after a
 // warning and a full check with no exceptions accepted, so a bad record never
 // hides the page's tells. Head and navigation rules run only on a full HTML
 // document; a fragment gets the copy and code rules alone.
 
 import { readFileSync } from 'fs';
-import { acceptFindings, checkCraft, formatCraft, parseCraftExceptions, type CraftException } from '../lib/design-craft';
+import { acceptFindings, checkCraft, formatCraft, parseCraftExceptions, visibleText, type CraftException } from '../lib/design-craft';
 
 const USAGE = 'Usage: gstack-design-craft <file.html> [--accepted <finalized.json>]';
 const [file, flag, acceptedFile, ...rest] = process.argv.slice(2);
@@ -37,6 +39,11 @@ try {
 }
 if (source.trim() === '') {
   console.error(`gstack-design-craft: ${file} is empty; nothing was checked`);
+  process.exit(2);
+}
+const body = source.match(/<body\b[\s\S]*/i)?.[0];
+if (/<head\b/i.test(source) && body !== undefined && visibleText(body).trim() === '') {
+  console.error(`gstack-design-craft: ${file} has no visible text (a framework mount-node shell?); nothing was checked, check the rendered page`);
   process.exit(2);
 }
 let exceptions: CraftException[] = [];
