@@ -15,6 +15,7 @@ Conventions:
 - [/benchmark-models](benchmark-models/SKILL.md): Cross-model benchmark for gstack skills.
 - [/browse](browse/SKILL.md): Drive a real browser through Aside: open a page, read it, click through a flow, take screenshots, check console errors.
 - [/canary](canary/SKILL.md): Post-deploy canary monitoring.
+- [/captain](captain/SKILL.md): Run a crew of coding agents from one controller (also /crew): lanes send READY blocks and never merge; the controller merges through trains, keeps the digest, relays approvals, fixes flakes daily.
 - [/careful](careful/SKILL.md): Safety guardrails for destructive commands.
 - [/codex](codex/SKILL.md): OpenAI Codex CLI wrapper — three modes.
 - [/context-restore](context-restore/SKILL.md): Restore working context saved earlier by /context-save.
