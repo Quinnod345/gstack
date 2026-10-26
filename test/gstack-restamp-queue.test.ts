@@ -47,6 +47,25 @@ describe('pure pieces', () => {
     expect(checkChangelog(r.text, '1.2.5.0')).toEqual([]);
     expect(checkChangelog(r.text, '1.2.6.0').map(e => e.code)).toEqual(['CHANGELOG_TOP_MISMATCH']);
     expect(checkChangelog(r.text + '\n## [1.2.3.0] - 2026-10-02\n\n- dup\n', '1.2.5.0').map(e => e.code)).toEqual(['CHANGELOG_DUPLICATE_HEADING']);
+    // A duplicate the base already carries is inherited history, not the PR's; one more copy still is.
+    const dupBase = '# Changelog\n\n## [1.2.3.0] - 2026-10-01\n\n- base\n\n## [1.2.3.0] - 2026-10-02\n\n- dup\n';
+    const prText = '# Changelog\n\n## [1.2.5.0] - 2026-10-10\n\n- mine\n\n' + dupBase.slice('# Changelog\n\n'.length);
+    expect(checkChangelog(prText, '1.2.5.0')).toHaveLength(1);
+    expect(checkChangelog(prText, '1.2.5.0', 'CHANGELOG.md', [dupBase])).toEqual([]);
+    const third = checkChangelog(prText + '\n## [1.2.3.0] - 2026-10-03\n\n- third\n', '1.2.5.0', 'CHANGELOG.md', [dupBase]);
+    expect(third.map(e => [e.code, e.path])).toEqual([['CHANGELOG_DUPLICATE_HEADING', 'CHANGELOG.md:15']]);
+    expect(third[0]!.message).toBe('1.2.3.0 headed 3 times (the base carries it 2 times; first at line 7)');
+    expect(checkChangelog(prText + '\n## [1.2.5.0] - 2026-10-11\n\n- again\n', '1.2.5.0', 'CHANGELOG.md', [dupBase]).map(e => e.message)).toEqual(['1.2.5.0 already headed at line 3']);
+    // Several readings of the base (its tip and the fork point) grant the larger count; an [Unreleased]
+    // placeholder the base keeps is inherited like any heading, and a second one is still the PR's.
+    const collapsed = '# Changelog\n\n## [1.2.3.0] - 2026-10-01\n\n- base, merged copy\n';
+    expect(checkChangelog(prText, '1.2.5.0', 'CHANGELOG.md', [collapsed, dupBase])).toEqual([]);
+    expect(checkChangelog(prText, '1.2.5.0', 'CHANGELOG.md', [collapsed])).toHaveLength(1);
+    expect(checkChangelog(prText, '1.2.5.0', 'CHANGELOG.md', [])).toHaveLength(1);
+    const placeholders = '# Changelog\n\n## [Unreleased]\n\n## [Unreleased]\n\n## [1.2.3.0] - 2026-10-01\n\n- base\n';
+    expect(checkChangelog(placeholders, null, 'CHANGELOG.md', [placeholders])).toEqual([]);
+    expect(checkChangelog(placeholders, null)).toHaveLength(1);
+    expect(checkChangelog(placeholders + '\n## [Unreleased]\n\n- mine\n', null, 'CHANGELOG.md', [placeholders]).map(e => e.message)).toEqual(['Unreleased headed 3 times (the base carries it 2 times; first at line 3)']);
     expect(reheadChangelog(r.text, { from: '1.2.5.0', to: '1.2.5.0', date: 'x' }).moved).toBe(false);
     expect(reheadChangelog('# Changelog\n\n## [1.2.3.0] - d\n\n- base\n', { from: '9.9.9.9', to: '1.2.5.0', date: 'x' }).error?.code).toBe('CHANGELOG_SECTION_MISSING');
     expect(normalizeChangelog(r.text)).toBe(normalizeChangelog(text.replace('[Unreleased]', '[1.2.9.0] - 2026-10-11')));
@@ -70,7 +89,13 @@ describe('three PRs, reordered twice, zero manual edits', () => {
     expect(a.status).toBe(EXIT.ok);
     expect(a.out).toContain('ship, next in queue at 1.2.4.0');
     expect(a.out).toContain('claims: ignored (stamp-at-merge)');
-    expect(a.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; .*CHANGELOG entry text only.*expected head [0-9a-f]{40}/m);
+    // Under a train the stamp commit may hold only restamp's own output: the next: line must not ask the lane
+    // to edit the CHANGELOG by hand (a lane that did was refused by the train's verify, freezing the queue).
+    // Value: protects=restamp's stamp-at-merge handoff never instructs a hand edit of CHANGELOG; fails_when=the
+    // claim-at-open wording ("write the CHANGELOG entry text") leaks into the train path; why_new=the earlier
+    // assertion pinned that wording as the contract; seam=none; no_claim=nothing about the lane obeying it.
+    expect(a.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; commit and push only the stamp diff above \(FILES\), with no edit of your own: .*expected head [0-9a-f]{40}/m);
+    expect(a.out).not.toMatch(/write the CHANGELOG|entry text|release summary/i);
     expect(stages(a.out)).toMatchObject({ version: 'done', release_tool: 'done', changelog: 'done', stamp_paths: 'skipped', apply: 'done' });
     expect(readFile(repo, 'VERSION')).toBe('1.2.4.0\n');
     expect(readFile(repo, 'generated/digest.md')).toBe('# digest v1.2.4.0\nbody\n');
@@ -161,6 +186,10 @@ describe('three PRs, reordered twice, zero manual edits', () => {
     expect(r.out).not.toContain('ship, next in queue at');
     const forced = restamp(repo, ['--next', '--dry-run', '--queue-mode', 'stamp-at-merge']);
     expect(forced.out).toContain('claims: ignored (stamp-at-merge)');
+    // claim-at-open's bump still writes the entry text at /ship's CHANGELOG step; only the train path drops the ask.
+    const stamped = restamp(repo, ['--next']);
+    expect(stamped.status).toBe(EXIT.ok);
+    expect(stamped.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; record the release decision, then write the CHANGELOG entry text only/m);
   });
 
   test('claim-at-open with an unknown claim says incomplete, names the PR and never says read', () => {
@@ -185,6 +214,114 @@ describe('three PRs, reordered twice, zero manual edits', () => {
     expect(r.out).toContain('STAMP_VERSION: 1.2.6.0');
     expect(r.out).toContain('claims: incomplete (claim-at-open; the VERSION claims of PR #42 are unknown, so 1.2.6.0 is provisional and may collide; rerun, then ask the coordinator before stamping; queue [');
     expect(r.out).not.toMatch(/^claims: read/m);
+  });
+});
+
+describe('CHANGELOG duplicates and the base branch', () => {
+  const dupHistory = (repo: FixtureRepo) => {
+    const cl = readFile(repo, 'CHANGELOG.md');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), cl + '\n## [1.2.2.0] - 2026-09-02\n\n- older, headed a second time on main\n');
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'history with a duplicate heading'); repo.git('push', '-q', 'origin', 'main');
+  };
+
+  test('a duplicate heading the base already carries is not the PR\'s: the stamp proceeds and keeps both copies', () => {
+    const repo = fixture();
+    dupHistory(repo);
+    expect(headings(repo)).toEqual(['1.2.3.0', '1.2.2.0', '1.2.2.0']);
+    makePr(repo, 'pr-a');
+    const r = restamp(repo, ['--next', '--pr', '1']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(stages(r.out).changelog).toBe('done');
+    expect(headings(repo)).toEqual(['1.2.4.0', '1.2.3.0', '1.2.2.0', '1.2.2.0']);
+    expect(readFile(repo, 'VERSION')).toBe('1.2.4.0\n');
+  });
+
+  test('a duplicate heading the PR introduces is still CHANGELOG_DUPLICATE_HEADING with nothing written, base duplicates or not', () => {
+    const repo = fixture();
+    dupHistory(repo);
+    makePr(repo, 'pr-a');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), readFile(repo, 'CHANGELOG.md') + '\n## [1.2.2.0] - 2026-09-03\n\n- a third copy, added by the PR\n');
+    repo.git('commit', '-q', '-am', 'pr adds a duplicate');
+    const r = restamp(repo, ['--next', '--pr', '1']);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toMatch(/CHANGELOG\.md:\d+: 1\.2\.2\.0 headed 3 times \(the base carries it 2 times; first at line \d+\); nothing written.*\(CHANGELOG_DUPLICATE_HEADING\)/);
+    expect(readFile(repo, 'VERSION')).toBe('1.2.3.0\n');
+    expect(headings(repo)).toEqual(['Unreleased', '1.2.3.0', '1.2.2.0', '1.2.2.0', '1.2.2.0']);
+
+    const plain = fixture();
+    makePr(plain, 'pr-b');
+    fs.writeFileSync(path.join(plain.work, 'CHANGELOG.md'), readFile(plain, 'CHANGELOG.md') + '\n## [1.2.2.0] - 2026-09-03\n\n- second copy, added by the PR\n');
+    plain.git('commit', '-q', '-am', 'pr adds a duplicate');
+    const p = restamp(plain, ['--next', '--pr', '1']);
+    expect(p.status).toBe(EXIT.refused);
+    expect(p.err).toMatch(/1\.2\.2\.0 already headed at line \d+; nothing written.*\(CHANGELOG_DUPLICATE_HEADING\)/);
+    expect(readFile(plain, 'VERSION')).toBe('1.2.3.0\n');
+  });
+
+  // Value: protects=a PR forked while main headed a version twice still stamps after main collapsed the copies into
+  // one, because the allowance reads the fork point as well as the tip; fails_when=restamp reads only plan.baseSha;
+  // why_new=the other rows never move main after makePr; seam=none; no_claim=nothing about a duplicate main gained
+  // after the fork (the tip reading grants it, and the train merge dedups by heading).
+  test('a duplicate main collapsed after the fork is still inherited: the merge-base reading keeps the stamp going', () => {
+    const repo = fixture();
+    dupHistory(repo);
+    makePr(repo, 'pr-a');
+    repo.git('checkout', '-q', 'main');
+    const cl = readFile(repo, 'CHANGELOG.md').replace('\n## [1.2.2.0] - 2026-09-02\n\n- older, headed a second time on main\n', '');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), cl);
+    repo.git('commit', '-q', '-am', 'collapse the duplicate'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'pr-a');
+    expect(headings(repo)).toEqual(['Unreleased', '1.2.3.0', '1.2.2.0', '1.2.2.0']);
+    const r = restamp(repo, ['--next', '--pr', '1']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(headings(repo)).toEqual(['1.2.4.0', '1.2.3.0', '1.2.2.0', '1.2.2.0']);
+  });
+
+  // Value: protects=a base with no CHANGELOG at all (the PR introduces the file) stamps, and the refusal for a
+  // duplicate the new file carries says the base reading was unavailable; fails_when=the git show failure is
+  // treated as an error, or the fallback to the self-contained rule is silent; why_new=every fixture seeds
+  // CHANGELOG.md on main; seam=none; no_claim=other git show failures are not distinguished from an absent file.
+  test('no CHANGELOG at the base: the PR\'s new file is checked against itself and the detail says so', () => {
+    const repo = fixture();
+    repo.git('rm', '-q', 'CHANGELOG.md'); repo.git('commit', '-q', '-m', 'no changelog yet'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'origin/main', '-b', 'pr-a');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\n\n- first entry\n');
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'add changelog');
+    const r = restamp(repo, ['--next', '--pr', '1']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(r.out).toMatch(/^stage changelog: done \(Unreleased -> 1\.2\.4\.0; base CHANGELOG\.md unreadable at [0-9a-f]{12}:CHANGELOG\.md, so every duplicate heading counts\)$/m);
+    expect(headings(repo)).toEqual(['1.2.4.0']);
+
+    const dup = fixture();
+    dup.git('rm', '-q', 'CHANGELOG.md'); dup.git('commit', '-q', '-m', 'no changelog yet'); dup.git('push', '-q', 'origin', 'main');
+    dup.git('checkout', '-q', 'origin/main', '-b', 'pr-b');
+    fs.writeFileSync(path.join(dup.work, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\n\n- first entry\n\n## [0.9.0.0] - d\n\n- a\n\n## [0.9.0.0] - d\n\n- b\n');
+    dup.git('add', '-A'); dup.git('commit', '-q', '-m', 'add changelog with a duplicate');
+    const d = restamp(dup, ['--next', '--pr', '1']);
+    expect(d.status).toBe(EXIT.refused);
+    expect(d.err).toMatch(/0\.9\.0\.0 already headed at line \d+; base CHANGELOG\.md unreadable at [0-9a-f]{12}:CHANGELOG\.md, so every duplicate heading counts; nothing written.*\(CHANGELOG_DUPLICATE_HEADING\)/);
+    expect(fs.existsSync(path.join(dup.work, 'VERSION')) && readFile(dup, 'VERSION')).toBe('1.2.3.0\n');
+  });
+
+  // Value: protects=when only one base reading exists (main gained the CHANGELOG after the fork), inherited
+  // headings are still counted from it and the detail names the reading that was used; fails_when=the note
+  // claims every duplicate counts while the readable reading granted an allowance, or the unreadable reading
+  // is treated as an error; why_new=the other rows read the same sha twice; seam=none; no_claim=nothing about
+  // a file renamed between the two readings.
+  test('one readable base reading: inherited headings count from it and the detail says so', () => {
+    const repo = fixture();
+    repo.git('rm', '-q', 'CHANGELOG.md'); repo.git('commit', '-q', '-m', 'no changelog yet'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'origin/main', '-b', 'pr-a');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\n\n- mine\n\n## [0.9.0.0] - d\n\n- a\n\n## [0.9.0.0] - d\n\n- b\n');
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'pr adds the changelog, carrying history with a duplicate');
+    repo.git('checkout', '-q', 'main');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), '# Changelog\n\n## [0.9.0.0] - d\n\n- a\n\n## [0.9.0.0] - d\n\n- b\n');
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'main adds the changelog too'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'pr-a');
+    const r = restamp(repo, ['--next', '--pr', '1']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(r.out).toMatch(/^stage changelog: done \(Unreleased -> 1\.2\.4\.0; base CHANGELOG\.md unreadable at [0-9a-f]{12}:CHANGELOG\.md, inherited headings counted at [0-9a-f]{12} only\)$/m);
+    expect(headings(repo)).toEqual(['1.2.4.0', '0.9.0.0', '0.9.0.0']);
   });
 });
 

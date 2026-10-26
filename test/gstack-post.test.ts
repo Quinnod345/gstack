@@ -16,6 +16,8 @@ function fakeEnv(opts: {
   files?: Record<string, string>;
   visibility?: string;
   email?: string;
+  /** The repository root `git rev-parse --show-toplevel` reports; VERSION and CHANGELOG.md are read from `files` under it. */
+  root?: string;
   respond?: (c: Call) => { status: number; stdout?: string; stderr?: string } | undefined;
 } = {}) {
   const calls: Call[] = [];
@@ -30,6 +32,7 @@ function fakeEnv(opts: {
       if (custom) return { stdout: "", stderr: "", ...custom };
       if (cmd === "git" && args[0] === "remote") return { status: 0, stdout: (opts.remote ?? "git@github.com:acme/widget.git") + "\n", stderr: "" };
       if (cmd === "git" && args[0] === "config") return { status: opts.email ? 0 : 1, stdout: (opts.email ?? "") + "\n", stderr: "" };
+      if (cmd === "git" && args[0] === "rev-parse") return { status: opts.root ? 0 : 128, stdout: (opts.root ?? "") + "\n", stderr: opts.root ? "" : "fatal: not a git repository" };
       if (cmd === "cfg") return { status: 0, stdout: (opts.visibility ?? "private") + "\n", stderr: "" };
       if (cmd === "gh" && args[0] === "pr" && args[1] === "edit") {
         const t = args.find(a => a.startsWith("--title="));
@@ -155,6 +158,70 @@ describe("gstack-post owns the redaction scan", () => {
     for (const argv of [["pr-comment", "10", "--body-file", "/b"], ["issue-comment", "9", "--body-file", "/b"], ["pr-body", "9", "--body-file", "/b"]]) {
       const f = fakeEnv({ files });
       expect(run([...argv, "--confirm", t], f)).toBe(EXIT.confirm);
+      expect(f.posts()).toEqual([]);
+    }
+  });
+
+  test("the repo's own release versions in prose are not public IPs; other dotted quads still need confirmation", () => {
+    const repo = {
+      "/repo/VERSION": "1.91.226.0\n",
+      "/repo/CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.91.191.0] - 2026-10-24\n- x\n\n## v1.91.190.0\n\n## [1.128.1.0 mirror]\n",
+    };
+    const clean = [
+      "The receipt is written to a file (1.91.191.0).",
+      "Since v1.91.226.0 the queue refuses a READY without it.",
+      "1.91.191.0",
+      "landed in release 1.91.190.0 and 1.91.226.0",
+    ];
+    for (const body of clean) {
+      const f = fakeEnv({ files: { ...repo, "/b": body + "\n" }, root: "/repo", visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.posted]);
+      expect(f.posts()).toHaveLength(1);
+    }
+    const controls = [
+      "resolver 8.8.8.8 answered",
+      "egress is 203.0.113.7 in prod",
+      "the mirror at 1.128.1.0 is ours",
+      "host: 1.91.192.0",
+    ];
+    for (const body of controls) {
+      const f = fakeEnv({ files: { ...repo, "/b": body + "\n" }, root: "/repo", visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.confirm]);
+      expect(f.stdout()).toContain("RULE: pii.ip_public LINE: 1 PART: body");
+      expect(f.posts()).toEqual([]);
+    }
+    const elsewhere = fakeEnv({ files: { "/b": "The receipt is written to a file (1.91.191.0).\n" }, visibility: "public" });
+    expect(run(["pr-comment", "12", "--body-file", "/b"], elsewhere)).toBe(EXIT.confirm);
+    expect(elsewhere.stdout()).toContain("RULE: pii.ip_public LINE: 1 PART: body");
+    const noVersion = fakeEnv({ files: { "/repo/VERSION": "2.4.0\n", "/b": "see (1.91.191.0)\n" }, root: "/repo", visibility: "public" });
+    expect(run(["pr-comment", "12", "--body-file", "/b"], noVersion)).toBe(EXIT.confirm);
+  });
+
+  test("a receipt's all-digit tree hash and GitHub run ids in prose or link text are not phone numbers; real numbers still are", () => {
+    const clean = [
+      "SHIP_RECEIPT: pr=3424 head=abc tree=704992822996",
+      "receipt tree 704992822996 verified",
+      "head=193687123456 gated_tree=704992822996 predecessor=123456789012 (gate-reuse: eligible)",
+      "cleared by run 19368712345",
+      "see [run 19368712345](https://github.com/garrytan/gstack/actions/runs/19368712345) for the gate",
+      "run #19368712345 is green",
+    ];
+    for (const body of clean) {
+      const f = fakeEnv({ files: { "/b": body + "\n" }, visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.posted]);
+      expect(f.posts()).toHaveLength(1);
+    }
+    const controls = [
+      "call +14155551234 for the on-call",
+      "the id is 19368712345",
+      "run 4155551234 answered",
+      "tree=70499282299 is short",
+      "subtree=704992822996 is not a receipt key",
+    ];
+    for (const body of controls) {
+      const f = fakeEnv({ files: { "/b": body + "\n" }, visibility: "public" });
+      expect([body, run(["pr-comment", "12", "--body-file", "/b"], f)]).toEqual([body, EXIT.confirm]);
+      expect(f.stdout()).toContain("RULE: pii.phone.e164 LINE: 1 PART: body");
       expect(f.posts()).toEqual([]);
     }
   });

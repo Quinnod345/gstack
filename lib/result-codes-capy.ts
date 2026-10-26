@@ -1,7 +1,7 @@
 /**
  * Result codes for gstack's Capy adaptations: the per-thread approval record
- * (gstack-approvals), the Captain brief (gstack-owner-brief render --captain)
- * and PR screenshots (gstack-pr-shots). Kept beside lib/result-codes.ts (which
+ * (gstack-approvals), the Captain brief (gstack-owner-brief render --captain),
+ * PR screenshots (gstack-pr-shots) and the installer's launch file. Kept beside lib/result-codes.ts (which
  * spreads this table into RESULT_CODES) so the owner module stays within the
  * module-size ratchet; the same rules apply: one stable docs/troubleshooting.md
  * anchor, a summary and a fix clause each.
@@ -63,5 +63,10 @@ export const CAPY_RESULT_CODES = {
     anchor: 'pr-shots-render-failed',
     summary: 'a browser was available but rendering shot.html failed',
     fix: 'read the renderer transcript the line names; screenshot shot.html with your own browser at 880px width, or use the text fallback in text.md',
+  },
+  LAUNCH_FILE_UNWRITABLE: {
+    anchor: 'capy-install-launch-file-unwritable',
+    summary: 'the install passed but its launch file (the sourceable GSTACK_LAUNCH_FILE beside the verdict) could not be written, so the run is a fail: no caller is handed only the launch line to re-type',
+    fix: 'make the verdict directory under the state root writable, or set GSTACK_STATE_ROOT to a writable directory, then re-run bin/gstack-capy-install',
   },
 } satisfies Record<string, ResultCode>;

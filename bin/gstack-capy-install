@@ -34,7 +34,10 @@
 # Chromium is lazy by default (bin/gstack-browser-ensure
 # installs it on first use); --with-browser installs it now. The last lines
 # are the GSTACK_LAUNCH line the parent supplies to every gstack command it
-# launches and the doctor's trailer (`gstack: ok ...` or `gstack: fail ...`;
+# launches, GSTACK_LAUNCH_PATH when the certified Bun is not first on PATH,
+# GSTACK_LAUNCH_FILE on a passing run (the same assignments as a sourceable
+# mode-0600 file beside the verdict; callers and their children `. <file>` it,
+# never re-type it) and the doctor's trailer (`gstack: ok ...` or `gstack: fail ...`;
 # grep that, never pipe through tail).
 # Exit: 0 ok, 1 a component failed, 2 usage, 3 preflight stopped before ./setup.
 set -u
@@ -374,10 +377,13 @@ SETUP_RECORD="head=$HEAD_SHA hosts=claude,codex model=gpt-6-astra browser=$WITH_
 if [ -n "$FOR" ]; then set -- --for "$FOR"; else set -- --require "$REQUIRE"; fi
 [ "$WITH_BROWSER" -eq 1 ] && [ -z "$FOR" ] && set -- --require "$REQUIRE,browse-bundle,browser"
 certify() { OUT=$(cd "$ORIG_PWD" && GSTACK_EPHEMERAL="${GSTACK_EPHEMERAL:-1}" "$ROOT/bin/gstack-doctor" --check "$@" ${PROJECT:+--project "$PROJECT"} ${MIN_REVISION:+--min-revision "$MIN_REVISION"} 2>&1); RC=$?; }
+# A profile check never narrows an ok verdict a fuller install wrote for this HEAD.
+verdict_kept() {
+  [ "$PROFILE" -eq 1 ] && [ -f "$VERDICT" ] && [ "$(gstack_install_verdict_field "$VERDICT" ok)" = true ] \
+     && [ "$(gstack_install_verdict_field "$VERDICT" head)" = "$HEAD_SHA" ] && ! gstack_doctor_install_profile "$(gstack_install_verdict_field "$VERDICT" for)"
+}
 record_verdict() { # TRAILER OK — --check keeps the recorded resolution (drift is reported, never re-recorded)
-  # A profile check never narrows an ok verdict a fuller install wrote for this HEAD.
-  if [ "$PROFILE" -eq 1 ] && [ -f "$VERDICT" ] && [ "$(gstack_install_verdict_field "$VERDICT" ok)" = true ] \
-     && [ "$(gstack_install_verdict_field "$VERDICT" head)" = "$HEAD_SHA" ] && ! gstack_doctor_install_profile "$(gstack_install_verdict_field "$VERDICT" for)"; then
+  if verdict_kept; then
     say "kept the install verdict for=$(gstack_install_verdict_field "$VERDICT" for) at $VERDICT (it covers more than $FOR; the trailer below is this check's)"
     return 0
   fi
@@ -390,6 +396,7 @@ record_verdict() { # TRAILER OK — --check keeps the recorded resolution (drift
 }
 setup_failed() { # MESSAGE
   echo "gstack-capy-install: $1" >&2
+  rm -f "${VERDICT%.json}.env"
   OUT="" record_verdict "gstack: fail setup" 0
   echo "gstack: fail setup — $1; fix: re-run the Capy skill installer or $ROOT/bin/gstack-capy-install (setup is re-run until it succeeds)"
   exit 1
@@ -549,6 +556,8 @@ EOF_SHIM
 # (the session exports GSTACK_CAPY_BEHIND_BLOCKED) is never ok: its ok trailer becomes
 #   gstack: fail behind — installed <rev> is <n> commits behind origin (latest <ver>)
 #     and the session-start upgrade was skipped: <reason>; fix: <command> (<CODE>)
+# and a passing run whose launch file cannot be written becomes
+#   gstack: fail launch-file — could not write the launch file <path>; fix: <command> (LAUNCH_FILE_UNWRITABLE)
 INSTALLED=$(head -1 "$ROOT/VERSION")
 TRAILER="$(printf '%s\n' "$OUT" | grep '^gstack: ' | tail -1)"
 NOTES=""
@@ -576,11 +585,44 @@ case "$TRAILER" in "gstack: ok "*) if [ -n "$BLOCKED" ]; then
   TRAILER="gstack: fail behind — installed $INSTALLED is ${GSTACK_CAPY_BEHIND:-?} commits behind origin (latest ${GSTACK_CAPY_BEHIND_TO:-unknown}) and the session-start upgrade was skipped: $BLOCKED"
   RC=1
 elif [ -n "$NOTES" ]; then TRAILER="$TRAILER ($NOTES)"; fi ;; esac
+# The launch file: the same assignments as a sourceable script, mode 0600,
+# beside the verdict. `. <file>` applies them without ever printing them; the
+# line carries no secret, but a caller that re-typed it as `export $(...)`
+# ran a bare `export` when the substitution came back empty and dumped the
+# whole environment, API keys included, into its tool output (GSTA-96). The
+# file is part of the ok verdict: a passing run that cannot write it fails,
+# so no caller is left with only the line and the re-typing path.
+LAUNCH_FILE="${VERDICT%.json}.env"
+write_launch_file() {
+  local tmp
+  mkdir -p "$(dirname "$LAUNCH_FILE")" || return 1
+  tmp=$(umask 077 && mktemp "$LAUNCH_FILE.tmp.XXXXXX") || return 1
+  {
+    echo "# gstack launch environment, written by gstack-capy-install; mode 0600."
+    echo "# Apply it with: . <this file>"
+    echo "# Never print it or the environment: no \`export \$(...)\`, \`env\`, \`printenv\` or bare \`set\` in a tool fence."
+    [ -n "$LAUNCH_DIR" ] && echo "case \":\$PATH:\" in *:$(shq "$LAUNCH_DIR"):*) ;; *) PATH=$(shq "$LAUNCH_DIR"):\"\$PATH\" ;; esac; export PATH"
+    echo "export GSTACK_SESSION_KIND=unattended"
+    echo "export GSTACK_STATE_ROOT=$(shq "$GSTACK_STATE_ROOT")"
+    echo "export GSTACK_EPHEMERAL=$(shq "${GSTACK_EPHEMERAL:-1}")"
+    echo "export GSTACK_CAPY=1"
+    echo "export GSTACK_INSTALL_VERDICT=$(shq "$VERDICT")"
+  } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE" || { rm -f "$tmp"; return 1; }
+}
+if [ "$RC" -eq 0 ] && ! write_launch_file; then
+  TRAILER="gstack: fail launch-file — could not write the launch file $LAUNCH_FILE; fix: make $(dirname "$LAUNCH_FILE") writable, or set GSTACK_STATE_ROOT to a writable directory (LAUNCH_FILE_UNWRITABLE)"
+  RC=1
+fi
+# A failing run announces no launch file and removes the one its verdict owned
+# (where the directory lets it); a profile check that keeps a fuller ok verdict
+# leaves that verdict's file in place.
+[ "$RC" -eq 0 ] || { verdict_kept || rm -f "$LAUNCH_FILE" 2>/dev/null; LAUNCH_FILE=""; }
 record_verdict "$TRAILER" "$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
 [ "$CHECK_ONLY" -eq 1 ] || [ "$PROFILE" -eq 1 ] || write_shim
 printf '%s\n' "$OUT" | grep -v '^gstack: '
 say "total: $(( $(now) - T0 ))s"
 echo "GSTACK_LAUNCH: ${LAUNCH_DIR:+PATH=$LAUNCH_DIR:\$PATH }GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=$GSTACK_STATE_ROOT GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-1} GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=$VERDICT"
 [ -n "$LAUNCH_DIR" ] && echo "GSTACK_LAUNCH_PATH: $LAUNCH_DIR"
+[ -n "$LAUNCH_FILE" ] && echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"
 printf '%s\n' "$TRAILER"
 exit "$RC"

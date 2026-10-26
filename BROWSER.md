@@ -267,7 +267,7 @@ flow, and a layered prompt-injection defense — all behind a compiled CLI that
 prints plain text to stdout. ~100-200ms per call. Zero context-token overhead.
 It runs whenever the probe above does not print `READY`, and `$B` is a
 legitimate tool in that context; on a Mac with Aside open the skills never
-reach for it.
+reach for it. Its HTTPS trust has a known gap: see [TLS trust](#tls-trust-the-bundled-chromiums-root-store).
 
 ---
 
@@ -311,7 +311,7 @@ $B connect                       # headed Chromium + Side Panel extension
 9. [Side Panel + sidebar agent](#side-panel--sidebar-agent)
 10. [Pair-agent — remote agents over an ngrok tunnel](#pair-agent)
 11. [Authentication + tokens](#authentication)
-12. [Prompt-injection security stack (L1–L6)](#security-stack)
+12. [Prompt-injection security stack (L1–L6)](#security-stack) — including [TLS trust: the bundled Chromium's root store](#tls-trust-the-bundled-chromiums-root-store)
 13. [Screenshots, PDFs, visual inspection](#screenshots-pdfs-visual)
 14. [Local HTML — `goto file://` vs `load-html`](#local-html)
 15. [Batch endpoint](#batch-endpoint)
@@ -562,7 +562,7 @@ from `snapshot`, or `@c` refs from `snapshot -C`. Full table:
 |---------|-------------|
 | `cookie <name>=<value>` | Set cookie on current page domain |
 | `cookie-import <json>` | Import cookies from JSON file |
-| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion |
+| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion. The imported session rides on the fallback browser's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
 | `header <name>:<value>` | Set custom request header (sensitive values auto-redacted) |
 | `useragent <string>` | Set user agent (triggers context recreation, invalidates refs) |
 
@@ -673,7 +673,7 @@ pass `--force-restart` to replace it explicitly (see "Daemon lifecycle" above).
 
 | Command | Description |
 |---------|-------------|
-| `handoff [reason]` | Open visible Chrome at current page for user takeover (CAPTCHA, MFA, complex auth) |
+| `handoff [reason]` | Open visible Chrome at current page for user takeover (CAPTCHA, MFA, complex auth). What you type there trusts the bundled Chromium's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
 | `resume` | Re-snapshot after user takeover, return control to AI |
 
 ### Meta + chains
@@ -1295,6 +1295,39 @@ field on `/health` (#2557): the session-state file that fed them lost its
 only writer when the chat-path agent was removed, so they reported stale or
 empty data. The live defenses report through their own call sites. See
 ARCHITECTURE.md § "Prompt injection defense" for the full threat model.
+
+### TLS trust: the bundled Chromium's root store
+
+The fallback engine checks HTTPS certificates against the root store built into
+its bundled Playwright Chromium. Its default headless browser launches with
+Playwright's `--disable-component-update`, so it never receives the CRLSet
+revocation updates Chrome pushes to running browsers. Aside uses your own
+browser's trust store and updates.
+
+**Known gap: the compromised eMudhra intermediates
+([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked
+eight eMudhra intermediate CAs by CRLSet on 2026-10-17, the day their key
+compromise was reported, and scheduled the removal of their root, emSign ECC
+Root CA - G3, from the Chrome Root Store for 2026-10-27. The root store built
+into gstack's pinned Playwright 1.62.1 (Chromium 151) still trusts that root, so
+the headless browser accepts certificates those intermediates issued. That lasts
+until gstack moves to the first Playwright release whose Chromium is
+158.0.8115.0 or later, the first Chrome for Testing build measured to refuse
+them. Until then, don't do signed-in work in this engine on a network you do not
+trust, and prefer Aside for signed-in work where you have it.
+
+To check a build, run it on a network that does not inspect TLS, because a
+captive portal or an intercepting proxy can fail some or all sites with the
+same error. Run `$B stop`, confirm in the default headless mode that a
+known-good HTTPS site such as `$B goto https://example.com/` loads, then run
+`$B goto https://dv-g3b-emudhra.we-have-a-problem.com/`. Only
+`ERR_CERT_AUTHORITY_INVALID` there means the root store no longer trusts them.
+Any other error proves nothing.
+
+Caveats that depend on your environment (proxy variables, headed and
+per-project profiles, `GSTACK_CHROMIUM_PATH` and `BROWSE_EXTENSIONS_DIR`
+builds, and CRLSet timing in headed mode and `handoff`) are tracked in
+[#3440](https://github.com/garrytan/gstack/issues/3440).
 
 ---
 
