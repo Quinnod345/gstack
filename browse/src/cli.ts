@@ -16,7 +16,7 @@ import { safeUnlink, safeUnlinkQuiet, safeKill, isProcessAlive } from './error-h
 import { readPidStartTime, readPidCmdline } from './xvfb';
 import { writeSecureFile, mkdirSecure } from './file-permissions';
 import { resolveConfig, ensureStateDir, readVersionHash, isPairAgentEnabled, resolveChromiumProfile } from './config';
-import { resolveProxy, computeConfigHash, ProxyConfigError, PROXY_TROUBLESHOOTING } from './proxy-config';
+import { resolveProxy, computeConfigHash, explicitDirect, ProxyConfigError, PROXY_TROUBLESHOOTING } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
 import { spawnTerminalAgent, bunChildFlags } from './terminal-agent-control';
 import { profileOwner, ensureProjectProfile, runProfilesCommand } from './chromium-profiles';
@@ -194,6 +194,8 @@ interface ServerState {
   proxy?: string;
   proxySource?: string;
   proxyBypass?: string;
+  /** #3440: started with BROWSE_PROXY_URL=direct where that bypasses the system proxy settings. */
+  proxyDirect?: boolean;
   /** Xvfb child PID for cleanup on disconnect. */
   xvfbPid?: number;
   xvfbStartTime?: string;
@@ -484,24 +486,29 @@ function reportDaemonBusyAndExit(pid: number): never {
  * #915 refusal for a daemon whose proxy differs from this session's when
  * either side came from the environment: names the variable, the two
  * settings and the remedies. Null leaves the --proxy/--headed refusals as they
- * were (a headed difference always uses those).
+ * were (a headed difference always uses those). The BROWSE_PROXY_URL=direct
+ * remedy is offered only where it matches a proxy-less daemon's hash: on
+ * Linux, or when that daemon was started with it (#3440); elsewhere following
+ * it would be refused again.
  */
-export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: NodeJS.ProcessEnv = process.env): string[] | null {
+export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string[] | null {
   if ((state.mode === 'headed') !== flags.headed) return null;
   const fromEnv = (source?: string | null) => !!source && source !== '--proxy';
   const optedOut = env.BROWSE_PROXY_URL === 'direct' && !flags.proxyUrl;
-  if (!fromEnv(flags.proxySource) && !fromEnv(state.proxySource) && !flags.proxyWarning && !optedOut) return null;
+  if (!fromEnv(flags.proxySource) && !fromEnv(state.proxySource) && !flags.proxyWarning && !optedOut && !state.proxyDirect) return null;
   const describe = (proxy: string | undefined, source: string | null | undefined, bypass: string | null | undefined) =>
     proxy ? `proxy ${proxy} from ${source ?? 'an older browse'}${bypass ? `, bypassing ${bypass}` : ''}` : 'no proxy';
-  const daemon = describe(state.proxy, state.proxySource, state.proxyBypass);
+  const daemon = describe(state.proxy, state.proxySource, state.proxyBypass) + (state.proxyDirect ? ' (BROWSE_PROXY_URL=direct)' : '');
   const session = flags.proxyUrl
     ? describe(flags.redactedProxyUrl, flags.proxySource, flags.proxyBypass)
     : `no proxy${optedOut ? ' (BROWSE_PROXY_URL=direct)' : flags.proxyWarning ? ' (a proxy variable did not parse)' : ''}`;
   const sameProxy = !!state.proxy && state.proxy === (flags.proxyUrl ? flags.redactedProxyUrl : undefined);
   const variable = sameProxy ? 'NO_PROXY' : fromEnv(flags.proxySource) ? flags.proxySource : state.proxySource ?? 'BROWSE_PROXY_URL';
   const remedies = [`run 'browse stop' to restart the daemon with this session's proxy settings`];
-  if (!state.proxy) remedies.push(`or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy`);
-  else remedies.push(`or run this session with the daemon's ${variable} so the settings match`);
+  if (state.proxy) remedies.push(`or run this session with the daemon's ${variable} so the settings match`);
+  else if (flags.explicitDirect && !state.proxyDirect) remedies.push(`or unset BROWSE_PROXY_URL to use the running daemon with the system proxy settings`);
+  else if (state.proxyDirect || platform === 'linux') remedies.push(`or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy`);
+  else remedies.push(`or unset ${variable} to use the running daemon with the system proxy settings`);
   return [
     `the running browse daemon was started with different proxy settings (${variable} differs), so it was not reused.`,
     `  daemon:  ${daemon}`,
@@ -511,9 +518,14 @@ export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: 
   ];
 }
 
-/** The server env for this invocation's resolved proxy (#915); empty when direct. */
-function proxyServerEnv(flags: Partial<Pick<GlobalFlags, 'proxyUrl' | 'proxySource' | 'proxyBypass'>> | null | undefined): Record<string, string> {
-  if (!flags?.proxyUrl) return {};
+/**
+ * The server env for this invocation's resolved proxy (#915); empty when
+ * direct, except BROWSE_PROXY_URL=direct where that bypasses the system proxy
+ * settings (#3440), so a daemon start or auto-restart carries the opt-out the
+ * session's hash was computed from.
+ */
+function proxyServerEnv(flags: Partial<Pick<GlobalFlags, 'proxyUrl' | 'proxySource' | 'proxyBypass' | 'explicitDirect'>> | null | undefined): Record<string, string> {
+  if (!flags?.proxyUrl) return flags?.explicitDirect ? { BROWSE_PROXY_URL: 'direct' } : {};
   return {
     BROWSE_PROXY_URL: flags.proxyUrl,
     ...(flags.proxySource ? { BROWSE_PROXY_SOURCE: flags.proxySource } : {}),
@@ -522,10 +534,13 @@ function proxyServerEnv(flags: Partial<Pick<GlobalFlags, 'proxyUrl' | 'proxySour
 }
 
 /**
- * Build the env for an auto-restart after a crash. headed/proxy/configHash are
+ * Build the env for an auto-restart after a crash. headed and configHash are
  * reapplied from THIS invocation OR the persisted server state, so a restart
  * triggered by a plain command (goto/status, no --headed flag) never silently
- * downgrades a headed session to headless (#1781). Pure + exported for tests.
+ * downgrades a headed session to headless (#1781). The proxy settings,
+ * including the explicit direct opt-out, come only from this invocation's
+ * flags, which the config-hash gate already matched against that daemon.
+ * Pure + exported for tests.
  */
 export function buildRestartEnv(
   globalFlags: GlobalFlags | null | undefined,
@@ -544,7 +559,7 @@ export function buildRestartEnv(
  * the same port, watchdog setting, proxy and config hash. Pure + exported for tests.
  */
 export function buildHeadedServerEnv(
-  globalFlags: Pick<GlobalFlags, 'proxyUrl' | 'configHash'> & Partial<Pick<GlobalFlags, 'proxySource' | 'proxyBypass'>>,
+  globalFlags: Pick<GlobalFlags, 'proxyUrl' | 'configHash' | 'explicitDirect'> & Partial<Pick<GlobalFlags, 'proxySource' | 'proxyBypass'>>,
 ): Record<string, string> {
   return {
     BROWSE_HEADED: '1',
@@ -935,8 +950,8 @@ async function ensureServer(flags?: GlobalFlags): Promise<ServerState> {
     // Same path: existing daemon is plain (no flags) but caller passes
     // --proxy/--headed. Refuse for the same reason — apply explicitly via
     // disconnect+reconnect.
-    if (desiredHash && !state.configHash && (flags?.proxyUrl || flags?.headed)) {
-      console.error(`[browse] existing daemon was started without --proxy/--headed.`);
+    if (desiredHash && !state.configHash && (flags?.proxyUrl || flags?.headed || flags?.explicitDirect)) {
+      console.error(`[browse] existing daemon was started without --proxy/--headed${flags?.explicitDirect ? ' or BROWSE_PROXY_URL=direct' : ''}.`);
       console.error(`[browse] run 'browse disconnect' first to apply new flags.`);
       process.exit(1);
     }
@@ -1347,9 +1362,11 @@ export interface GlobalFlags {
   proxyBypass: string | null;
   /** Why a standard proxy variable was ignored, printed when a server starts. */
   proxyWarning: string | null;
+  /** BROWSE_PROXY_URL=direct on a platform where it bypasses the system proxy settings (#3440). */
+  explicitDirect: boolean;
   /** Whether --headed was passed. */
   headed: boolean;
-  /** Hash of (proxy + headed) for daemon-mismatch check. */
+  /** Hash of (proxy + headed + explicit direct) for daemon-mismatch check. */
   configHash: string;
   /** Redacted form of proxyUrl, safe for logs. */
   redactedProxyUrl: string;
@@ -1365,7 +1382,7 @@ export interface GlobalFlags {
  *
  * Exported for unit tests.
  */
-export function extractGlobalFlags(rawArgs: string[], env: NodeJS.ProcessEnv): GlobalFlags {
+export function extractGlobalFlags(rawArgs: string[], env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): GlobalFlags {
   const out: string[] = [];
   let proxyUrl: string | null = null;
   let headed = false;
@@ -1398,6 +1415,7 @@ export function extractGlobalFlags(rawArgs: string[], env: NodeJS.ProcessEnv): G
   // creds embedded (server reads BROWSE_PROXY_URL from env, which passes to
   // the child without ps-aux exposure).
   const proxy = resolveProxy(proxyUrl, env);
+  const direct = !proxy.url && explicitDirect(env, platform);
 
   return {
     args: out,
@@ -1405,8 +1423,9 @@ export function extractGlobalFlags(rawArgs: string[], env: NodeJS.ProcessEnv): G
     proxySource: proxy.source,
     proxyBypass: proxy.bypass,
     proxyWarning: proxy.warning,
+    explicitDirect: direct,
     headed,
-    configHash: computeConfigHash({ proxyUrl: proxy.url, headed, noProxyRules: proxy.noProxyRules }),
+    configHash: computeConfigHash({ proxyUrl: proxy.url, headed, noProxyRules: proxy.noProxyRules, explicitDirect: direct }),
     redactedProxyUrl: redactProxyUrl(proxy.url),
     forceRestart,
   };

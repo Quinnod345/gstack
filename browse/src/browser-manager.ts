@@ -25,6 +25,7 @@ import { TabSession, type RefEntry } from './tab-session';
 import { resolveChromiumProfile, cleanSingletonLocks, resolveConfig } from './config';
 import { ensureProjectProfile } from './chromium-profiles';
 import { launchWithXProtectHeal } from './xprotect-heal';
+import { DIRECT_PROXY_ARG, forcesDirect } from './proxy-config';
 import { readPidStartTime, shouldSpawnXvfb, spawnFreeXvfb, xvfbInstallHint, type XvfbHandle } from './xvfb';
 import { withCdpSession } from './cdp-bridge';
 import { resultLine } from '../../lib/result-codes';
@@ -615,6 +616,18 @@ export class BrowserManager {
   }
 
   /**
+   * Playwright passes a configured proxy explicitly as --proxy-server, so only
+   * a session browse resolved to direct was exposed: `BROWSE_PROXY_URL=direct`
+   * on a machine with HTTPS_PROXY set still routed every `goto` through that
+   * proxy (#3440 item 8). Direct now means DIRECT_PROXY_ARG on every launch
+   * path (headless, the extension context, headed, handoff) wherever Chromium
+   * would otherwise pick a proxy browse did not resolve (forcesDirect).
+   */
+  private proxyLaunchArgs(): string[] {
+    return !this.proxyConfig && forcesDirect(process.env) ? [DIRECT_PROXY_ARG] : [];
+  }
+
+  /**
    * Get the ref map for external consumers (e.g., /refs endpoint).
    */
   getRefMap(): Array<{ ref: string; role: string; name: string }> {
@@ -635,7 +648,7 @@ export class BrowserManager {
     // macOS still showed (#2281, #432).
     const extensionsDir = process.env.BROWSE_EXTENSIONS_DIR;
     const { STEALTH_LAUNCH_ARGS, buildGStackLaunchArgs, STEALTH_IGNORE_DEFAULT_ARGS } = await import('./stealth');
-    const launchArgs: string[] = [...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs()];
+    const launchArgs: string[] = [...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs(), ...this.proxyLaunchArgs()];
     // #2771/#1968: honor GSTACK_CHROMIUM_PATH headless too (NixOS, macOS 13).
     // That bundle belongs to the user, so the XProtect heal never touches it,
     // and a launch failure names it.
@@ -809,6 +822,7 @@ export class BrowserManager {
       // empty-fallback returns native), so this is safe on stock Playwright
       // Chromium too.
       ...buildGStackLaunchArgs(),
+      ...this.proxyLaunchArgs(),
     ];
     if (extensionPath) {
       // Skip --load-extension when running against a custom Chromium build
@@ -2117,7 +2131,7 @@ export class BrowserManager {
       // Same blink-level stealth flags as launch()/launchHeaded(). Without
       // STEALTH_LAUNCH_ARGS the handed-off browser kept the AutomationControlled
       // tell that the other two paths strip.
-      const launchArgs: string[] = ['--hide-crash-restore-bubble', ...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs()];
+      const launchArgs: string[] = ['--hide-crash-restore-bubble', ...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs(), ...this.proxyLaunchArgs()];
       if (extensionPath) {
         launchArgs.push(`--disable-extensions-except=${extensionPath}`);
         launchArgs.push(`--load-extension=${extensionPath}`);

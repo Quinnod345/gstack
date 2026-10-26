@@ -970,9 +970,47 @@ first one set wins:
 3. `HTTPS_PROXY`, then `https_proxy`
 4. `HTTP_PROXY`, then `http_proxy`
 5. `ALL_PROXY`, then `all_proxy`
-6. no proxy (a direct connection)
+6. no proxy configured by `$B` (a direct connection on Linux; the system proxy
+   settings on macOS and Windows)
+
+Whatever `$B` resolves is what Chromium gets, explicitly: a proxy is passed
+as `--proxy-server=<url>`, and a direct connection as
+`--proxy-server=direct://`. On Linux, Chromium launched without a proxy
+switch reads `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` itself, so every
+direct connection there carries the switch: with `BROWSE_PROXY_URL=direct`
+(or an unparseable variable, below) a set variable is ignored, and to use
+one, name it through steps 1-5. Earlier releases left Chromium to read those
+variables in the direct case (#3440), so a session that reported a direct
+connection could still route through a proxy. Chromium on macOS and Windows
+never reads those variables; it follows the system proxy settings (PAC and
+WPAD included), and step 6 leaves it to them, so GStack Browser.app behind a
+corporate proxy keeps working. `BROWSE_PROXY_URL=direct` bypasses the system
+settings too, on every platform; on macOS and Windows it is part of the
+daemon's settings, so a running daemon started without it is not reused (for
+a headless daemon the refusal below names `BROWSE_PROXY_URL`; a `connect`
+daemon gets the generic flags refusal) and a crash restart keeps it. The
+daemon log (`browse-daemon.log` next to the state file) records the
+effective mode each time the daemon starts, as `[proxy] using <url> from
+<source>`, `[proxy] none: direct connection (--proxy-server=direct://;
+ignoring HTTPS_PROXY)` (on macOS and Windows, `ignoring the system proxy
+settings`), or `[proxy] none: system proxy settings` (an authenticated
+`socks5://` upstream logs its `[proxy] upstream test ok` and `[proxy] bridge
+listening on 127.0.0.1:<port>` lines instead). A managed Chromium
+proxy policy (`ProxyMode`/`ProxySettings`) still overrides the switch; `$B`
+cannot see it, so on a managed machine the log line describes what `$B`
+asked for, not what the policy enforces.
 
 Values from the environment follow the same credential policy as `--proxy`.
+A variable without a scheme (curl-style `host:port` or `user:pass@host:port`)
+is read as `http://host:port` (port 80 when none is given). For `host:port`
+that is what Chromium's own environment reader took it as, so a value
+Chromium on Linux used to pick up by itself now reaches the same proxy
+through `$B`; `user:pass@host:port` follows curl's reading and is newly
+proxied, because Chromium rejects any proxy spec with a userinfo. On macOS and
+Windows such a value is now a configured proxy too, where it used to be
+ignored with a warning in favour of the system proxy settings. `--proxy` and
+`BROWSE_PROXY_URL` still require the scheme.
+
 `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
 resolves names through the proxy. `NO_PROXY` (or `no_proxy`) is translated to
 Chromium's bypass list: `example.com` and `.example.com` cover the domain and
@@ -982,10 +1020,19 @@ proxy source. When a server starts, `$B` prints one line naming the proxy and
 where it came from, with credentials redacted.
 
 - **`warning: HTTPS_PROXY is not a proxy URL browse can use (...)`.** The
-  variable doesn't parse as `scheme://host:port`: a curl-style `host:port`, an
-  unsupported scheme, or a bad port. `$B` connects directly instead of failing
+  variable doesn't parse even as `http://` plus the value: an unsupported
+  scheme (`ftp://`), a bad port, a missing host, a path other than a bare
+  `/`, a query or a fragment (where a `DOMAIN\user` login or a `/` in a
+  password ends up after URL parsing, so such values are refused for every
+  source rather than printed unredacted; percent-encode `/ ? #` in
+  credentials for every scheme, and `\` in `http://` and `https://`
+  credentials), or credentials that are not valid percent-encoding. A
+  credential-free value with a path (`http://proxy.corp:3128/pac`) is refused
+  the same way, where it used to be read with the path dropped. `$B` connects directly (on Linux,
+  Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
-  or set `BROWSE_PROXY_URL=direct` to silence the warning. A bad `--proxy` or
+  or set `BROWSE_PROXY_URL=direct` to silence the warning (on macOS and
+  Windows that also makes Chromium bypass the system proxy settings). A bad `--proxy` or
   `BROWSE_PROXY_URL` is still an error, because those are explicit browse
   settings and a silent direct connection could expose your real IP address.
 - **`the running browse daemon was started with different proxy settings (<VAR> differs), so it was not reused.`**
@@ -994,7 +1041,10 @@ where it came from, with credentials redacted.
   silently reuse a daemon that routes differently. The refusal prints the
   daemon's settings and this session's. Fix: run `browse stop` to restart the
   daemon with this session's settings (stop works whatever the proxy settings
-  are), or set `BROWSE_PROXY_URL=direct` when the running daemon has no proxy.
+  are), or match the daemon: unset the variable that differs, or on Linux set
+  `BROWSE_PROXY_URL=direct` when the running daemon has no proxy (on macOS and
+  Windows that opt-out is itself part of the daemon settings, so it only
+  matches a daemon started with it).
 
 **Stealth scope (Layer C, always on).** Every context — headless `launch`,
 `--headed`/`--proxy`, `handoff`, and the `useragent`/`viewport --scale`
@@ -1705,7 +1755,7 @@ browse/
 │   ├── port-allocator.ts        # Fixed 10000-49151 scan range for every long-lived listener (never port:0)
 │   ├── xprotect-heal.ts         # macOS XProtect launch-kill classify + quarantine-clear + bounded reinstall
 │   ├── socks-bridge.ts          # Local 127.0.0.1 SOCKS5 bridge that handles auth handshakes Chromium can't speak
-│   ├── proxy-config.ts          # --proxy URL parsing + cred resolution (URL vs env, fail-fast on both)
+│   ├── proxy-config.ts          # --proxy URL parsing + cred resolution (URL vs env, fail-fast on both); direct:// launch switch + proxy-mode log line
 │   ├── proxy-redact.ts          # Cred-redaction helper for any proxy URL surfaced to logs/errors
 │   ├── xvfb.ts                  # Xvfb auto-spawn + orphan cleanup with PID + start-time validation
 │   ├── stealth.ts               # Layer C: webdriver mask + window.chrome.* + Notification/Permissions + per-install hardware + toString proxy + automation-global sweep; buildGStackLaunchArgs (GSTACK_* cmdline switches); GSTACK_STEALTH=extended opt-in
