@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.258.0] - 2026-10-26
 
 **The session check stops failing for things that are not failures, and a consuming repository can name the gstack it wants without broadcasting to every thread.** Five Captains running gstack on Capy hit the same install friction this week: eight crew-wide "upgrade to <version>" messages since Oct 16, `gstack: fail not-installed` on coordinator machines that run no workflow, `fail pins` from the image's Node while the tests run on the pinned one, reviewers told to "reinstall" when asked to run a workflow, and an environment dump from a broken `/cso` shell line. Each of these is now a product behaviour instead of a crew rule.
 
