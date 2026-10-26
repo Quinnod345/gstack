@@ -191,14 +191,19 @@ dispatches the free workflows on the branch (`gh workflow run free-tests.yml
 clears the requires-remote pregate lanes with those runs
 (`gstack-pregate clear --remote <lane> --run-url <run>`) and reruns `ready`,
 which passes because the dispatched check runs attach to the commit; the
-`ci-hint:` line then says the dispatched runs count. `ready --screen` on such a
+`ci-hint:` line then says the dispatched runs count. The `ci-hint:` line is
+advisory text for the lane; nothing parses it, and a PR whose head is on a fork
+gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
 PR is `QUEUE_SCREEN_STALE_REF` (there is no merge ref to screen), so it READYs
 with `--no-screen` after the skill's own paid cases ran focused.
 
-`ci:` counts the latest run per check name, as GitHub's rollup does: a check
-that was re-run or superseded on the same commit (a cancelled run beside a later
-pass of the same name) is judged by its newest run; commit-status contexts are
-counted one each.
+`ci:` counts the latest run per check (one app's check name), as GitHub's
+rollup does: a check that was re-run or superseded on the same commit (a
+cancelled run beside a later pass of the same name from a second workflow run)
+is judged by its newest run (latest `completed_at`, then id; a run still in
+progress is newest); two apps reporting the same name stay separate; a run with
+no name or no readable `completed_at` counts on its own; commit-status contexts
+are counted one each.
 
 It refuses (`QUEUE_NOT_READY`) when the working tree has tracked edits, HEAD
 is not the PR's pushed head, CI at that exact head is not green, or the pregate

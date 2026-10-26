@@ -388,7 +388,15 @@ describe('ready reads all of CI at the head (review #3235 P1-5)', () => {
     expect(line(sameTime.r.out, 'ci: ')).toBe(`ci: red at ${sameTime.at} (passed=1 failed=1 pending=0 skipped=0)`);
     const unnamed = readyWith({ check_runs: [{ status: 'completed', conclusion: 'cancelled' }, { status: 'completed', conclusion: 'success' }] });
     expect(line(unnamed.r.out, 'ci: ')).toBe(`ci: red at ${unnamed.at} (passed=1 failed=1 pending=0 skipped=0)`);
-  }, 180_000);
+    const twoApps = readyWith({ check_runs: [{ ...older, conclusion: 'failure', app: { id: 1 } }, { ...newer, app: { id: 2 } }, other] });
+    expect(line(twoApps.r.out, 'ci: ')).toBe(`ci: red at ${twoApps.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const undated = readyWith({ check_runs: [{ id: 5, name: 'contributor-gate', status: 'completed', conclusion: 'failure' }, newer, other] });
+    expect(line(undated.r.out, 'ci: ')).toBe(`ci: red at ${undated.at} (passed=2 failed=1 pending=0 skipped=0)`);
+    const queued = readyWith({ check_runs: [{ ...older, conclusion: 'failure' }, { id: 6, name: 'contributor-gate', status: 'queued' }, other] });
+    expect(line(queued.r.out, 'ci: ')).toBe(`ci: pending at ${queued.at} (passed=1 failed=0 pending=1 skipped=0)`);
+    const nullConclusion = readyWith({ check_runs: [{ ...newer, conclusion: null }, other] });
+    expect(line(nullConclusion.r.out, 'ci: ')).toBe(`ci: red at ${nullConclusion.at} (passed=1 failed=1 pending=0 skipped=0)`);
+  }, 240_000);
 
   test('a commit-status context is never collapsed with a check run of the same name', () => {
     const r = readyWith({ check_runs: [{ id: 1, name: 'deploy', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' }] }, { state: 'failure', statuses: [{ context: 'deploy', state: 'failure' }] });
@@ -404,13 +412,13 @@ describe('ready reads all of CI at the head (review #3235 P1-5)', () => {
 
 describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, rule 14)', () => {
   const pass = { id: 1, name: 'Free Tests', status: 'completed', conclusion: 'success', completed_at: '2026-10-26T01:00:00Z' };
-  function readyWith(mergeable: string, checks: unknown) {
+  function readyWith(mergeable: string, checks: unknown, pr: Record<string, unknown> = {}) {
     const repo = fixture();
     const head = makePr(repo, 'pr-a');
     const tree = runBin(repo, 'gstack-wtree', []).out.trim();
     const pregate = path.join(repo.root, 'pregate.json');
     fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
-    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: '', mergeable, headRefName: 'pr-a' } }, checks: { [head]: checks } });
+    const gh = ghQueueShim(repo, { prs: { '1': { headRefOid: head, body: '', mergeable, headRefName: 'pr-a', ...pr } }, checks: { [head]: checks } });
     return { r: queue(repo, ['ready', '--pr', '1', '--pregate', pregate], gh), at: head.slice(0, 12) };
   }
 
@@ -418,13 +426,17 @@ describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, 
     const { r, at } = readyWith('CONFLICTING', { check_runs: [] });
     expect(r.status).toBe(EXIT.refused);
     expect(line(r.out, 'ci: ')).toBe(`ci: none at ${at} (passed=0 failed=0 pending=0 skipped=0)`);
-    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${at}); dispatch the free workflows on the branch (gh workflow run free-tests.yml --ref pr-a && gh workflow run windows-free-tests.yml --ref pr-a), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready`);
-  }, 120_000);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${at}); dispatch the free workflows on the branch (gh workflow run free-tests.yml --ref pr-a && gh workflow run windows-free-tests.yml --ref pr-a), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready (advisory)`);
+    const odd = readyWith('CONFLICTING', { check_runs: [] }, { headRefName: 'x;$(curl evil)' });
+    expect(line(odd.r.out, 'ci-hint: ')).toContain('gh workflow run free-tests.yml --ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>');
+    const fork = readyWith('CONFLICTING', { check_runs: [] }, { isCrossRepository: true });
+    expect(line(fork.r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${fork.at}) and its head is on a fork, so the free workflows cannot be dispatched here; the coordinator decides (advisory)`);
+  }, 240_000);
 
   test('dispatched runs green at the head and a conflict: READY, with the hint saying the dispatched runs count', () => {
     const { r, at } = readyWith('CONFLICTING', { check_runs: [pass] });
     expect(r.status).toBe(EXIT.ok);
-    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were dispatched on the branch, which counts`);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were dispatched on the branch, which counts (advisory)`);
   }, 120_000);
 
   test('no hint without a conflict, and none while the dispatched runs are red or pending', () => {
