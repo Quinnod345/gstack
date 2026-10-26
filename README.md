@@ -196,6 +196,7 @@ The same `/qa` and `/qa-only` commands test CLIs, APIs, jobs, workers and webhoo
 | `/setup-gbrain` | **GBrain Onboarding** — from zero to running gbrain in under 5 minutes. PGLite local, Supabase existing URL, or auto-provision a new Supabase project via Management API. MCP registration for Claude Code + per-repo trust triad (read-write/read-only/deny). [Full guide](USING_GBRAIN_WITH_GSTACK.md). |
 | `/sync-gbrain` | **Keep Brain Current** — re-index this repo's code into gbrain via `gbrain sources add` + `gbrain sync --strategy code`, refresh the `## GBrain Search Guidance` block in CLAUDE.md, and auto-remove guidance when the capability check fails. `--incremental` (default), `--full`, `--dry-run`. Idempotent; safe to re-run. |
 | `/gstack-upgrade` | **Self-Updater** — upgrade gstack to latest. Detects global vs vendored install, syncs both, shows what changed. |
+| `/captain` | **Crew Controller** — run many coding agents from one controller: lanes send a READY block and never merge, the controller merges through trains (stamp on call, verify, merge with the expected head), keeps the digest, relays approvals in a fixed shape and runs a daily flaky-fix pass. Also answers to `/crew`. [Team guide](docs/captain.md). |
 | `/ios-qa` | **iOS Live-Device QA (v1.43.0.0+)** — drive a real iPhone or iPad over USB CoreDevice via an embedded `StateServer` in the app. Read Swift source, codegen typed `@Observable` accessors, run the agent loop. Optional `--tailnet` flag exposes the device to OpenClaw or any HTTP-capable agent on your Tailscale tailnet so remote agents can run iOS QA without ever touching the hardware. Capability-tier allowlist (observe/interact/mutate/restore), per-device session lock, audit log. |
 | `/ios-fix`, `/ios-design-review`, `/ios-clean`, `/ios-sync` | iOS bug-fix loop, designer's-eye HIG audit, debug-bridge cleanup, and accessor resync. See `docs/skills.md`. End-to-end walkthrough: [docs/howto-ios-testing-with-gstack.md](docs/howto-ios-testing-with-gstack.md). |
 
@@ -253,6 +254,7 @@ On Windows without Developer Mode (MSYS2 / Git Bash), `setup` falls back to file
 | [Contributing](CONTRIBUTING.md) | Dev setup, testing, contributor mode, and dev mode |
 | [Memorable recall bridge](docs/memorable-workflow-memory.md) | Opt-in third-party workflow memory through gstack: two consents, what gstack hands over and can attest, removal, troubleshooting |
 | [Troubleshooting](docs/troubleshooting.md) | Every `not run` / `unavailable` message, what it means, and the fix |
+| [Running a Captain crew](docs/captain.md) | One controller, many lanes on Capy: the drive layout, CREW.md, the READY contract, merge trains, approvals, the digest and the daily flaky pass, with templates |
 | [Changelog](CHANGELOG.md) | What's new in every version |
 
 ## Privacy & Telemetry

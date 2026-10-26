@@ -27,7 +27,7 @@ const LANGUAGES: Array<[string, RegExp]> = [
   ['go', /\.go$/], ['ruby', /\.rb$/], ['rust', /\.rs$/], ['shell', /\.(?:sh|bash|bats)$/],
 ];
 /** Above this many tests a directory's tests are no longer a useful suggestion. */
-const MAX_SUGGESTED = 25;
+export const MAX_SUGGESTED = 25;
 const MAX_TODO_LINES = 50;
 
 export interface InitDraft {
@@ -40,7 +40,7 @@ export interface InitDraft {
 }
 
 /** The tests under the nearest ancestor directory of `file` (not the repo root) that has 1..MAX_SUGGESTED tests. */
-function nearestTests(tests: readonly string[], file: string): string[] {
+export function nearestTests(tests: readonly string[], file: string): string[] {
   for (let dir = path.posix.dirname(file); dir !== '.' && dir !== ''; dir = path.posix.dirname(dir)) {
     const under = tests.filter(t => t.startsWith(`${dir}/`));
     if (under.length > MAX_SUGGESTED) return [];
