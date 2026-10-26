@@ -21,6 +21,7 @@ import { policyUnavailableLine, resolveBaseBranch } from '../ship-policy';
 import { PREGATE_CONFIG_PATH, isConfigUnavailable, loadConfigFromBase, loadConfigFromHead, loadConfigFromUser, type ConfigError, type ConfigLoad, type PregateConfig } from './config';
 import type { CheckResult, PregateContext, TouchedFile } from './types';
 import { discoverLanes } from './workflows';
+import { createScratch, scratchRunId } from './run-scratch';
 import type { RegistryError } from '../regen';
 
 export interface BuildContextOptions {
@@ -32,6 +33,9 @@ export interface BuildContextOptions {
   invocation?: InvocationOptions;
   /** `<state root>/projects/<slug>/pregate.json`: read only when the base carries no pregate.json, and never from a relative path or one inside the repository. */
   userConfigPath?: string;
+  /** `--run <id>`: names this run's scratch directory under `scratchRoot` (default `<state root>/projects/<slug>/pregate/runs`); unset, a unique id. */
+  runId?: string;
+  scratchRoot?: string;
 }
 
 export const DEFAULT_STALL_TIMEOUT_S = 300;
@@ -175,6 +179,23 @@ export function defaultUserConfigPath(root: string): string {
   return path.join(resolveStateRoot(), 'projects', slugFromEnvironment(undefined, root), 'pregate.json');
 }
 
+/** `<state root>/projects/<slug>/pregate/runs`: where every run's scratch directory lives (lib/pregate/run-scratch.ts), from the caller's environment. */
+export function defaultScratchRoot(root: string, env: NodeJS.ProcessEnv = process.env): string {
+  const stateRoot = resolveStateRoot(env);
+  return path.join(stateRoot, 'projects', slugFromEnvironment(stateRoot, root), 'pregate', 'runs');
+}
+
+/** This run's scratch directory, created under the state root; an unwritable state root falls back to a private directory under os.tmpdir() (still one per run). */
+function openScratch(o: BuildContextOptions, env: NodeJS.ProcessEnv, explain: string[]): string {
+  const runId = scratchRunId(o.runId);
+  try { return createScratch(o.scratchRoot ?? defaultScratchRoot(o.repoRoot, env), runId); }
+  catch (e: any) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `gstack-pregate-${runId}-`));
+    explain.push(`scratch: state root not writable (${e?.message ?? e}); using ${dir}`);
+    return dir;
+  }
+}
+
 /** Why a user policy path must not be read, or null: a relative path (no HOME) or one a PR could commit is never trusted. */
 export function userConfigRejection(repoRoot: string, file: string): string | null {
   if (!path.isAbsolute(file)) return 'not an absolute path';
@@ -209,6 +230,7 @@ export function buildContext(o: BuildContextOptions): ContextLoad {
   const fp = wtreeFingerprint({ cwd: o.repoRoot, env, invocation: o.invocation });
   if ('error' in fp) return { refused: wtreeRefusal(fp) };
   const wtree = fp.tree;
+  const scratch = openScratch(o, env, explain);
   const platform = o.platform ?? process.platform;
   const config = configLoad.config as PregateConfig;
   const lanes = discoverLanes(o.repoRoot, platform);
@@ -217,7 +239,7 @@ export function buildContext(o: BuildContextOptions): ContextLoad {
   return {
     ctx: {
       repoRoot: o.repoRoot, base, baseRef, baseSha: baseSha.out, mergeBase, head, wtree, touched: touchedFiles(o.repoRoot, mergeBase),
-      config, configLabel: configLoad.label, configFile: configLoad.kind === 'user' && o.userConfigPath ? o.userConfigPath : PREGATE_CONFIG_PATH, ...(configLoad.kind === 'user' && configLoad.digest ? { configDigest: configLoad.digest } : {}), ...(absentUserPolicy ? { absentUserPolicy } : {}), registry: registryLoad.registry as Registry, registryLabel: registryLoad.source.label,
+      config, configLabel: configLoad.label, configKind: configLoad.kind, scratch, configFile: configLoad.kind === 'user' && o.userConfigPath ? o.userConfigPath : PREGATE_CONFIG_PATH, ...(configLoad.kind === 'user' && configLoad.digest ? { configDigest: configLoad.digest } : {}), ...(absentUserPolicy ? { absentUserPolicy } : {}), registry: registryLoad.registry as Registry, registryLabel: registryLoad.source.label,
       lanes, platform, allowRepoCommands: o.allowRepoCommands, timeoutMs: o.timeoutMs ?? 600_000,
       stallTimeoutMs: o.stallTimeoutMs ?? (config.stall_timeout_s ?? DEFAULT_STALL_TIMEOUT_S) * 1000,
       progress: o.progress ?? (line => process.stderr.write(`${line}\n`)),

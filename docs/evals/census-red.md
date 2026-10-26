@@ -93,7 +93,7 @@ What incomplete data means:
 | headroom `censored` | a sample timed out, so its real duration is at least the budget |
 | cause `unrecorded` | the trial was written before `failure_cause` existed |
 | cause `unknown` | the trial failed with no evidence for any other cause |
-| `cost unknown` | the harness (PTY, Codex) records no billing; only the known sum is shown |
+| `cost unknown` | the harness (PTY, Codex) records no billing, or the trial sits in a multi-case shard whose records are named by display label and cannot be attributed to it; only the known sum is shown |
 | `history unavailable (...)` | the GitHub history could not be read; `--gate` fails closed |
 
 ## 4. Replay and repair (free)

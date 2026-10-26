@@ -4,7 +4,10 @@
  * `set -o pipefail` with the exit code and the runner's own summary judged
  * (zero tests ran is a failure, exit 0 or not); platform lanes this machine
  * cannot run become persisted `requires-remote` obligations. A touched file
- * with no lane is `FAIL lanes — <file> has no test lane`, never a pass.
+ * with no lane is `FAIL lanes — <file> has no test lane` once any policy
+ * exists; with no policy anywhere (no base `.gstack/pregate.json`, no
+ * user-owned file) it is the `warn` PREGATE_NO_POLICY with a starter printed
+ * (lib/pregate/starter.ts), never a pass either way.
  * Markdown no test depends on is the docs/no-tests empty lane instead
  * (lib/pregate/docs-lane.ts): it does not fail, and unmapped code still does.
  * A release manifest whose diff against the merge base changes only version
@@ -15,10 +18,12 @@
  * p0-4-windows-lane-unrun (a Windows-only change merged with its lane unrun).
  */
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { baseInputs, sha256 } from '../context';
 import { PREGATE_CONFIG_PATH } from '../config';
+import { classifyCommandEnvironment, classifyEnvironment, environmentLine, environmentResult, launchCause } from '../environment';
+import { checkScratch } from '../run-scratch';
+import { starterPolicy } from '../starter';
 import { isDeviceDart, listRepoFiles, readRepoFile } from '../import-graph';
 import { selectLanes, type Selection } from '../lane-selection';
 import { launchRuntime } from '../runtime';
@@ -219,11 +224,12 @@ export function planRuns(ctx: PregateContext, files: readonly string[]): RunPlan
 }
 
 /** Why `plan` leaves files unrun: their count, the missing SDKs, `.dart` files outside any package, and the fix. */
-function planGap(ctx: PregateContext, plan: RunPlan, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix'> {
+function planGap(ctx: PregateContext, plan: RunPlan, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix' | 'cause' | 'environment'> {
   const { unclaimed, missing, noPubspec } = plan;
   const detail = `no test runner detected for ${unclaimed.length} of ${total} selected file(s): ${unclaimed.slice(0, 8).join(' ')}${unclaimed.length > 8 ? ' …' : ''}${missing.length ? `; not on PATH: ${missing.join(', ')}` : ''}${noPubspec.length ? `; no pubspec.yaml above ${noPubspec.length} .dart file(s)` : ''}`;
-  const fix = missing.length ? `install ${missing.join(' and ')}${fvmPinnedFor(ctx.repoRoot, unclaimed) ? ' (or fvm, which this repo pins)' : ''} and rerun`
-    : noPubspec.length ? `commit the Dart package's pubspec.yaml, or declare \`runner\` (with {files}) in ${ctx.configFile}`
+  // A tool missing from PATH is this machine's gap, not the diff's; no runner declared or no pubspec is the repo's.
+  if (missing.length) return { code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment: launchCause('missing-binary', `not on PATH: ${missing.join(', ')}`), detail, fix: `install ${missing.join(' and ')}${fvmPinnedFor(ctx.repoRoot, unclaimed) ? ' (or fvm, which this repo pins)' : ''} on this machine and rerun, or run the lane remotely; the diff is not at fault` };
+  const fix = noPubspec.length ? `commit the Dart package's pubspec.yaml, or declare \`runner\` (with {files}) in ${ctx.configFile}`
     : `declare \`runner\` (with {files}) in ${ctx.configFile}`;
   return { code: 'PREGATE_INCOMPLETE', detail, fix };
 }
@@ -270,7 +276,7 @@ export function parseSummary(raw: string, runner = ''): RunnerSummary {
   return (dartRun ? null : parseDart(output)) ?? parseBats(output) ?? { ran: null, failed: null };
 }
 
-interface LocalRun { exit: number | null; outcome: Supervised['outcome']; ran: number | null; failed: number | null; tail: string[]; command: string; files: string[]; lastFile: string | null; ms: number }
+interface LocalRun { exit: number | null; outcome: Supervised['outcome']; signal: string | null; observedStart: boolean; ran: number | null; failed: number | null; tail: string[]; runner: string; command: string; files: string[]; lastFile: string | null; ms: number; error?: string }
 
 const quote = (f: string) => `'${f.replace(/'/g, `'\\''`)}'`;
 
@@ -282,7 +288,7 @@ async function runOnce(ctx: PregateContext, env: NodeJS.ProcessEnv, g: RunGroup,
   const r = await supervise({ command: run, cwd: path.join(ctx.repoRoot, g.cwd), env: { ...env, CI: env.CI ?? '1' }, log, deadline: Date.now() + ctx.timeoutMs, stallMs: ctx.stallTimeoutMs, label: `lanes (${shown.length === 1 ? shown[0] : `${shown.length} files`})`, files, adapter: adapterFor(g.runner), counter, progress: ctx.progress });
   const output = readRange(log, r.start, r.end);
   const summary = parseSummary(output, g.runner);
-  return { exit: r.exit, outcome: r.outcome, ...summary, tail: output.trim().split('\n').slice(-25), command, files: shown, lastFile: r.lastFile && g.cwd ? `${g.cwd}/${r.lastFile}` : r.lastFile, ms: r.ms };
+  return { exit: r.exit, outcome: r.outcome, signal: r.signal, observedStart: r.observedStart, ...summary, tail: output.trim().split('\n').slice(-25), runner: g.runner, command, files: shown, lastFile: r.lastFile && g.cwd ? `${g.cwd}/${r.lastFile}` : r.lastFile, ms: r.ms, ...(r.error ? { error: r.error } : {}) };
 }
 
 /**
@@ -297,7 +303,7 @@ async function runOnce(ctx: PregateContext, env: NodeJS.ProcessEnv, g: RunGroup,
  * count must not hide it).
  */
 async function runLocal(ctx: PregateContext, env: NodeJS.ProcessEnv, groups: RunGroup[]) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-pregate-lanes-'));
+  const dir = checkScratch(ctx.scratch, 'lanes');
   const log = path.join(dir, 'lanes.log');
   fs.writeFileSync(log, '');
   const counter: Counter = { done: 0, total: groups.reduce((n, g) => n + g.files.length, 0) };
@@ -316,19 +322,28 @@ async function runLocal(ctx: PregateContext, env: NodeJS.ProcessEnv, groups: Run
 }
 
 /** Why the local lane did not finish: a stall, a runner process past --timeout or a launch failure, with the last file started. */
-function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix'> {
+function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix' | 'environment'> {
   const stalled = r.runs.filter(x => x.outcome === 'stalled');
   const timedOut = r.runs.filter(x => x.outcome === 'timeout');
   const rest = r.failed ? `; ${r.failed} failed` : '';
   if (stalled.length) {
     return { code: 'PREGATE_STALLED', detail: `no test output for ${ctx.stallTimeoutMs / 1000} s; process group killed; last file started: ${stalled.map(x => x.lastFile ?? `(none reported; ${x.files.length} file(s))`).join(', ')}${rest}`, fix: `read ${r.log} for the stalled file; fix the hang, or raise --stall-timeout (stall_timeout_s in ${ctx.configFile}; 0 disables) for a test that is quiet for longer` };
   }
-  if (!timedOut.length) return { code: 'PREGATE_INCOMPLETE', detail: `the runner could not be launched (${total} files${rest})`, fix: 'read the lane log, fix the runner command, then rerun gstack-pregate --stage tests' };
+  const launch = r.runs.find(x => x.outcome === 'spawn-failed');
+  if (launch) {
+    const environment = { ...(classifyEnvironment(launch.error ?? '', null) ?? launchCause('missing-binary', launch.error ?? 'the runner could not be started')), proof: 'launch' as const };
+    return { environment, detail: `the runner could not be launched (${total} files${rest}): ${environment.evidence}` };
+  }
+  if (!timedOut.length) {
+    // The runner started and died without an exit code (a signal: OOM kill, SIGSEGV, an outside kill): incomplete, not the machine's missing binary.
+    const killed = r.runs.find(x => x.outcome === 'exited' && x.exit === null);
+    return { code: 'PREGATE_INCOMPLETE', detail: `the runner process ended without an exit code (killed by ${killed?.signal ?? 'a signal'}; ${total} files; last file started: ${killed?.lastFile ?? 'none reported'}${rest})`, fix: `read ${r.log}; a runner killed by a signal (out of memory, an outside kill) never passes; rerun, or split the selection` };
+  }
   return { code: 'PREGATE_INCOMPLETE', detail: `a runner process timed out after ${ctx.timeoutMs} ms (--timeout applies to each runner process; ${total} files; last file started: ${timedOut.map(x => x.lastFile ?? `(none reported; ${x.files.length} file(s))`).join(', ')}${rest})`, fix: 'raise --timeout or split the selection; a timed-out lane never passes' };
 }
 
-function describe(sel: Selection): string[] {
-  const lines = sel.noLane.map(f => `FAIL lanes — ${f} has no test lane`);
+function describe(sel: Selection, noPolicy = false): string[] {
+  const lines = noPolicy ? [`no policy: ${sel.noLane.join(' ')} have no test lane (a warning under no policy; the starter below maps them)`] : sel.noLane.map(f => `FAIL lanes — ${f} has no test lane`);
   if (sel.emptyLane.length) lines.push(`docs/no-tests (empty lane): ${sel.emptyLane.join(' ')}`);
   if (sel.inert.length) lines.push(`no-tests (assets and tool config): ${sel.inert.join(' ')}`);
   if (sel.stampOnly.length) lines.push(`version-stamp-only (no lane needed): ${sel.stampOnly.join(' ')} — only version values changed against the merge base; a manifest whose other content changed still needs a lane`);
@@ -355,6 +370,8 @@ function remoteObligation(ctx: PregateContext, sel: Selection): RemoteObligation
 }
 
 export const REMOTE_GATE_LANE = 'pregate.json/remote_gate';
+/** How many leading lines of a remote gate's output are read for an environment cause: its preamble, before any test output could stream. */
+export const REMOTE_PREAMBLE_LINES = 40;
 /** The `clear` command for an obligation: the remote gate's own output for remote_gate, a run URL otherwise. */
 export const clearHint = (lane: string) => `gstack-pregate clear --remote ${lane} ${lane === REMOTE_GATE_LANE ? '--receipt <gate output file>' : '--run-url <url>'}`;
 export interface RemoteReport { tree: string; tests: number; failed: number; spent?: string }
@@ -386,7 +403,7 @@ async function runRemote(ctx: PregateContext, sel: Selection, base: CheckResult)
   if (!ctx.config.remote_gate) return { ...base, status: 'incomplete', code: 'PREGATE_INCOMPLETE', detail: `--remote runs only a declared remote gate; ${ctx.configLabel} has no remote_gate`, fix: `declare remote_gate (a command that prints PREGATE_REMOTE: tree=… tests=… failed=…) in ${ctx.configFile === PREGATE_CONFIG_PATH ? `${PREGATE_CONFIG_PATH} on the base branch` : ctx.configFile}, or run the tests locally without --remote` };
   const obligation = remoteObligation(ctx, sel);
   const cap = ctx.remote!.spendCapUsd;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-pregate-remote-'));
+  const dir = checkScratch(ctx.scratch, 'remote');
   const log = path.join(dir, 'remote.log');
   const filesFile = path.join(dir, 'files.txt');
   fs.writeFileSync(log, '');
@@ -402,21 +419,20 @@ async function runRemote(ctx: PregateContext, sel: Selection, base: CheckResult)
   const why = r.outcome !== 'exited' ? `the remote gate did not finish (${r.outcome === 'stalled' ? `no output for ${ctx.stallTimeoutMs / 1000} s` : r.outcome})`
     : !reported ? `the remote gate exited ${r.exit} without a PREGATE_REMOTE: line`
     : remoteReportProblem(reported, ctx.wtree) ?? (r.exit !== 0 ? `the remote gate exited ${r.exit}` : null);
+  // A gate that printed no report and names a quota, network or missing-tool error in its preamble never ran the tests: the environment, not the diff.
+  // Only the gate's first lines are read (a VM refusal or a network error comes before any test streams); exit 127 counts only when the gate's own binary is off PATH.
+  const environment = why && !reported && r.outcome !== 'stalled' && r.outcome !== 'timeout'
+    ? r.outcome === 'spawn-failed' ? { ...(classifyEnvironment(r.error ?? '', null) ?? launchCause('missing-binary', r.error ?? 'the remote gate could not be started')), proof: 'launch' as const } : classifyCommandEnvironment(obligation.command!, output.split('\n').slice(0, REMOTE_PREAMBLE_LINES).join('\n'), r.exit, ctx.env)
+    : null;
+  if (environment) return environmentResult({ ...base, inputs, lines: runLines, remote: [...sel.remote, obligation] }, environment, `${why}; requires-remote ${obligation.lane} stays uncleared`);
   if (why) return { ...base, inputs, lines: runLines, status: 'incomplete', remote: [...sel.remote, obligation], code: r.outcome === 'stalled' ? 'PREGATE_STALLED' : 'PREGATE_INCOMPLETE', detail: `${why}; requires-remote ${obligation.lane} stays uncleared`, fix: `read ${log}; the obligation clears only on PREGATE_REMOTE: tree=${ctx.wtree.slice(0, 12)}… tests>0 failed=0 with exit 0` };
   const cleared = { ...obligation, receipt: `remote-gate tree=${ctx.wtree.slice(0, 12)} tests=${reported!.tests}`, cleared_by: `gstack-pregate --remote ${new Date().toISOString()}` };
   return { ...base, inputs, lines: runLines, status: 'requires-remote', remote: [...sel.remote, cleared], detail: `remote gate ${obligation.lane}: ${reported!.tests} tests, 0 failed on tree ${ctx.wtree.slice(0, 12)}; ${spend}` };
 }
 
-async function run(ctx: PregateContext): Promise<CheckResult> {
-  const sel = selectLanes(ctx);
-  ctx.explain.push(...sel.provenance);
-  for (const [lane, set] of Object.entries(sel.laneSets)) ctx.explain.push(`lane ${lane}: ${set === '?' ? 'file set unknown' : `${set.length} files`}`);
-  const inputs = baseInputs(ctx, { selection: sha256(sel.tests.join('\n')), localTests: sha256(sel.localTests.join('\n')), remote: sha256(sel.remote.map(r => `${r.lane}:${r.tests.join(',')}`).join('\n')) });
-  const lines = describe(sel);
-  const base: CheckResult = { id: 'lanes', stage: 'tests', status: 'pass', inputs, lines, remote: sel.remote };
-  if (sel.noLane.length) {
-    return { ...base, status: 'fail', code: 'PREGATE_NO_LANE', detail: `${sel.noLane.length} touched file(s) with no test lane: ${sel.noLane.join(' ')}`, fix: noLaneFix(ctx, sel.noLane) };
-  }
+/** The lanes verdict for a selection: the selected tests run (locally, remotely or as obligations) and the result names the diff or the machine. */
+async function runSelected(ctx: PregateContext, sel: Selection, base: CheckResult): Promise<CheckResult> {
+  const { inputs, lines = [] } = base;
   if (sel.tests.length === 0) {
     const classes = [sel.emptyLane.length ? `${sel.emptyLane.length} documentation file(s)` : '', sel.inert.length ? `${sel.inert.length} asset or tool-config file(s)` : '', sel.stampOnly.length ? `${sel.stampOnly.length} version-stamp-only manifest(s)` : ''].filter(Boolean);
     const label = sel.emptyLane.length ? 'docs/no-tests' : sel.inert.length ? 'no-tests' : 'version-stamp-only';
@@ -435,21 +451,59 @@ async function run(ctx: PregateContext): Promise<CheckResult> {
   // Runnable groups run even when other files are unclaimed: a real failure is reported as one, and an all-green run is still incomplete.
   const plan = planRuns(ctx, sel.localTests);
   const gap = plan.unclaimed.length ? planGap(ctx, plan, sel.localTests.length) : null;
-  if (!plan.groups.length) return { ...base, status: 'incomplete', ...gap };
+  if (!plan.groups.length) return { ...base, status: 'incomplete', ...gap, ...(gap?.environment ? { lines: [...lines, environmentLine(gap.environment)] } : {}) };
   const { groups } = plan;
   const total = groups.reduce((n, g) => n + g.files.length, 0);
   const runtime = launchRuntime(ctx.repoRoot, ctx.env);
-  if (runtime.refusal) return { ...base, ...runtime.refusal, lines: [`runtime: ${runtime.label}`] };
+  if (runtime.refusal) return { ...base, ...runtime.refusal, cause: 'environment', environment: launchCause('runtime', runtime.refusal.detail), lines: [`runtime: ${runtime.label}`, environmentLine(launchCause('runtime', runtime.refusal.detail))] };
   const r = await runLocal(ctx, runtime.env, groups);
   const adapters = [...new Set(groups.map(g => adapterFor(g.runner)).filter(Boolean))];
   const runLines = [...lines, `runtime: ${runtime.label}`, `progress: ${adapters.join(', ') || 'none (no progress adapter for this runner; serial files and heartbeats only)'}`, `ran: ${r.command.length > 200 ? `${r.command.slice(0, 200)}…` : r.command}`, `log: ${r.log}`, ...r.tail.map(l => `  ${l}`)];
   const withRun = { ...base, lines: runLines, inputs: { ...inputs, command: sha256(r.command), runtime: runtime.label } };
-  if (r.exit === null) return { ...withRun, status: 'incomplete', ...unfinished(ctx, r, total) };
-  if (r.exit !== 0) return { ...withRun, status: 'fail', code: 'PREGATE_LANE_FAILED', detail: `local lane exited ${r.exit} (${r.failed ?? '?'} failed of ${r.ran ?? '?'} ran; ${total} files; pipefail)`, fix: `read ${r.log}, fix the in-branch failure, rerun gstack-pregate --stage tests` };
-  if (r.ran === 0) return { ...withRun, status: 'fail', code: 'PREGATE_LANE_FAILED', detail: `ZERO-RUN: the runner reported 0 tests${r.zero ? ` in ${r.zero}` : ''} (${total} selected file(s))`, fix: 'a bad selector, a missing file or a skipped describe; exit 0 is not a pass' };
+  if (r.exit === null) {
+    const why = unfinished(ctx, r, total);
+    return why.environment ? environmentResult(withRun, why.environment, why.detail!) : { ...withRun, status: 'incomplete', ...why };
+  }
+  if (r.exit !== 0) {
+    // The runner's own summary decides: a counted failure is the diff's. Only a run that reported no test at all, and whose runner was not seen
+    // starting a test file (a test that exits the process before the summary cannot relabel itself), is read from its output; exit 127 counts
+    // only when the runner's binary is off PATH.
+    const environment = r.ran === null && r.bad && !r.bad.observedStart ? classifyCommandEnvironment(r.bad.runner, r.tail.join('\n'), r.exit, runtime.env) : null;
+    if (environment) return environmentResult(withRun, environment, `the runner exited ${r.exit} before any test was counted (${total} files): ${environment.evidence}`);
+    return { ...withRun, status: 'fail', cause: 'diff', code: 'PREGATE_LANE_FAILED', detail: `local lane exited ${r.exit} (${r.failed ?? '?'} failed of ${r.ran ?? '?'} ran; ${total} files; pipefail)`, fix: `read ${r.log}, fix the in-branch failure, rerun gstack-pregate --stage tests` };
+  }
+  if (r.ran === 0) return { ...withRun, status: 'fail', cause: 'diff', code: 'PREGATE_LANE_FAILED', detail: `ZERO-RUN: the runner reported 0 tests${r.zero ? ` in ${r.zero}` : ''} (${total} selected file(s))`, fix: 'a bad selector, a missing file or a skipped describe; exit 0 is not a pass' };
   const detail = `${r.ran ?? 'count unavailable'} tests ran in ${total} file(s)${r.serial ? ` (${r.serial} serial)` : ''}, exit 0${sel.remote.length ? `; ${sel.remote.length} requires-remote obligation(s)` : ''}`;
-  if (gap) return { ...withRun, status: 'incomplete', ...gap, detail: `${detail}; ${gap.detail}` };
+  if (gap) return { ...withRun, status: 'incomplete', ...gap, detail: `${detail}; ${gap.detail}`, ...(gap.environment ? { lines: [...runLines, environmentLine(gap.environment)] } : {}) };
   return { ...withRun, status: sel.remote.length ? 'requires-remote' : 'pass', detail };
+}
+
+/**
+ * With no policy anywhere (no base `.gstack/pregate.json`, no user-owned
+ * file), an unmapped file is a warning with a starter policy, not a hard
+ * failure: the selected tests still ran and their verdict stands; a green run
+ * becomes `warn` (PREGATE_NO_POLICY) so the first /ship in a new repo is not
+ * blocked before the owner has written a lane policy.
+ */
+function withStarter(ctx: PregateContext, sel: Selection, result: CheckResult): CheckResult {
+  const lines = [...(result.lines ?? []), ...starterPolicy(ctx, sel.noLane, detectRunner(ctx, sel.localTests.length ? sel.localTests : sel.tests))];
+  const noted = `${sel.noLane.length} touched file(s) with no test lane under no policy (starter printed)`;
+  if (result.status !== 'pass') return { ...result, lines, detail: `${result.detail}; ${noted}`, ...(result.status === 'requires-remote' && !result.code ? { code: 'PREGATE_NO_POLICY' } : {}) };
+  return { ...result, status: 'warn', code: 'PREGATE_NO_POLICY', lines, detail: `${result.detail}; ${noted}`, fix: `review the starter above, write it with gstack-pregate init, edit each TODO, then commit ${PREGATE_CONFIG_PATH} on the base branch; from then on an unmapped file is PREGATE_NO_LANE` };
+}
+
+async function run(ctx: PregateContext): Promise<CheckResult> {
+  const sel = selectLanes(ctx);
+  ctx.explain.push(...sel.provenance);
+  for (const [lane, set] of Object.entries(sel.laneSets)) ctx.explain.push(`lane ${lane}: ${set === '?' ? 'file set unknown' : `${set.length} files`}`);
+  const inputs = baseInputs(ctx, { selection: sha256(sel.tests.join('\n')), localTests: sha256(sel.localTests.join('\n')), remote: sha256(sel.remote.map(r => `${r.lane}:${r.tests.join(',')}`).join('\n')) });
+  const noPolicy = sel.noLane.length > 0 && ctx.configKind === 'none';
+  const base: CheckResult = { id: 'lanes', stage: 'tests', status: 'pass', inputs, lines: describe(sel, noPolicy), remote: sel.remote };
+  if (sel.noLane.length && !noPolicy) {
+    return { ...base, status: 'fail', cause: 'diff', code: 'PREGATE_NO_LANE', detail: `${sel.noLane.length} touched file(s) with no test lane: ${sel.noLane.join(' ')}`, fix: noLaneFix(ctx, sel.noLane) };
+  }
+  const result = await runSelected(ctx, sel, base);
+  return noPolicy ? withStarter(ctx, sel, result) : result;
 }
 
 function noLaneFix(ctx: PregateContext, noLane: readonly string[]): string {
