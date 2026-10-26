@@ -103,6 +103,13 @@ describe('no policy anywhere: warn plus a printed starter (never PREGATE_NO_LANE
     expect(u.status).toBe(EXIT.fail);
     expect(u.err).toContain('(PREGATE_NO_LANE)');
     expect(u.out).not.toContain('PREGATE_STARTER');
+    // --policy-from head with a head policy (no base copy) is strict too.
+    const withHead = fixture({ pregate: null });
+    commit(withHead, { 'lib/orphan.js': 'exports.lonely = () => 2;\n', '.gstack/pregate.json': JSON.stringify({ runner: 'node --test {files}' }) + '\n' });
+    const h = lanes(withHead, ['--policy-from', 'head']);
+    expect(h.status).toBe(EXIT.fail);
+    expect(h.err).toContain('(PREGATE_NO_LANE)');
+    expect(h.out).not.toContain('PREGATE_STARTER');
   });
 
   // Value: protects=`run` never writes the policy; `init` is the explicit write and the starter and the init draft agree on the

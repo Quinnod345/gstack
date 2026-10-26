@@ -58,6 +58,8 @@ describe('per-run scratch under the state root', () => {
     for (const run of runs) expect(fs.existsSync(path.join(runsDir(repo), run, 'secrets'))).toBe(false);
     expect(scratchRunId('weird id/with:chars')).toBe('weird-id-with-chars');
     expect(scratchRunId(undefined, 123)).toMatch(/^\d{8}T\d{6}Z-123-[0-9a-f]{4}$/);
+    expect(scratchRunId('...', 123)).toMatch(/^\d{8}T\d{6}Z-123-[0-9a-f]{4}$/);
+    expect(scratchRunId('a'.repeat(200))).toHaveLength(96);
   });
 
   // Value: protects=pruning removes only run directories older than the retention and never the current one; fails_when=a fresh
@@ -73,5 +75,21 @@ describe('per-run scratch under the state root', () => {
       pruneScratch(root, 'current');
       expect(fs.readdirSync(root).sort()).toEqual(['current', 'fresh']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('an unwritable state root', () => {
+  // Value: protects=a state root whose projects dir cannot be created still runs pregate, in a private per-run directory under
+  //   os.tmpdir(), and says so under --explain; fails_when=the mkdir error escapes buildContext or the note is dropped; why_new=the
+  //   fallback is new; seam=none; no_claim=none
+  test('falls back to a per-run tmpdir and says so', () => {
+    const repo = makeFixtureRepo();
+    repos.push(repo);
+    fs.writeFileSync(path.join(repo.home, 'projects'), 'not a directory');
+    commit(repo, { 'lib/util.js': 'exports.add = (a, b) => b + a;\n' });
+    const r = pregate(repo, ['--only', 'secrets', '--explain']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(readOut(repo).scratch.startsWith(os.tmpdir())).toBe(true);
+    expect(r.out + r.err).toContain('scratch: state root not writable');
   });
 });

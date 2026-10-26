@@ -32,8 +32,9 @@ async function runGuard(ctx: PregateContext, guard: Guard, env: NodeJS.ProcessEn
   fs.writeFileSync(log, '');
   const r = await supervise({ command: guard.command, cwd: ctx.repoRoot, env: { ...env, CI: env.CI ?? '1' }, log, deadline: Date.now() + timeoutMs, stallMs: ctx.stallTimeoutMs, label: `guard ${guard.id}`, progress: ctx.progress });
   const output = readRange(log, r.start, r.end).trim();
-  // A guard that could not run (its binary missing, no network) is the machine's failure, not the diff's; a guard that ran and said no is the diff's.
-  const environment = r.outcome === 'spawn-failed' ? classifyEnvironment(r.error ?? '', null) ?? { kind: 'missing-binary' as const, evidence: r.error ?? 'the guard could not be started' } : r.outcome === 'exited' && r.exit !== 0 ? classifyEnvironment(output, r.exit) : null;
+  // A guard that could not start, or whose shell found no such command (exit 127), is the machine's failure; a guard that ran and said no is the diff's,
+  // whatever its output mentions (a test about rate limits must not read as a quota refusal).
+  const environment = r.outcome === 'spawn-failed' ? classifyEnvironment(r.error ?? '', null) ?? { kind: 'missing-binary' as const, evidence: r.error ?? 'the guard could not be started' } : r.outcome === 'exited' && r.exit === 127 ? classifyEnvironment(output, r.exit) : null;
   return { guard, exit: r.exit, timedOut: r.outcome !== 'exited' && r.outcome !== 'spawn-failed', stalled: r.outcome === 'stalled', tail: output ? output.split('\n').slice(-15) : [], log, environment };
 }
 

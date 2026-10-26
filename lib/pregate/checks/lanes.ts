@@ -4,7 +4,10 @@
  * `set -o pipefail` with the exit code and the runner's own summary judged
  * (zero tests ran is a failure, exit 0 or not); platform lanes this machine
  * cannot run become persisted `requires-remote` obligations. A touched file
- * with no lane is `FAIL lanes — <file> has no test lane`, never a pass.
+ * with no lane is `FAIL lanes — <file> has no test lane` once any policy
+ * exists; with no policy anywhere (no base `.gstack/pregate.json`, no
+ * user-owned file) it is the `warn` PREGATE_NO_POLICY with a starter printed
+ * (lib/pregate/starter.ts), never a pass either way.
  * Markdown no test depends on is the docs/no-tests empty lane instead
  * (lib/pregate/docs-lane.ts): it does not fail, and unmapped code still does.
  * A release manifest whose diff against the merge base changes only version
@@ -319,7 +322,7 @@ async function runLocal(ctx: PregateContext, env: NodeJS.ProcessEnv, groups: Run
 }
 
 /** Why the local lane did not finish: a stall, a runner process past --timeout or a launch failure, with the last file started. */
-function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix' | 'cause' | 'environment'> {
+function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>, total: number): Pick<CheckResult, 'code' | 'detail' | 'fix' | 'environment'> {
   const stalled = r.runs.filter(x => x.outcome === 'stalled');
   const timedOut = r.runs.filter(x => x.outcome === 'timeout');
   const rest = r.failed ? `; ${r.failed} failed` : '';
@@ -329,7 +332,7 @@ function unfinished(ctx: PregateContext, r: Awaited<ReturnType<typeof runLocal>>
   if (!timedOut.length) {
     const launch = r.runs.find(x => x.outcome === 'spawn-failed');
     const environment = classifyEnvironment(launch?.error ?? '', null) ?? { kind: 'missing-binary' as const, evidence: launch?.error ?? 'the runner could not be started' };
-    return { code: 'PREGATE_ENVIRONMENT', cause: 'environment', environment, detail: `the runner could not be launched (${total} files${rest}): ${environment.evidence}`, fix: 'repair the runner command or the shell on this machine, or run the lane remotely; the diff is not at fault' };
+    return { environment, detail: `the runner could not be launched (${total} files${rest}): ${environment.evidence}` };
   }
   return { code: 'PREGATE_INCOMPLETE', detail: `a runner process timed out after ${ctx.timeoutMs} ms (--timeout applies to each runner process; ${total} files; last file started: ${timedOut.map(x => x.lastFile ?? `(none reported; ${x.files.length} file(s))`).join(', ')}${rest})`, fix: 'raise --timeout or split the selection; a timed-out lane never passes' };
 }
@@ -471,8 +474,7 @@ async function runSelected(ctx: PregateContext, sel: Selection, base: CheckResul
  * blocked before the owner has written a lane policy.
  */
 function withStarter(ctx: PregateContext, sel: Selection, result: CheckResult): CheckResult {
-  const starter = starterPolicy(ctx, sel.noLane, detectRunner(ctx, sel.localTests.length ? sel.localTests : sel.tests));
-  const lines = [...(result.lines ?? []), ...starter.lines];
+  const lines = [...(result.lines ?? []), ...starterPolicy(ctx, sel.noLane, detectRunner(ctx, sel.localTests.length ? sel.localTests : sel.tests))];
   const noted = `${sel.noLane.length} touched file(s) with no test lane under no policy (starter printed)`;
   if (result.status !== 'pass') return { ...result, lines, detail: `${result.detail}; ${noted}`, ...(result.status === 'requires-remote' && !result.code ? { code: 'PREGATE_NO_POLICY' } : {}) };
   return { ...result, status: 'warn', code: 'PREGATE_NO_POLICY', lines, detail: `${result.detail}; ${noted}`, fix: `review the starter above, write it with gstack-pregate init, edit each TODO, then commit ${PREGATE_CONFIG_PATH} on the base branch; from then on an unmapped file is PREGATE_NO_LANE` };

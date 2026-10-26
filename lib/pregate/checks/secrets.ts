@@ -2,7 +2,10 @@
  * pregate check `secrets` (tier 1, preflight, never downgradable): the
  * branch's added lines (merge-base → working tree, untracked files included)
  * go through bin/gstack-redact. Exit 0 is clean; 2 (MEDIUM) and 3 (HIGH)
- * fail; anything else is incomplete. Runs regardless of lint tools.
+ * fail unless the policy's `allowlist` names each finding (lib/pregate/allowlist.ts;
+ * never env.value); a scanner that does not finish or exits outside its
+ * contract is PREGATE_ENVIRONMENT (kind tool), never a pass. Runs regardless
+ * of lint tools.
  */
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -54,6 +57,8 @@ function run(ctx: PregateContext): CheckResult {
   const parts = addedLines(ctx);
   const inputs = baseInputs(ctx, { added_lines: sha256(JSON.stringify(parts)), ...(ctx.config.allowlist.length ? { allowlist: allowlistDigest(ctx.config.allowlist) } : {}) });
   if (!parts.length) return { id: 'secrets', stage: 'preflight', status: 'pass', detail: 'no added lines', inputs };
+  // A run killed mid-scan under the same --run id must not keep its added-line copies: clear them before writing new ones.
+  fs.rmSync(path.join(ctx.scratch, 'secrets'), { recursive: true, force: true });
   const tmp = checkScratch(ctx.scratch, 'secrets');
   const base: CheckResult = { id: 'secrets', stage: 'preflight', status: 'incomplete', inputs };
   try {
@@ -77,7 +82,7 @@ function run(ctx: PregateContext): CheckResult {
     const applied = parsedAll && ctx.config.allowlist.length ? applyAllowlist(findings, ctx.config.allowlist) : { kept: findings, allowlisted: [] };
     const kept = applied.kept;
     if (parsedAll) { high = kept.some(f => f.severity === 'HIGH'); medium = kept.some(f => f.severity === 'MEDIUM'); }
-    const render = (f: Finding) => `${f.severity} ${f.id ?? 'finding'} [${f.category ?? '?'}]: ${f.description ?? ''}${f.line ? ` (${f.file ? `${f.file}, ` : ''}added line ${f.line})` : ''}`;
+    const render = (f: Scanned) => `${f.severity} ${f.id} [${f.category}]: ${f.description ?? ''}${f.line ? ` (${f.file ? `${f.file}, ` : ''}added line ${f.line})` : ''}`;
     const allowLines = applied.allowlisted.map(describeAllowlisted);
     const allowNote = applied.allowlisted.length ? `; ${applied.allowlisted.length} allowlisted (${[...new Set(applied.allowlisted.map(a => a.finding.id))].join(', ')})` : '';
     // HIGH and any MEDIUM credential fail; a MEDIUM hygiene/internal/pii/legal

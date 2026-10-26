@@ -9,8 +9,8 @@
  * against the list: validation refuses an entry naming it, and this matcher
  * keeps such a finding whatever the entries say (#3449).
  */
-import { createHash } from 'node:crypto';
 import { matchesAny } from '../ship-policy';
+import { sha256 } from './context';
 import { ALLOWLISTABLE_CATEGORIES, NON_ALLOWLISTABLE, type AllowlistEntry } from './config';
 
 export interface AllowlistFinding {
@@ -49,9 +49,7 @@ export function applyAllowlist<F extends AllowlistFinding>(findings: readonly F[
 }
 
 /** sha256 of the entries, for the check's `inputs.allowlist`. */
-export function allowlistDigest(entries: readonly AllowlistEntry[]): string {
-  return createHash('sha256').update(JSON.stringify(entries)).digest('hex');
-}
+export const allowlistDigest = (entries: readonly AllowlistEntry[]) => sha256(JSON.stringify(entries));
 
 /** One table line per allowlisted finding: what, where, and which entry (with its reason) covered it. */
 export function describeAllowlisted(a: Allowlisted): string {

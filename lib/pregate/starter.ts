@@ -17,7 +17,6 @@ import type { PregateContext } from './types';
 
 const MAX_DIRS = 8;
 
-export interface Starter { json: string; config: Record<string, unknown>; lines: string[]; todo: string[] }
 
 /** `init`'s nearest-directory suggestion, else the tests whose basename starts with the file's stem. */
 export function nearestTestsFor(tests: readonly string[], file: string): string[] {
@@ -30,7 +29,7 @@ export function nearestTestsFor(tests: readonly string[], file: string): string[
 }
 
 /** The starter for `noLane` (touched files with no lane) under `runner` (detected by the lanes check; null when none). */
-export function starterPolicy(ctx: Pick<PregateContext, 'repoRoot' | 'lanes' | 'config' | 'baseRef' | 'absentUserPolicy'>, noLane: readonly string[], runner: string | null): Starter {
+export function starterPolicy(ctx: Pick<PregateContext, 'repoRoot' | 'lanes' | 'config' | 'baseRef' | 'absentUserPolicy'>, noLane: readonly string[], runner: string | null): string[] {
   const tests = listRepoFiles(ctx.repoRoot).filter(isTestFile).sort();
   const dependencies: Record<string, string[]> = {};
   const todo: string[] = [];
@@ -38,13 +37,12 @@ export function starterPolicy(ctx: Pick<PregateContext, 'repoRoot' | 'lanes' | '
     const suggested = nearestTestsFor(tests, file);
     if (suggested.length) dependencies[file] = suggested; else todo.push(file);
   }
-  const config: Record<string, unknown> = { $schema: PREGATE_CONFIG_SCHEMA, runner, dependencies };
-  const json = JSON.stringify(config, null, 2);
+  const json = JSON.stringify({ $schema: PREGATE_CONFIG_SCHEMA, runner, dependencies }, null, 2);
   const dirCounts = new Map<string, number>();
   for (const t of tests) { const d = path.posix.dirname(t); dirCounts.set(d, (dirCounts.get(d) ?? 0) + 1); }
   const dirs = [...dirCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DIRS).map(([d]) => d);
   const lanes = ctx.lanes.filter(l => l.runsTests && !l.manual).map(l => `${l.id} (${l.platform}${l.matrixExpression && l.testFiles.length === 0 && !ctx.config.selection[l.id] ? ', matrix computed; declare selection' : ''})`);
-  const lines = [
+  return [
     `PREGATE_STARTER: no ${PREGATE_CONFIG_PATH} on ${ctx.baseRef}${ctx.absentUserPolicy ? ` and no user-owned policy at ${ctx.absentUserPolicy}` : ''}; a starter drafted from this repository follows. Review it, write it with gstack-pregate init, edit each TODO, then commit it on the base branch (from then on an unmapped file is PREGATE_NO_LANE)`,
     `PREGATE_STARTER: runner ${runner ?? 'null (none detected; set runner with {files})'}`,
     `PREGATE_STARTER: test directories: ${dirs.join(', ') || '(no test files found)'}${dirCounts.size > MAX_DIRS ? ` (+${dirCounts.size - MAX_DIRS} more)` : ''}`,
@@ -54,5 +52,4 @@ export function starterPolicy(ctx: Pick<PregateContext, 'repoRoot' | 'lanes' | '
     'PREGATE_STARTER: end',
     ...todo.map(f => `TODO ${f}: no test lane and no nearby test; add a test, map it under dependencies, or declare [] if no test can cover it`),
   ];
-  return { json: json + '\n', config, lines, todo };
 }

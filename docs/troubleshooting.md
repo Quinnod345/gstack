@@ -3081,10 +3081,10 @@ network or quota error before any test ran, or a full disk is
 [`PREGATE_ENVIRONMENT`](#pregate-environment) instead, so the machine's failure
 reads apart from the diff's.
 
-**Fix.** Pass `--allow-repo-commands`, install the tool (for a Dart package the
-message names `not on PATH: dart` or `flutter`; fvm also works when the repo pins
-it), commit the `pubspec.yaml` of a Dart package the message says has none (or
-declare `runner`), raise `--timeout`, or keep the tree still, then rerun.
+**Fix.** Pass `--allow-repo-commands`, commit the `pubspec.yaml` of a Dart
+package the message says has none (or declare `runner`), raise `--timeout`, or
+keep the tree still, then rerun. A tool missing from PATH is
+[`PREGATE_ENVIRONMENT`](#pregate-environment), with its own fix.
 
 <a id="pregate-stalled"></a>
 ### `PREGATE_STALLED`

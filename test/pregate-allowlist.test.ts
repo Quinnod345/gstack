@@ -40,6 +40,14 @@ describe('allowlist: policy validation', () => {
     expect(codes({ allowlist: [{ finding: 'env.kv', pattern: '(', reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].pattern']);
     expect(codes({ allowlist: [{ finding: 'env.kv', paths: ['../x'], reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].paths[0]']);
     expect(codes({ allowlist: { finding: 'env.kv' } })).toEqual(['PREGATE_CONFIG_INVALID:allowlist']);
+    expect(codes({ allowlist: Array.from({ length: 65 }, () => TRIAL_ENTRY) })).toContain('PREGATE_CONFIG_INVALID:allowlist');
+    expect(codes({ allowlist: [{ ...TRIAL_ENTRY, extra: 1 }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].extra']);
+    expect(codes({ allowlist: [{ finding: 'env.kv', paths: [], reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].paths']);
+    expect(codes({ allowlist: [{ finding: 'env.kv', pattern: 'a'.repeat(257), reason: 'x' }] })).toEqual(['PREGATE_CONFIG_INVALID:allowlist[0].pattern']);
+    // A pattern entry never covers a finding the scanner gave no position; a paths-only entry does.
+    const positionless: AllowlistFinding = { id: 'env.kv', category: 'secret', severity: 'MEDIUM', file: 'evals/x.json' };
+    expect(applyAllowlist([positionless], [TRIAL_ENTRY]).kept).toHaveLength(1);
+    expect(applyAllowlist([positionless], [{ finding: 'env.kv', paths: ['evals/**'], reason: 'r' }]).allowlisted).toHaveLength(1);
     expect(NON_ALLOWLISTABLE).toContain('env.value');
   });
 });

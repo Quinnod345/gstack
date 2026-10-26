@@ -90,9 +90,7 @@ export interface CheckResult extends PregateCheck {
   /** Per-file or per-item lines for the table body. */
   lines?: string[];
   remote?: RemoteObligation[];
-  /** Who is to blame for a non-pass: the branch's diff, or the machine the check ran on (lib/pregate/environment.ts). */
-  cause?: 'diff' | 'environment';
-  /** With `cause: 'environment'`: the kind and the line that proves it. */
+  /** With `cause: 'environment'` (declared on PregateCheck): the kind and the line that proves it. */
   environment?: EnvironmentCause;
 }
 

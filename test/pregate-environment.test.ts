@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { classifyEnvironment } from '../lib/pregate/environment';
+import { verifyPregate } from '../lib/pregate/index';
 import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -29,7 +30,8 @@ describe('classifyEnvironment', () => {
   //   seam=none; no_claim=completeness of the vocabulary
   test('names missing-binary, network, quota and disk, and stays null for an ordinary failure', () => {
     expect(classifyEnvironment('bash: line 1: vitest: command not found', 127)?.kind).toBe('missing-binary');
-    expect(classifyEnvironment('', 127)?.kind).toBe('missing-binary');
+    expect(classifyEnvironment('', 127)).toEqual({ kind: 'missing-binary', evidence: 'exit 127: the shell found no such command' });
+    expect(classifyEnvironment('write failed: Disk quota exceeded (EDQUOT)', 1)).toEqual({ kind: 'disk', evidence: 'write failed: Disk quota exceeded (EDQUOT)' });
     expect(classifyEnvironment("'nope' is not recognized as an internal or external command", 1)?.kind).toBe('missing-binary');
     expect(classifyEnvironment('Error: getaddrinfo ENOTFOUND registry.example.invalid', 1)).toEqual({ kind: 'network', evidence: 'getaddrinfo ENOTFOUND registry.example.invalid' });
     expect(classifyEnvironment('curl: (7) Failed to connect to host port 443: Connection refused', 7)?.kind).toBe('network');
@@ -96,17 +98,33 @@ describe('environment failures are reported apart from diff failures', () => {
   // Value: protects=guards classify the same way: a guard whose command is missing is environment, a guard that fails on its
   //   own terms is the diff; fails_when=a missing guard binary is PREGATE_GUARD_FAILED; why_new=new; seam=none; no_claim=none
   test('a guard whose binary is missing is environment; a guard that fails is the diff', () => {
-    const repo = fixture({ ...BASE_PREGATE, guards: [{ id: 'absent', when: ['lib/**'], command: 'gstack-fixture-guard-that-does-not-exist --check' }, { id: 'red', when: ['lib/**'], command: 'node -e "process.exit(2)"', fix: 'fix it' }] });
+    // The red guard's output names a rate limit and a refused connection: a guard that ran and said no is the diff's whatever it printed.
+    const repo = fixture({ ...BASE_PREGATE, guards: [{ id: 'absent', when: ['lib/**'], command: 'gstack-fixture-guard-that-does-not-exist --check' }, { id: 'red', when: ['lib/**'], command: 'node -e "console.log(\'FAIL api > retries after a rate limit (ECONNREFUSED fixture)\'); process.exit(2)"', fix: 'fix it' }] });
     commit(repo, UTIL_EDIT);
     const r = pregate(repo, ['--only', 'guards']);
     expect(r.status).toBe(EXIT.fail);
     const g = check(repo, 'guards');
     expect([g.status, g.code, g.cause]).toEqual(['fail', 'PREGATE_GUARD_FAILED', 'diff']);
     expect(g.lines.join('\n')).toContain('environment: missing-binary');
+    expect(g.lines.join('\n')).not.toContain('red environment:');
     const only = fixture({ ...BASE_PREGATE, guards: [{ id: 'absent', when: ['lib/**'], command: 'gstack-fixture-guard-that-does-not-exist --check' }] });
     commit(only, UTIL_EDIT);
     pregate(only, ['--only', 'guards']);
     const o = check(only, 'guards');
     expect([o.status, o.code, o.cause, o.environment.kind]).toEqual(['incomplete', 'PREGATE_ENVIRONMENT', 'environment', 'missing-binary']);
+  });
+});
+
+describe('verify: a mixed incomplete record stays PREGATE_INCOMPLETE and names the environment-blocked check', () => {
+  test('one environment-caused check beside a plain incomplete one is not promoted to PREGATE_ENVIRONMENT', () => {
+    const file: any = { schema_version: 1, tree: 'T', checks: [
+      { id: 'lanes', status: 'incomplete', cause: 'environment', environment: { kind: 'network', evidence: 'ENOTFOUND x' } },
+      { id: 'guards', status: 'incomplete', code: 'REPO_COMMANDS_NOT_ALLOWED' },
+    ] };
+    const v = verifyPregate('/nonexistent', file, { tree: 'T' } as any);
+    expect(v.code).toBe('PREGATE_INCOMPLETE');
+    expect(v.message).toContain('(blocked by the environment: lanes network)');
+    const all: any = { ...file, checks: [file.checks[0]] };
+    expect(verifyPregate('/nonexistent', all, { tree: 'T' } as any).code).toBe('PREGATE_ENVIRONMENT');
   });
 });

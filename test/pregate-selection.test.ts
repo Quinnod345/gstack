@@ -393,6 +393,7 @@ describe('gstack-pregate (bin)', () => {
     const ok = pregate(docs, ['--only', 'lanes', '--explain']);
     expect(ok.status).toBe(EXIT.ok);
     expect(ok.err).not.toContain('PREGATE_NO_LANE');
+    expect(ok.out).not.toContain('PREGATE_NO_POLICY');
     expect(ok.out).toMatch(/docs\/no-tests: 3 documentation file\(s\)/);
     expect(ok.out).toContain('.work/round-3-plan.md: docs/no-tests (empty lane)');
     expect(ok.out).toContain('notes/redproof.md: docs/no-tests (empty lane)');
