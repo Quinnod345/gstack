@@ -132,7 +132,7 @@ find "$_GH/sessions" -mmin +120 -type f -exec rm {} + 2>/dev/null || true
 }
 _SESSIONS=$(find "$_GH/sessions" -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
 
-_PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "true")
+_PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "core")
 _PROACTIVE_PROMPTED=$([ -f "$_GH/.proactive-prompted" ] && echo "yes" || echo "no")
 # Branch name is embedded in concatenated JSON below; strip anything outside
 # the gstack-slug BRANCH alphabet so a hostile ref name can't forge fields.
