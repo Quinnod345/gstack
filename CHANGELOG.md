@@ -6,7 +6,7 @@
 
 ### Fixed
 - **Claims Need Evidence kernel** (`scripts/resolvers/preamble/generate-evidence-directive.ts`): the evidence-kind bullet ended with "Reuse rules: Step 16." That step exists only in /ship, so in every other skill the pointer led nowhere. It's gone. /ship's Step 16 still states its own reuse rule ("Reuse a check when its inputs match"), and every tier's DONE line still asks you to name reuse.
-- **AskUserQuestion Tool resolution** (`generate-ask-user-format.ts`): "per its Unattended session block" read like a section of the skill, but the block is runtime output, and item 1 already states the unattended rule itself. The change removes the dangling pointer from item 1 and from the failure fallback's `unattended` branch. That branch keeps the destructive/irreversible carve-out: it now says itself that a destructive or irreversible option stays pending, as the printed `unattended-session` block does, because the pointer had been its only route to that rule.
+- **AskUserQuestion Tool resolution** (`generate-ask-user-format.ts`): "per its Unattended session block" read like a section of the skill, but the block is runtime output. The change removes the dangling pointer from item 1 and from the failure fallback's `unattended` branch. Both keep the destructive/irreversible carve-out the pointer used to supply: item 1 now names destructive or irreversible options among the pending gate items itself, and the fallback branch says a destructive or irreversible option stays pending, as the printed `unattended-session` block does.
 - **AskUserQuestion fallback hook** (`hosts/claude/hooks/auq-error-fallback-hook.ts`): its unattended directive ended with "GSTACK_RESULT status=gate_pending (Unattended session block).", the same section-style pointer to runtime output. The parenthetical is gone.
 - **Reality rows, eng/ceo branch** (`scripts/resolvers/plan-reality.ts`): the Completion Summary row and plan-eng-review's checklist ask for the `PLAN_REALITY` line, but the operative block never said where that line comes from. It now says `gstack-plan-reality check` prints it.
 
@@ -14,10 +14,10 @@
 - `test/honesty-kernel.test.ts` no longer requires the Step 16 pointer. It now rejects any `Step <n>` cross-reference in the kernel, which every skill renders.
 - `test/resolver-ask-user-format.test.ts` checks that item 1 states the unattended pending set with no section or block pointer, in any spelling of the unattended-session block or "per its printed". It also checks that the failure fallback's `unattended` branch keeps destructive or irreversible options pending, and that the hook's unattended directive says the same. `test/gstack-skill-start.test.ts` checks that the block gstack-skill-start actually prints keeps destructive or irreversible options pending for every skill it samples. `test/auq-error-fallback-hook.test.ts` asserts the hook's unattended directive no longer says "Unattended session block".
 - `test/plan-reality.test.ts` checks that the reality-rows block for the eng and ceo phases says its `gstack-plan-reality check` line prints `PLAN_REALITY`.
-- 89 pins in `test/fixtures/skill-md-size-allowlist.json` were moved to their new exact sizes, and every pin went down. 78 went down by 62 characters. The 11 non-Claude plan-eng-review pins went down by 38, because they also inline the 24-character "prints `PLAN_REALITY`" pointer from `review-sections.md`. Both figures already include the destructive/irreversible carve-out the fallback branch keeps. The /ship goldens were regenerated.
+- 89 pins in `test/fixtures/skill-md-size-allowlist.json` were moved to their new exact sizes, and every pin went down. 78 went down by 32 characters. The 11 non-Claude plan-eng-review pins went down by 8, because they also inline the 24-character "prints `PLAN_REALITY`" pointer from `review-sections.md`. Both figures already include the destructive/irreversible carve-out that item 1 and the fallback branch keep. The /ship goldens were regenerated.
 
 ### Gate integrity
-- No threshold, rubric, trial count, case kind or judge prompt changed. Every size pin went down (78 by 62, 11 by 38); none was raised.
+- No threshold, rubric, trial count, case kind or judge prompt changed. Every size pin went down (78 by 32, 11 by 8); none was raised.
 
 ## [1.91.230.0] - 2026-10-26
 

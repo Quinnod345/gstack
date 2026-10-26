@@ -377,7 +377,7 @@ describe('CQ3 — Tool resolution item 1 states the unattended rule with no sect
       const out = generateAskUserFormat({ ...makeCtx(), skillName });
       const item1 = out.split('\n').find(line => line.startsWith('1. **\`SESSION_KIND: spawned\` echoed**')) ?? '';
       expect(item1, 'Tool resolution item 1 must exist').not.toBe('');
-      expectMentions(item1, [['unattended', 'consent', 'unrecommended question', 'approval gate', 'pending']], `${skillName} item 1`);
+      expectMentions(item1, [['unattended', 'consent', 'destructive', 'irreversible', 'unrecommended question', 'approval gate', 'pending']], `${skillName} item 1`);
       expect(item1).not.toMatch(UNATTENDED_POINTER);
     });
   }
