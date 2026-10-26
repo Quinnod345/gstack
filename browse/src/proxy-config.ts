@@ -329,9 +329,10 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
  * an HTTP proxy: `[user:pass@]host[:port]` with a name, dotted address or
  * bracketed IPv6 host. Anything else (a scheme, a path, query or fragment
  * character, a backslash, whitespace inside, a bare number) goes to the URL
- * parser as written, so a typo such as `http:/host:3128` keeps the
- * diagnostic it had; parseProxyConfig then rejects any path, query or
- * fragment, so no part of a password can land outside the redacted userinfo.
+ * parser as written, so a bare number such as `1234` keeps the diagnostic
+ * it had and `http:/host:3128` reads as it always did; parseProxyConfig
+ * then rejects any path, query or fragment, so no part of a password can
+ * land outside the redacted userinfo.
  * A userinfo that opens with a known scheme (`https:bob@host:3128`, the
  * slash-less spelling the URL parser reads as an `https://` URL with user
  * `bob`) is a scheme, not credentials, so it is excluded too.
