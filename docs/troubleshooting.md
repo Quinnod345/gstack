@@ -4554,7 +4554,8 @@ always the branch PRs merge into; pass `-b origin/<branch>`. A squash-merged
 branch is never an ancestor of the base, so `MERGED no` beside `PR #n/merged`
 is normal and the bucket is still `safe` while the tree is clean and every
 commit is pushed; an unpushed commit or an untracked file on that branch makes
-it `review`, because deleting the worktree would lose it. The audit only reads;
+it `review`, because deleting the worktree would lose it. The audit only reads
+(its one write is the base fetch, which `--no-fetch` skips);
 a worktree it calls `safe` is still yours to remove, and a `prunable` row names
 a registered, unlocked worktree whose directory is already gone (`git worktree
 prune`); a locked one, or a `broken` row whose `.git` link is missing, reads

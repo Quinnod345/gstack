@@ -181,7 +181,8 @@ lanes the checkout carries worktrees nobody remembers. `bin/gstack-worktree-audi
 beside the main one, largest first: size, age of the last commit, whether its
 head is merged into the base, `clean` / `clean,ignored:<n>` (only gitignored
 entries such as `.env` or build output) / `wip:<n>` (tracked edits) /
-`scratch:<n>` (untracked only), `pushed` / `ahead<n>` / `no-remote` /
+`scratch:<n>` (untracked only) / `missing` (registered, directory gone) /
+`broken` (below) / `unknown` (`git status` failed), `pushed` / `ahead<n>` / `no-remote` /
 `detached` (against the local `origin/<branch>` tracking ref as last fetched),
 the PR on its branch through `gh` (`#n/open|merged|closed`, or `-`; a fork's
 PR on a same-named branch is ignored, so in a fork workflow where `origin` is
@@ -197,6 +198,7 @@ closed or merged with every commit pushed; an unpushed commit or an untracked
 file on a merged branch is `review`. Ignored entries do not change the bucket,
 but removing the worktree removes them too, so read the `ignored:<n>` count
 before you do. A squash-merged branch is never an ancestor of the base, so read
-`MERGED` together with `PR`. The audit only reads; removing a worktree
+`MERGED` together with `PR`. The audit only reads, apart from a best-effort fetch
+of the base ref that `--no-fetch` skips; removing a worktree
 (`git worktree remove <path>`) stays your call after the table. `/landing-report` points at it when the sibling table shows
 stale worktrees.
