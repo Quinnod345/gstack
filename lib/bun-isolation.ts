@@ -4,10 +4,12 @@
  * variables, and a `bunfig.toml` preload runs code before the entry point.
  * gstack runs inside the user's repository, so that directory belongs to the
  * code under review. Every Bun gstack starts passes --no-env-file and an empty
- * --config: shebangs and shell callers spell it
- * `bun --no-env-file --config=/dev/null`, TypeScript spawns use
- * bunIsolationArgs(). test/bun-entry-isolation.test.ts holds every entry point
- * to that form.
+ * --config: shebangs and skill prose spell it
+ * `bun --no-env-file --config=/dev/null`, shipped shell files spell
+ * `--config="${GSTACK_BUN_CONFIG:-/dev/null}"` (NUL when OSTYPE is msys or
+ * cygwin and cygpath is on PATH, #3415), TypeScript spawns use
+ * bunIsolationArgs().
+ * test/bun-entry-isolation.test.ts holds every entry point to that form.
  *
  * POSIX passes /dev/null. Native Windows has no /dev/null and `--config=NUL`
  * panicked Bun 1.3.10 while parsing the flag (#3085), so a TypeScript spawn on

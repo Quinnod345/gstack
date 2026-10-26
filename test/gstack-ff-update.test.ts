@@ -336,10 +336,12 @@ describe.skipIf(process.platform === 'win32')('gstack-ff-update: the install-sco
   test('the heartbeat and its sleeper are reaped when the bin exits', () => {
     const fx = makeFixture();
     release(fx, { 'notes.txt': 'top UPSTREAM\nmiddle\nbottom\n' });
-    const before = execFileSync('bash', ['-c', 'pgrep -f "^sleep 300$" | wc -l'], { encoding: 'utf8', timeout: 30_000 }).trim();
-    expect(ff(fx).status).toBe(0);
-    const after = execFileSync('bash', ['-c', 'sleep 0.3; pgrep -f "^sleep 300$" | wc -l'], { encoding: 'utf8', timeout: 30_000 }).trim();
-    expect(after).toBe(before);
+    const beat = String(3000 + (process.pid % 997));
+    const sleepers = (delay = '') => execFileSync('bash', ['-c', `${delay}pgrep -f "^sleep ${beat}$" | wc -l`], { encoding: 'utf8', timeout: 30_000 }).trim();
+    const before = sleepers();
+    expect(before).toBe('0');
+    expect(ff(fx, 'origin/main', { GSTACK_FF_HEARTBEAT_SECONDS: beat }).status).toBe(0);
+    expect(sleepers('sleep 0.3; ')).toBe(before);
   });
 });
 
