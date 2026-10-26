@@ -1713,8 +1713,12 @@ import again. Imports are idempotent, so a retry never records an answer twice.
 **Meaning.** `answer --owner-standing rec` looked for a standing approval covering autoplan
 recommendations (a `gstack-approvals` row with outcome `standing`, scope or ask naming
 `autoplan`, words or scope naming `rec` or the recommendations) in this project's records,
-local and mirror, every branch, and found none. The gate stays pending; nothing was applied.
-Exit 3.
+local and mirror, every branch, and found none that applies: either no such row exists, the
+newest row about autoplan recommendations refuses them (`never take the recommendations`, a
+scope that carves autoplan out; the line quotes it, and a later grant supersedes it), or the
+run's plan is not inside a git repository, so no project record can be named (the project is
+the repository the plan's physical path was in at init). A row whose id or date is not the
+recorded shape is never cited. The gate stays pending; nothing was applied. Exit 3.
 
 **Fix.** Relay the gate to the owner (or Captain) and answer with their reply through
 `--reply` and `--owner-reply`. For the next gate, the Captain records the owner's standing

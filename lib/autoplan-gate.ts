@@ -348,7 +348,7 @@ export function standingAnswer(state: RunState, gateRev: number, answeredBy: str
   if ((list.rec_rev ?? 0) > 0 || edited.length) throw inapplicable(`\`recommend\` changed this gate (rec_rev=${list.rec_rev ?? 0}${edited.length ? `; ${edited.map(i => `${i.id} by ${i.recommended_by}`).join(', ')}` : ''}), so its recommendations are no longer the reviewers' alone; relay the render and answer with --reply and --rec-hash`);
   const r = answerGate(state, gateRev, 'rec', answeredBy, { recHash: recHash(list), ownerReply: standing.words, standing });
   const flat = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ');
-  r.lines.unshift(`STANDING: ${standing.id} (${standing.date}, ${flat(standing.by)}; ${flat(standing.source)}) ${JSON.stringify(flat(standing.words))} — scope: ${flat(standing.scope)}`);
+  r.lines.unshift(`STANDING: ${flat(standing.id)} (${flat(standing.date)}, ${flat(standing.by)}; ${flat(standing.source)}) ${JSON.stringify(flat(standing.words))} — scope: ${flat(standing.scope)}`);
   return r;
 }
 

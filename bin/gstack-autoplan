@@ -33,7 +33,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { amendmentSteps, answerGate, closeDeferred, finishGate, recommendGate, standingAnswer } from '../lib/autoplan-gate';
 import { gateCost, gateCostPayload, renderGateCost, type GateCost } from '../lib/autoplan-gate-cost';
-import { locate, standingRecApproval } from '../lib/approval-record';
+import { locate, standingRecApproval, type ApprovalRow } from '../lib/approval-record';
 import { attemptEstimate, changeBudget, liftStop } from '../lib/autoplan-budget';
 import { ANSWERED_BY_RE } from '../lib/gate-list';
 import { checkpointLines, checkpointRun, restoreCheckpoint, type CheckpointMoment } from '../lib/autoplan-checkpoint';
@@ -292,7 +292,6 @@ async function doRun(out: string, rest: string[], json: boolean): Promise<number
     const state = readState(out);
     if (state.status !== 'awaiting_result') {
       if (!json) process.stdout.write([...statusLines(state), ...(state.status === 'gate_pending' ? gateLines(state, out) : [])].join('\n') + '\n');
-      else if (state.status === 'gate_pending') process.stdout.write(JSON.stringify({ run: state.run, status: state.status, gate_rev: state.gate_rev ?? null, ...gateCostField(state, out), out }) + '\n');
       process.stdout.write(resultLineFor(state.status, out) + '\n'); return EXIT.ok;
     }
     const phase = state.phase_order.find(p => state.phases[p]?.snapshot && !state.phases[p]?.closed_at)!;
@@ -371,17 +370,21 @@ async function main(argv: string[]): Promise<number> {
       const ownerReply = replyFile !== undefined ? fs.readFileSync(replyFile, 'utf8') : ownerFlag === '-' ? fs.readFileSync(0, 'utf8') : ownerFlag;
       return mutating(out, json, () => {
         const state = readState(out);
-        let standing: ReturnType<typeof standingRecApproval>;
+        let standing: ApprovalRow | undefined;
         if (standingFlag !== undefined) {
           // The record is the run's project's, never the caller's cwd: a lane answering project B's gate from
-          // project A's checkout must not cite A's standing words. The plan under review names the repository.
+          // project A's checkout must not cite A's standing words. The project was fixed at init from the plan's
+          // physical path (project_root); a run from before that field resolves it the same way now.
           const planFile = state.plan_input ?? state.plan_source;
-          const runRepo = planFile ? repoRoot(path.dirname(planFile)) : undefined;
+          const runRepo = state.project_root ?? (planFile && fs.existsSync(planFile) ? repoRoot(path.dirname(fs.realpathSync(planFile))) : undefined);
           if (!runRepo) throw new RunError('STANDING_APPROVAL_ABSENT', `the run's plan (${planFile ?? 'unknown'}) is not inside a git repository, so no project approval record can be resolved for it`, 3);
           const loc = locate({ cwd: runRepo, env: process.env, branch: flag(rest, '--branch') });
           if ('code' in loc) throw new RunError(loc.code, loc.message, 3);
-          standing = standingRecApproval(loc);
-          if (!standing) throw new RunError('STANDING_APPROVAL_ABSENT', `no standing approval covering autoplan recommendations in ${[loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : []).join(' or ')} (project ${loc.slug} at ${runRepo}, branch ${loc.branch})`, 3);
+          const found = standingRecApproval(loc);
+          const where = `${[loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : []).join(' or ')} (project ${loc.slug} at ${runRepo}, branch ${loc.branch})`;
+          if (found.refusal) throw new RunError('STANDING_APPROVAL_ABSENT', `the newest standing instruction about autoplan recommendations refuses them: ${found.refusal.id} (${found.refusal.date}) ${JSON.stringify(found.refusal.words.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' '))}; relay the gate instead (record in ${where})`, 3);
+          standing = found.grant;
+          if (!standing) throw new RunError('STANDING_APPROVAL_ABSENT', `no standing approval covering autoplan recommendations in ${where}`, 3);
         }
         const r = standing ? standingAnswer(state, Number(rev), by, standing) : answerGate(state, Number(rev), reply!, by, { recHash: flag(rest, '--rec-hash'), ownerReply });
         writeState(state);

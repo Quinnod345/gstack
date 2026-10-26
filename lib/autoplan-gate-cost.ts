@@ -7,10 +7,12 @@
  * `unknown` to it (kept at its reservation in worst_case), so the line says so
  * and points at the host's own cost view instead of inventing a credit figure.
  * The reopen estimate is an upper bound (`recReopens`): two voices per reopened
- * phase when the outside voice is on, at the per-voice estimate the run has
- * been reserving.
+ * or newly added phase when the outside voice is on, at the per-voice estimate
+ * the run has been reserving.
  */
 import * as path from 'node:path';
+import { PHASES } from './autoplan-prompts';
+import { readDecisions } from './autoplan-state';
 import type { GateList } from './gate-list';
 import { readLedger, summarize, type SpendSummary } from './spend-ledger';
 
@@ -26,26 +28,37 @@ export interface GateCost {
   rec_more_usd: number;
 }
 
-export interface GateCostRun { phase_order: string[]; outside_enabled: boolean; spend_cap_usd: number | null }
+export interface GateCostRun { phase_order: string[]; outside_enabled: boolean; spend_cap_usd: number | null; scope_flags?: Record<string, boolean | undefined> }
 
 const usd = (n: number) => n.toFixed(2);
 
 /**
- * The phases a `rec` can reopen, as an upper bound from the answer and revise rules: a recommended
- * plan change is absorbed by `revise`, which reopens every phase whose snapshot the edited plan
- * changes (any of them, so all of them are counted); a recommended round grant (`cap` item, option
- * `b`) reopens its phase and Eng. Phases already at their cap are not reopened by revise, but the
- * bound does not subtract them: the gate lists their delta as its own item instead.
+ * The phases a `rec` can reopen, as an upper bound from the answer and revise rules. The effective
+ * choice per item is what `rec` would record: an answer already given at this gate revision
+ * (`prior`, as answerGate reads it from decisions.jsonl) wins over the recommendation. A plan
+ * change is absorbed by `revise`, which reopens every phase whose snapshot the edited plan changes
+ * and re-detects scope, so it can add a phase the run skipped: every phase the scope flags do not
+ * pin off is counted (`--no-ui` keeps Design out, `--no-dx` keeps DX out). A round grant (`cap`
+ * item, option `b`) reopens its phase and Eng. Phases already at their cap are not reopened by
+ * revise, but the bound does not subtract them: the gate lists their delta as its own item instead.
  */
-export function recReopens(list: GateList, phaseOrder: string[]): string[] {
+export function recReopens(list: GateList, run: Pick<GateCostRun, 'phase_order' | 'scope_flags'>, prior: Record<string, string> = {}): string[] {
+  const flags = run.scope_flags ?? {};
+  const bound = PHASES.filter(p => run.phase_order.includes(p) || (p === 'design' ? flags.ui !== false : p === 'dx' ? flags.dx !== false : true));
   const named = new Set<string>();
   for (const item of list.items) {
     if (item.id === 'p1' || item.carried) continue;
-    if (item.cap && item.recommended === 'b') { named.add(item.cap.phase); if (phaseOrder.includes('eng')) named.add('eng'); continue; }
+    const choice = prior[item.id] ?? item.recommended;
+    if (item.cap && choice === 'b') { named.add(item.cap.phase); if (run.phase_order.includes('eng')) named.add('eng'); continue; }
     if (item.reopens === false) continue;
-    if (item.options.find(o => o.key === item.recommended)?.changes_plan) for (const p of phaseOrder) named.add(p);
+    if (item.options.find(o => o.key === choice)?.changes_plan) for (const p of bound) named.add(p);
   }
-  return phaseOrder.filter(p => named.has(p));
+  return PHASES.filter(p => named.has(p));
+}
+
+/** The answers already recorded at this gate revision, keyed as parseReply's `prior` is (item id → option). */
+export function priorChoices(outDir: string, gateRev: number): Record<string, string> {
+  return Object.fromEntries(readDecisions(outDir).filter(r => r.gate_rev === gateRev && r.chosen != null && r.status !== 'pending' && r.label).map(r => [r.label!.toLowerCase(), r.chosen!]));
 }
 
 export function gateCost(outDir: string, list: GateList, run: GateCostRun, o: { defaultPerVoiceUsd?: number } = {}): GateCost {
@@ -53,7 +66,7 @@ export function gateCost(outDir: string, list: GateList, run: GateCostRun, o: { 
   const summary = summarize(ledger);
   const seen = [...ledger.settled.map(s => s.reserved_usd), ...ledger.reserved.map(r => r.estimate_usd)].filter(n => n > 0);
   const per_voice_usd = seen.length ? seen[seen.length - 1]! : o.defaultPerVoiceUsd ?? 0;
-  const reopens = recReopens(list, run.phase_order);
+  const reopens = recReopens(list, run, priorChoices(outDir, list.gate_rev));
   const voices = reopens.length * (run.outside_enabled ? 2 : 1);
   return { summary, attempts: ledger.settled.length + ledger.reserved.length, reopens, voices, per_voice_usd, rec_more_usd: Math.round(voices * per_voice_usd * 100) / 100 };
 }

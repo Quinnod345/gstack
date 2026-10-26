@@ -116,17 +116,30 @@ export function captainApprovalsDir(env: Env): string | undefined {
  * standing, the ask or scope naming autoplan, and the owner's own words naming the recommendations
  * without a negation (`never take the recommendations` is a standing refusal, not an approval).
  */
-export const coversAutoplanRec = (r: ApprovalRow): boolean =>
-  r.outcome === 'standing' && /\bautoplan\b/i.test(`${r.ask} ${r.scope}`)
-  && /\b(rec|recommendations?|recommended)\b/i.test(r.words) && !/\b(never|not|no|don'?t|do not|without|except)\b/i.test(r.words);
+const NEGATION_RE = /\b(never|not|no|don[’']?t|do not|without|except|excluding|unless|reject|refuse|decline|stop|revoke|withdraw)\b/i;
+/** A standing row that names autoplan and the recommendations at all: a grant or a refusal, so the newest one decides. */
+export const mentionsAutoplanRec = (r: ApprovalRow): boolean =>
+  r.outcome === 'standing' && /\bautoplan\b/i.test(`${r.ask} ${r.scope}`) && /\b(rec|recommendations?|recommended)\b/i.test(r.words);
+/** The words withhold or the scope carves autoplan out (`all reviews except autoplan`). */
+export const refusesAutoplanRec = (r: ApprovalRow): boolean =>
+  NEGATION_RE.test(r.words) || /\b(except|excluding|not|never|unless|but not)\b[^.;]*\bautoplan\b/i.test(r.scope);
+export const coversAutoplanRec = (r: ApprovalRow): boolean => mentionsAutoplanRec(r) && !refusesAutoplanRec(r);
 
+/** A row an agent may cite: the generated id shape, a calendar date and plain string fields, so no stored row can forge an output line. */
+const STANDING_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+export const citableRow = (r: ApprovalRow): boolean =>
+  STANDING_ID_RE.test(r.id) && DATE_RE.test(r.date) && ['ask', 'words', 'by', 'scope', 'source', 'branch', 'recorded_at'].every(k => typeof r[k as keyof ApprovalRow] === 'string');
+
+export interface StandingLookup { grant?: ApprovalRow; refusal?: ApprovalRow }
 /**
- * The newest standing approval covering autoplan recommendations, from this branch's record
- * and every other branch's record of the same project (local, mirror and the other mirror roots):
- * a Captain records the owner's standing words once, on whatever branch it had checked out, and
- * every lane cites it.
+ * The newest standing instruction about autoplan recommendations, from this branch's record and
+ * every other branch's record of the same project (local, mirror and the other mirror roots): a
+ * Captain records the owner's standing words once, on whatever branch it had checked out, and
+ * every lane cites it. The newest row decides: a later refusal (`never take the recommendations`)
+ * blocks every older grant instead of being filtered away, and a row that fails `citableRow` is
+ * never cited.
  */
-export function standingRecApproval(loc: StoreLocation): ApprovalRow | undefined {
+export function standingRecApproval(loc: StoreLocation): StandingLookup {
   const rows: ApprovalRow[] = [];
   for (const dir of [loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : [])) {
     let names: string[] = [];
@@ -134,7 +147,9 @@ export function standingRecApproval(loc: StoreLocation): ApprovalRow | undefined
     for (const n of names) rows.push(...readRows(path.join(dir, n)));
   }
   const seen = new Set<string>();
-  return rows.filter(r => coversAutoplanRec(r) && !seen.has(r.id) && seen.add(r.id)).sort((a, b) => b.date.localeCompare(a.date) || b.recorded_at.localeCompare(a.recorded_at))[0];
+  const newest = rows.filter(r => mentionsAutoplanRec(r) && citableRow(r) && !seen.has(r.id) && seen.add(r.id)).sort((a, b) => b.date.localeCompare(a.date) || b.recorded_at.localeCompare(a.recorded_at))[0];
+  if (!newest) return {};
+  return refusesAutoplanRec(newest) ? { refusal: newest } : { grant: newest };
 }
 
 function readRows(file: string | undefined): ApprovalRow[] {
