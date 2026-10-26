@@ -784,7 +784,8 @@ Each item was deferred with a reason during the `/claude-api prompt-audit` clean
   (landed, but one provider refusal on corpus item f03 under the new prompt,
   matched by one under the old prompt) and the cookie workflow judge (GSTA-91:
   held on one new false pass on a07, zero new-request format errors, so it stays
-  on today's request). Reuse `test/fixtures/judge-calibration`
+  on today's request; today's request itself false-passes a07 in `old-b` and on
+  both valid `old-a` samples, and a08 in `old-a`, so the prose step targets those). Reuse `test/fixtures/judge-calibration`
   and `scripts/judge-calibration.ts`. Priority P3. Effort M.
 - **Uncalibrated workflow-judge configurations** — build a corpus and calibrate
   schema transport for the frontier configuration (review/SKILL.md workflow); it

@@ -11,7 +11,8 @@ Each `<config>/corpus.json` holds 24 items: 8 clearly passing, 8 clearly failing
 has been sampled, with the same frozen requests. `expected` is the verdict a careful
 grader would reach under the eval's pass rule (`pass_rule`). The author labeled every
 item; a separate agent run then labeled every item blind (shuffled ids, no author
-labels) before any schema was written. `second_review` records that verdict, and each
+labels) before any schema was written (for `cookie-workflow`, before any request with the
+schema was sent). `second_review` records that verdict, and each
 disagreement carries `author_expected` and the third reviewer's `adjudication`.
 
 `scripts/judge-calibration.ts` runs the comparison and `scripts/judge-calibration-configs.ts`
@@ -21,7 +22,7 @@ and priced usage, and `comparison-1.result.json` holds the flip rates, agreement
 false passes, error rates, p95 latency, landing decision and the UC3 prose-step
 trigger. `manifest.json` prices every planned call before dispatch.
 
-## Comparison (1) results (2026-10-03, `claude-fable-5-1`)
+## Comparison (1) results (2026-10-03, `claude-fable-5-1`, unless the row says otherwise)
 
 Flips are panel-verdict differences on items where both panels completed: old-vs-old
 is `old-a` vs `old-b`, new-vs-old is `new` vs `old-a`. Agreement is items whose panel
@@ -53,7 +54,8 @@ output tokens before the manifest was priced. Total W2 spend: $90.47 of $115.
 `cookie-workflow` (GSTA-91, separately funded) is held and stays on today's request. Its one
 new false pass, a07, scored 4/4/4 on all three new samples and on all three `old-b` samples;
 `old-a`'s a07 panel is incomplete because one old sample returned invalid JSON (the defect the
-schema transport removes), so the comparison counts it against the new request only. The old
+schema transport removes), so the comparison counts it against the new request only. Both
+valid `old-a` a07 samples also scored 4/4/4. The old
 request failed to parse 2 of 144 samples; the new one 0 of 72. The failed landing condition
 triggers the UC3 prose step, which is deferred to TODOS. Its `manifest.json` entry was priced
 separately (`priced_at`, `funding`) and is maintained by hand: the `manifest` command rewrites
