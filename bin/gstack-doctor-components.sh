@@ -294,6 +294,7 @@ gstack_result_anchor() {
     REVIEW_SCOPE_INPUT) printf '%s' 'review-scope-input' ;;
     REVIEW_SCOPE_RANGE) printf '%s' 'review-scope-range' ;;
     RECEIPT_CARRY_REFUSED) printf '%s' 'receipt-carry-refused' ;;
+    PROSE_LINT_FOUND) printf '%s' 'prose-lint-found' ;;
     RECEIPT_CARRY_PRODUCT_CHANGED) printf '%s' 'receipt-carry-product-changed' ;;
     APPROVAL_RECORD_INVALID) printf '%s' 'approval-record-invalid' ;;
     APPROVAL_RECORD_SECRET) printf '%s' 'approval-record-secret' ;;

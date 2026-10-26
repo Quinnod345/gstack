@@ -95,3 +95,13 @@ design is not a defect, missing context; independent agreement as the strongest 
 `NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
 `docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
 text is carried; this entry is a courtesy.
+
+## pstack (unslop) — Copyright Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/skills/unslop/SKILL.md`, at 99b609a7). The
+word lists in `lib/prose-lint.ts` (the autopilot vocabulary and the metaphor nouns with
+their plain replacements) are facts taken from unslop's rules 7 and 26; the rules a
+regular expression decides (the "not just X, but Y" shape, the mid-sentence colon, the
+bold label that restates its line, arrows and dropped articles) are written in gstack's
+words, scoped to the CHANGELOG entry and PR body /ship writes, and report-only elsewhere.
+No sentence is copied, so no license text is carried; this entry is a courtesy.

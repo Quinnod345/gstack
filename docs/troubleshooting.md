@@ -4466,6 +4466,34 @@ every flag and code.
 
 **Fix.** Rerun once; if it repeats, report the printed frame to the gstack maintainers.
 
+## Prose lint (gstack-prose-lint)
+
+`bin/gstack-prose-lint` reads the prose /ship is about to publish, a CHANGELOG
+entry (Step 13) and the PR body drafts (Step 19), and the quality-gate workflow
+runs it over `CHANGELOG.md`'s `[Unreleased]` block. It decides only what a
+regular expression can: autopilot vocabulary, "not just X, but Y", metaphor
+nouns, a colon used as a conjunction, a bold label that restates its line, an
+arrow or a dropped article standing in for a sentence. Fenced code, inline code,
+URLs and HTML comments are never read. Everywhere else (a template, a doc, this
+file) it is a report: run it, read it, keep your em dashes.
+
+<a id="prose-lint-found"></a>
+### `PROSE_LINT_FOUND`
+
+**Meaning.** A gated run (`--gate`) found at least one tell in the text it was
+given. Each `PROSE: <file>:<line> <rule> "<match>" (<hint>)` line above the
+trailer names the rule and what to write instead; `PROSE_LINT: found=<n>` counts
+them. With `--unreleased` only the `## [Unreleased]` block was read; with
+`--base <ref>` only the lines the working tree added since the merge base.
+
+**Fix.** Rewrite each named line in the draft the way its hint says (a measurement
+such as `1.6740 → 1.7010` and the `before → after` heading are not findings), then
+rerun the same command. A finding inside a verbatim tool section of a PR body
+(an approvals table, issue links, a rendered review note) is fixed at its source
+or left as it is and named in the completion message, never edited by hand in the
+body. A rule that keeps flagging correct prose is a bug in `lib/prose-lint.ts`:
+file it with the sentence.
+
 ## Quick answers
 
 The short troubleshooting entries that used to live in the README. Each names the symptom and the fix; the sections above cover every gate message in depth.
