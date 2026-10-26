@@ -275,7 +275,7 @@ reach for it.
 
 ```bash
 # One-time: build the binary (browse/dist/browse, ~58MB)
-bun install && bun run build
+bun install --production --frozen-lockfile && bun run build
 
 # Set $B once and forget about it
 B=./browse/dist/browse           # or ~/.claude/skills/gstack/browse/dist/browse

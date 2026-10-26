@@ -1,20 +1,27 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // gstack-design-craft — free craft check for a generated page (/design-html Step 4).
 //
-// Usage: gstack-design-craft <file.html>
+// Usage: gstack-design-craft <file.html> [--accepted <finalized.json>]
 //
 // Prints one "CRAFT_CHECK: <id> <count> <fix>" line per tell, then
 // "CRAFT_RESULT: clean" (exit 0) or "CRAFT_RESULT: <n> issue(s)" (exit 1).
-// Exit 2: usage error, a non-HTML file, an unreadable or empty file. Head and
-// navigation rules run only on a full HTML document; a fragment gets the copy
-// and code rules alone.
+// --accepted reads the craft_exceptions a finalized.json recorded: a tell an
+// exception covers (same id, count at most the accepted count) prints as
+// "CRAFT_ACCEPTED: <id> <count> <reason>" and does not fail the check; the
+// result line then adds " (<k> accepted)" or ", <k> accepted".
+// Exit 2: usage error, a non-HTML file, or an unreadable or empty file, with
+// nothing checked; or an unreadable or malformed exceptions file, after a
+// warning and a full check with no exceptions accepted, so a bad record never
+// hides the page's tells. Head and navigation rules run only on a full HTML
+// document; a fragment gets the copy and code rules alone.
 
 import { readFileSync } from 'fs';
-import { checkCraft, formatCraft } from '../lib/design-craft';
+import { acceptFindings, checkCraft, formatCraft, parseCraftExceptions, type CraftException } from '../lib/design-craft';
 
-const file = process.argv[2];
-if (!file) {
-  console.error('Usage: gstack-design-craft <file.html>');
+const USAGE = 'Usage: gstack-design-craft <file.html> [--accepted <finalized.json>]';
+const [file, flag, acceptedFile, ...rest] = process.argv.slice(2);
+if (!file || (flag !== undefined && (flag !== '--accepted' || !acceptedFile)) || rest.length > 0) {
+  console.error(USAGE);
   process.exit(2);
 }
 if (!/\.html?$/i.test(file)) {
@@ -32,6 +39,16 @@ if (source.trim() === '') {
   console.error(`gstack-design-craft: ${file} is empty; nothing was checked`);
   process.exit(2);
 }
-const findings = checkCraft(source);
-console.log(formatCraft(findings));
-process.exit(findings.length === 0 ? 0 : 1);
+let exceptions: CraftException[] = [];
+let badExceptions = false;
+if (acceptedFile) {
+  try {
+    exceptions = parseCraftExceptions(readFileSync(acceptedFile, 'utf-8'));
+  } catch (err) {
+    console.error(`gstack-design-craft: cannot use exceptions from ${acceptedFile}: ${(err as Error).message}; checked with none accepted`);
+    badExceptions = true;
+  }
+}
+const { issues, accepted } = acceptFindings(checkCraft(source), exceptions);
+console.log(formatCraft(issues, accepted));
+process.exit(badExceptions ? 2 : issues.length === 0 ? 0 : 1);

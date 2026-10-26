@@ -183,7 +183,10 @@ a pass.
 
 It refuses (`QUEUE_NOT_READY`) when the working tree has tracked edits, HEAD
 is not the PR's pushed head, CI at that exact head is not green, or the pregate
-result is not a current pass. Send the block as printed.
+result is not a current pass, and (`QUEUE_RECEIPT_MISSING`,
+`QUEUE_RECEIPT_STALE`) when the PR body carries no /ship receipt for that
+head: /ship runs before every READY ([details](#ship-before-ready)). Send the
+block as printed.
 
 **2. Lane behind another PR: gate ahead.** Gate the tree the queue will have
 once the predecessor lands, while it is still open:
@@ -317,13 +320,53 @@ are mirrored to origin as git notes on `refs/notes/gstack-trains` before any
 remote effect, so a lost machine loses nothing: `train status` on a clean
 state root rebuilds them. `GSTACK_SHIP_QUEUE_NOW` pins the clock for tests.
 
+<a id="ship-before-ready"></a>
+**0. Lane: /ship before READY.** Every READY follows a /ship run on the branch
+at the head being READY'd, including a re-READY after a push (Garry,
+2026-10-25: "we should really be using the gstack ship skill before merging
+PRs"). /ship runs the tests, both reviews, the gate-integrity list and the docs
+audit, and ends by writing its receipt into the PR body
+(`gstack-ship-receipt write --pr <n> … --body <file>`, posted with
+`gstack-post pr-body`). Under `queue_mode: stamp-at-merge` it bumps no version
+and never merges or merges main into the branch; the train still stamps at the
+slot. The queue enforces this at every step from the PR body alone:
+
+- `ready` refuses with `QUEUE_RECEIPT_MISSING` when the body has no valid
+  receipt and with `QUEUE_RECEIPT_STALE` when the receipt's `head` is not the
+  head being READY'd (or its `pr` is another PR); the informational
+  `SHIP_RECEIPT:` line still prints. There is no flag around it.
+- `train build` refuses a pin whose PR has no current receipt with the same
+  codes, naming the PR, before anything is written, pushed or dispatched,
+  `--dry-run` included.
+- `verify --train` refuses the slot with the same codes before printing
+  `MERGE_CONDITION`.
+
+**The stamp keeps the pin's receipt.** The slot's stamp commit changes only
+stamp files (and, from slot 2 on, merges main into the pin), so no /ship runs
+on it: the receipt written for the pinned head stays the binding one. `verify
+--train` accepts a receipt whose `head` is either the slot's pinned head or
+the current head, and the re-READY after the stamp push (`ready` at the stamp
+commit) accepts the receipt for the pin when HEAD is the pin plus stamp files,
+or (from slot 2 on) the pin merged with main plus stamp files on top of the
+merge; any other head is `QUEUE_RECEIPT_STALE`, including a merge of main with
+no stamp above it (a lane's own push under rule 14) and a merge whose pin side
+carries an edit made after /ship.
+
+This is a process gate, not an authenticity check: the receipt is a block in
+the PR body, which the PR author writes, so the codes prove that /ship was run
+and recorded for this head, not that nobody typed the block by hand. Fork heads
+are already refused (`QUEUE_TRAIN_UNTRUSTED`). The `ship-run.json` that
+`gstack-ship-receipt result` writes under the lane's state root is a
+normalized copy of that same block bound to the head it was run at, not an
+authenticity proof either.
+
 **1. Lane: READY with a screen choice.** Under a train policy READY needs an
 explicit choice:
 
 ```bash
 gstack-ship-queue ready --pr 42                    # prints SCREEN: lines and the recommendation, refuses
 gstack-ship-queue ready --pr 42 --no-screen        # READY receipt; the PR rides unscreened
-gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA
+gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (QUEUE_SCREEN_STALE_REF when GitHub's merge ref lags the head)
 ```
 
 Without a choice it prints the `SCREEN:` selection (with
@@ -339,7 +382,17 @@ dispatches `gate_workflow` with `screen_pr`, `screen_merge_sha` (the
 the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
-it.
+it. Before dispatching, `ready` fetches the merge ref and requires its second
+parent to be the PR head: a missing or lagging merge ref (GitHub stops
+recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
+included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
+no cases and reports success. A finished screen that planned no cases (no
+`paid-plan` artifact, which a superseded run never uploads, or a plan manifest
+with nothing planned) is never followed as a screen: `ready --screen`
+dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
+no cases …; counted as not-run` and seats the slot unscreened. A plan the
+queue cannot read keeps the slot screened, with `SCREEN: #<n> <reason>;
+counted as screened, unverified`.
 
 **2. Coordinator: build.** Name the pins exactly as READY reported them:
 
@@ -363,8 +416,10 @@ has waited `fill_hours` (`QUEUE_TRAIN_WAITING`); `--urgent` dispatches a
 one-PR train at once. The same pins on the same base return the live train
 instead of a second one; `train build --train <nonce>` resumes a train from
 its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork
-head), `QUEUE_TRAIN_MOVED` (a head moved from its pin), `QUEUE_NOT_READY` (no
-READY receipt at that head), `QUEUE_TRAIN_CONFLICT` (the printed
+head), `QUEUE_TRAIN_MOVED` (a head moved from its pin),
+`QUEUE_RECEIPT_MISSING` and `QUEUE_RECEIPT_STALE` (the PR body has no /ship
+receipt for the pin; see [/ship before READY](#ship-before-ready)),
+`QUEUE_NOT_READY` (no READY receipt at that head), `QUEUE_TRAIN_CONFLICT` (the printed
 `QUEUE_TRAIN_CONFLICT: train <id> stopped at #<pr> (conflicts: <files>) after
 merging #<a>,#<b>; nothing dispatched, no branch pushed; fix: …` line names
 the build without that PR) and `QUEUE_TRAIN_FREE_RED` (free tests red,
