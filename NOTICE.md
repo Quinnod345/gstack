@@ -95,3 +95,20 @@ design is not a defect, missing context; independent agreement as the strongest 
 `NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
 `docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
 text is carried; this entry is a courtesy.
+
+## pstack, ported scripts — Copyright (c) 2026 Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/` at 99b609a7). License text:
+`licenses/MIT-pstack.txt`. Unlike the ideas entry above, these two are code
+ports, so the license text is carried and each file's header names its source.
+
+Derived, modified:
+
+- `bin/gstack-decision-trail`: `pstack/skills/show-me-your-work/scripts/log.sh`
+  in TypeScript: the header-once append, the one-line cells and the
+  spreadsheet formula guard (a leading quote on cells starting with `=`, `+`,
+  `-` or `@`). The `start` subcommand and the `--run` admission check are
+  gstack's.
+- `bin/gstack-worktree-audit`: `pstack/skills/poteto-mode/scripts/worktree-audit.sh`,
+  with the PR column read through `gh --jq` alone, the chat column read from
+  Claude Code's per-worktree transcript directory, and a `--no-fetch` flag.

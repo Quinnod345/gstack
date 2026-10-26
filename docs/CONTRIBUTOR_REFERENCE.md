@@ -172,3 +172,20 @@ Option C (this section) keeps secret-distribution scope tight.
 If the user asks you to skip the move (e.g., "just leave it as a fork PR"),
 respect that — eval CI will fail with empty-env auth, but check-freshness,
 workflow-lint, and windows-tests will still pass on the fork PR.
+
+## Auditing Conductor worktrees
+
+Conductor workspaces are git worktrees, so after a few weeks of parallel
+lanes the checkout carries worktrees nobody remembers. `bin/gstack-worktree-audit
+[-b origin/<base>] [--no-fetch] [repo-path]` prints one TSV row per worktree
+beside the main one, largest first: size, age of the last commit, whether its
+head is merged into the base, `clean` / `wip:<n>` (tracked edits) /
+`scratch:<n>` (untracked only), `pushed` / `ahead<n>` / `no-remote` /
+`detached`, the PR on its branch through `gh` (`#n/open|merged|closed`, or
+`-`), the date of the newest Claude Code chat that ran in it, and a bucket:
+`hold-wip`, then `hold-open-pr`, then `verify-recent-chat` (a chat in the last
+four days), then `safe` (merged, or its PR is closed or merged), else
+`review`. A squash-merged branch is never an ancestor of the base, so read
+`MERGED` together with `PR`. The audit only reads; removing a worktree
+(`git worktree remove <path>`) stays your call after the table. `/landing-report`
+points at it when the sibling table shows stale worktrees.
