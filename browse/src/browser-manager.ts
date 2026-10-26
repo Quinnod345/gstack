@@ -25,7 +25,7 @@ import { TabSession, type RefEntry } from './tab-session';
 import { resolveChromiumProfile, cleanSingletonLocks, resolveConfig } from './config';
 import { ensureProjectProfile } from './chromium-profiles';
 import { launchWithXProtectHeal } from './xprotect-heal';
-import { DIRECT_PROXY_ARG } from './proxy-config';
+import { DIRECT_PROXY_ARG, forcesDirect } from './proxy-config';
 import { readPidStartTime, shouldSpawnXvfb, spawnFreeXvfb, xvfbInstallHint, type XvfbHandle } from './xvfb';
 import { withCdpSession } from './cdp-bridge';
 import { resultLine } from '../../lib/result-codes';
@@ -620,10 +620,11 @@ export class BrowserManager {
    * a session browse resolved to direct was exposed: `BROWSE_PROXY_URL=direct`
    * on a machine with HTTPS_PROXY set still routed every `goto` through that
    * proxy (#3440 item 8). Direct now means DIRECT_PROXY_ARG on every launch
-   * path (headless, the extension context, headed, handoff).
+   * path (headless, the extension context, headed, handoff) wherever Chromium
+   * would otherwise pick a proxy browse did not resolve (forcesDirect).
    */
   private proxyLaunchArgs(): string[] {
-    return this.proxyConfig ? [] : [DIRECT_PROXY_ARG];
+    return !this.proxyConfig && forcesDirect(process.env) ? [DIRECT_PROXY_ARG] : [];
   }
 
   /**

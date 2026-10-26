@@ -4,13 +4,15 @@
  * own (HTTPS_PROXY, HTTP_PROXY, ALL_PROXY) never win silently. Two logging
  * CONNECT proxies on loopback stand in for the environment's proxy and a
  * configured one; a name that does not resolve is the target, so a CONNECT at
- * a proxy is the only way the navigation can get past DNS.
+ * a proxy is the only way the navigation can get past DNS. Linux only: that is
+ * where Chromium reads the variables (forcesDirect); macOS and Windows follow
+ * the system proxy settings, which proxy-config.test.ts covers as a unit.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
-import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { closeConnectProxies, connectProxy } from './helpers/connect-proxy';
 
 const CLI = path.resolve(import.meta.dir, '../src/cli.ts');
 const TARGET = 'proxied.gstack-3440.test';
@@ -18,20 +20,6 @@ const TARGET = 'proxied.gstack-3440.test';
 let scratch = '';
 let stateFile = '';
 let daemonLog = '';
-const proxies: Array<{ server: http.Server; url: string; connects: string[] }> = [];
-
-async function connectProxy() {
-  const connects: string[] = [];
-  const server = http.createServer((_req, res) => { res.writeHead(502); res.end(); });
-  server.on('connect', (req, socket) => {
-    connects.push(req.url ?? '');
-    socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
-  const entry = { server, url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, connects };
-  proxies.push(entry);
-  return entry;
-}
 
 beforeAll(() => {
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-proxy-direct-'));
@@ -47,9 +35,11 @@ afterAll(async () => {
   if (fs.existsSync(stateFile)) {
     try { process.kill(JSON.parse(fs.readFileSync(stateFile, 'utf8')).pid, 'SIGKILL'); } catch {}
   }
-  for (const { server } of proxies) await new Promise<void>(resolve => server.close(() => resolve()));
+  await closeConnectProxies();
   fs.rmSync(scratch, { recursive: true, force: true });
 });
+
+const readDaemonLog = () => fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf8') : '';
 
 async function browse(args: string[], extraEnv: Record<string, string>) {
   const env: Record<string, string> = {};
@@ -63,16 +53,18 @@ async function browse(args: string[], extraEnv: Record<string, string>) {
     BROWSE_STATE_FILE: stateFile,
     BROWSE_PARENT_PID: '0',
   }, extraEnv);
+  // browse-daemon.log is append-mode and shared by every case, so `log` is
+  // only what this invocation's daemon wrote: an earlier case's line can never
+  // satisfy a later case's assertion.
+  const logStart = readDaemonLog().length;
   const cli = Bun.spawn([process.execPath, CLI, ...args], { cwd: scratch, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => cli.kill('SIGKILL'), 60_000);
   const [code, stdout, stderr] = await Promise.all([cli.exited, new Response(cli.stdout).text(), new Response(cli.stderr).text()]);
   clearTimeout(timer);
-  return { code, stdout, stderr, out: stdout + stderr };
+  return { code, stdout, stderr, out: stdout + stderr, log: readDaemonLog().slice(logStart) };
 }
 
-const readDaemonLog = () => fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf8') : '';
-
-describe.skipIf(process.platform === 'win32')('#3440 item 8: direct mode never lets Chromium pick a proxy from the environment', () => {
+describe.skipIf(process.platform !== 'linux')('#3440 item 8: direct mode never lets Chromium pick a proxy from the environment', () => {
   test('BROWSE_PROXY_URL=direct with HTTPS_PROXY set: no CONNECT reaches the proxy, and the daemon names what it ignored', async () => {
     const envProxy = await connectProxy();
     const env = { HTTPS_PROXY: envProxy.url, BROWSE_PROXY_URL: 'direct' };
@@ -82,7 +74,22 @@ describe.skipIf(process.platform === 'win32')('#3440 item 8: direct mode never l
     expect(r.out).toContain('ERR_NAME_NOT_RESOLVED');
     expect(r.out).not.toContain('ERR_TUNNEL_CONNECTION_FAILED');
     expect(envProxy.connects).toEqual([]);
-    expect(readDaemonLog()).toContain('[browse] [proxy] none: direct connection (--proxy-server=direct://; ignoring HTTPS_PROXY)');
+    expect(r.log).toContain('[browse] [proxy] none: direct connection (--proxy-server=direct://; ignoring HTTPS_PROXY)');
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).proxy).toBeUndefined();
+  }, 120_000);
+
+  // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
+  // Value: protects=the warning fallback ("browse connects directly") is true: a curl-style HTTPS_PROXY Chromium itself would parse never carries the session;
+  //   fails_when=the direct switch is dropped or the unparseable variable is forwarded to Chromium; why_new=proxy-env-daemon's curl-style case targets loopback, which Chromium bypasses anyway; seam=none
+  test('an unparseable HTTPS_PROXY warns and the daemon still forces direct: no CONNECT reaches the host:port Chromium would have used', async () => {
+    const envProxy = await connectProxy();
+    const env = { HTTPS_PROXY: envProxy.url.replace(/^http:\/\//, '') };
+    const r = await browse(['goto', `https://${TARGET}/`], env);
+    expect(r.stderr).toContain('warning: HTTPS_PROXY is not a proxy URL browse can use');
+    expect(r.stderr).toContain('Starting server...');
+    expect(r.out).toContain('ERR_NAME_NOT_RESOLVED');
+    expect(envProxy.connects).toEqual([]);
+    expect(r.log).toContain('[browse] [proxy] none: direct connection (--proxy-server=direct://; ignoring HTTPS_PROXY)');
     expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).proxy).toBeUndefined();
   }, 120_000);
 
@@ -93,7 +100,7 @@ describe.skipIf(process.platform === 'win32')('#3440 item 8: direct mode never l
     expect(r.stderr).toContain(`Starting server with proxy ${envProxy.url}/ from HTTPS_PROXY...`);
     expect(r.out).toContain('ERR_TUNNEL_CONNECTION_FAILED');
     expect(envProxy.connects).toEqual([`${TARGET}:443`]);
-    expect(readDaemonLog()).toContain(`[browse] [proxy] using ${envProxy.url}/ from HTTPS_PROXY (pass-through to Chromium)`);
+    expect(r.log).toContain(`[browse] [proxy] using ${envProxy.url}/ from HTTPS_PROXY (pass-through to Chromium)`);
   }, 120_000);
 
   test('control: --proxy beats HTTPS_PROXY explicitly, so only the configured proxy sees the CONNECT', async () => {

@@ -974,16 +974,22 @@ first one set wins:
 
 Whatever `$B` resolves is what Chromium gets, explicitly: a proxy is passed
 as `--proxy-server=<url>`, and a direct connection as
-`--proxy-server=direct://`. Chromium never picks a proxy on its own, so with
-`BROWSE_PROXY_URL=direct` (or an unparseable variable, below) a set
-`HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` is ignored, and so are the
-system proxy settings on macOS and Windows: to use one, name it through steps
-1-5. Earlier releases left Chromium to read those variables itself in the
-direct case (#3440), so a session that reported a direct connection could
-still route through a proxy. The daemon log (`browse-daemon.log` next to the
-state file) records the effective mode on every launch, as `[proxy] using
-<url> from <source>` or `[proxy] none: direct connection
-(--proxy-server=direct://; ignoring HTTPS_PROXY)`.
+`--proxy-server=direct://`. On Linux, Chromium launched without a proxy
+switch reads `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` itself, so every
+direct connection there carries the switch: with `BROWSE_PROXY_URL=direct`
+(or an unparseable variable, below) a set variable is ignored, and to use
+one, name it through steps 1-5. Earlier releases left Chromium to read those
+variables in the direct case (#3440), so a session that reported a direct
+connection could still route through a proxy. Chromium on macOS and Windows
+never reads those variables; it follows the system proxy settings (PAC and
+WPAD included), and step 6 leaves it to them, so GStack Browser.app behind a
+corporate proxy keeps working. `BROWSE_PROXY_URL=direct` bypasses the system
+settings too, on every platform. The daemon log (`browse-daemon.log` next
+to the state file) records the effective mode on every launch, as `[proxy]
+using <url> from <source>`, `[proxy] none: direct connection
+(--proxy-server=direct://; ignoring HTTPS_PROXY)` (on macOS and Windows,
+`ignoring the system proxy settings`), or `[proxy] none: system proxy
+settings`.
 
 Values from the environment follow the same credential policy as `--proxy`.
 `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
@@ -996,8 +1002,8 @@ where it came from, with credentials redacted.
 
 - **`warning: HTTPS_PROXY is not a proxy URL browse can use (...)`.** The
   variable doesn't parse as `scheme://host:port`: a curl-style `host:port`, an
-  unsupported scheme, or a bad port. `$B` connects directly (Chromium is
-  told so, and does not read the variable itself) instead of failing
+  unsupported scheme, or a bad port. `$B` connects directly (on Linux,
+  Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
   or set `BROWSE_PROXY_URL=direct` to silence the warning. A bad `--proxy` or
   `BROWSE_PROXY_URL` is still an error, because those are explicit browse

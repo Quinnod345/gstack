@@ -250,11 +250,29 @@ export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefine
 export const DIRECT_PROXY_ARG = '--proxy-server=direct://';
 
 /**
- * The daemon's launch log line for a direct connection: the switch Chromium
- * was given, then each standard variable it would otherwise have read.
+ * Whether a direct connection is made explicit to Chromium with
+ * DIRECT_PROXY_ARG. Always on Linux, where the leak in #3440 item 8 lives:
+ * Chromium launched without --proxy-server reads the proxy variables itself.
+ * Chromium on macOS and Windows never reads them and follows the system proxy
+ * settings (PAC and WPAD included), which GStack Browser.app users behind a
+ * corporate proxy rely on, so there the switch is passed only when the user
+ * asked for a direct connection with BROWSE_PROXY_URL=direct.
  */
-export function directProxyLogLine(env: NodeJS.ProcessEnv): string {
-  const ignored = STANDARD_PROXY_VARS.filter(name => env[name]);
+export function forcesDirect(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'linux' || env.BROWSE_PROXY_URL === 'direct';
+}
+
+/**
+ * The daemon's launch log line when no proxy is configured: the switch
+ * Chromium was given and what it ignores for it (each standard variable set on
+ * Linux, the system proxy settings elsewhere), or that Chromium follows the
+ * system proxy settings.
+ */
+export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string {
+  if (!forcesDirect(env, platform)) {
+    return `[browse] [proxy] none: system proxy settings (Chromium's default on ${platform}; BROWSE_PROXY_URL=direct connects directly)`;
+  }
+  const ignored = platform === 'linux' ? STANDARD_PROXY_VARS.filter(name => env[name]) : ['the system proxy settings'];
   return `[browse] [proxy] none: direct connection (${DIRECT_PROXY_ARG}${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
 }
 
