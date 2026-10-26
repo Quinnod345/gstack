@@ -20,7 +20,8 @@ automation lane, an unattended parent said so). Nothing here publishes.
    (a `requires-remote` lane, an open gate finding, an unverified claim) or `none`.
    `issues:` its lines, unpromoted candidates and lookup failures.
    Full thread ids (`jam_…`) cross-thread.
-3. Skip Steps 19 and 21. Run Step 20 with `"version":null` when NO_VERSION applied.
+3. Skip Steps 19 and 21. Run Step 20 with `"version":null` when NO_VERSION applied, then
+   Step 22 with `--body .gstack/tmp/ship-receipt.md`.
 
 ### Multi-lane runs
 

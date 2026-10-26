@@ -1712,6 +1712,24 @@ bun_cmd() {
   "$BUN_CMD" "$@"
 }
 
+# Users get production dependencies only. devDependencies are the test and eval
+# toolchain (the Claude Agent SDK's native binaries alone are ~440 MB on Linux), and
+# nothing setup, the build or an installed skill runs needs them. Bun never
+# prunes packages that are already installed, so a contributor's full
+# `bun install` (CONTRIBUTING.md, bin/dev-setup, CI) survives a later ./setup.
+# Bun's --production implies a frozen lockfile, so when bun.lock is out of date
+# (a fork or a local edit) refresh it first, then install production-only again.
+# A checkout that already has the dev toolchain (node_modules/typescript) is a
+# contributor's: a production install would leave its dev packages at old
+# versions after bun.lock moves, so it gets the full install instead.
+install_runtime_deps() {
+  if [ -d node_modules/typescript ]; then
+    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    return
+  fi
+  bun_cmd install --production --frozen-lockfile 2>/dev/null || { bun_cmd install --lockfile-only && bun_cmd install --production --frozen-lockfile; }
+}
+
 cleanup_copied_bun() {
   local rc=$?
   if [ "${BUN_CMD_WAS_COPIED:-0}" -eq 1 ]; then
@@ -1929,7 +1947,7 @@ if [ "$NEEDS_BUILD" -eq 1 ]; then
   log "Building browse binary..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     if [ "$CSO_BUILD_AVAILABLE" -eq 0 ]; then
       export GSTACK_SETUP_SKIP_CSO_BUILD=1
     fi
@@ -2080,7 +2098,7 @@ if [ "$NEEDS_AGENTS_GEN" -eq 1 ]; then
   log "Generating .agents/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host codex --model "$CODEX_GENERATION_MODEL" ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
   _prune_stale_generated "$SOURCE_GSTACK_DIR" "$AGENTS_DIR" "$CODEX_SKILLS"
@@ -2093,7 +2111,7 @@ if [ "$INSTALL_FACTORY" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MO
   log "Generating .factory/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host factory ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2103,7 +2121,7 @@ if [ "$INSTALL_OPENCODE" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_M
   log "Generating .opencode/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host opencode ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2113,7 +2131,7 @@ if [ "$INSTALL_CURSOR" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MOD
   log "Generating .cursor/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host cursor ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2123,7 +2141,7 @@ if [ "$INSTALL_COPILOT" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MO
   log "Generating .copilot/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host copilot ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
@@ -2133,7 +2151,7 @@ if [ "$INSTALL_AGY" -eq 1 ] && { [ "$NEEDS_BUILD" -eq 0 ] || [ -n "$_PLAN_MODE_A
   log "Generating .agy/ skill docs..."
   (
     cd "$SOURCE_GSTACK_DIR"
-    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    install_runtime_deps
     bun_cmd run gen:skill-docs --host agy ${_DISABLED_CSV:+"--disabled-skills=$_DISABLED_CSV"} ${_PLAN_MODE_ARG:+"$_PLAN_MODE_ARG"}
   )
 fi
