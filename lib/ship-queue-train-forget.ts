@@ -4,15 +4,19 @@
  * refs/notes/gstack-trains under an exact lease, then delete the local files
  * (until now a stale record needed a hand-run
  * `git notes remove` plus a file hunt on every machine that ran the train).
- * A rejected lease removes nothing. Other machines that still hold the local
- * files can push the record back with their next write; the output says so.
+ * A rejected lease removes nothing (the local notes ref is restored too, so a
+ * later write cannot carry the removal without a lease). Other machines that
+ * still hold the local files can push the record back with their next write;
+ * the output says so.
  */
 import * as fs from 'node:fs';
 import type { QueueContext } from './ship-queue';
 import { outOk, outRefused, trainEnv, type TrainOut } from './ship-queue-train';
-import { attemptsOf, forgetNotes, loadBisect, loadReady, loadTrain, noteName, readyPath, rebuildFromNotes, trainDir, type AnyRecord } from './ship-queue-train-record';
+import { attemptsOf, forgetNotes, loadBisect, loadReady, loadTrain, noteName, readyPath, rebuildFromNotes, trainDir, type AnyRecord, type TrainState } from './ship-queue-train-record';
 
 const Q = 'gstack-ship-queue';
+/** States with work still in flight (a branch being built or pushed, free tests or a gate running, a merge under way): forget never settles them. */
+const LIVE_STATES: readonly TrainState[] = ['built', 'pushed', 'free-pending', 'free-green', 'dispatch-unknown', 'dispatch-absent', 'gate-pending', 'merging'];
 
 export function trainForget(ctx: QueueContext, o: { train?: string; receipt?: string; dryRun: boolean }): TrainOut {
   const env = trainEnv(ctx);
@@ -24,8 +28,8 @@ export function trainForget(ctx: QueueContext, o: { train?: string; receipt?: st
   if (o.train) {
     const t = loadTrain(o.train);
     if (!t) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `no train record ${o.train} here or in refs/notes/gstack-trains` }, [], `${Q} train status`, 'none');
-    if (t.state === 'merging' || t.state === 'gate-pending' || t.state === 'free-pending') {
-      return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `train ${t.nonce} is ${t.state}; forget settles nothing that is still running or merging (train prune --stale for a train whose PRs merged elsewhere)` }, [], `${Q} train status --train ${t.nonce}`, trainDir(t.nonce));
+    if (LIVE_STATES.includes(t.state)) {
+      return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `train ${t.nonce} is ${t.state}; forget settles nothing that is still building, running or merging (train prune --stale for a train whose PRs merged elsewhere)` }, [], `${Q} train status --train ${t.nonce}`, trainDir(t.nonce));
     }
     const bisect = loadBisect(t.nonce);
     records.push(t, ...attemptsOf(t), ...(bisect ? [bisect] : []));

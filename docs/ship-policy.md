@@ -575,7 +575,10 @@ PRs landed through another train or by hand): it logs each PR's state on a
 <pr>@<sha> [--dry-run]` removes one record (a settled train with its attempts,
 or one READY receipt) from local state and from `refs/notes/gstack-trains`
 with an exact lease on the notes ref, printing `FORGET:` then `FORGOTTEN:`; a
-merging, gate-pending or free-pending train is refused.
+train that is still building, running or merging (`built`, `pushed`,
+`free-pending`, `free-green`, `dispatch-unknown`, `dispatch-absent`,
+`gate-pending`, `merging`) is refused; a rejected lease removes nothing and
+restores the local notes ref.
 
 **Following a train without a daemon.** `gstack-ship-queue train watch --train
 <nonce> [--timeout <s>]` is the one resumable follow command: it reads the

@@ -223,7 +223,7 @@ describe('train prune --stale and train watch', () => {
 
   // Value: protects=a stale train record or READY receipt leaves refs/notes/gstack-trains through one command under an exact lease, with the local files, instead of a hand-run git notes remove on every machine;
   // fails_when=forget removes the wrong notes, deletes locally when the push failed, or forgets a merging train; why_new=no CLI removed notes (merge-train skill, known gaps); seam=none; no_claim=a concurrent writer's race (the lease is exercised only as a fast-forward)
-  test('train forget removes a settled train (attempts included) or a READY receipt from the notes ref and the state root, leaves other records alone, and refuses a merging train', () => {
+  test('train forget removes a settled train (attempts included) or a READY receipt from the notes ref and the state root, leaves other records alone, keeps everything (the local notes ref too) when the lease is rejected, and refuses a train still building, running or merging', () => {
     const fx = make();
     const { nonce, h1 } = greenTrain(fx);
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
@@ -266,12 +266,27 @@ describe('train prune --stale and train watch', () => {
     expect(queue(fx, ['train', 'forget']).status).toBe(EXIT.usage);
     const { nonce: second } = (() => { readyReceipt(fx, '3', h3); readyReceipt(fx, '4', h4); const r = queue(fx, ['train', 'build', '--prs', `3@${h3},4@${h4}`, '--free-timeout', '1']); return { nonce: nonceOf(r.out) }; })();
     expect(queue(fx, ['train', 'verdict', '--train', second]).status).toBe(EXIT.ok);
-    const t = JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'trains', second, 'train.json'), 'utf8'));
-    t.state = 'merging';
-    fs.writeFileSync(path.join(fx.state, 'ship-queue', 'trains', second, 'train.json'), JSON.stringify(t));
-    const merging = queue(fx, ['train', 'forget', '--train', second]);
-    expect(merging.status).toBe(EXIT.refused);
-    expect(merging.err).toMatch(/is merging; forget settles nothing that is still running or merging .*\(QUEUE_PROOF_MISSING\)/);
+    const hook = path.join(fx.repo.origin, 'hooks', 'pre-receive');
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    fs.writeFileSync(hook, '#!/bin/sh\nwhile read o n r; do case "$r" in refs/notes/*) echo "notes frozen" >&2; exit 1;; esac; done\nexit 0\n', { mode: 0o755 });
+    const localNotes = fx.repo.git('rev-parse', 'refs/notes/gstack-trains');
+    const rejected = queue(fx, ['train', 'forget', '--train', second]);
+    expect(rejected.status).toBe(EXIT.refused);
+    expect(rejected.err).toMatch(/the notes ref was not updated \(git push refs\/notes\/gstack-trains rejected: .*notes frozen.*; the local notes ref was restored\); nothing deleted locally.*\(QUEUE_PROOF_MISSING\)/);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'trains', second, 'train.json'))).toBe(true);
+    expect(fx.repo.git('rev-parse', 'refs/notes/gstack-trains')).toBe(localNotes);
+    expect(fx.repo.git('notes', '--ref=refs/notes/gstack-trains', 'list').split('\n').length).toBeGreaterThan(0);
+    fs.rmSync(hook);
+    const trainFile = path.join(fx.state, 'ship-queue', 'trains', second, 'train.json');
+    for (const state of ['dispatch-unknown', 'merging']) {
+      const t = JSON.parse(fs.readFileSync(trainFile, 'utf8'));
+      t.state = state;
+      fs.writeFileSync(trainFile, JSON.stringify(t));
+      const live = queue(fx, ['train', 'forget', '--train', second]);
+      expect(live.status).toBe(EXIT.refused);
+      expect(live.err).toMatch(new RegExp(`is ${state}; forget settles nothing that is still building, running or merging .*\\(QUEUE_PROOF_MISSING\\)`));
+      expect(fs.existsSync(trainFile)).toBe(true);
+    }
   }, 120_000);
 
   // Value: protects=a restarted controller re-arms with one command: watch continues from the record (free tests, gate dispatch, the pending run, the verdict) and prints NEXT;

@@ -241,21 +241,26 @@ function parseNote(text: string): AnyRecord | null {
  * (a rejected lease returns `pushed: false` and nothing is deleted locally).
  * Names are note names (noteName); a name with no note is reported missing.
  */
-export function forgetNotes(repoRoot: string, names: string[], remote = 'origin'): { removed: string[]; missing: string[]; pushed: boolean; lease: string | null; detail: string } {
+export function forgetNotes(repoRoot: string, names: string[], remote = 'origin'): { removed: string[]; missing: string[]; failed: string[]; pushed: boolean; lease: string | null; detail: string } {
   const f = fetchNotes(repoRoot, remote);
-  if (!f.ok) return { removed: [], missing: [], pushed: false, lease: null, detail: f.detail };
+  if (!f.ok) return { removed: [], missing: [], failed: [], pushed: false, lease: null, detail: f.detail };
   const lease = git(repoRoot, ['rev-parse', '--verify', '--quiet', NOTES_REMOTE_REF]).out || null;
+  const before = git(repoRoot, ['rev-parse', '--verify', '--quiet', NOTES_REF]).out || null;
   const listed = git(repoRoot, ['notes', `--ref=${NOTES_REF}`, 'list']).out.split('\n').map(l => l.split(' ')[1]).filter(Boolean);
   const removed: string[] = [];
   const missing: string[] = [];
+  const failed: string[] = [];
+  const restore = () => { if (before) git(repoRoot, ['update-ref', NOTES_REF, before]); };
   for (const name of names) {
     const blob = git(repoRoot, ['hash-object', '--stdin'], undefined, name).out;
     if (!listed.includes(blob)) { missing.push(name); continue; }
-    if (git(repoRoot, ['notes', `--ref=${NOTES_REF}`, 'remove', blob], notesEnv()).ok) removed.push(name); else missing.push(name);
+    if (git(repoRoot, ['notes', `--ref=${NOTES_REF}`, 'remove', blob], notesEnv()).ok) removed.push(name); else failed.push(name);
   }
-  if (!removed.length) return { removed, missing, pushed: false, lease, detail: 'no note to remove' };
+  if (failed.length) { restore(); return { removed: [], missing, failed, pushed: false, lease, detail: `git notes remove failed for ${failed.join(', ')}; the local notes ref was restored` }; }
+  if (!removed.length) return { removed, missing, failed, pushed: false, lease, detail: 'no note to remove' };
   const p = git(repoRoot, ['push', '-q', lease ? `--force-with-lease=${NOTES_REF}:${lease}` : `--force-with-lease=${NOTES_REF}`, remote, `${NOTES_REF}:${NOTES_REF}`]);
-  return { removed, missing, pushed: p.ok, lease, detail: p.ok ? `notes pushed to ${remote} ${NOTES_REF} (lease ${lease?.slice(0, 12) ?? 'new ref'})` : `git push ${NOTES_REF} rejected: ${p.err.replace(/\s+/g, ' ').trim().slice(0, 160)}` };
+  if (!p.ok) restore();
+  return { removed, missing, failed, pushed: p.ok, lease, detail: p.ok ? `notes pushed to ${remote} ${NOTES_REF} (lease ${lease?.slice(0, 12) ?? 'new ref'})` : `git push ${NOTES_REF} rejected: ${p.err.replace(/\s+/g, ' ').trim().slice(0, 160)}; the local notes ref was restored` };
 }
 
 /** Rebuild local records from the notes ref: a note whose record is missing locally, or newer than the local copy, is written. */
