@@ -147,11 +147,12 @@ describe("env-value scan", () => {
   // (1) the name rule also admits *_PASS, *_PAT, *_APIKEY and *_PWD, while the shell's own PWD and
   // OLDPWD stay out by NAME (their fixture values are plain words, so only the name rule keeps them
   // out); (2) there is no path exemption: a path-valued SSL_KEY and a base64 secret starting with
-  // "/" are both scanned, and an existing directory as a value changes nothing (an existence check
+  // "/" are both scanned, and a directory path as a value changes nothing (an existence check
   // let the scanned agent exempt a value by creating a path of that name); (3) gstack's own
   // GSTACK_BRAIN_LOCK_TOKEN (pid-random-epoch, written to the lock owner file) is not a secret, and
   // bin/gstack-brain-lock.sh still exports every name in that set; (4) a value NFKC rewrites
-  // (fullwidth digits) is matched in its normalized form, so its leaked ASCII form is found.
+  // (fullwidth digits) is matched in its normalized form, so its leaked ASCII form is found, and a
+  // value whose normalized form is under eight characters is not searched for.
   // fails_when: PWD is admitted (every mention of the cwd becomes HIGH), a shape or existence rule
   // returns (the slash secret or the directory value is skipped), the non-secret set drifts, or the
   // value is matched raw against the normalized text.
@@ -159,7 +160,7 @@ describe("env-value scan", () => {
     const names = credentialEnvValues({
       DB_PASS: dbValue, GITHUB_PAT: ghValue, STRIPE_APIKEY: lowerCaseValue, MYSQL_PWD: dbPasswdValue,
       PWD: "workspace-dir-name", OLDPWD: "previous-dir-name",
-      SSL_KEY: sslKeyPath, DIR_KEY: process.cwd(), SLASH_KEY: slashSecret,
+      SSL_KEY: sslKeyPath, DIR_KEY: "/usr/local/share/ca-certificates", SLASH_KEY: slashSecret,
       GSTACK_BRAIN_LOCK_TOKEN: lockOwner,
     }).map(e => e.name).sort();
     expect(names).toEqual(["DB_PASS", "DIR_KEY", "GITHUB_PAT", "MYSQL_PWD", "SLASH_KEY", "SSL_KEY", "STRIPE_APIKEY"]);
@@ -167,7 +168,10 @@ describe("env-value scan", () => {
     const lock = fs.readFileSync(path.join(import.meta.dir, "..", "bin", "gstack-brain-lock.sh"), "utf8");
     for (const name of NON_SECRET_ENV_NAMES) expect(lock, name).toContain(`export ${name}`);
     const fullwidth = anthropicValue.replace(/[0-9]/g, c => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+    expect(fullwidth).not.toBe(anthropicValue);
     expect(scan(`leak: ${anthropicValue} end`, { processEnv: { WIDE_KEY: fullwidth } }).findings.map(f => f.id)).toEqual(["env.value"]);
+    const zeroWidthPadded = "ab\u200bcd\u200bef\u200bg";
+    expect(scan("plain abcdefg here", { processEnv: { ZW_KEY: zeroWidthPadded } }).findings).toEqual([]);
   });
 
   test("the default environment is process.env", () => {

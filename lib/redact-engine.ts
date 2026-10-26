@@ -476,10 +476,10 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
   // Environment values, by exact value: a credential that is already in the
   // process environment needs no shape to be recognized.
   for (const { name, value: raw } of credentialEnvValues(opts.processEnv ?? process.env)) {
-    if (allow.has(raw)) continue;
-    // The text was normalized before matching; the value takes the same form.
+    // The text was normalized before matching; the value takes the same form,
+    // and the allowlist and placeholder rules see both forms.
     const value = normalizeOriginal(raw).normalized;
-    if (value.length < MIN_ENV_VALUE_LENGTH) continue;
+    if (allow.has(raw) || allow.has(value) || value.length < MIN_ENV_VALUE_LENGTH || isPlaceholderSpan(value)) continue;
     let from = 0;
     let normOffset: number;
     while ((normOffset = normalized.indexOf(value, from)) !== -1) {
@@ -538,7 +538,9 @@ const MIN_ENV_VALUE_LENGTH = 8;
  * match ordinary prose. There is no path exemption on purpose: a shape rule
  * exempted base64 secrets that start with `/`, and an existence check let the
  * scanned agent exempt a value by creating a path of that name; a path-valued
- * SSL_KEY that must appear in a text goes through the allowlist. The value is
+ * SSL_KEY that must appear in a text goes through `allowlist` where a caller
+ * passes one (`gstack-redact`, the pre-push hook), else the variable is set
+ * empty for that one command. The value is
  * trimmed, so a key read from a file with a trailing newline still matches its
  * leaked form; it is matched against the normalized text in its own normalized
  * form, so a value NFKC rewrites still finds its leaked bytes.
