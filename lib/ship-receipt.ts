@@ -104,7 +104,7 @@ export function missingIssueLines(body: string, issues: NonNullable<ShipReceipt[
 }
 
 /** Receipt fields come from the PR body, so anything printed from one stays on its own line, control characters included. */
-const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f]+/g, ' ');
+const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f\u0080-\u009f\u2028\u2029]+/g, ' ');
 
 /** The first lines of the completion message to the coordinator: identifiers only. */
 export function receiptSummaryLine(r: ShipReceipt): string {

@@ -224,7 +224,7 @@ function cmdResult(rest: string[], json: boolean): number {
   let source: string;
   if (bodyFile) {
     if (!fs.existsSync(bodyFile)) return refused('QUEUE_RECEIPT_MISSING', `${bodyFile} does not exist; /ship did not write its receipt`);
-    body = fs.readFileSync(bodyFile, 'utf8');
+    try { body = fs.readFileSync(bodyFile, 'utf8'); } catch (e) { return incomplete(`cannot read ${bodyFile}: ${e instanceof Error ? e.message : String(e)}`); }
     source = path.resolve(bodyFile);
   } else if (pr) {
     const repo = flag(rest, '--repo');

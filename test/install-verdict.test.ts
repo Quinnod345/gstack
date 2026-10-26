@@ -128,6 +128,10 @@ describe('install verdict keyed by (checkout, project): both twins', () => {
     expect(corrupt).toMatchObject({ refuse: true, status: 'verdict', code: 'INSTALL_UNVERIFIED' });
     expect(corrupt.detail).toBe(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
     expect(bashAdmit('ship', proj, { _GH: sr, ...env }).line).toContain(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
+    writeVerdict(sr, { project: proj, bun_path: BUN, bun_version: '1.4.2', schema_version: 3, for: 'ship' });
+    const future = both('ship', proj, env);
+    expect(future).toMatchObject({ refuse: true, status: 'verdict' });
+    expect(future.detail).toContain('unsupported schema_version');
   });
 
   test('a running Bun other than the recorded one refuses with BUN_RESOLUTION_DRIFT and names both', () => {
