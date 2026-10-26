@@ -82,7 +82,8 @@ Now route based on what was found. Check these cases in order:
 
 ### Case A: approved.json exists (design-shotgun ran)
 
-If `APPROVED` was found, read it for user feedback and screen name, and resolve the
+If `APPROVED` was found, read it for user feedback, screen name, and any `archetype`
+and `sections` (the craft section takes them as given), and resolve the
 approved PNG (never guess it from a letter or the newest variant):
 
 ```bash
@@ -341,7 +342,7 @@ kill <PID> 2>/dev/null || true
 
 {{DESIGN_DETECTOR:gate}}
 
-Then, always: the craft section's check, `{{BIN_DIR}}/gstack-design-craft <path-to-finalized.html>`, one fix pass and one rerun, as above.
+Then, always: the craft section's check, `{{BIN_DIR}}/gstack-design-craft <path-to-finalized.html>` (plus `--accepted` per the section), one fix pass and one rerun, as above.
 
 ### Verification Screenshots
 
@@ -442,6 +443,7 @@ Write `finalized.json` alongside the HTML:
   "pretext_tier": "<selected tier>",
   "framework": "<vanilla|react|svelte|vue>",
   "iterations": <number of refinement iterations>,
+  "craft_exceptions": [{"id": "<craft id>", "count": <n>, "reason": "<why accepted>"}],
   "date": "<ISO 8601>",
   "screen": "<screen name>",
   "branch": "<current branch>"

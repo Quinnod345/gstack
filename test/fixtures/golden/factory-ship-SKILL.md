@@ -1158,7 +1158,9 @@ Lookup failure or ambiguous matches **STOP** for resolution, never mean no PR.
 Save the result for Step 19's recheck.
 
 The pr-body section prepares the title from that result, then publishes;
-`--no-pr` or an automation lane takes the handoff section.
+`--no-pr` or an automation lane takes the handoff section. Unattended (`UNATTENDED_SHIP:`
+echoed): an open PR at HEAD takes pr-body's existing-PR path (body and title only, no
+`pr-create`, no push); else handoff.
 
 > **STOP.** Before preparing the title and creating or updating the PR/MR with the verified documentation outcome (Steps 18-19), Read `sections/pr-body.md` relative to the installed `gstack-ship` SKILL.md directory and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
@@ -1177,13 +1179,12 @@ $GSTACK_ROOT/bin/gstack-review-log '{"skill":"ship","timestamp":"'"$(date -u +%Y
 ```
 
 Substitute from earlier steps:
-- **COVERAGE_PCT**: Step 7 diagram's integer percentage; encode null/undetermined as -1
-- **COVERAGE_PCT_VALUE**: Step 7's `coverage_pct_value` (the gate's X) as an integer, or `null` when missing or ignored
-- **WEAK_GAPS**, **TESTS_EXTENDED**, **TESTS_REJECTED**: counts of Step 7's `weak_gaps`, `tests_extended` and `tests_rejected` (0 when the key is missing or ignored)
-- **REGRESSION_PROOF**: `{"red_at_head":N,"base_green":N,"base_unavailable":N}` from Step 7, or `null` when missing
-- **PLAN_TOTAL**: total plan items extracted in Step 8 (0 if no plan file)
-- **PLAN_DONE**: count of DONE + CHANGED items from Step 8 (0 if no plan file)
-- **VERIFY_RESULT**: "pass", "fail", or "skipped", set after Step 9 executes Step 8.1's verification list
+- **COVERAGE_PCT**: Step 7's integer percentage; -1 when null or undetermined
+- **COVERAGE_PCT_VALUE**: Step 7's `coverage_pct_value` (the gate's X) as an integer; `null` when missing or ignored
+- **WEAK_GAPS**, **TESTS_EXTENDED**, **TESTS_REJECTED**: counts of Step 7's `weak_gaps`, `tests_extended`, `tests_rejected` (0 when missing or ignored)
+- **REGRESSION_PROOF**: Step 7's `{"red_at_head":N,"base_green":N,"base_unavailable":N}`; `null` when missing
+- **PLAN_TOTAL** / **PLAN_DONE**: Step 8's plan items, total and DONE + CHANGED (0 with no plan file)
+- **VERIFY_RESULT**: "pass", "fail" or "skipped", set when Step 9 runs Step 8.1's verification list
 - **VERSION**: `NEW_VERSION` from Step 12; `null` (unquoted) under NO_VERSION
 
 The shell supplies the branch. Run it without confirmation.
@@ -1200,15 +1201,27 @@ GSTACK_STATE_ROOT=$($GSTACK_ROOT/bin/gstack-paths --get GSTACK_STATE_ROOT); : "$
 _NUDGE_MARKER="$GSTACK_STATE_ROOT/.plan-tune-nudge-shown"
 _QT=$($GSTACK_ROOT/bin/gstack-config get question_tuning 2>/dev/null || echo "false")
 if [ ! -f "$_NUDGE_MARKER" ] && [ "$_QT" = "false" ]; then
-  echo ""
-  echo "gstack can learn from your AskUserQuestion answers. Run /plan-tune to opt in"
-  echo "— it captures which prompts you find valuable vs noisy and (with hooks installed)"
-  echo "auto-decides your never-ask preferences."
+  printf '\ngstack can learn from your AskUserQuestion answers. Run /plan-tune to opt in: it captures which prompts you find valuable vs noisy and (with hooks installed) auto-decides your never-ask preferences.\n'
   mkdir -p "$GSTACK_STATE_ROOT" && touch "$_NUDGE_MARKER"
 fi
 ```
 
 The marker or enabled question_tuning suppresses it; remove the marker to re-enable.
+
+---
+
+## Step 22: Terminal line (every run)
+
+The last line printed is the result line a parent greps (docs/unattended.md):
+
+```bash
+[ -d "${GSTACK_ROOT:-/-}/bin" ]&&[ -d "$GSTACK_ROOT/lib" ]||{ _r=$(git rev-parse --show-toplevel 2>/dev/null)/.factory/skills/gstack;[ -d "$_r/bin" ]||_r=~/.factory/skills/gstack;[ -d "$_r/bin" ]||{ echo "gstack: no install found (tried $_r). Fix: ./setup --host factory from your gstack checkout; ./setup --status shows it.">&2;exit 1;};GSTACK_ROOT=$_r;}
+$GSTACK_ROOT/bin/gstack-ship-receipt result --pr <pr-number>   # handoff: --body .gstack/tmp/ship-receipt.md
+```
+
+It binds the receipt to HEAD, writes the run record and prints `GSTACK_RESULT: skill=ship
+status=complete run=<dir>`; `QUEUE_RECEIPT_STALE` means HEAD moved after the receipt (rewrite,
+repost, rerun). A run that STOPs earlier ends with `GSTACK_RESULT: skill=ship status=refused run=-`.
 
 ---
 

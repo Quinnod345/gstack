@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { callJudge, JudgeRefusalError, type CallJudgeOptions, type JudgeResponseMeta } from './helpers/llm-judge';
+import { buildCookieWorkflowJudgeInput, COOKIE_WORKFLOW_JUDGE } from './helpers/cookie-workflow-judge-input';
 import {
   analyze, classifyError, loadCorpus, undispatched, PANEL_SAMPLES, PHASES, planCalls, priceManifest, runCalls, runSample,
   type CalibrationConfig, type CorpusItem, type JudgeCall, type SampleRecord,
@@ -201,8 +202,8 @@ describe('judge calibration harness (free, stubbed provider)', () => {
 describe('committed calibration configurations and corpora', () => {
   test('comparison (1) changes only the JSON schema; prompts come from the eval builders', async () => {
     const { CALIBRATION_CONFIGS } = await import('../scripts/judge-calibration-configs');
-    expect(CALIBRATION_CONFIGS.map(config => config.id)).toEqual(['arm', 'qa-workflow', 'qa-health-rubric', 'qa-anti-refusal', 'cross-skill', 'voice', 'workflow-default']);
-    expect(CALIBRATION_CONFIGS.map(config => config.priority)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(CALIBRATION_CONFIGS.map(config => config.id)).toEqual(['arm', 'qa-workflow', 'qa-health-rubric', 'qa-anti-refusal', 'cross-skill', 'voice', 'workflow-default', 'cookie-workflow']);
+    expect(CALIBRATION_CONFIGS.map(config => config.priority)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     for (const config of CALIBRATION_CONFIGS) {
       const { jsonSchema, ...rest } = config.newOptions;
       expect(jsonSchema).toBeTruthy();
@@ -232,6 +233,18 @@ describe('committed calibration configurations and corpora', () => {
     }
   });
 
+  // /ship Step 7 coverage audit (GSTA-91).
+  // Value: protects=the cookie-workflow calibration sends the eval's exact prompt for the same bundle;
+  // fails_when=its build drops COOKIE_WORKFLOW_JUDGE context/goal or adds a capability the eval does not send;
+  // why_new=the corpus test only checks the bundle is contained in the prompt; seam=none;
+  // no_claim=provider behavior (no request is sent; both prompts come from the live SKILL.md and BROWSER.md)
+  test('the cookie-workflow calibration builds the prompt the cookie eval sends', async () => {
+    const { CALIBRATION_CONFIGS } = await import('../scripts/judge-calibration-configs');
+    const cookie = CALIBRATION_CONFIGS.find(config => config.id === 'cookie-workflow')!;
+    const production = buildCookieWorkflowJudgeInput(path.join(import.meta.dir, '..'));
+    expect(cookie.build({ bundle: production.text })).toBe(production.prompt);
+  });
+
   test('panel verdicts restate each eval pass rule', async () => {
     const { CALIBRATION_CONFIGS } = await import('../scripts/judge-calibration-configs');
     const byId = Object.fromEntries(CALIBRATION_CONFIGS.map(config => [config.id, config]));
@@ -242,6 +255,12 @@ describe('committed calibration configurations and corpora', () => {
       expect(byId[id]!.verdict([qa(5, 5, 4), qa(5, 5, 3), qa(5, 5, 3)])).toBe('fail');
       expect(() => byId[id]!.validate({ ...qa(3, 3, 4), clarity: '3' })).toThrow();
     }
+    expect(byId['cookie-workflow']!.verdict([qa(4, 3, 4), qa(4, 3, 4), qa(4, 3, 4)])).toBe('pass');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 5, 4), qa(5, 5, 4), qa(3, 2, 3)])).toBe('pass');
+    expect(byId['cookie-workflow']!.verdict([qa(4, 3, 4), qa(3, 3, 4), qa(3, 3, 4)])).toBe('fail');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 2, 5), qa(5, 2, 5), qa(5, 3, 5)])).toBe('fail');
+    expect(byId['cookie-workflow']!.verdict([qa(5, 5, 4), qa(5, 5, 3), qa(5, 5, 3)])).toBe('fail');
+    expect(() => byId['cookie-workflow']!.validate({ ...qa(4, 3, 4), clarity: '4' })).toThrow();
     const arm = (over_engineering: number) => ({ over_engineering, construct: over_engineering ? 'helper' : 'none', reasoning: '' });
     expect(byId.arm!.verdict([arm(0), arm(1), arm(3)])).toBe('pass');
     expect(byId.arm!.verdict([arm(1), arm(2), arm(2)])).toBe('fail');
@@ -277,23 +296,45 @@ describe('landed schemas match the recorded calibration', () => {
     expect(sent).toBe(recorded.landing.lands);
   });
 
+  // /ship Step 7 coverage audit (GSTA-91).
+  // Value: protects=the held cookie-workflow result is what analyze() derives from its committed labels, samples, stop record and request options;
+  // fails_when=result.json is hand-edited, a corpus label moves after the run, a sample is altered, or the config's model/options drift;
+  // why_new=no test reads samples.jsonl or stop.json, and the wiring test trusts result.json's landing verbatim; seam=none;
+  // no_claim=that the recorded samples are genuine provider output (the committed JSONL stands in for the paid run), or that prompt
+  // text and bundle bytes are unchanged since the run (request_hash covers model and options only)
+  test('the recorded cookie-workflow result is reproducible from its committed labels, samples, stop record and request options', async () => {
+    const { CALIBRATION_CONFIGS } = await import('../scripts/judge-calibration-configs');
+    const cookie = CALIBRATION_CONFIGS.find(config => config.id === 'cookie-workflow')!;
+    const runs = path.join(import.meta.dir, 'fixtures', 'judge-calibration', 'cookie-workflow', 'runs');
+    const samples: SampleRecord[] = fs.readFileSync(path.join(runs, 'comparison-1.samples.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const { stopped } = JSON.parse(fs.readFileSync(path.join(runs, 'comparison-1.stop.json'), 'utf8'));
+    expect(JSON.parse(JSON.stringify(analyze(cookie, loadCorpus('cookie-workflow'), samples, stopped)))).toEqual(result('cookie-workflow'));
+  });
+
   test('armJudge sends ARM_JUDGE_SCHEMA because its calibration landed', () => {
     expect(result('arm').landing.lands).toBe(true);
     expect(judgeSource).toContain('buildArmJudgePrompt(task, diff), ARM_JUDGE_MODEL, { jsonSchema: ARM_JUDGE_SCHEMA })');
   });
 
-  test('workflow transport follows the workflow-default calibration; uncalibrated configurations stay on today\'s request', () => {
+  test('workflow transport follows the workflow-default and cookie-workflow calibrations; uncalibrated configurations stay on today\'s request', () => {
     const recorded = result('workflow-default');
     expect(recorded.complete).toBe(true);
+    const cookie = result('cookie-workflow');
+    expect(cookie.complete).toBe(true);
     const registrations = [...evalSource.matchAll(/await runWorkflowJudge\(\{([\s\S]*?)\n    \}\);/g)].map(match => match[1]!);
     expect(registrations.length).toBeGreaterThan(14);
     for (const body of registrations) {
       const testName = /testName: '([^']+)'/.exec(body)![1];
       const defaultConfig = !/^\s+(?:agentCapability|model|readInput|thresholds|maxTokens|stream|effort):|\.\.\.COOKIE_WORKFLOW_JUDGE/m.test(body);
-      const expected = testName === 'ship/SKILL.md workflow' || (defaultConfig && recorded.landing.lands);
+      const expected = testName === 'ship/SKILL.md workflow' || (defaultConfig && recorded.landing.lands)
+        || (testName === 'setup-browser-cookies/SKILL.md workflow' && cookie.landing.lands);
       expect(body.includes('schemaTransport: true'), testName).toBe(expected);
       expect(body.includes('compactReasoning: true'), testName).toBe(testName === 'ship/SKILL.md workflow');
     }
-    expect(registrations.filter(body => body.includes('schemaTransport: true'))).toHaveLength(15);
+    expect(registrations.filter(body => body.includes('schemaTransport: true'))).toHaveLength(cookie.landing.lands ? 16 : 15);
+    const cookieBody = registrations.find(body => body.includes("testName: 'setup-browser-cookies/SKILL.md workflow'"))!;
+    expect(cookieBody).toContain('...COOKIE_WORKFLOW_JUDGE');
+    expect(cookieBody).not.toMatch(/^\s+(?:agentCapability|model|thresholds|maxTokens|stream|effort):/m);
+    expect(Object.keys(COOKIE_WORKFLOW_JUDGE).sort()).toEqual(['judgeContext', 'judgeGoal', 'model', 'thresholds']);
   });
 });

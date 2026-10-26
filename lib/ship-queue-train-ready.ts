@@ -16,7 +16,7 @@ import { EXIT } from './headless-artifacts';
 import { ready, type QueueContext } from './ship-queue';
 import { classifyTrainHead } from './version-gate-train';
 import { git } from './ship-queue-gate';
-import { execFor, repoSlug } from './ship-queue-train-github';
+import { execFor, hollowScreen, repoSlug } from './ship-queue-train-github';
 import { loadReady, nowIso, persist, readyPath, type ReadyReceipt, type ScreenChoice } from './ship-queue-train-record';
 import { outOk, outPending, outRefused, trainEnv, type TrainEnv, type TrainOut } from './ship-queue-train';
 
@@ -85,10 +85,12 @@ async function dispatchScreen(env: TrainEnv, o: ReadyOptions, mergeSha: string, 
   if (!slug) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: 'gh repo view could not name the repository' }, [], `${Q} ready --pr ${o.pr} --screen`, 'none');
   const exec = execFor(env.ctx);
   const existing = findDuplicateRun(listDispatchRuns(dispatch.workflow, exec, slug) ?? [], dedupeKey('pr', mergeSha, baseSha, scope));
-  if (existing) return { choice: { choice: 'screen', policy, nonce: /eval-bg (\S+?)\]/.exec(existing.displayTitle)?.[1] ?? nonce, run: existing.databaseId, merge_sha: mergeSha }, line: `SCREEN_DISPATCH: following run ${existing.databaseId} (same merge SHA, base and policy; no duplicate)` };
+  const plan = existing ? hollowScreen(env.ctx, slug, existing.databaseId) : null;
+  const hollow = plan?.kind === 'hollow' ? plan.reason : null;
+  if (existing && !hollow) return { choice: { choice: 'screen', policy, nonce: /eval-bg (\S+?)\]/.exec(existing.displayTitle)?.[1] ?? nonce, run: existing.databaseId, merge_sha: mergeSha }, line: `SCREEN_DISPATCH: following run ${existing.databaseId} (same merge SHA, base and policy; no duplicate)` };
   const found = dispatchWorkflow(dispatch, env.ctx.base, exec, slug) ? await awaitNonceRun(dispatch.workflow, nonce, exec, slug) : null;
   if (!found) return outPending({ code: 'QUEUE_TRAIN_DISPATCH_UNKNOWN', message: `no ${dispatch.workflow} run named ${nonce} appeared after the screen dispatch` }, [], `${Q} ready --pr ${o.pr} --screen${o.broad ? ' --broad' : ''} (adopts the run by its key once it appears)`, 'none');
-  return { choice: { choice: 'screen', policy, nonce, run: found.databaseId, merge_sha: mergeSha }, line: `SCREEN_DISPATCH: ${dispatch.workflow} run ${found.databaseId} ${found.url} nonce ${nonce}` };
+  return { choice: { choice: 'screen', policy, nonce, run: found.databaseId, merge_sha: mergeSha }, line: `SCREEN_DISPATCH: ${dispatch.workflow} run ${found.databaseId} ${found.url} nonce ${nonce}${hollow ? ` (not following ${hollow}: a screen that planned nothing is not a screen)` : ''}` };
 }
 
 export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<TrainOut> {
@@ -113,8 +115,14 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
   let choice: ScreenChoice = { choice: 'no-screen', policy: null, nonce: null, run: null, merge_sha: null };
   if (o.screen === 'screen') {
     const ls = git(ctx.repoRoot, ['ls-remote', env.remote, `refs/pull/${o.pr}/merge`]);
-    const mergeSha = ls.ok ? ls.out.split(/\s/)[0] ?? '' : '';
-    if (!/^[0-9a-f]{40,64}$/.test(mergeSha)) return outRefused({ code: 'QUEUE_NOT_READY', message: `${env.remote} has no refs/pull/${o.pr}/merge (the PR conflicts with ${ctx.base}, or GitHub has not computed it yet)` }, lines, `merge ${ctx.base} into the branch, push, then ${Q} ready --pr ${o.pr} --screen`, 'none');
+    if (!ls.ok) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `could not list ${env.remote}'s refs: ${(ls.err || ls.out).trim().replace(/\s+/g, ' ').slice(0, 200) || 'git ls-remote failed'}` }, lines, `check the remote, then ${Q} ready --pr ${o.pr} --screen`, 'none');
+    const mergeSha = ls.out.split(/\s/)[0] ?? '';
+    const again = `resolve the conflict with ${ctx.base} (or wait for GitHub to recompute refs/pull/${o.pr}/merge), push, then ${Q} ready --pr ${o.pr} --screen; a screen dispatched on a stale merge ref plans no cases`;
+    if (!/^[0-9a-f]{40,64}$/.test(mergeSha)) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `${env.remote} has no refs/pull/${o.pr}/merge (the PR conflicts with ${ctx.base}, or GitHub has not computed it yet)` }, lines, again, 'none');
+    const fetched = git(ctx.repoRoot, ['fetch', '-q', env.remote, `refs/pull/${o.pr}/merge`]);
+    if (!fetched.ok) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `could not fetch refs/pull/${o.pr}/merge from ${env.remote}: ${(fetched.err || fetched.out).trim().replace(/\s+/g, ' ').slice(0, 200) || 'git fetch failed'}` }, lines, `check the remote, then ${Q} ready --pr ${o.pr} --screen`, 'none');
+    const mergeParent = git(ctx.repoRoot, ['rev-parse', '--verify', '--quiet', `${mergeSha}^2`]).out;
+    if (mergeParent !== head) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `${env.remote}'s refs/pull/${o.pr}/merge (${mergeSha.slice(0, 12)}) merges ${mergeParent ? mergeParent.slice(0, 12) : 'no PR head'}, not the PR head ${head.slice(0, 12)}: GitHub has not recomputed it, which is what a conflicting PR looks like (CHANGELOG-only conflicts included)` }, lines, again, 'none');
     const d = await dispatchScreen(env, o, mergeSha, baseSha);
     if ('exit' in d) return { ...d, lines: [...lines, ...d.lines] };
     choice = d.choice;
