@@ -1,8 +1,8 @@
 /**
  * Dependency-override smoke tests (v1.78.0.0 dependency wave).
  *
- * The wave's `overrides` entries (package.json: ip-address 10.7.3 (raised
- * from 10.3.1 for GHSA-2vr4/h3mg/j6r3/rpw4, Oct 2026),
+ * The wave's `overrides` entries (package.json: ip-address 10.7.4 (raised
+ * from 10.3.1 for GHSA-2vr4/h3mg/j6r3/rpw4, then 10.7.3 for GHSA-rxp7, Oct 2026),
  * sharp 0.35.0; lib/diagram-render: nanoid 5.x, lodash-es 4.18.x) defeat
  * nested exact pins, so a green unit suite alone does not prove the forced
  * versions actually work for their consumers. These smokes exercise the

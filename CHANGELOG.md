@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**The weekly OSV scan on main is green again, so the weekly release cut can run.** The 2026-10-26 scan ([run 40288353843](https://github.com/garrytan/gstack/actions/runs/40288353843), #3462) found 14 fixable vulnerabilities in six packages across both lockfiles, and the release workflow skips any main commit with a red check run. Every one is bumped to its fixed release; no code changed, because gstack imports none of these packages directly (the MCP SDK and zod arrive through `@anthropic-ai/claude-agent-sdk`, body-parser through its express, fast-uri through ajv, ip-address through socks and express-rate-limit, dompurify through mermaid).
+
+### Fixed
+- **dompurify 3.4.16 → 3.4.17 in `lib/diagram-render`** (GHSA-cg2g-xh64-v4q7, CVSS 9.2; GHSA-mrv2-3pqr-j5jr; GHSA-c6gr-qvv4-5v3f). The override moves and the committed bundle is rebuilt with Bun 1.4.2 (deterministic: two builds, one sha256 `4d1c10a0…`), so the shipped page runs the fixed sanitizer instead of a bundled copy of the old one. Mermaid, excalidraw and React pins are unchanged.
+- **@modelcontextprotocol/sdk 1.31.0 → 1.32.0** (GHSA-22jm-h49p-29qw, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq, GHSA-6prh-2h8m-c8cw), **fast-uri 3.1.8 → 3.1.9** (GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-333x-w4r6-6crp, GHSA-xhq7-xmqj-769h) and **ip-address 10.7.3 → 10.7.4** (GHSA-rxp7-6hxx-x8q5) through the existing `overrides` pins.
+- **zod 4.5.4 → 4.6.7** (GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6) and **body-parser 2.3.0 → 2.4.0** (GHSA-27r3-jxmh-p828) through the lockfile alone; both sit inside their consumers' ranges, so no override was added. body-parser 2.4.0 brings a nested qs 6.16.1.
+
+### Tests
+- `test/deps-smoke.test.ts` names the new ip-address pin. OSV-Scanner 2.3.8 with the workflow's own arguments (`--config=.osv-scanner.toml --include-git-root --recursive ./`) reports no issues on this tree; the katex ignore is the only filtered advisory.
+
 ## [1.91.235.0] - 2026-10-26
 
 **An issue we intend to fix later now stays open under the `parked` label instead of being closed.** The Oct 11 triage closed 75 feature requests with a "not rejected" note, and GitHub showed them as closed with no fix. Those 75 are open again under the new `parked` label on garrytan/gstack ("Not fixed yet, not rejected: stays open; a comment says where it is tracked and what fixes it"), each with one comment saying where the work is tracked and what fixes it. The rule is written down: an issue closes only as fixed, duplicate or won't fix, each with its reason; a report that main already fixed closes as fixed, not won't fix; and a duplicate uses GitHub's own duplicate close reason.
