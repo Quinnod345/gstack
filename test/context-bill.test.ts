@@ -391,6 +391,28 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("walks a chain of links deeper than the kernel's link limit without losing files", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-deep-chain-"));
+    const depth = 50;
+    for (let i = 0; i < depth; i++) {
+      fs.mkdirSync(path.join(tmp, "levels", `L${i}`), { recursive: true });
+      fs.writeFileSync(path.join(tmp, "levels", `L${i}`, `f${i}.md`), "x");
+    }
+    for (let i = 0; i < depth - 1; i++) {
+      fs.symlinkSync(path.join(tmp, "levels", `L${i + 1}`), path.join(tmp, "levels", `L${i}`, "next"));
+    }
+    const root = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(root, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(root, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(path.join(tmp, "levels", "L0"), path.join(root, "qa", "next"));
+
+    expect(walkMd(path.join(root, "qa")).length).toBe(depth + 1);
+    const qa = buildBill(root).skills.find((s) => s.name === "qa")!;
+    expect(qa.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + depth);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it("refuses skill discovery past its entry cap instead of walking on", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-discovery-cap-"));
     fs.mkdirSync(path.join(root, "vendor"));

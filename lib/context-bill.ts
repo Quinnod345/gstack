@@ -270,7 +270,24 @@ function encloses(outer: string, inner: string): boolean {
  * skill instead of losing them to whichever path sorted first.
  */
 export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkills?: boolean } = {}): string[] {
-  const out: string[] = [];
+  return walkMdFiles(dir, opts).map((f) => f.path);
+}
+
+export interface WalkedFile {
+  /** The lexical path under the walked dir; the key the bill and --exact use. */
+  path: string;
+  /** The file's realpath when it was walked. */
+  real: string;
+}
+
+/**
+ * walkMd's files with their realpaths. Every directory is read through its
+ * realpath, so a lookup crosses at most one link however deep the lexical
+ * path runs: a chain of links never hits the kernel's link-depth limit
+ * (ELOOP) and silently loses the files past it.
+ */
+export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNestedSkills?: boolean } = {}): WalkedFile[] {
+  const out: WalkedFile[] = [];
   let rootReal: string;
   let billedReal: string;
   try {
@@ -281,10 +298,10 @@ export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkill
   }
   const seen = new Set<string>([rootReal]);
   let entryCount = 0;
-  const walk = (current: string) => {
+  const walk = (current: string, currentReal: string) => {
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
+      entries = fs.readdirSync(currentReal, { withFileTypes: true });
     } catch {
       return;
     }
@@ -292,36 +309,37 @@ export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkill
     for (const e of entries) {
       if (++entryCount > WALK_ENTRY_CAP) throw entryCapError(dir, WALK_ENTRY_CAP);
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
-      const p = path.join(current, e.name);
-      const kind = entryKind(p, e);
+      const viaReal = path.join(currentReal, e.name);
+      const kind = entryKind(viaReal, e);
       if (kind === "file") {
         if (!e.name.endsWith(".md")) continue;
       } else if (
         kind !== "dir" ||
-        fs.existsSync(path.join(p, ".git")) ||
-        (opts.skipNestedSkills && current === dir && isFile(path.join(p, "SKILL.md")))
+        fs.existsSync(path.join(viaReal, ".git")) ||
+        (opts.skipNestedSkills && current === dir && isFile(path.join(viaReal, "SKILL.md")))
       ) {
         continue;
       }
       let real: string;
       try {
-        real = fs.realpathSync(p);
+        real = fs.realpathSync(viaReal);
       } catch {
         continue;
       }
       if (seen.has(real)) continue;
+      const p = path.join(current, e.name);
       if (kind === "file") {
         if (!real.endsWith(".md")) continue;
         seen.add(real);
-        out.push(p);
+        out.push({ path: p, real });
         continue;
       }
       if (encloses(real, rootReal) || encloses(real, billedReal)) continue;
       seen.add(real);
-      walk(p);
+      walk(p, real);
     }
   };
-  walk(dir);
+  walk(dir, rootReal);
   return out;
 }
 
@@ -333,8 +351,8 @@ function totalMd(dir: string, tokensOf: TokensOf, billedRoot: string): { bytes: 
   // skill reports its own totalMd, and the grand total sums per-skill
   // figures — counting them here again double-counted every nested skill
   // in the TOTAL line (v1.63 deferred polish, fixed in fork port wave 2).
-  for (const p of walkMd(dir, { billedRoot, skipNestedSkills: true })) {
-    const b = bytesOf(p) ?? 0;
+  for (const { path: p, real } of walkMdFiles(dir, { billedRoot, skipNestedSkills: true })) {
+    const b = bytesOf(real) ?? 0;
     bytes += b;
     tokens += tokensOf(p, b);
   }
@@ -799,7 +817,7 @@ async function countTokens(text: string, { model, apiKey, fetchImpl }: CountToke
 
 export interface ExactSendSet {
   /** Each real file once, under the first lexical path a skill's walk reaches it by. */
-  files: string[];
+  files: WalkedFile[];
   /** Realpaths of the SKILL.md files whose frontmatter the bill prices. */
   frontmatter: Set<string>;
 }
@@ -815,15 +833,14 @@ export interface ExactSendSet {
 export function exactSendSet(root: string): ExactSendSet {
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
-  const files: string[] = [];
+  const files: WalkedFile[] = [];
   const frontmatter = new Set<string>();
   const seen = new Set<string>();
   for (const dir of findSkillDirs(resolved)) {
     frontmatter.add(fs.realpathSync(path.join(dir, "SKILL.md")));
-    for (const file of walkMd(dir, { billedRoot: resolved, skipNestedSkills: true })) {
-      const real = fs.realpathSync(file);
-      if (seen.has(real)) continue;
-      seen.add(real);
+    for (const file of walkMdFiles(dir, { billedRoot: resolved, skipNestedSkills: true })) {
+      if (seen.has(file.real)) continue;
+      seen.add(file.real);
       files.push(file);
     }
   }
@@ -877,9 +894,8 @@ export async function measureExactTokens(
   // real file back to the one key that was measured.
   const lexicalOf = new Map<string, string>();
   const { files, frontmatter } = sendSet ?? exactSendSet(root);
-  for (const file of files) {
-    const text = fs.readFileSync(file, "utf8");
-    const real = fs.realpathSync(file);
+  for (const { path: file, real } of files) {
+    const text = fs.readFileSync(real, "utf8");
     texts.set(file, text);
     lexicalOf.set(real, file);
     if (!frontmatter.has(real)) continue;
@@ -1096,7 +1112,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       return {};
     }
     const treeReal = fs.realpathSync(tree);
-    const outside = set.files.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
+    const outside = set.files.filter((f) => !encloses(treeReal, f.real)).length;
     stderr.write(
       `--exact: sending the content of ${set.files.length} .md file(s) under ${tree}` +
         (outside ? ` (${outside} of them through symlinks to files outside it)` : "") +
