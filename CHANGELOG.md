@@ -6,6 +6,8 @@
 
 ### Changed
 - **`BROWSER.md`**: a new "TLS trust: the bundled Chromium's root store" section, at the end of the security stack, says the fallback engine checks certificates against that compiled root store, that the headless browser never gets CRLSet updates while headed mode and `handoff` get them about a minute after launch, and that the bundled build does not enforce Certificate Transparency. It names the flows that put real sessions and credentials into the browser (`cookie-import-browser`, `fill`/`type`, `handoff`) and gives the one-line `$B goto` check. The fallback-engine introduction and the `cookie-import-browser` and `handoff` command rows link to it. Aside is unaffected, because it is your own browser with its own updates.
+
+### For contributors
 - The edits above the cookie workflow excerpt change no line count, so the `setup-browser-cookies/SKILL.md workflow` judge input is byte-identical (prompt SHA-256 `c851e635…`, 12,805 bytes, before and after).
 
 ## [1.91.191.0] - 2026-10-25

@@ -1313,7 +1313,7 @@ updates.
 ([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked them
 by CRLSet on 2026-10-17 and removes their root, emSign ECC Root CA - G3, from
 the Chrome Root Store on 2026-10-27. gstack's pinned Playwright 1.62.1
-(Chromium 151), every release through 1.64.1 (Chromium 156) and the 1.65
+(Chromium 151), the latest release 1.64.1 (Chromium 156) and the 1.65
 alphas (Chromium 157) still trust them, so
 `$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
 "That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
