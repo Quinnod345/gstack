@@ -74,7 +74,7 @@ if [ ! -d "$ROOT/node_modules/playwright" ]; then
   [ "$CHECK" -eq 1 ] && fail "playwright is not installed under $ROOT/node_modules" "cd $ROOT && ./setup"
   command -v bun >/dev/null 2>&1 || fail "playwright is not installed under $ROOT/node_modules and bun is not on PATH" "install Bun, then cd $ROOT && ./setup"
   log "gstack-browser-ensure: installing node modules (bun install)..."
-  (cd "$ROOT" && { bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null; }) || fail "bun install failed under $ROOT" "cd $ROOT && bun install, then re-run $0"
+  (cd "$ROOT" && { bun install --production --frozen-lockfile >/dev/null 2>&1 || { bun install --lockfile-only >/dev/null && bun install --production --frozen-lockfile >/dev/null; }; }) || fail "bun install failed under $ROOT" "cd $ROOT && bun install --production --frozen-lockfile, then re-run $0"
 fi
 
 probe

@@ -22,11 +22,11 @@ if [ ! -f "$REPO_ROOT/.env" ]; then
   fi
 fi
 
-# 2. Install dependencies
-if [ ! -d "$REPO_ROOT/node_modules" ]; then
-  echo "Installing dependencies..."
-  (cd "$REPO_ROOT" && bun install)
-fi
+# 2. Install dependencies, devDependencies included. Always run: a checkout
+# first installed by ./setup has production dependencies only, and an
+# up-to-date install is a no-op.
+echo "Installing dependencies..."
+(cd "$REPO_ROOT" && bun install)
 
 # 3. Create .claude/skills/ inside the repo
 mkdir -p "$REPO_ROOT/.claude/skills"

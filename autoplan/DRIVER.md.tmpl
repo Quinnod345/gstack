@@ -4,8 +4,8 @@ Read this file instead of `autoplan/SKILL.md` when you (a parent agent on any ho
 unattended /autoplan run through `gstack-autoplan`: the reviewers are subagents you dispatch,
 and the runner keeps the state. The commands live in `<root>/bin/`, where `<root>` is the
 folder that holds this `autoplan/` directory; `gstack-autoplan --help` and the first `next`
-print `DRIVER: <root>/autoplan/DRIVER.md`. Run every command with the `GSTACK_LAUNCH`
-assignments your installer printed. Read printed lines and files, never prose: every workflow
+print `DRIVER: <root>/autoplan/DRIVER.md`. Run every command with the `GSTACK_LAUNCH` assignments your installer printed: `. <the GSTACK_LAUNCH_FILE it printed>` in the shell that runs the command,
+never `export $(...)`, `env`, `printenv` or a bare `set` in a tool fence (a bare `export` prints every variable, credentials included). Read printed lines and files, never prose: every workflow
 command ends with `GSTACK_RESULT: skill=autoplan status=<s> run=<dir>`, and every error line
 ends with `(<CODE>)`.
 

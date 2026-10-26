@@ -462,7 +462,7 @@ You know the feeling. You have a feature, a page, a landing screen... and you're
 3. It generates 3 distinct design variants as PNGs
 4. A comparison board opens in your browser with all 3 side-by-side
 5. You click "Approve" on the one you like, or give feedback for another round
-6. The approved variant saves to `~/.gstack/projects/$SLUG/designs/` with an `approved.json`
+6. The approved variant saves to `~/.gstack/projects/$SLUG/designs/` with an `approved.json`; for a landing, pricing or campaign screen, it also records the page archetype you picked (`classic-hero`, `long-form-story`, `minimal-conversion` or `comparison`) and its section outline
 
 That `approved.json` is one way to feed `/design-html`. The design pipeline chains: shotgun picks the direction, design-html renders it as working code. But `/design-html` also works with CEO plans, design reviews, or just a description.
 
@@ -512,7 +512,7 @@ Not every page needs the full Pretext engine. The skill reads the design and pic
 
 ### The refinement loop
 
-1. Reads the approved mockup from `approved.json`
+1. Reads the approved mockup from `approved.json`, plus any page archetype and section outline you picked on the board, which it builds as given instead of asking again
 2. Uses GPT-4o vision to extract implementation spec (colors, typography, layout)
 3. Generates self-contained HTML with Pretext inlined (15KB, zero network dependency)
 4. Spins up a live-reload server so you see changes instantly
@@ -1235,6 +1235,10 @@ The Claude Code CLI must be installed and authenticated. Without a role, its exi
 Outside-review routing follows the harness, independently of the configured model. Generic second-opinion requests choose `/claude-code` on Codex and `/codex` elsewhere; explicit provider requests keep that provider. The existing `codex_reviews` setting controls the selected automatic reviewer in workflows that already use that setting. Existing opt-in and skip controls still apply in office hours, design, and spec workflows.
 
 `/claude` was renamed to `/claude-code` without an alias. Run `./setup --host <name>` to migrate managed installations, including installations sharing that checkout. Setup retains a working old installation when replacement generation or installation fails.
+
+## Proactive skill suggestions
+
+gstack can invoke a skill for you when your request matches one. By default (`proactive: core`) only `/office-hours`, `/review`, `/qa` and `/ship` auto-invoke; `all` frees every skill and `off` suggests nothing. See [docs/proactive.md](proactive.md).
 
 ## Safety & Guardrails
 

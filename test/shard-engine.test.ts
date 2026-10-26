@@ -24,6 +24,7 @@ import {
   strictShardStatus,
   writeDurationSeed,
   zeroExecutionVerdict,
+  CAPY_LAUNCH_MARKERS,
 } from '../scripts/lib/shard-engine';
 import { FREE_LANE_POLICY, exitCodeFor, runFreeShard } from '../scripts/test-free-shards';
 import {
@@ -237,7 +238,13 @@ describe('shard engine: capture and isolation', () => {
   });
 
   test('each shard gets its own tmp and Chromium profile, removed by the backstop', async () => {
-    const base = { KEEP: '1', TMPDIR: '/inherited', CHROMIUM_PROFILE: '/shared-profile' };
+    const base = {
+      KEEP: '1', TMPDIR: '/inherited', CHROMIUM_PROFILE: '/shared-profile',
+      // The Capy launch file's markers (GSTA-99): a lane started from a shell that sourced it must
+      // not hand them to the product-under-test children, which set their own session kind.
+      GSTACK_SESSION_KIND: 'unattended', GSTACK_CAPY: '1', GSTACK_EPHEMERAL: '1', GSTACK_INSTALL_VERDICT: '/v.json',
+      GSTACK_STATE_ROOT: '/kept-root',
+    };
     const a = createShardSandbox('gstack-unit-shard-', base);
     const b = createShardSandbox('gstack-unit-shard-', base, { realpath: true });
     try {
@@ -246,6 +253,8 @@ describe('shard engine: capture and isolation', () => {
       for (const box of [a, b]) {
         expect(box.env.KEEP).toBe('1');
         expect(box.env.GSTACK_HOME).toBeUndefined();
+        for (const key of CAPY_LAUNCH_MARKERS) expect(box.env[key]).toBeUndefined();
+        expect(box.env.GSTACK_STATE_ROOT).toBe('/kept-root');
         for (const key of ['TMPDIR', 'TEMP', 'TMP']) expect(box.env[key]).toBe(box.tmp);
         expect(box.env.CHROMIUM_PROFILE).toBe(path.join(box.stateDir, 'chromium-profile'));
         expect(fs.statSync(box.tmp).isDirectory()).toBe(true);

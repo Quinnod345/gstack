@@ -103,8 +103,42 @@ export function checkCraft(html: string): CraftFinding[] {
   return findings;
 }
 
-export function formatCraft(findings: CraftFinding[]): string {
-  const lines = findings.map(f => `CRAFT_CHECK: ${f.id} ${f.count} ${f.fix}`);
-  lines.push(findings.length === 0 ? 'CRAFT_RESULT: clean' : `CRAFT_RESULT: ${findings.length} issue(s)`);
+/** An accepted finding recorded in finalized.json's `craft_exceptions`. */
+export interface CraftException {
+  id: string;
+  count: number;
+  reason: string;
+}
+
+/** Reads `craft_exceptions` from a finalized.json; a record without one has none. Throws on a malformed record. */
+export function parseCraftExceptions(json: string): CraftException[] {
+  const record = JSON.parse(json);
+  if (typeof record !== 'object' || record === null || Array.isArray(record)) throw new Error('not a finalized.json object');
+  const list = record.craft_exceptions ?? [];
+  const valid = (e: any) => typeof e?.id === 'string' && Number.isInteger(e.count) && e.count > 0 && typeof e.reason === 'string' && e.reason.trim() !== '';
+  if (!Array.isArray(list) || !list.every(valid)) throw new Error('craft_exceptions must be a list of { id, count, reason } with a positive count and a reason');
+  return list.map(({ id, count, reason }) => ({ id, count, reason: reason.replace(/\s+/g, ' ').trim() }));
+}
+
+/** A finding is accepted when an exception names its id with at least its count; a higher count stays an issue and says how many were accepted. */
+export function acceptFindings(findings: CraftFinding[], exceptions: CraftException[]): { issues: CraftFinding[]; accepted: CraftException[] } {
+  const issues: CraftFinding[] = [];
+  const accepted: CraftException[] = [];
+  for (const finding of findings) {
+    const exception = exceptions.filter(e => e.id === finding.id).sort((a, b) => b.count - a.count)[0];
+    if (!exception) issues.push(finding);
+    else if (finding.count <= exception.count) accepted.push({ id: finding.id, count: finding.count, reason: exception.reason });
+    else issues.push({ ...finding, fix: `${finding.fix} (${exception.count} accepted earlier: ${exception.reason})` });
+  }
+  return { issues, accepted };
+}
+
+export function formatCraft(findings: CraftFinding[], accepted: CraftException[] = []): string {
+  const lines = [
+    ...findings.map(f => `CRAFT_CHECK: ${f.id} ${f.count} ${f.fix}`),
+    ...accepted.map(a => `CRAFT_ACCEPTED: ${a.id} ${a.count} ${a.reason}`),
+  ];
+  const note = accepted.length === 0 ? '' : findings.length === 0 ? ` (${accepted.length} accepted)` : `, ${accepted.length} accepted`;
+  lines.push(`${findings.length === 0 ? 'CRAFT_RESULT: clean' : `CRAFT_RESULT: ${findings.length} issue(s)`}${note}`);
   return lines.join('\n');
 }

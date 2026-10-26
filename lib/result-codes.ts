@@ -226,8 +226,8 @@ export const RESULT_CODES = {
   },
   CHANGELOG_DUPLICATE_HEADING: {
     anchor: 'changelog-duplicate-heading',
-    summary: 'two CHANGELOG sections carry the same version heading',
-    fix: 'merge the duplicate sections into one entry under the new version',
+    summary: 'two CHANGELOG sections carry the same version heading, beyond any duplicate the base branch already carries',
+    fix: 'merge the duplicate sections the PR introduced into one entry under the new version',
   },
   CHANGELOG_TOP_MISMATCH: {
     anchor: 'changelog-top-mismatch',

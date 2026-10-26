@@ -46,12 +46,35 @@ export function resolvesToCommit(ref: string, cwd: string): string | null {
   return gitText(['rev-parse', '--verify', '-q', `${ref}^{commit}`], cwd);
 }
 
-/** origin/HEAD's target → `main` → `master` (the gstack-diff-scope chain), as a ref name. */
+/**
+ * A ref that could be a branch name: not a sha, not relative or symbolic
+ * (`HEAD~1`, `main^2`, `@{u}`, `HEAD`, `FETCH_HEAD`), not a full `refs/` path.
+ * Only such a ref has a remote-tracking twin (`origin/<ref>`) worth trying, and
+ * only such a ref goes into a fix-line refspec; `origin/HEAD~1` would resolve
+ * to a different commit than the `HEAD~1` the caller named.
+ */
+function isBranchName(ref: string): boolean {
+  return !/^[0-9a-f]{7,64}$/.test(ref) && !/[~^]|@\{/.test(ref) && !/^(?:[A-Z_]*HEAD)$/.test(ref) && !ref.startsWith('refs/');
+}
+
+function remoteNames(cwd: string): string[] {
+  const remotes = (gitText(['remote'], cwd) ?? '').split('\n').filter(Boolean);
+  return remotes.includes('origin') ? ['origin', ...remotes.filter((r) => r !== 'origin')] : remotes;
+}
+
+/**
+ * The remote's HEAD target → `main` → `master` (the gstack-diff-scope chain),
+ * as a ref name; the remotes are walked in resolveBase's order, so the default
+ * and the fix line come from the same remote.
+ */
 export function defaultBase(cwd: string): string {
-  const head = gitText(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'], cwd);
-  if (head) return head.replace(/^refs\/remotes\//, '');
+  const remotes = remoteNames(cwd);
+  for (const remote of remotes) {
+    const head = gitText(['symbolic-ref', '-q', `refs/remotes/${remote}/HEAD`], cwd);
+    if (head) return head.replace(/^refs\/remotes\//, '');
+  }
   for (const name of ['main', 'master']) {
-    if (resolvesToCommit(name, cwd) || resolvesToCommit(`origin/${name}`, cwd)) return name;
+    if (resolvesToCommit(name, cwd) || remotes.some((remote) => resolvesToCommit(`${remote}/${name}`, cwd))) return name;
   }
   return 'main';
 }
@@ -60,14 +83,50 @@ export function isShallow(cwd: string): boolean {
   return gitText(['rev-parse', '--is-shallow-repository'], cwd) === 'true';
 }
 
-/** The concrete recovery for an unresolvable base: fetch it from the detected remote, unshallowing when needed. */
+/**
+ * The base as a ref that resolves here and, when `head` is given, shares
+ * history with it: the ref itself, else its remote-tracking branch
+ * (`origin/main` for `main`). A clone that checked out only the feature
+ * branch has no local `main`, and the merge-base against `origin/main` is the
+ * same commit; a stale local `main` that shares no history with HEAD (a
+ * fetched-over clone) yields to the twin too, so the fix line's fetch into the
+ * tracking ref is a fix and not a loop.
+ */
+export function resolveBase(ref: string, cwd: string, head?: string): { ref: string; sha: string; local?: 'missing' | 'unrelated' } | null {
+  const related = (sha: string) => !head || mergeBase(sha, head, cwd) !== null;
+  const direct = resolvesToCommit(ref, cwd);
+  if (direct && related(direct)) return { ref, sha: direct };
+  if (!isBranchName(ref)) return direct ? { ref, sha: direct } : null;
+  for (const remote of remoteNames(cwd)) {
+    const tracking = `${remote}/${ref}`;
+    const sha = resolvesToCommit(tracking, cwd);
+    if (sha && related(sha)) return { ref: tracking, sha, local: direct ? 'unrelated' : 'missing' };
+  }
+  return direct ? { ref, sha: direct } : null;
+}
+
+/** A word for a printed shell line: as is when it is plain, single-quoted otherwise (ref names may hold `;`, `$`, `(`, `{1,2}`). */
+function shellWord(s: string): string {
+  return /^[A-Za-z0-9._\/@^~+:-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The concrete recovery for an unresolvable base: fetch it from the detected
+ * remote into its remote-tracking ref (which resolveBase then finds; a bare
+ * `git fetch origin main` only updates FETCH_HEAD in a single-branch clone),
+ * unshallowing when needed. The refspec is forced (`+`) so the line also
+ * repairs a tracking ref that exists but shares no history with HEAD. A sha
+ * or a relative ref (`HEAD~1`, `main^2`, `@{u}`) is not a refspec: that gets a
+ * plain fetch (deepened when shallow).
+ */
 export function noBaseFix(ref: string, cwd: string): string {
-  const remotes = (gitText(['remote'], cwd) ?? '').split('\n').filter(Boolean);
+  const remotes = remoteNames(cwd);
   const m = /^([^/]+)\/(.+)$/.exec(ref);
-  const remote = m && remotes.includes(m[1]) ? m[1] : remotes.includes('origin') ? 'origin' : remotes[0] ?? 'origin';
+  const remote = m && remotes.includes(m[1]) ? m[1] : remotes[0] ?? 'origin';
   const branch = m && remotes.includes(m[1]) ? m[2] : ref;
-  if (/^[0-9a-f]{7,64}\^?$/.test(ref) || ref.endsWith('^')) return isShallow(cwd) ? `git fetch --deepen=50 ${remote}` : `git fetch ${remote}`;
-  return isShallow(cwd) ? `git fetch --unshallow ${remote} ${branch}` : `git fetch ${remote} ${branch}`;
+  if (!isBranchName(ref)) return isShallow(cwd) ? `git fetch --deepen=50 ${shellWord(remote)}` : `git fetch ${shellWord(remote)}`;
+  const refspec = shellWord(`+${branch}:refs/remotes/${remote}/${branch}`);
+  return isShallow(cwd) ? `git fetch --unshallow ${shellWord(remote)} ${refspec}` : `git fetch ${shellWord(remote)} ${refspec}`;
 }
 
 export function mergeBase(a: string, b: string, cwd: string): string | null {

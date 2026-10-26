@@ -2289,9 +2289,9 @@ describe('preamble routing injection (bin/gstack-skill-start emission layer)', (
   });
 
   test('routing injection only fires when all conditions met', () => {
-    // Must be: HAS_ROUTING=no AND ROUTING_DECLINED=false AND PROACTIVE_PROMPTED=yes
+    // Must be: HAS_ROUTING=no AND ROUTING_DECLINED=false AND PROACTIVE_PROMPTED=yes AND the offer is not switched off by proactive off
     expect(SKILL_START_SCRIPT).toContain(
-      'if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ]; then',
+      'if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_PROACTIVE_OFF" = "no" ]; then',
     );
   });
 
@@ -4647,7 +4647,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
     // so those rules are the resolver's order marker.
     const content = readSkillStartup(path.join(ROOT, 'plan-ceo-review', 'SKILL.md'));
     const planModeIdx = content.indexOf(PLAN_MODE_INFO_MARKER);
-    const upgradeIdx = content.search(/If `PROACTIVE` is `"?false"?`/i);
+    const upgradeIdx = content.search(/If `PROACTIVE` is `"?(false|off)"?`/i);
     expect(planModeIdx).toBeGreaterThan(0);
     expect(upgradeIdx).toBeGreaterThan(0);
     expect(planModeIdx).toBeLessThan(upgradeIdx);

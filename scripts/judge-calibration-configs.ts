@@ -13,6 +13,7 @@ import {
   judgePanelMedian, judgePanelMajority,
 } from '../test/helpers/llm-judge';
 import { buildWorkflowJudgePrompt, WORKFLOW_JUDGE_RESPONSE_SCHEMA } from '../test/helpers/workflow-judge-input';
+import { COOKIE_WORKFLOW_JUDGE } from '../test/helpers/cookie-workflow-judge-input';
 import { CLAUDE_JUDGE_EVAL_MODEL } from '../lib/eval-model';
 import type { CalibrationConfig, Verdict } from './judge-calibration';
 
@@ -106,4 +107,11 @@ export const CALIBRATION_CONFIGS: CalibrationConfig[] = [
     'land-and-deploy/SKILL.md workflow', 'canary/SKILL.md monitoring loop', 'benchmark/SKILL.md perf collection',
     'setup-deploy/SKILL.md platform setup', 'sync-gbrain/SKILL.md read-only readiness', 'retro/SKILL.md instructions',
     'qa-only/SKILL.md workflow', 'gstack-upgrade/SKILL.md upgrade flow']),
+  {
+    id: 'cookie-workflow', priority: 8, cases: ['setup-browser-cookies/SKILL.md workflow'], model: COOKIE_WORKFLOW_JUDGE.model,
+    build: inputs => buildWorkflowJudgePrompt(COOKIE_WORKFLOW_JUDGE, { files: [], text: inputs.bundle! }),
+    oldOptions: { max_tokens: DEFAULT_JUDGE_MAX_TOKENS },
+    newOptions: { max_tokens: DEFAULT_JUDGE_MAX_TOKENS, jsonSchema: WORKFLOW_JUDGE_RESPONSE_SCHEMA },
+    ...scoreJudge(COOKIE_WORKFLOW_JUDGE.thresholds), estimatedOutputTokens: 1200,
+  },
 ];
