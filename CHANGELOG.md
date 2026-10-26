@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.242.0] - 2026-10-26
 
 **`gstack-context-bill` now bills a real install.** On `~/.claude/skills` it reported "2 skills, ~134 tok" always-on, because setup installs each skill as a real directory whose `SKILL.md` and `sections/` are symlinks into the gstack checkout, and the walker only counted regular files. The tool built to answer the token-cost complaint gave a falsely tiny answer on the layout users actually have. On a fresh install it now reports 58 skills, ~6.8K tokens always-on, and 3.6 MB on disk (it was 37 KB across 2 skills). Billing the checkout itself is unchanged (66 skills, ~7.2K tokens).
 
