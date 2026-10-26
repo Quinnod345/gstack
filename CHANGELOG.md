@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.231.0] - 2026-10-26
 
 **A fresh install is about 520 MB smaller: `./setup` installs production dependencies only.** Setup ran `bun install` without `--production`, so every user also got the test and eval toolchain from `devDependencies`, mostly the Claude Agent SDK's native binaries (both the glibc and musl builds on Linux, ~440 MB). Measured on a clean Ubuntu 24.04 container with a cold Bun cache (4 vCPU, two runs each): `node_modules` goes from 1,094 MB to 572 MB, the checkout from 1.74 GB to 1.22 GB, and the whole install with Chromium from 2.42 GB to 1.90 GB. `./setup` took 24.6 s and 20.0 s before, 21.1 s and 18.9 s after.
 
