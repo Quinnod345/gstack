@@ -999,7 +999,11 @@ cannot see it, so on a managed machine the log line describes what `$B`
 asked for, not what the policy enforces.
 
 Values from the environment follow the same credential policy as `--proxy`.
-`socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
+A variable without a scheme (curl-style `host:port` or `user:pass@host:port`)
+is read as `http://host:port`, the way curl and Chromium's own environment
+reader take it, so a value Chromium used to pick up by itself now reaches the
+same proxy through `$B`; `--proxy` and `BROWSE_PROXY_URL` still require the
+scheme. `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already
 resolves names through the proxy. `NO_PROXY` (or `no_proxy`) is translated to
 Chromium's bypass list: `example.com` and `.example.com` cover the domain and
 its subdomains, and CIDR blocks and `host:port` entries pass through.
@@ -1008,8 +1012,8 @@ proxy source. When a server starts, `$B` prints one line naming the proxy and
 where it came from, with credentials redacted.
 
 - **`warning: HTTPS_PROXY is not a proxy URL browse can use (...)`.** The
-  variable doesn't parse as `scheme://host:port`: a curl-style `host:port`, an
-  unsupported scheme, or a bad port. `$B` connects directly (on Linux,
+  variable doesn't parse even as `http://` plus the value: an unsupported
+  scheme (`ftp://`), a bad port, or a missing host. `$B` connects directly (on Linux,
   Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
   or set `BROWSE_PROXY_URL=direct` to silence the warning (on macOS and
@@ -1703,7 +1707,7 @@ browse/
 │   ├── port-allocator.ts        # Fixed 10000-49151 scan range for every long-lived listener (never port:0)
 │   ├── xprotect-heal.ts         # macOS XProtect launch-kill classify + quarantine-clear + bounded reinstall
 │   ├── socks-bridge.ts          # Local 127.0.0.1 SOCKS5 bridge that handles auth handshakes Chromium can't speak
-│   ├── proxy-config.ts          # --proxy URL parsing + cred resolution (URL vs env, fail-fast on both)
+│   ├── proxy-config.ts          # --proxy URL parsing + cred resolution (URL vs env, fail-fast on both); direct:// launch switch + proxy-mode log line
 │   ├── proxy-redact.ts          # Cred-redaction helper for any proxy URL surfaced to logs/errors
 │   ├── xvfb.ts                  # Xvfb auto-spawn + orphan cleanup with PID + start-time validation
 │   ├── stealth.ts               # Layer C: webdriver mask + window.chrome.* + Notification/Permissions + per-install hardware + toString proxy + automation-global sweep; buildGStackLaunchArgs (GSTACK_* cmdline switches); GSTACK_STEALTH=extended opt-in

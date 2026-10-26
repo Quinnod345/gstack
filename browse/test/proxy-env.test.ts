@@ -64,8 +64,16 @@ describe('resolveProxy precedence', () => {
     }
   });
 
-  test('a standard variable that does not parse warns and falls back to direct, without echoing it', () => {
-    for (const value of ['proxy.corp:8080', 'user:secret@proxy.corp:8080', 'ftp://proxy.corp:21', 'http://proxy.corp:99999']) {
+  test('a scheme-less standard variable is read as an http:// proxy, as curl and Chromium read it (#3440), with creds kept and redactable', () => {
+    expect(resolveProxy(null, { HTTPS_PROXY: 'proxy.corp:8080' })).toMatchObject({ url: 'http://proxy.corp:8080/', source: 'HTTPS_PROXY', warning: null });
+    expect(resolveProxy(null, { https_proxy: 'user:secret@proxy.corp:8080' })).toMatchObject({ url: 'http://user:secret@proxy.corp:8080/', source: 'https_proxy', warning: null });
+    expect(resolveProxy(null, { ALL_PROXY: '[::1]:3128' })).toMatchObject({ url: 'http://[::1]:3128/', source: 'ALL_PROXY', warning: null });
+    expect(resolveProxy(null, { HTTP_PROXY: 'proxy.corp' })).toMatchObject({ url: 'http://proxy.corp/', source: 'HTTP_PROXY', warning: null });
+    expect(resolveProxy(null, { HTTPS_PROXY: 'socks5h://proxy.corp:1080' }).url).toBe('socks5://proxy.corp:1080');
+  });
+
+  test('a standard variable that does not parse even as http:// warns and falls back to direct, without echoing it', () => {
+    for (const value of ['ftp://proxy.corp:21', 'http://proxy.corp:99999', 'proxy.corp:notaport', 'http://:8080']) {
       const resolved = resolveProxy(null, { https_proxy: value });
       expect(resolved).toMatchObject({ url: null, source: null, bypass: null });
       expect(resolved.warning).toStartWith('https_proxy is not a proxy URL browse can use (');
@@ -73,11 +81,13 @@ describe('resolveProxy precedence', () => {
       expect(resolved.warning).toContain('BROWSER.md#proxy-from-environment');
       expect(resolved.warning).not.toContain('secret');
     }
+    expect(resolveProxy(null, { https_proxy: 'user:secret@proxy.corp:notaport' }).warning).not.toContain('secret');
   });
 
-  test('--proxy and BROWSE_PROXY_URL are explicit and still fail closed', () => {
+  test('--proxy and BROWSE_PROXY_URL are explicit and still fail closed, scheme required', () => {
     expect(() => resolveProxy('proxy.corp:8080', {})).toThrow(/unsupported proxy scheme/);
     expect(() => resolveProxy(null, { BROWSE_PROXY_URL: 'proxy.corp:8080' })).toThrow(/unsupported proxy scheme/);
+    expect(() => resolveProxy(null, { BROWSE_PROXY_URL: 'user:secret@proxy.corp:8080' })).toThrow(/unsupported proxy scheme/);
   });
 });
 

@@ -122,10 +122,22 @@ describe.skipIf(process.platform === 'win32')('#915 proxy from the environment, 
     expect(proxiedHosts.length).toBe(before);
   }, 120_000);
 
-  test('a curl-style HTTPS_PROXY warns and falls back to direct instead of failing', async () => {
+  test('a scheme-less HTTPS_PROXY is the configured http:// proxy (#3440), redacted in the start line and the state', async () => {
+    expect((await browse(['stop'], {})).code).toBe(0);
+    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'user:secret@proxy.corp:8080' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.stderr).toContain('Starting server with proxy http://***:***@proxy.corp:8080/ from HTTPS_PROXY...');
+    expect(r.stderr).not.toContain('warning: HTTPS_PROXY is not a proxy URL');
+    expect(r.out).not.toContain('secret');
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    expect(state.proxy).toBe('http://***:***@proxy.corp:8080/');
+    expect(state.proxySource).toBe('HTTPS_PROXY');
+  }, 120_000);
+
+  test('an HTTPS_PROXY that does not parse even as http:// warns and falls back to direct instead of failing', async () => {
     expect((await browse(['stop'], {})).code).toBe(0);
     const before = proxiedHosts.length;
-    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'user:secret@proxy.corp:8080' });
+    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'ftp://user:secret@proxy.corp:21' });
     expect(r.code, r.out).toBe(0);
     expect(r.stderr).toContain('warning: HTTPS_PROXY is not a proxy URL browse can use');
     expect(r.stderr).toContain('BROWSE_PROXY_URL=direct');

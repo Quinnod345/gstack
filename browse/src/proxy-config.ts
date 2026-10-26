@@ -275,7 +275,8 @@ export function forcesDirect(env: NodeJS.ProcessEnv, platform: NodeJS.Platform =
  * bypass the system proxy settings, so it is part of the daemon's config hash
  * (a reused daemon started without it would keep the system proxy while the
  * CLI reports direct), is recorded in the daemon state and is re-emitted on an
- * auto-restart. On Linux every direct connection already carries
+ * auto-restart from the invocation's own flags, which the hash gate already
+ * matched against that daemon. On Linux every direct connection already carries
  * DIRECT_PROXY_ARG, so the opt-out changes nothing and hashes like no proxy.
  */
 export function explicitDirect(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
@@ -296,12 +297,19 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
   return `[browse] [proxy] none: direct connection (${DIRECT_PROXY_ARG}${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
 }
 
+/** A proxy URL with a scheme (`http://`, `socks5h://`); anything else is read as curl and Chromium read it, as an HTTP proxy. */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
 /**
  * Resolve the proxy for this invocation (#915). Env URLs go through
- * parseProxyConfig, so the cred policy applies. A standard variable that does
- * not parse (curl-style `host:port`, an unsupported scheme) is ignored with a
+ * parseProxyConfig, so the cred policy applies. A standard variable without a
+ * scheme (curl-style `host:port` or `user:pass@host:port`) is read as an
+ * `http://` proxy, the way curl and Chromium's own environment reader take
+ * it, so a session that worked through Chromium reading the variable keeps
+ * working now that the launch is explicit (#3440). One that still does not
+ * parse (an unsupported scheme, a bad port, a missing host) is ignored with a
  * warning instead of failing every command; --proxy and BROWSE_PROXY_URL are
- * explicit browse settings and still fail closed.
+ * explicit browse settings and still fail closed, scheme required.
  */
 export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): ResolvedProxy {
   const direct = (warning: string | null = null): ResolvedProxy => ({ url: null, source: null, noProxyRules: null, bypass: null, warning });
@@ -315,7 +323,7 @@ export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): Re
   } else {
     const name = STANDARD_PROXY_VARS.find(key => env[key]);
     if (!name) return direct();
-    [source, raw] = [name, env[name]!];
+    [source, raw] = [name, SCHEME_RE.test(env[name]!) ? env[name]! : `http://${env[name]!}`];
     try {
       parseProxyConfig({ proxyUrl: raw });
     } catch (err) {

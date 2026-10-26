@@ -521,7 +521,8 @@ export function proxyMismatchLines(flags: GlobalFlags, state: ServerState, env: 
 /**
  * The server env for this invocation's resolved proxy (#915); empty when
  * direct, except BROWSE_PROXY_URL=direct where that bypasses the system proxy
- * settings (#3440), so a restart from a shell without it stays direct.
+ * settings (#3440), so a daemon start or auto-restart carries the opt-out the
+ * session's hash was computed from.
  */
 function proxyServerEnv(flags: Partial<Pick<GlobalFlags, 'proxyUrl' | 'proxySource' | 'proxyBypass' | 'explicitDirect'>> | null | undefined): Record<string, string> {
   if (!flags?.proxyUrl) return flags?.explicitDirect ? { BROWSE_PROXY_URL: 'direct' } : {};
@@ -543,7 +544,6 @@ export function buildRestartEnv(
   oldState: ServerState | null,
 ): Record<string, string> {
   const env: Record<string, string> = proxyServerEnv(globalFlags);
-  if (!globalFlags && oldState?.proxyDirect) env.BROWSE_PROXY_URL = 'direct';
   if (globalFlags?.headed || oldState?.mode === 'headed') env.BROWSE_HEADED = '1';
   const configHash = globalFlags?.configHash || oldState?.configHash;
   if (configHash) env.BROWSE_CONFIG_HASH = configHash;

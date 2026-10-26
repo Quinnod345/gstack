@@ -79,11 +79,24 @@ describe.skipIf(process.platform !== 'linux')('#3440 item 8: direct mode never l
   }, 120_000);
 
   // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
-  // Value: protects=the warning fallback ("browse connects directly") is true: a curl-style HTTPS_PROXY Chromium itself would parse never carries the session;
-  //   fails_when=the direct switch is dropped or the unparseable variable is forwarded to Chromium; why_new=proxy-env-daemon's curl-style case targets loopback, which Chromium bypasses anyway; seam=none
-  test('an unparseable HTTPS_PROXY warns and the daemon still forces direct: no CONNECT reaches the host:port Chromium would have used', async () => {
+  // Value: protects=a scheme-less HTTPS_PROXY (host:port, what Chromium's own environment reader took as an HTTP proxy before the launch was explicit) still reaches that proxy, now through browse's own configuration;
+  //   fails_when=resolveProxy stops reading scheme-less variables as http:// and the session goes direct with only a warning; why_new=proxy-env-daemon's scheme-less case targets loopback, which Chromium bypasses anyway; seam=none
+  test('a scheme-less HTTPS_PROXY is the configured proxy and the CONNECT reaches the host:port Chromium would have used by itself', async () => {
     const envProxy = await connectProxy();
     const env = { HTTPS_PROXY: envProxy.url.replace(/^http:\/\//, '') };
+    const r = await browse(['goto', `https://${TARGET}/`], env);
+    expect(r.stderr).toContain(`Starting server with proxy ${envProxy.url}/ from HTTPS_PROXY...`);
+    expect(r.stderr).not.toContain('warning: HTTPS_PROXY is not a proxy URL');
+    expect(envProxy.connects).toEqual([`${TARGET}:443`]);
+    expect(r.log).toContain(`[browse] [proxy] using ${envProxy.url}/ from HTTPS_PROXY`);
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).proxy).toBe(`${envProxy.url}/`);
+  }, 120_000);
+
+  // Value: protects=the warning fallback ("browse connects directly") is true for a variable that does not parse even as http://: the session never carries it;
+  //   fails_when=the direct switch is dropped or the unparseable variable is forwarded to Chromium; seam=none
+  test('an unparseable HTTPS_PROXY (unsupported scheme) warns and the daemon still forces direct: no CONNECT reaches the proxy it named', async () => {
+    const envProxy = await connectProxy();
+    const env = { HTTPS_PROXY: envProxy.url.replace(/^http:\/\//, 'ftp://') };
     const r = await browse(['goto', `https://${TARGET}/`], env);
     expect(r.stderr).toContain('warning: HTTPS_PROXY is not a proxy URL browse can use');
     expect(r.stderr).toContain('Starting server...');
