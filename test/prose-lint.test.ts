@@ -137,6 +137,8 @@ describe('selections', () => {
     expect(picked.split('\n')).toHaveLength(body.split('\n').length);
     expect(lintProse(picked, 'b.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 2], ['vocabulary', 2], ['arrow', 9]]);
     expect(sectionsOnly(body, ['Why'])).toBeNull();
+    const fenced = ['## Summary', 'Fine.', '', '## Pre-Landing Review', '```codex-review', '## Summary', 'The parser showcases a vibrant result.', '```', '', '## Blast radius', '```', '## Why', 'a fenced heading showcases nothing', '```', 'but this vibrant line is read.'].join('\n');
+    expect(lintProse(sectionsOnly(fenced, ['Summary', 'Blast radius'])!, 'b.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 15]]);
     const gated = run([path.join(FIXTURES, 'slopped-changelog.md'), '--sections', '[1.0.0] - 2026-10-01', '--gate']);
     expect(gated.code).toBe(1);
     expect(gated.out).toMatch(/^PROSE: \S+slopped-changelog\.md:16 /m);
@@ -148,6 +150,8 @@ describe('selections', () => {
   test('a multi-line HTML comment is masked through its closing marker and prose after it is read', () => {
     const text = ['Plain start. <!-- a vibrant', 'multi-line crucial comment', 'still pivotal --> The parser showcases it.', 'Showcasing a vibrant end.'].join('\n');
     expect(lintProse(text, 'x.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 3], ['vocabulary', 4], ['vocabulary', 4]]);
+    const quoted = ['Use `<!--` to open a comment, or see https://example.com/<!--', 'The parser showcases a vibrant result.'].join('\n');
+    expect(lintProse(quoted, 'x.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 2], ['vocabulary', 2]]);
   });
 
   test('unreleasedBlock returns the block with its heading line, or null', () => {
@@ -303,11 +307,15 @@ describe('wiring', () => {
     expect(read('docs/troubleshooting.md')).toContain('<a id="prose-lint-found"></a>');
   });
 
-  // Value: protects=a template run is a report (exit 0 and a trailer) even when the templates carry findings, so a template's em dashes and BAD examples never fail a check; fails_when=report mode exits nonzero on a finding; why_new=the earlier row accepted ok or found and proved nothing; seam=none; no_claim=the templates' own findings count is not pinned (it moves with every prose edit)
-  test('the shipped templates get a report, never a gate: exit 0 with a trailer even with findings', () => {
+  // Value: protects=report mode (no --gate) exits 0 with a trailer even over a file full of findings, which is what lets the templates and docs keep their em dashes; fails_when=a finding exits nonzero without --gate, or a template run prints no trailer or writes to stderr; why_new=the earlier row accepted ok or found over the templates alone and so proved nothing about findings; seam=none; no_claim=the templates' own findings count is not pinned (it moves with every prose edit, and ok is as valid as found)
+  test('report mode never gates: the slopped fixture exits 0 without --gate, and the shipped templates get a trailer and no stderr', () => {
+    const slop = run([path.join(FIXTURES, 'slopped-changelog.md')]);
+    expect(slop.code).toBe(0);
+    expect(slop.out).toMatch(/PROSE_LINT: found=\d+ files=1\n$/);
+    expect(slop.err).toBe('');
     const r = run(['ship/sections/changelog.md.tmpl', 'ship/sections/capy-pr.md.tmpl', 'ship/sections/pr-body.md.tmpl']);
     expect(r.code).toBe(0);
-    expect(r.out).toMatch(/PROSE_LINT: found=\d+ files=3\n$/);
+    expect(r.out).toMatch(/PROSE_LINT: (ok|found=\d+) files=3\n$/);
     expect(r.err).toBe('');
   });
 });

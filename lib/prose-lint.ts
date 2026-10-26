@@ -110,13 +110,13 @@ export function maskProse(text: string): string {
     if (fence) { if (open && open[1]!.startsWith(fence[0]!) && open[1]!.length >= fence.length) fence = null; return ''; }
     if (comment) { const end = line.indexOf('-->'); if (end < 0) return ''; comment = false; line = ' '.repeat(end + 3) + line.slice(end + 3); }
     if (open) { fence = open[1]!; return ''; }
-    const tail = line.lastIndexOf('<!--');
-    if (tail >= 0 && line.indexOf('-->', tail) < 0) { comment = true; line = line.slice(0, tail); }
-    return line
-      .replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length))
+    line = line
       .replace(/`[^`\n]*`/g, (m) => 'CODE' + ' '.repeat(Math.max(0, m.length - 4)))
       .replace(/\]\([^)\s]+\)/g, (m) => ']' + ' '.repeat(m.length - 1))
       .replace(/https?:\/\/\S+/g, (m) => 'URL' + ' '.repeat(Math.max(0, m.length - 3)));
+    const tail = line.lastIndexOf('<!--');
+    if (tail >= 0 && line.indexOf('-->', tail) < 0) { comment = true; line = line.slice(0, tail); }
+    return line.replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length));
   });
   return out.join('\n');
 }
@@ -172,7 +172,11 @@ export function unreleasedBlock(text: string): { text: string; line: number } | 
 export function sectionsOnly(text: string, names: string[]): string | null {
   const wanted = new Set(names.map(n => n.trim().toLowerCase()).filter(Boolean));
   let keep = false, found = false;
+  let fence: string | null = null;
   const out = text.split('\n').map((line) => {
+    const open = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) { if (open && open[1]!.startsWith(fence[0]!) && open[1]!.length >= fence.length) fence = null; return keep ? line : ''; }
+    if (open) { fence = open[1]!; return keep ? line : ''; }
     const h = /^##\s+(.+?)\s*$/.exec(line);
     if (h) { keep = wanted.has(h[1]!.toLowerCase()); found ||= keep; return ''; }
     return keep ? line : '';
