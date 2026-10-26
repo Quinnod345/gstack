@@ -1327,8 +1327,9 @@ the latest release 1.64.1 (Chromium 156) and the 1.65.0 alpha of 2026-10-24
 fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
 the first Playwright release whose Chromium carries the removal. Until then,
 don't do signed-in work in this engine on a network you do not trust (sessions
-imported earlier persist in the headed profile, the `BROWSE_EXTENSIONS_DIR`
-profile, `state save` files and, with `BROWSE_PERSIST_STATE=1`, the headless
+imported earlier persist in each project's headed profile (`$B profiles list`
+shows them; new projects copy logins from the old shared
+`~/.gstack/chromium-profile`), the `BROWSE_EXTENSIONS_DIR` profile, `state save` files and, with `BROWSE_PERSIST_STATE=1`, the headless
 session state), and prefer Aside for signed-in work where you have it.
 
 To check a build, run `$B stop`, then the same `goto` in the default headless
@@ -1336,9 +1337,10 @@ mode with `BROWSE_EXTENSIONS_DIR` and `BROWSE_PROXY_URL` unset, the proxy
 variables `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` unset in both cases
 (Chromium reads those itself, even when gstack sets no proxy), and
 `GSTACK_CHROMIUM_PATH` unset (the bundled build) or set to the build you want
-to check. First confirm that a known-good HTTPS site such as
-`$B goto https://example.com/` loads in the same session, because a captive
-portal or an intercepting proxy fails every site with the same error. Then only
+to check. Run it on a network you trust not to inspect TLS, because a captive
+portal or an intercepting proxy can fail some or all sites with the same error,
+and first confirm that a known-good HTTPS site such as
+`$B goto https://example.com/` loads in the same session. Then only
 `ERR_CERT_AUTHORITY_INVALID` on the test host means the root store no longer
 trusts them. `ERR_CERT_REVOKED` only shows that the session has a CRLSet, and a
 DNS, network or other error proves nothing.
