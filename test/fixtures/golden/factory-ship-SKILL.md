@@ -424,7 +424,8 @@ tests without asking again. Step 15 commits those tests.
 
 **Route:** integrate (1–3) → test and review (4–11.5) → prepare the release
 (12–15) → verify frozen content (16) → push and publish (17–21).
-Every new invocation repeats Steps 1–16, including both reviews and the docs audit.
+Every new invocation repeats Steps 1–16, including both reviews and the docs audit,
+unless Step 1's carry check binds an earlier receipt to HEAD.
 Steps 12, 17 and 19 prevent duplicate bumps, pushes and PRs, never verification.
 
 ### Keep state between steps
@@ -446,6 +447,13 @@ each Step 11 attempt, and `DESIGN_START` for design. Finish each pass with its o
 token; `--finish` stamps the binding fields automatically. Never borrow or replace a token.
 `gstack-wtree` prints a Git tree hash covering tracked and non-ignored untracked files,
 not a commit ID. Use `git diff <old-tree> <new-tree>` to compare these snapshots.
+
+**Review policy** (docs/review-policy.md): a finding blocks another review pass
+only when it would fail a test, break production, or lose data or secrets;
+everything below that floor ships as a named note in the PR body. Pass 1 reviews
+the diff; later passes read only the range since the previous pass; three passes
+is the cap. `NO FINDINGS` is a complete reviewer result. The ship receipt's
+`review_loop` counters record the outcome; `ship: review_scope` (Step 3) is the knob.
 
 ### Ship control flow
 
@@ -565,7 +573,15 @@ repository-landing asks, including on Apple repos.
    `git diff origin/<base> --stat`, untracked files from status, and
    `git log origin/<base>..HEAD --oneline`.
 
-4. Display historical readiness using the dashboard below, then finish Step 1.
+4. **Carry check.** If `gh pr list --head <branch-name> --state open --json number`
+   names a PR, run `$GSTACK_ROOT/bin/gstack-ship-receipt carry --pr <n> --base <base>`.
+   `CARRY: carried` means the product diff against `origin/<base>` has the same
+   patch-id as the reviewed head's (only a base merge, tests or release metadata
+   changed; the receipt's `carry` object holds the range-diff evidence): the receipt
+   now binds HEAD and the run is complete at its `GSTACK_RESULT` line, so stop.
+   `CARRY: refused` or `current` continues; a product change always re-runs Steps 2–16.
+
+5. Display historical readiness using the dashboard below, then finish Step 1.
    Prior CLEAR reviews or dashboard skips never replace Step 9's gates.
 
 ## Review Readiness Dashboard

@@ -79,6 +79,22 @@ PROFILE=0; [ -n "$FOR" ] && gstack_doctor_install_profile "$FOR" && PROFILE=1
 now() { date +%s; }
 T0=$(now); ORIG_PWD=$(pwd)
 
+# --for none (lib/doctor-components.ts NOT_NEEDED_PROFILE): this session runs
+# no gstack workflow here, so nothing is certified and nothing is installed.
+# The trailer is `gstack: ok not-needed for=none (<notes>)`, exit 0; it admits
+# no workflow, because no install verdict is written. A checkout, when there
+# is one, is named with its version so the owner sees what the machine holds.
+if [ "$FOR" = "${GSTACK_DOCTOR_NOT_NEEDED:-none}" ]; then
+  _nn_fix=$(gstack_capy_bootstrap_cmd "$ROOT" "<skill>" 2>/dev/null || echo "git clone $REPO $ROOT, then $ROOT/bin/gstack-capy-install --for <skill>")
+  [ -n "${GSTACK_CAPY_WRAPPER_PATH:-}" ] && _nn_fix="bash $GSTACK_CAPY_WRAPPER_PATH --for <skill>"
+  if [ -f "$ROOT/setup" ] && [ -f "$ROOT/VERSION" ]; then _nn_note="checkout $(head -1 "$ROOT/VERSION") at $ROOT, not certified"
+  else _nn_note="no checkout at $ROOT"; fi
+  [ -n "${GSTACK_CAPY_BEHIND:-}" ] && _nn_note="$_nn_note; behind=$GSTACK_CAPY_BEHIND (latest: ${GSTACK_CAPY_BEHIND_TO:-${GSTACK_CAPY_REMOTE_VERSION:-unknown}})"
+  echo "gstack-capy-install: --for none: no workflow runs on this machine in this session; nothing certified, nothing installed"
+  echo "gstack: ok ${GSTACK_DOCTOR_NOT_NEEDED_REVISION:-not-needed} for=none ($_nn_note; before the first workflow run: $_nn_fix)"
+  exit 0
+fi
+
 # 1. Clone or reuse, under the same lock the user-scope skill takes.
 mkdir -p "$(dirname "$ROOT")" || stop INSTALL_PREFLIGHT_FAILED "cannot create $(dirname "$ROOT")" "choose a writable --root"
 command -v git >/dev/null 2>&1 || stop INSTALL_PREFLIGHT_FAILED "preflight: git not found" "apt-get install -y git"
@@ -131,10 +147,19 @@ INSTALL_VERSION=$(gstack_bun_install_version) || stop BUN_INSTALL_VERSION_INVALI
 [ -n "$PROJECT" ] || { PROJECT=$(cd "$ORIG_PWD" && git rev-parse --show-toplevel 2>/dev/null || true); [ "$(cd "${PROJECT:-/nonexistent}" 2>/dev/null && pwd -P)" = "$ROOT_REAL" ] && PROJECT=""; }
 PROJECT_REAL=""; [ -n "$PROJECT" ] && PROJECT_REAL=$(cd "$PROJECT" 2>/dev/null && pwd -P)
 VERDICT=$(gstack_install_verdict_path "$GSTACK_STATE_ROOT" "$ROOT_REAL" "$PROJECT_REAL")
-REC_BUN="" REC_VER="" REC_RULE="" REC_BUN_INSTALL=""
+REC_BUN="" REC_VER="" REC_RULE="" REC_BUN_INSTALL="" REC_FOR=""
 if [ -f "$VERDICT" ]; then
   REC_BUN=$(gstack_install_verdict_field "$VERDICT" bun_path) REC_VER=$(gstack_install_verdict_field "$VERDICT" bun_version)
   REC_RULE=$(gstack_install_verdict_field "$VERDICT" bun_rule) REC_BUN_INSTALL=$(gstack_install_verdict_field "$VERDICT" bun_install)
+  REC_FOR=$(gstack_install_verdict_field "$VERDICT" for)
+fi
+# A reviewer's machine (--for review-voice) asked to run a workflow upgrades
+# in place: the same checkout, the project's pins applied, ./setup and both
+# host profiles; no second clone and no removal (HARN: reviewers were told to
+# "reinstall"). The review-voice verdict for this HEAD and project is replaced
+# by the workflow's.
+if [ "$CHECK_ONLY" -eq 0 ] && [ "$PROFILE" -eq 0 ] && [ -n "$REC_FOR" ] && gstack_doctor_install_profile "$REC_FOR"; then
+  say "upgrading the $REC_FOR install in place to --for ${FOR:-${REQUIRE}} (same checkout at $ROOT; the project's pins apply, ./setup and both host profiles run now; no second clone)"
 fi
 LAUNCH_DIR="" RES_BIN="" RES_VER="" RES_RULE=""
 PINS_OUT="" PINS_MODE=none RUNNER="" PIN="" PIN_SRC="" PIN_EXACT="" PIN_ALTS=""
@@ -552,11 +577,15 @@ EOF_SHIM
 # (bin/gstack-capy-session exports GSTACK_CAPY_BEHIND, _BEHIND_TO, _BEHIND_FIX), or
 # `latest` when the bootstrapper read a newer VERSION from origin in this run,
 # exported as GSTACK_CAPY_REMOTE_VERSION. The failure head (`gstack: fail <ids>`)
-# is unchanged. An install-mode session whose self-upgrade was skipped
-# (the session exports GSTACK_CAPY_BEHIND_BLOCKED) is never ok: its ok trailer becomes
-#   gstack: fail behind — installed <rev> is <n> commits behind origin (latest <ver>)
-#     and the session-start upgrade was skipped: <reason>; fix: <command> (<CODE>)
-# and a passing run whose launch file cannot be written becomes
+# is unchanged. A gap above the supported minimum is never a hard fail: an
+# install-mode session whose self-upgrade was skipped (the session exports
+# GSTACK_CAPY_BEHIND_BLOCKED) prints a `WARN behind` row with the reason and
+# keeps its ok trailer, whose notes then read
+#   behind=<n> (latest: <ver>); upgrade skipped: <reason> (<CODE>); fix: <command>
+# (below the minimum the bootstrapper fails revision before anything runs).
+# A project floor the doctor could not meet (`WARN floor`, PROJECT_FLOOR_UNMET)
+# adds `floor=<ver> (<file>)` and a `fix:` note the same way. A passing run
+# whose launch file cannot be written becomes
 #   gstack: fail launch-file — could not write the launch file <path>; fix: <command> (LAUNCH_FILE_UNWRITABLE)
 INSTALLED=$(head -1 "$ROOT/VERSION")
 TRAILER="$(printf '%s\n' "$OUT" | grep '^gstack: ' | tail -1)"
@@ -571,20 +600,44 @@ elif printf '%s\n' "$OUT" | grep -Eq '^SKIP pins \((no project|project directory
 elif printf '%s\n' "$OUT" | grep -q '^SKIP pins (helper runtime'; then note "pins: skipped (helper runtime)"
 fi
 REMOTE_VERSION="${GSTACK_CAPY_REMOTE_VERSION:-}"
+FIX_NOTE=""
+BLOCKED="${GSTACK_CAPY_BEHIND_BLOCKED:-}"
+if [ -n "$BLOCKED" ]; then
+  case "$BLOCKED" in *"; fix: "*) ;; *) BLOCKED="$BLOCKED; fix: ${GSTACK_CAPY_BEHIND_FIX:-$ROOT/bin/gstack-upgrade}" ;; esac
+  case "$BLOCKED" in *"("[A-Z]*_[A-Z]*")") ;; *) BLOCKED="$BLOCKED (UPGRADE_REFUSED)" ;; esac
+  BLOCKED_REASON="${BLOCKED%%; fix: *}" BLOCKED_FIX="${BLOCKED#*; fix: }"
+  BLOCKED_CODE="${BLOCKED_FIX##* (}"; BLOCKED_CODE="${BLOCKED_CODE%)}"; BLOCKED_FIX="${BLOCKED_FIX% (*}"
+  case "$BLOCKED_CODE" in UPGRADE_BUSY|UPGRADE_REFUSED) ;; *) BLOCKED_CODE=UPGRADE_SKIPPED ;; esac
+fi
 if [ -n "${GSTACK_CAPY_BEHIND:-}" ]; then
   note "behind=$GSTACK_CAPY_BEHIND (latest: ${GSTACK_CAPY_BEHIND_TO:-${REMOTE_VERSION:-unknown}})"
-  note "fix: ${GSTACK_CAPY_BEHIND_FIX:-bash <skill>/scripts/install.sh}"
+  [ -n "$BLOCKED" ] && note "upgrade skipped: $BLOCKED_REASON ($BLOCKED_CODE)"
+  # The trailer's fix is always one runnable command (the session's: the rerun
+  # or bin/gstack-upgrade, which prints its own refusal); the refusal's own
+  # prose stays on the WARN behind row.
+  FIX_NOTE="${GSTACK_CAPY_BEHIND_FIX:-${BLOCKED:+$ROOT/bin/gstack-upgrade}}"; FIX_NOTE="${FIX_NOTE:-bash <skill>/scripts/install.sh}"
 elif [ -n "$REMOTE_VERSION" ] && [ "$REMOTE_VERSION" != "$INSTALLED" ] \
    && [ "$(printf '%s\n%s\n' "$INSTALLED" "$REMOTE_VERSION" | sort -V | head -1)" = "$INSTALLED" ]; then
   note "latest: $REMOTE_VERSION available"
 fi
-BLOCKED="${GSTACK_CAPY_BEHIND_BLOCKED:-}"
-case "$TRAILER" in "gstack: ok "*) if [ -n "$BLOCKED" ]; then
-  case "$BLOCKED" in *"; fix: "*) ;; *) BLOCKED="$BLOCKED; fix: ${GSTACK_CAPY_BEHIND_FIX:-$ROOT/bin/gstack-upgrade}" ;; esac
-  case "$BLOCKED" in *"("[A-Z]*_[A-Z]*")") ;; *) BLOCKED="$BLOCKED (UPGRADE_REFUSED)" ;; esac
-  TRAILER="gstack: fail behind — installed $INSTALLED is ${GSTACK_CAPY_BEHIND:-?} commits behind origin (latest ${GSTACK_CAPY_BEHIND_TO:-unknown}) and the session-start upgrade was skipped: $BLOCKED"
-  RC=1
-elif [ -n "$NOTES" ]; then TRAILER="$TRAILER ($NOTES)"; fi ;; esac
+# The project floor (the doctor's WARN floor row): the floor and its file ride
+# the trailer, and the fix is the install when it fast-forwards, else the row's.
+FLOOR_ROW=$(printf '%s\n' "$OUT" | grep '^WARN floor — ' | head -1)
+if [ -n "$FLOOR_ROW" ]; then
+  FLOOR_VER=$(printf '%s' "$FLOOR_ROW" | sed -n 's/.* is below the floor \([0-9][0-9.]*\) that \(.*\) declares (.*/\1/p')
+  FLOOR_FILE=$(printf '%s' "$FLOOR_ROW" | sed -n 's/.* is below the floor [0-9][0-9.]* that \(.*\) declares (.*/\1/p')
+  note "floor=${FLOOR_VER:-unknown} (${FLOOR_FILE:-$GSTACK_PROJECT_FLOOR_FILE})"
+  [ -n "$FIX_NOTE" ] || FIX_NOTE="${GSTACK_CAPY_BEHIND_FIX:-${GSTACK_CAPY_WRAPPER_PATH:+bash $GSTACK_CAPY_WRAPPER_PATH${FOR:+ --for $FOR} (fast-forwards)}}"
+  [ -n "$FIX_NOTE" ] || FIX_NOTE="$ROOT/bin/gstack-upgrade"
+fi
+[ -n "$FIX_NOTE" ] && note "fix: $FIX_NOTE"
+case "$TRAILER" in "gstack: ok "*)
+  if [ -n "$BLOCKED" ]; then
+    OUT="$OUT
+WARN behind — installed $INSTALLED is ${GSTACK_CAPY_BEHIND:-?} commits behind origin (latest ${GSTACK_CAPY_BEHIND_TO:-unknown}) and the session-start upgrade was skipped: $BLOCKED_REASON; fix: $BLOCKED_FIX ($BLOCKED_CODE; $DOCS#$(gstack_result_anchor "$BLOCKED_CODE" 2>/dev/null || echo upgrade-skipped))"
+  fi
+  [ -n "$NOTES" ] && TRAILER="$TRAILER ($NOTES)" ;;
+esac
 # The launch file: the same assignments as a sourceable script, mode 0600,
 # beside the verdict. `. <file>` applies them without ever printing them; the
 # line carries no secret, but a caller that re-typed it as `export $(...)`

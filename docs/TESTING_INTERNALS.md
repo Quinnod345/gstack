@@ -642,9 +642,17 @@ holds the panel's gating median), each part capped at 200
 characters. `sessions[]` (at most 32) summarizes the trial's session-ledger
 rows. `cost_known: false` marks a record or trial whose harness captured no
 billing: PTY and Codex sessions never bill, and an SDK session bills only with a
-terminal `total_cost_usd`. An absent field means known. Census and marathon
-cost lines print the known sum and `N of M trial(s) cost unknown`, never a bare
-total over unknowns.
+terminal `total_cost_usd`. It also marks a trial no result record could be
+attributed to: a record named by the case id or carrying `case_id` is that
+case's, and a record named by a display label (`/qa fix loop`) is the shard's
+only case's when the shard ran one case, so a multi-case shard whose records
+carry display labels leaves those trials cost-unknown rather than guessing
+which case paid (`junitCensus` in `scripts/lib/paid-report.ts`). An absent
+field means known. Census and marathon cost lines print the known sum and
+`N of M trial(s) cost unknown`, and a train verdict's `ATTEMPT:` line prints
+`cost=$<known> known + <n> of <m> case(s) cost unknown` when some but not
+every case in the train record has a cost (a record with no priced case prints
+no cost at all), never a bare total over unknowns.
 
 <a id="session-ledger"></a>
 **Session ledger.** Every runner (session-runner, the Agent SDK runner
