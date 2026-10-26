@@ -478,6 +478,7 @@ fix. `GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1` admits anyway (`INSTALL_VERDICT:
 overridden`), recorded as a deviation. TypeScript entrypoints use
 `checkInstallAdmission` from `lib/install-verdict.ts`; the Bash side is
 `bin/gstack-install-verdict.sh`. See [capy-install.md](capy-install.md#the-launch-line).
+
 ## What an unattended session may do
 
 A parent that starts a skill with `GSTACK_SESSION_KIND=unattended` grants it
