@@ -54,6 +54,9 @@ function runStart(script: string, state: string, cwd = tmpHome): string {
     timeoutMs: 30_000,
     env: {
       PATH: process.env.PATH,
+      // An interactive session: CI sets CI/GITHUB_ACTIONS, which gstack-session-kind reads
+      // as headless, and headless skips first-task detection, so the tips never fire there.
+      CLAUDE_CODE_ENTRYPOINT: 'cli',
       HOME: tmpHome,
       GSTACK_HOME: state,
       GSTACK_STATE_DIR: state,
