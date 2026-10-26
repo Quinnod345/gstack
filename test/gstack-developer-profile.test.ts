@@ -422,19 +422,38 @@ describe('gstack-developer-profile per-day bound', () => {
     expect(inferred().contributing_events.architecture_care).toBe(10);
   });
 
-  test('the day is the UTC day of ts', () => {
+  const deriveWestOfUtc = () => {
+    const res = spawnSync(BIN_DEV, ['--derive'], {
+      env: { ...process.env, GSTACK_HOME: tmpHome, TZ: 'America/Los_Angeles' },
+      encoding: 'utf-8',
+      cwd: ROOT,
+      timeout: 30_000,
+    });
+    expect(res.status).toBe(0);
+  };
+  const atTs = (ts: unknown) =>
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts });
+
+  test('the day is the UTC day of ts, not the local day', () => {
     arch(1, 'fix-now');
-    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: '2026-04-01T20:00:00-08:00' });
-    runDev('--derive');
+    atTs('2026-04-01T20:00:00-08:00');
+    deriveWestOfUtc();
     expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
   });
 
-  test('rows without a parseable ts are each their own bucket', () => {
-    for (let i = 0; i < 3; i++) {
-      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: 'not-a-date' });
-    }
+  test('a ts without a zone is read as UTC', () => {
+    atTs('2026-04-01T23:30:00');
+    atTs('2026-04-02T00:30:00Z');
+    deriveWestOfUtc();
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(2);
+  });
+
+  test('rows without a parseable string ts share one undated bucket', () => {
+    for (const ts of ['not-a-date', 'TS', 1775000000]) atTs(ts);
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(value(3 * 0.05));
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect((readProfile() as { inferred: { diversity: { days_span: number } } }).inferred.diversity.days_span).toBe(0);
   });
 
   test('answers on one day net out before the bound applies', () => {

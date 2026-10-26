@@ -415,7 +415,9 @@ do_gap() {
 # not its session_id: writers log different ids for one review (the
 # PostToolUse hook logs the host conversation, the agent the preamble run)
 # and an unsubstituted placeholder such as SESSION_ID would merge or split
-# reviews. A row without a parseable ts is its own bucket.
+# reviews. A ts without a zone is read as UTC, and every row without a
+# parseable string ts shares one undated bucket, so junk timestamps cannot
+# escape the bound. diversity.days_span counts the same days.
 # The body is a single-quoted bash string: its JS must not contain a single
 # quote (use double quotes or backticks), or the assignment ends early and
 # every subcommand fails to parse.
@@ -439,30 +441,31 @@ function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
   for (const line of lines) {
     let e;
     try { e = JSON.parse(line); } catch { continue; }
-    if (!e || typeof e !== "object" || !e.question_id || !e.user_choice) continue;
+    if (!e || typeof e !== "object" || typeof e.question_id !== "string" || typeof e.user_choice !== "string" || !e.question_id || !e.user_choice) continue;
     count++;
     skills.add(e.skill);
     qids.add(e.question_id);
-    if (e.ts) days.add(String(e.ts).slice(0, 10));
+    const iso = typeof e.ts === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(e.ts) ? e.ts + "Z" : e.ts;
+    const when = typeof iso === "string" ? new Date(iso) : null;
+    const day = when && !Number.isNaN(when.getTime()) ? when.toISOString().slice(0, 10) : null;
+    if (day) days.add(day);
     const def = Object.hasOwn(QUESTIONS, e.question_id) ? QUESTIONS[e.question_id] : undefined;
     const byChoice = def && def.signal_key && Object.hasOwn(SIGNAL_MAP, def.signal_key) ? SIGNAL_MAP[def.signal_key] : {};
     const deltas = Object.hasOwn(byChoice, e.user_choice) ? byChoice[e.user_choice] : [];
     if (!Array.isArray(deltas) || deltas.length === 0) continue;
     signalEvents++;
-    const when = e.ts ? new Date(e.ts) : null;
-    const day = when && !Number.isNaN(when.getTime()) ? when.toISOString().slice(0, 10) : null;
-    const key = day ? "day " + day : "row " + count;
-    const bucket = buckets.get(key) || { day: day || "undated row " + count, sums: {} };
-    buckets.set(key, bucket);
+    const key = day || "undated";
+    const sums = buckets.get(key) || {};
+    buckets.set(key, sums);
     for (const d of deltas) {
-      bucket.sums[d.dim] = (bucket.sums[d.dim] || 0) + d.delta;
-      rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, day: bucket.day, dim: d.dim, delta: d.delta });
+      sums[d.dim] = (sums[d.dim] || 0) + d.delta;
+      rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, dim: d.dim, delta: d.delta });
     }
     for (const dim of new Set(deltas.map((d) => d.dim))) contributing[dim] = (contributing[dim] ?? 0) + 1;
   }
   const totals = Object.fromEntries(dims.map((d) => [d, 0]));
   const capped = [];
-  for (const { day, sums } of buckets.values()) {
+  for (const [day, sums] of buckets) {
     for (const [dim, sum] of Object.entries(sums)) {
       const bounded = Math.max(-cap, Math.min(cap, sum));
       if (Math.abs(sum - bounded) > 1e-9) capped.push({ day, dim, sum, bounded });
