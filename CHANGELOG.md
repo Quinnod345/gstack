@@ -10,7 +10,7 @@
 - **plan-eng-review keeps its versions** of the shared Tool resolution, fallback, Format, Self-check, Voice, plan-mode invocation and Plan Status Footer text, because each differs on purpose (the Scope gate, D-numbering after the target menu, the em-dash rule for composed prose, the selected-report footer, its own self-check). Its cap is unchanged.
 
 ### Tests
-- `test/helpers/skill-startup.ts` applies added subsections when it builds the effective text, so the hoisted-equals-inline check covers office-hours' new layout.
+- `test/helpers/skill-startup.ts` applies added subsections when it builds the effective text, so the hoisted-equals-inline check covers office-hours' new layout. Its `scripts/harness-version.json` pin moves to the new blob, recorded non-behavioral at HARNESS_VERSION 6 with no pass-rate reset: `readSkillStartup`, `readSharedSections` and `readSkillEffective` return the same bytes as the pinned helper for every tier 2+ render without added subsections (735 across all hosts) and for office-hours' SKILL.md before this change, so office-hours' fixture input changes only because its prompt did.
 - `test/preamble-hoist.test.ts` checks, on every host and tier, that a cut-down variant carries the "add to its end" note exactly when it adds a subsection, and that `readSkillEffective` puts a changed subsection in place and appends added ones in order.
 - `test/helpers/carve-guards.ts`: office-hours' parity cap goes down from 1.2279 to 1.1796, its measured union. No cap or pin goes up.
 
