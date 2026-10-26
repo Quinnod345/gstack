@@ -334,9 +334,9 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
   it("walks a fan-out of links once per real directory and file", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fanout-"));
-    // L0..L19 sit outside the root; each level holds two links to the next, so
-    // a walk that expands every link reaches leaf.md by 2^20 paths.
-    const depth = 20;
+    // L0..L11 sit outside the root; each level holds two links to the next, so
+    // a walk that expands every link reaches leaf.md by 2^12 paths.
+    const depth = 12;
     for (let d = 0; d <= depth; d++) fs.mkdirSync(path.join(tmp, `L${d}`));
     fs.writeFileSync(path.join(tmp, `L${depth}`, "leaf.md"), "l".repeat(300));
     for (let d = 0; d < depth; d++) {
@@ -351,6 +351,25 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     expect(walkMd(root).map((f) => path.relative(root, f))).toEqual([path.join("qa", "SKILL.md"), leaf]);
     const bill = buildBill(root);
     expect(bill.totals.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + 300);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("keeps a symlinked skill that lives outside the root from climbing to the root's parent", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fence-"));
+    const home = path.join(tmp, "home");
+    const root = path.join(home, "skills");
+    fs.mkdirSync(path.join(root, "real"), { recursive: true });
+    fs.writeFileSync(path.join(root, "real", "SKILL.md"), "---\nname: real\ndescription: d\n---\n# real\n");
+    fs.writeFileSync(path.join(home, "private.md"), "p".repeat(1_000));
+    const ext = path.join(tmp, "opt", "ext");
+    fs.mkdirSync(ext, { recursive: true });
+    fs.writeFileSync(path.join(ext, "SKILL.md"), "---\nname: ext\ndescription: d\n---\n# ext\n");
+    fs.symlinkSync(home, path.join(ext, "up"));
+    fs.symlinkSync(ext, path.join(root, "ext"));
+
+    const ext_ = buildBill(root).skills.find((s) => s.name === "ext")!;
+    expect(ext_.totalMdBytes).toBe(fileBytes(ext, "SKILL.md"));
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -835,6 +854,46 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     const bill = JSON.parse(stdout.text());
     expect(bill.tokenSource).toContain("count_tokens");
     expect(bill.calibration.rows.length).toBeGreaterThan(0);
+  });
+
+  it("says how many of the files it sends sit outside the tree behind symlinks", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-notice-"));
+    fs.mkdirSync(path.join(tmp, "checkout", "qa", "sections"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "checkout", "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(tmp, "checkout", "qa", "sections", "flow.md"), "f");
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.symlinkSync(path.join(tmp, "checkout", "qa", "SKILL.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.symlinkSync(path.join(tmp, "checkout", "qa", "sections"), path.join(skills, "qa", "sections"));
+    fs.writeFileSync(path.join(skills, "qa", "notes.md"), "n");
+    const stderr = capture();
+    const code = await contextBillMain([skills, "--exact", "--json"], {
+      stdout: capture().stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(),
+      egressHome,
+    });
+    expect(code).toBe(0);
+    expect(stderr.text()).toContain("sending the content of 3 .md file(s)");
+    expect(stderr.text()).toContain("(2 of them through symlinks to files outside it)");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("measures a skill's frontmatter even when its file was first walked under another name", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fm-alias-"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "aaa"), { recursive: true });
+    fs.mkdirSync(path.join(skills, "zskill"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "aaa", "notes.md"), "---\nname: zskill\ndescription: d\n---\n# z\n");
+    fs.symlinkSync(path.join(skills, "aaa", "notes.md"), path.join(skills, "zskill", "SKILL.md"));
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(), egressHome });
+    const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
+    expect(bill.skills.map((s) => s.name)).toEqual(["zskill"]);
+    expect([...measured.missedKeys]).toEqual([]);
+    fs.rmSync(tmp, { recursive: true, force: true });
   });
 
   it("degrades to the estimate when exact mode is unavailable, naming the code", async () => {

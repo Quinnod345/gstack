@@ -238,16 +238,18 @@ function encloses(outer: string, inner: string): boolean {
  * Each real directory is expanded once and each real file returned once per
  * walk, under the first lexical path reached with entries in sorted order: a
  * skill loads a file once however many links reach it, and links that fan out
- * into each other cannot multiply the walk. A directory that encloses `dir` is
- * never entered. A link named *.md counts only when its target is a .md file
- * too, so --exact never sends a non-markdown file through a markdown-named
- * link. More than WALK_ENTRY_CAP entries is an error, never a silent cut.
+ * into each other cannot multiply the walk. A directory that encloses `dir`,
+ * or `billedRoot` (the tree a skill is billed under), is never entered. A link
+ * named *.md counts only when its target is a .md file too, so --exact never
+ * sends a non-markdown file through a markdown-named link. More than WALK_ENTRY_CAP entries is an error, never a silent cut.
  */
-export function walkMd(dir: string): string[] {
+export function walkMd(dir: string, billedRoot: string = dir): string[] {
   const out: string[] = [];
   let rootReal: string;
+  let billedReal: string;
   try {
     rootReal = fs.realpathSync(dir);
+    billedReal = fs.realpathSync(billedRoot);
   } catch {
     return out;
   }
@@ -271,7 +273,11 @@ export function walkMd(dir: string): string[] {
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const p = path.join(current, e.name);
       const kind = entryKind(p, e);
-      if (kind === "file" ? !e.name.endsWith(".md") : kind !== "dir" || fs.existsSync(path.join(p, ".git"))) continue;
+      if (kind === "file") {
+        if (!e.name.endsWith(".md")) continue;
+      } else if (kind !== "dir" || fs.existsSync(path.join(p, ".git"))) {
+        continue;
+      }
       let real: string;
       try {
         real = fs.realpathSync(p);
@@ -285,7 +291,7 @@ export function walkMd(dir: string): string[] {
         out.push(p);
         continue;
       }
-      if (encloses(real, rootReal)) continue;
+      if (encloses(real, rootReal) || encloses(real, billedReal)) continue;
       seen.add(real);
       walk(p);
     }
@@ -294,10 +300,10 @@ export function walkMd(dir: string): string[] {
   return out;
 }
 
-function totalMd(dir: string, tokensOf: TokensOf): { bytes: number; tokens: number } {
+function totalMd(dir: string, tokensOf: TokensOf, billedRoot: string): { bytes: number; tokens: number } {
   let bytes = 0;
   let tokens = 0;
-  for (const p of walkMd(dir)) {
+  for (const p of walkMd(dir, billedRoot)) {
     // A skill dir that CONTAINS other skill dirs (the gstack root skill wraps
     // the whole tree) must not swallow its children's files: each nested
     // skill reports its own totalMd, and the grand total sums per-skill
@@ -319,7 +325,12 @@ function totalMd(dir: string, tokensOf: TokensOf): { bytes: number; tokens: numb
   return { bytes, tokens };
 }
 
-export function parseSkill(skillDir: string, name: string, tokensOf: TokensOf = estimateTokensOf): SkillBill {
+export function parseSkill(
+  skillDir: string,
+  name: string,
+  tokensOf: TokensOf = estimateTokensOf,
+  billedRoot: string = skillDir,
+): SkillBill {
   const skillMdPath = path.join(skillDir, "SKILL.md");
   const text = fs.readFileSync(skillMdPath, "utf8");
   const skillMdBytes = bytesOf(skillMdPath) ?? 0;
@@ -358,7 +369,7 @@ export function parseSkill(skillDir: string, name: string, tokensOf: TokensOf = 
     }
   }
 
-  const total = totalMd(skillDir, tokensOf);
+  const total = totalMd(skillDir, tokensOf, billedRoot);
   const eagerBytes = skillMdBytes + sumBytes(forcedRefs);
   const eagerTokens = skillMdTokens + sumTokens(forcedRefs);
   return {
@@ -496,7 +507,7 @@ export function buildBill(
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
   const skills = findSkillDirs(resolved).map((dir) =>
-    parseSkill(dir, path.relative(resolved, dir) || path.basename(resolved), tokensOf),
+    parseSkill(dir, path.relative(resolved, dir) || path.basename(resolved), tokensOf, resolved),
   );
   const total = skills.reduce((n, s) => n + s.totalMdBytes, 0);
   const totalTokens = skills.reduce((n, s) => n + s.totalMdTokens, 0);
@@ -819,10 +830,8 @@ export async function measureExactTokens(
     const text = fs.readFileSync(file, "utf8");
     texts.set(file, text);
     lexicalOf.set(fs.realpathSync(file), file);
-    if (path.basename(file) === "SKILL.md") {
-      const fm = parseFrontmatter(text);
-      if (fm.block) texts.set(frontmatterKey(file), fm.block);
-    }
+    const fm = parseFrontmatter(text);
+    if (fm.block) texts.set(frontmatterKey(file), fm.block);
   }
 
   // Receipt-before-send. Content-free: file count + total bytes only.
@@ -1025,10 +1034,13 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
     onDone?: () => void;
   }> => {
     if (!flags.exact) return {};
-    const files = walkMd(tree).length;
+    const walked = walkMd(tree);
+    const treeReal = fs.realpathSync(tree);
+    const outside = walked.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
     stderr.write(
-      `--exact: sending the content of ${files} .md file(s) under ${tree} to ` +
-        `api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
+      `--exact: sending the content of ${walked.length} .md file(s) under ${tree}` +
+        (outside ? ` (${outside} of them through symlinks to files outside it)` : "") +
+        ` to api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
     );
     try {
       const measured = await measureExactTokens(tree, {
