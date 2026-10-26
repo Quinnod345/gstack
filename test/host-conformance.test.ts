@@ -202,8 +202,7 @@ describe.skipIf(process.platform === 'win32')('host conformance kit', () => {
     const router = join(f.home, '.codex/skills/gstack/SKILL.md');
     rmSync(router);
     symlinkSync(join(src, '.agents/skills/gstack/SKILL.md'), router);
-    const qa = join(src, '.agents/skills/gstack-qa/sections');
-    rmSync(join(qa, readdirSync(qa).find(n => n.endsWith('.md'))!));
+    rmSync(join(src, '.agents/skills/gstack-qa/sections/scope.md'));
     const status = runSetup(f, join(src, 'setup'), ['--status']);
     // A1: broken section links make --status exit 1 instead of always 0.
     expect(status.status).toBe(1);
