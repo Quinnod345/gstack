@@ -12,10 +12,16 @@ import { compInner, twEyebrow, twGlow, twGradient, twGroup, twMonoIsMaterial, tw
 const EMOJI_ICON = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
 
 /** The tells one class string carries on its own: motion, gradient, glow, literals, a moving image, tracked caps, the eyebrow, mono costume. */
-function reportItem(ctx: LintContext, r: Reporter, it: TwItem, monoOk: boolean): void {
+/** Findings already on the record, keyed rule|file|line, so a Tailwind tell on a line the stylesheet rules already reported is not repeated; O(1) per lookup however many labels a page holds. */
+function reported(r: Reporter): Set<string> {
+  return new Set(r.findings.map((x) => `${x.rule}|${x.file}|${x.line}`));
+}
+
+function reportItem(ctx: LintContext, r: Reporter, it: TwItem, monoOk: boolean, seen: Set<string>): void {
   const { doc, info: f } = it;
   const where = twWhere(it);
-  const had = (rule: string) => r.findings.some((x) => x.rule === rule && x.file === relPath(doc.file, r.cwd) && x.line === it.line);
+  const file = relPath(doc.file, r.cwd);
+  const had = (rule: string) => seen.has(`${rule}|${file}|${it.line}`);
   if (f.tAll) r.report('layout-transition', doc.file, it.line, `${f.tAll} on ${where}`, { fix: 'name the properties: transition-colors, transition-opacity or transition-transform' });
   if (f.bounce || f.overshoot) r.report('bounce-easing', doc.file, it.line, `${f.bounce ? 'bounce' : 'overshoot easing'} ${f.bounce || f.overshoot} on ${where}`, { fix: 'an exponential ease-out on UI state; no bounce or overshoot' });
   const g = twGradient(ctx, f);
@@ -73,10 +79,13 @@ function checkTailwind(ctx: LintContext, r: Reporter): void {
   if (!tw.items.length) return;
   const monoOk = twMonoIsMaterial(twTokens(ctx));
   const byDoc = new Map<string, TwItem[]>();
+  const seen = reported(r);
   for (const it of tw.items) {
     if (!byDoc.has(it.file)) byDoc.set(it.file, []);
     byDoc.get(it.file)!.push(it);
-    reportItem(ctx, r, it, monoOk);
+    const before = r.findings.length;
+    reportItem(ctx, r, it, monoOk, seen);
+    for (let k = before; k < r.findings.length; k++) seen.add(`${r.findings[k].rule}|${r.findings[k].file}|${r.findings[k].line}`);
   }
   for (const list of byDoc.values()) reportFile(r, list);
 }
@@ -84,6 +93,7 @@ function checkTailwind(ctx: LintContext, r: Reporter): void {
 // sloplint checkComponentText (gates 63 30a)
 function checkComponentText(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
+    const file = relPath(doc.file, r.cwd);
     for (let c = 0; c < doc.comps.length; c++) {
       const t = doc.comps[c];
       if (t.close || t.selfClosing) continue;
@@ -94,7 +104,7 @@ function checkComponentText(ctx: LintContext, r: Reporter): void {
       if (/(?:link|button|btn|cta)$/i.test(t.name) && /(→|->|›|»|⟶)\s*$/.test(text)) r.report('template-punctuation', doc.file, t.line, `arrow glued to the label "${trunc(text, 40)}" (<${t.name}>)`, { fix: 'a verb as the label; the link already says it goes somewhere' });
       if ((text.match(/\s[·•]\s/g) || []).length >= 2) r.report('template-punctuation', doc.file, t.line, `middle-dot meta string "${trunc(text, 50)}"`, { fix: 'line breaks, columns or hairlines; one dot in a byline at most' });
       if (text.length <= 4 && EMOJI_ICON.test(text)) {
-        const outer = r.findings.findIndex((f) => f.rule === 'emoji-decoration' && f.file === relPath(doc.file, r.cwd) && f.evidence.includes(`"${text}"`));
+        const outer = r.findings.findIndex((f) => f.rule === 'emoji-decoration' && f.file === file && f.evidence.includes(`"${text}"`));
         if (outer >= 0) r.findings.splice(outer, 1);
         r.report('emoji-decoration', doc.file, t.line, `emoji icon "${text}" in <${t.name}>`, { fix: 'one icon library or custom SVG' });
       }

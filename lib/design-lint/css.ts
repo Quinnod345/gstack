@@ -182,7 +182,6 @@ export function buildTokens(rules: CssRule[]): Tokens {
   return tokens;
 }
 
-/** Substitute var() references from the tokens (a local scope first), honouring fallbacks, five levels deep. */
 /** A resolved value longer than this is a token that refers to itself, not a stylesheet value; expansion stops there. */
 const MAX_RESOLVED = 8192;
 
@@ -247,7 +246,7 @@ export function mergeBySelector(rules: CssRule[]): MergedRule[] {
     if (r.keyframes || r.selector === '@font-face') continue;
     const key = r.selector + '@@' + (r.media || '');
     if (!map.has(key)) map.set(key, { selector: r.selector, media: r.media, decls: [], file: r.file, line: r.line });
-    map.get(key)!.decls.push(...r.decls);
+    for (const d of r.decls) map.get(key)!.decls.push(d);
   }
   return [...map.values()];
 }

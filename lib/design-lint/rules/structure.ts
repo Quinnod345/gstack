@@ -8,7 +8,7 @@
 import { COLOR_LITERAL, oklchOf, parseColor } from '../color';
 import { isTokenRule, pxOf, resolveVars, type MergedRule } from '../css';
 import { memo, mergedRules, type LintContext } from '../context';
-import { getAttr, innerOf, plainText, textOf, treeOf, wordsOf, type Doc } from '../html';
+import { getAttr, innerOf, textOf, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
 import { heroIndexOf } from './chrome-copy';
@@ -147,6 +147,9 @@ function offScaleSpacing(ctx: LintContext, r: Reporter): void {
 }
 
 // sloplint check24a (gate 24a)
+/** Raw spacing lengths named per file before the rest fold into one count. */
+const RAW_SPACING_PER_FILE = 8;
+
 function rawSpacing(ctx: LintContext, r: Reporter): void {
   const spaceVals = new Map<number, string>();
   for (const [k, v] of Object.entries(ctx.tokens)) {
@@ -167,12 +170,12 @@ function rawSpacing(ctx: LintContext, r: Reporter): void {
         if (!px || !token) continue;
         const n = (counts.get(rule.file) || 0) + 1;
         counts.set(rule.file, n);
-        if (n <= 8) r.report('raw-spacing', rule.file, d.line, `${d.prop}: ${trunc(d.value, 28)} on ${trunc(rule.selector, 32)} where ${token} exists`, { fix: `var(${token})` });
+        if (n <= RAW_SPACING_PER_FILE) r.report('raw-spacing', rule.file, d.line, `${d.prop}: ${trunc(d.value, 28)} on ${trunc(rule.selector, 32)} where ${token} exists`, { fix: `var(${token})` });
         break;
       }
     }
   }
-  for (const [file, n] of counts) if (n > 8) r.report('raw-spacing', file, 1, `${n - 8} more raw spacing lengths in this file have a matching --space-* token`, { fix: 'the tokens' });
+  for (const [file, n] of counts) if (n > RAW_SPACING_PER_FILE) r.report('raw-spacing', file, 1, `${n - RAW_SPACING_PER_FILE} more raw spacing lengths in this file have a matching --space-* token`, { fix: 'the tokens' });
 }
 
 /** An HTML file that is only an app shell: no styles, a module script, no local stylesheet. */

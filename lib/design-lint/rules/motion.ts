@@ -103,10 +103,13 @@ function bounceEasing(ctx: LintContext, r: Reporter): void {
     if (!UI_SEL.test(rule.selector)) continue;
     for (const d of rule.decls) {
       if (!/transition|animation/.test(d.prop)) continue;
-      for (const m of resolveVars(d.value, ctx.tokens).matchAll(/cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/g)) {
+      const value = resolveVars(d.value, ctx.tokens);
+      for (const m of value.matchAll(/cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/g)) {
         const y1 = parseFloat(m[2]), y2 = parseFloat(m[4]);
         if (y1 > 1.05 || y2 > 1.05 || y1 < -0.05 || y2 < -0.05) r.report('bounce-easing', rule.file, d.line, `overshoot easing ${m[0]} on ${rule.selector}`);
       }
+      const named = /^animation(-name)?$/.test(d.prop) ? /(?<![\w-])[\w-]*(bounce|spring|elastic|wobble|jello|rubber)[\w-]*/i.exec(value) : null;
+      if (named) r.report('bounce-easing', rule.file, d.line, `bounce animation ${named[0]} on ${rule.selector}`);
     }
   }
 }
@@ -270,7 +273,7 @@ function inputStates(ctx: LintContext, r: Reporter): void {
   const widthOf = (v: string) => { const m = /(\d+(?:\.\d+)?)px/.exec(v); return m ? parseFloat(m[1]) : null; };
   let baseW: number | null = null;
   for (const rule of ctx.rules) {
-    if (!INPUT_SEL.test(rule.selector) || /:hover|:focus|:active|:disabled|\[|:checked/.test(rule.selector)) continue;
+    if (!INPUT_SEL.test(rule.selector) || /:hover|:focus|:active|:disabled|:checked|\[(?:disabled|aria-invalid|aria-disabled|data-state)/.test(rule.selector)) continue;
     for (const d of rule.decls) {
       if (d.prop !== 'border' && d.prop !== 'border-width') continue;
       const w = widthOf(d.value);
@@ -306,8 +309,9 @@ function controlHeight(ctx: LintContext, r: Reporter): void {
   for (const rule of ctx.rules) {
     if (rule.keyframes || isTokenRule(rule) || !CONTROL_SEL.test(rule.selector) || CONTROL_SKIP.test(rule.selector)) continue;
     if (rule.media && /max-width/i.test(rule.media)) continue;
+    const multiline = /(^|[\s,>+~(])textarea\b/i.test(rule.selector);
     for (const d of rule.decls) {
-      if (!/^(min-)?height$/.test(d.prop)) continue;
+      if (!/^(min-)?height$/.test(d.prop) || (multiline && d.prop === 'min-height')) continue;
       const px = pxOf(resolveVars(d.value, ctx.tokens));
       if (px == null || (px >= 44 && px <= 52) || seen.has(rule.selector)) continue;
       seen.add(rule.selector);

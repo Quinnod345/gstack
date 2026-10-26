@@ -6,7 +6,7 @@
  */
 import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
-import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
+import { fontPx, memo, mergedRules, styleFor, trackingEm, valueOf } from '../context';
 import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
 import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf } from '../html';
 import type { Reporter } from '../report';
@@ -147,7 +147,7 @@ function check38a(ctx: LintContext, r: Reporter): void {
       const tag = openTags(doc, /^(em|i)$/, head.idx + 1, closeIndex(doc, head.idx), () => true, 1)[0];
       if (!tag || normalised(level, classes)) continue;
       const italic = textOf(doc, tag.idx);
-      if (!italic || italic.length >= 0.8 * textOf(doc, head.idx).length) continue;
+      if (!/[A-Za-z0-9]/.test(italic) || /aria-hidden/i.test(tag.tag.attrs) || italic.length >= 0.8 * textOf(doc, head.idx).length) continue;
       r.report('italic-word-in-heading', doc.file, head.tag.line, `an <${tag.tag.name}> inside an otherwise roman <h${level}>`);
     }
   }
@@ -170,6 +170,21 @@ function accentedHeads(ctx: LintContext): CssRule[] {
     out.push(rule);
   }
   const norm = (v: string | null) => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const byClass = memo(ctx, 'rulesByClass38', () => {
+    const index = new Map<string, CssRule[]>();
+    for (const rule of ctx.rules) {
+      if (rule.keyframes || isTokenRule(rule)) continue;
+      for (const part of rule.selector.split(',')) {
+        if (/::?(before|after)\b/.test(part)) continue;
+        const base = baseSelector(part);
+        if (!/^\.[\w-]+$/.test(base)) continue;
+        const list = index.get(base.slice(1)) ?? [];
+        list.push(rule);
+        index.set(base.slice(1), list);
+      }
+    }
+    return index;
+  });
   for (const doc of ctx.docs) {
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
@@ -186,9 +201,8 @@ function accentedHeads(ctx: LintContext): CssRule[] {
         if (!/[A-Za-z0-9]/.test(plainText(m.inner))) continue;
         for (const cls of m.classes.split(/\s+/).filter(Boolean)) {
           if (cover(cls) >= 0.8) continue;
-          for (const rule of ctx.rules) {
-            if (rule.keyframes || isTokenRule(rule) || seen.has(rule.selector)) continue;
-            if (!rule.selector.split(',').some((part) => !/::?(before|after)\b/.test(part) && baseSelector(part) === `.${cls}`)) continue;
+          for (const rule of byClass.get(cls) ?? []) {
+            if (seen.has(rule.selector)) continue;
             if (rule.decls.some((d) => (d.prop === 'display' && /^(block|flex|grid|table)/.test(d.value.trim())) || (d.prop === 'position' && /absolute|fixed/.test(d.value)))) continue;
             const marking = marks38(rule);
             if (!marking.length) continue;
@@ -353,7 +367,7 @@ function check67(ctx: LintContext, r: Reporter): void {
       if (!upper && !smallCaps) { if (!(tracked && small)) continue; }
       else if (upperDisplay && (em == null || em <= 0.045)) continue;
       seen.add(key);
-      r.report('wide-tracking', rule.file, rule.line, upperDisplay ? `${rule.selector}: an uppercase control tracked ${em3(em!)}em` : `${rule.selector}: an uppercase control on a page whose display is not uppercase`,
+      r.report('wide-tracking', rule.file, rule.line, !upper && !smallCaps ? `${rule.selector}: a control tracked ${em3(em!)}em${at}` : upperDisplay ? `${rule.selector}: an uppercase control tracked ${em3(em!)}em` : `${rule.selector}: an uppercase control on a page whose display is not uppercase`,
         { fix: 'controls follow the display voice: sentence case here, or tracking 0.04em at most where the display itself is uppercase' });
       continue;
     }

@@ -192,7 +192,8 @@ function checkScrollChoreography(ctx: LintContext, r: Reporter): void {
 }
 
 const FAKE_AVATAR = /(i\.pravatar\.cc|pravatar\.cc|api\.dicebear\.com|dicebear\.com|randomuser\.me|thispersondoesnotexist\.com|ui-avatars\.com)/i;
-const UNSPLASH_URL = /https?:\/\/[^"'()\s]*unsplash\.com[^"'()\s]*/gi;
+/** Each URL token is scanned once (a scheme is only tried at a token start), so a run of scheme prefixes costs its length. */
+const UNSPLASH_URL = /(?<![^"'()\s])https?:\/\/[^"'()\s]*unsplash\.com[^"'()\s]*/gi;
 const PERSONY = /person|face|portrait|people|headshot/i;
 
 // sloplint checkF9 (F9)

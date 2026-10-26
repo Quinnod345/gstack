@@ -321,6 +321,9 @@ const CLASS_FN_CALL = new RegExp(`(?<![\\w$.])(?:${[...CLASS_FNS].join('|')})\\s
  * literals it holds), everything else becomes spaces. Also records where
  * class-helper calls start.
  */
+/** Failed element starts a component file may spend before the scanner stops pairing; jsScan carries the same budget. */
+const MAX_FAILED_TAGS = 500;
+
 class JsxScanner {
   private readonly n: number;
   private readonly out: string[];
@@ -407,7 +410,7 @@ class JsxScanner {
       if (c === '{') { level++; i++; val = false; continue; }
       if (c === '}') { if (stop && level === 0) return i; level--; i++; val = true; continue; }
       if (c === ')' || c === ']') { i++; val = true; continue; }
-      if (c === '<' && !val && this.fails < 500 && /[A-Za-z_$>]/.test(src[i + 1] || '')) {
+      if (c === '<' && !val && this.fails < MAX_FAILED_TAGS && /[A-Za-z_$>]/.test(src[i + 1] || '')) {
         const e = this.el(i);
         if (e > 0) { i = e; val = true; continue; }
         this.fails++;
@@ -430,13 +433,14 @@ class JsxScanner {
   }
   /** Starts that did not open an element: a retry from the same start fails the same way, so a run of unclosed elements costs its length, not two to its depth. */
   private failed = new Set<number>();
+  /** Past MAX_FAILED_TAGS failed starts (jsScan and el together) every later start is text, so a run of unclosed elements under the depth cap costs its length. */
   private el(start: number): number {
-    if (this.depth > 200 || this.failed.has(start)) return -1;
+    if (this.depth > 200 || this.fails >= MAX_FAILED_TAGS || this.failed.has(start)) return -1;
     const mc = this.classes.length, mk = this.calls.length;
     this.depth++;
     const e = this.tag(start);
     this.depth--;
-    if (e < 0) { this.failed.add(start); this.blank(start, Math.max(this.hi, start + 1)); this.hi = start; this.classes.length = mc; this.calls.length = mk; }
+    if (e < 0) { this.failed.add(start); this.fails++; this.blank(start, Math.max(this.hi, start + 1)); this.hi = start; this.classes.length = mc; this.calls.length = mk; }
     return e;
   }
   /** One attribute from i; returns the index after it, or -1 when the tag is not JSX after all. */
@@ -643,6 +647,7 @@ export function treeOf(doc: Doc): Tree {
       const { depth } = opens.pop()!;
       for (let k = stack.length - 1; k >= depth; k--) close[stack[k]] = i;
       stack.length = depth;
+      parent[i] = stack.length ? stack[stack.length - 1] : -1;
       continue;
     }
     if (stack.length) {
@@ -761,7 +766,6 @@ export function maskedProse(doc: Doc): string {
   if (cached != null) return cached;
   let prose = doc.kind !== 'html' ? doc.src.replace(/(^|>)([^<>]*)(?=<|$)/g, (_m0, a: string, run: string) => a + proseRun(run)) : doc.src;
   for (const name of CODE_ELEMENTS) prose = blankRanges(prose, spansOf(asciiLower(prose), '<' + name, '</' + name, true).map((s): [number, number] => [s.start, s.end]));
-  prose = blankRanges(prose, spansOf(asciiLower(prose), '<!--', '-->', false).map((s): [number, number] => [s.start, s.end]));
   prose = stripTags(prose, true);
   doc.cache.prose = prose;
   return prose;

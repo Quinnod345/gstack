@@ -15,6 +15,7 @@ import { bannedGradient, COLOR_LITERAL, oklchOf, parseColor, type Color } from '
 import { GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
 import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, treeOf, type Doc, type Tag } from './html';
 import { trunc } from './report';
+import { EYEBROW_ANCESTOR_SKIP, EYEBROW_ANNOUNCE, EYEBROW_BLOCKY } from './rules/chrome-eyebrow';
 
 export const TW_SIZE: Record<string, number> = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 30, '4xl': 36, '5xl': 48, '6xl': 60, '7xl': 72, '8xl': 96, '9xl': 128 };
 const TW_TRACK: Record<string, number> = { tighter: -0.05, tight: -0.025, normal: 0, wide: 0.025, wider: 0.05, widest: 0.1 };
@@ -31,13 +32,12 @@ const TW_NONFILL = /^bg-(?:none|transparent|inherit|current|fixed|local|scroll|c
 const TW_GLASS = /^bg-(?:white|black|(?:slate|gray|zinc|neutral|stone)-(?:50|100|900|950)|paper|ink|background|foreground)\/(\d{1,2}|\[(?:0?\.\d+|\d{1,2}%)\])$/;
 const TW_LOGO = /logo|brand|wordmark/i;
 const TW_COLOR_LIT = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
-const EYEBROW_ANCESTOR_SKIP = /^(form|fieldset|table|thead|tbody|nav|menu|dl|select|figcaption|label|button)$/;
-const EYEBROW_BLOCKY = /<(p|ul|ol|hr|h[1-6]|img|table|figure|section|article|blockquote|form|dl)\b/i;
-const EYEBROW_ANNOUNCE = /^(features?|benefits?|introducing|new|how it works?|the (process|tour)|our (process|story|work|team|approach|values?)|why (us|choose|we)|pricing|plans?|faq|questions?|testimonials?|reviews?|trusted by|as seen in|what we do|about( us)?|services?|solutions?|use cases?|get started|contact|team|work|projects?|gallery|blog|news|resources?|examples?|overview)$/i;
 
 export interface TwParsed { variants: string[]; base: string; neg: boolean }
 
 const TW_PARSED = new Map<string, TwParsed>();
+/** Distinct class tokens kept parsed; arbitrary values make the key space unbounded, so the cache is emptied past this. */
+const TW_PARSED_MAX = 50_000;
 
 /** One utility split into its variants (group-/peer- prefixes and /names dropped), its base and a leading minus. */
 export function twParse(tok: string): TwParsed {
@@ -56,6 +56,7 @@ export function twParse(tok: string): TwParsed {
   const neg = base.length > 1 && base.startsWith('-');
   if (neg) base = base.slice(1);
   const p = { variants: variants.map((v) => v.replace(/^(?:group|peer)-/, '').replace(/\/[\w-]+$/, '')), base, neg };
+  if (TW_PARSED.size >= TW_PARSED_MAX) TW_PARSED.clear();
   TW_PARSED.set(tok, p);
   return p;
 }
@@ -583,6 +584,7 @@ export function twMonoIsMaterial(tokens: Tokens): boolean {
 /** Text that reads as data (a version, a shortcut, a command, a path, a time): mono is material there. */
 export function twDataText(s: string): boolean {
   const t = s.trim();
+  if (t.length > 200) return false;
   const letters = (t.match(/[A-Za-z]/g) || []).length;
   const digits = (t.match(/\d/g) || []).length;
   if (digits >= letters) return true;

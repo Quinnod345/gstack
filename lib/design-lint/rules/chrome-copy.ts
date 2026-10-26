@@ -9,7 +9,7 @@
  */
 import { styleFor, type LintContext } from '../context';
 import { resolveVars } from '../css';
-import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, textOf, treeOf, type Doc, type Tag } from '../html';
+import { ancestorsOf, getAttr, innerOf, maskedProse, textOf, treeOf, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 
 

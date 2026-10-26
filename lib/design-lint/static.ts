@@ -30,10 +30,10 @@ export interface StaticResult {
   findings: Finding[];
 }
 
-/** The static tier before waivers: every context with the findings its rule families reported, so a caller can add the render tier's findings and settle the page's waivers once over both. */
 /** A source file the lint did not read, and why; it is reported, because a page the lint could not read is not a pass. */
 export interface Skipped { file: string; why: string }
 
+/** The static tier before waivers: every context with the findings its rule families reported, so a caller can add the render tier's findings and settle the page's waivers once over both. */
 export interface RawStaticResult {
   files: string[];
   contexts: LintContext[];
@@ -152,7 +152,7 @@ function attachStylesheets(cssFiles: CssFile[], rules: CssRule[], pending: strin
     const got = cache.read(p);
     if (!got) continue;
     cssFiles.push({ file: p, raw: got.raw });
-    rules.push(...got.rules);
+    for (const rule of got.rules) rules.push(rule);
     pending.push(...got.imports);
   }
 }
@@ -165,12 +165,12 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
   for (const f of cssList) {
     const got = cache.read(f);
     cssFiles.push({ file: f, raw: got?.raw ?? '' });
-    if (got) { rules.push(...got.rules); pending.push(...got.imports); }
+    if (got) { for (const rule of got.rules) rules.push(rule); pending.push(...got.imports); }
   }
   for (const doc of docList) {
     const root = rootOf(doc.file, cache.roots);
     for (const st of doc.styles) {
-      try { rules.push(...parseCss(st.css, doc.file, st.lineOffset)); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); continue; }
+      try { for (const rule of parseCss(st.css, doc.file, st.lineOffset)) rules.push(rule); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); continue; }
       pending.push(...importsOf(st.css, path.dirname(doc.file), root));
     }
     pending.push(...linksOf(doc, path.dirname(doc.file), root));
@@ -217,7 +217,11 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
     try {
       const doc = parseDoc(f, fs.readFileSync(f, 'utf8'));
       (doc.kind === 'html' ? g.pages : g.parts).push(doc);
-    } catch (e) { warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`); skipped.push({ file: f, why: `it could not be parsed (${(e as Error).message})` }); }
+    } catch (e) {
+      const why = (e as NodeJS.ErrnoException).code ? `it cannot be read (${(e as NodeJS.ErrnoException).code})` : `it could not be parsed (${(e as Error).message})`;
+      warn(`design-lint: skipped ${f}, ${why}`);
+      skipped.push({ file: f, why });
+    }
   }
   const linkedBy = new Map<Doc, Set<string>>();
   const owned = new Set<string>();
@@ -243,9 +247,10 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
   return contexts;
 }
 
+/** The nearest directory above dir holding a package.json or a .git entry: the project a relative stylesheet href may not climb out of. Null outside any project, where a relative href is bounded only by the disk (only .css files are read, and only their declarations are printed). */
 function projectRoot(dir: string): string | null {
   for (let d = dir; ; d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, 'package.json'))) return d;
+    if (fs.existsSync(path.join(d, 'package.json')) || fs.existsSync(path.join(d, '.git'))) return d;
     if (path.dirname(d) === d) return null;
   }
 }
@@ -315,9 +320,11 @@ export function lintStaticRaw(paths: string[], opts: StaticOptions = {}): RawSta
       }
     }
     raw.push(reporter.findings);
+    ctx.cache = {};
+    for (const doc of ctx.docs) doc.cache = {};
   }
   const skippedReporter = new Reporter(opts.scope ?? 'page', cwd);
-  for (const s of skippedFiles) skippedReporter.report('internal-error', s.file, 1, `skipped: ${s.why}; a page the lint could not read is not a pass`, { fix: 'split the file, or lint the page that links it' });
+  for (const s of skippedFiles) skippedReporter.report('internal-error', s.file, 1, `skipped: ${s.why}; a page the lint could not read is not a pass`, { fix: /cannot be read/.test(s.why) ? 'check the path' : /parsed/.test(s.why) ? 'fix the markup the parser stopped on' : 'split the file, or lint the page that links it' });
   return { files, contexts, raw, skipped: skippedReporter.findings };
 }
 

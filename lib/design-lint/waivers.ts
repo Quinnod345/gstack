@@ -32,7 +32,6 @@ export interface WaiverClaim {
   reason: string;
   file: string;
   line: number;
-  raw: string;
 }
 
 export interface Waiver {
@@ -42,11 +41,14 @@ export interface Waiver {
 }
 
 export interface WaiverSet {
-  /** Rule ids the page waived, each with its recorded reason. */
+  /** Waivers accepted, keyed by rule id for a page claim and by rule@sheet for a stylesheet claim (each linked sheet may answer for its own findings), each with its recorded reason. */
   accepted: Map<string, Waiver>;
   /** Refused waivers, already shaped as findings. */
   refused: Finding[];
 }
+
+/** A page claim is keyed by its rule; a stylesheet claim by rule@sheet, so two linked sheets may each waive the same rule for their own findings. */
+const waiverKey = (rule: string, sheet: string | null): string => (sheet ? `${rule}@${sheet}` : rule);
 
 export const WAIVER_MIN_REASON = 24;
 export const WAIVER_MAX = 3;
@@ -76,7 +78,7 @@ export function findWaivers(file: string, source: string): WaiverClaim[] {
   const lineOf = lineIndex(source);
   for (const m of source.matchAll(WAIVER_RE)) {
     const reason = m[2].trim().slice(0, WAIVER_REASON_MAX);
-    out.push({ rule: m[1], reason, file, line: lineOf(m.index!), raw: m[0] });
+    out.push({ rule: m[1], reason, file, line: lineOf(m.index!) });
   }
   return out;
 }
@@ -126,21 +128,23 @@ export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = pr
     if (!meta) { refuse(c, 'no such rule'); continue; }
     if (meta.gate === 'waiver' || meta.gate === 'render' || meta.gate === 'lint') { refuse(c, OWN_RULE_REFUSAL); continue; }
     if (meta.tier === 'blocks' && !suspected.has(c.rule)) { refuse(c, FLOOR_REFUSAL); continue; }
-    if (accepted.has(c.rule)) { refuse(c, 'one waiver per rule'); continue; }
+    const sheet = /\.css$/i.test(c.file) ? oneLine(relPath(c.file, cwd)) : null;
+    const key = waiverKey(c.rule, sheet);
+    if (accepted.has(key)) { refuse(c, 'one waiver per rule'); continue; }
     if (c.reason.length < WAIVER_MIN_REASON) { refuse(c, `reason under ${WAIVER_MIN_REASON} characters`); continue; }
     if (reasonIsBoilerplate(c.reason)) { refuse(c, 'boilerplate reason'); continue; }
     if ((reasons.get(c.reason.toLowerCase()) || 0) > 1) { refuse(c, 'reason reused on another waiver'); continue; }
     const words = c.reason.toLowerCase().match(/[a-z]{4,}/g) || [];
-    const sheet = /\.css$/i.test(c.file);
     if (pageWords.size && !sheet && !words.some((w) => pageWords.has(w))) { refuse(c, 'reason shares no word with the page'); continue; }
-    accepted.set(c.rule, { reason: c.reason, sheet: sheet ? oneLine(relPath(c.file, cwd)) : null });
+    accepted.set(key, { reason: c.reason, sheet });
   }
-  if (accepted.size > WAIVER_MAX) {
+  const rulesWaived = [...new Set([...accepted.keys()].map((k) => k.split('@')[0]))];
+  if (rulesWaived.length > WAIVER_MAX) {
     const first = claims[0];
     refused.push({
       rule: 'house-style', tier: 'polish', grade: 'polish', source: 'static',
       file: relPath(first.file, cwd), line: first.line,
-      evidence: trunc(`${accepted.size} rules waived on one page (${[...accepted.keys()].join(', ')}): that is a house style, not a set of exceptions`),
+      evidence: trunc(`${rulesWaived.length} rules waived on one page (${rulesWaived.join(', ')}): that is a house style, not a set of exceptions`),
       fix: 'lock the choices into DESIGN.md so later pages inherit them instead of re-arguing them',
     });
   }
@@ -150,7 +154,7 @@ export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = pr
 /** Mark waived ask and polish findings; blocking findings never change, and a stylesheet's claim reaches only findings in that stylesheet. Returns the findings plus the refusals. */
 export function applyWaivers(findings: Finding[], set: WaiverSet): Finding[] {
   const out = findings.map((f) => {
-    const w = set.accepted.get(f.rule);
+    const w = set.accepted.get(f.rule) ?? set.accepted.get(waiverKey(f.rule, f.file));
     if (f.tier === 'blocks' || !w || (w.sheet && f.file !== w.sheet)) return f;
     return { ...f, grade: 'waived' as const, waiver: oneLine(w.reason) };
   });

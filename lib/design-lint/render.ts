@@ -17,6 +17,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pickEngine, render, renderWithBrowse, type EngineChoice, type RenderResult as EngineResult, type RenderSpec, type RenderStep } from '../aside-render';
 import { contrastRatio } from './color';
+import { lineIndex } from './css';
 import { escapeRe, plainText } from './html';
 import { decodePng, medianRgb, type SampleRect } from './render-png';
 import { installScript, probeScript, type PixelItem, type ProbeAt, type ProbeFinding, type RingProbe, type SetupReport } from './render-probe';
@@ -105,33 +106,44 @@ function parsed<T>(text: string | undefined): Parsed<T> {
 }
 
 /** The source line of the element a finding names: its tag, first class, a distinguishing attribute and its opening text. Best effort; 1 when nothing matches. */
-export function lineOf(src: string | null, at?: ProbeAt): number {
+export function lineOf(src: string | null, at?: ProbeAt, lineAt: (i: number) => number = src ? lineIndex(src) : () => 1): number {
   if (!src || !at || typeof at.tag !== 'string' || typeof at.text !== 'string') return 1;
-  const cls = at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${escapeRe(at.cls)}(?:\\s[^"']*)?["']`, 'i') : null;
+  const cls = typeof at.cls === 'string' && at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${escapeRe(at.cls)}(?:\\s[^"']*)?["']`, 'i') : null;
+  const attr = typeof at.attr === 'string' && at.attr ? at.attr : null;
   const want = at.text.toLowerCase();
   let fallback = -1;
   for (const m of src.matchAll(new RegExp(`<${escapeRe(at.tag)}\\b[^>]*>`, 'gi'))) {
     const pos = m.index ?? 0;
     if (cls && !cls.test(m[0])) continue;
-    if (at.attr && !m[0].includes(at.attr)) continue;
+    if (attr && !m[0].includes(attr)) continue;
     if (!want) { fallback = pos; break; }
     if (plainText(src.slice(pos + m[0].length, pos + m[0].length + 600)).toLowerCase().startsWith(want)) { fallback = pos; break; }
     if (fallback < 0) fallback = pos;
   }
-  return fallback < 0 ? 1 : src.slice(0, fallback).split('\n').length;
+  return fallback < 0 ? 1 : lineAt(fallback);
 }
+
+const isRgb = (v: unknown): v is number[] => Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every((n) => typeof n === 'number' && Number.isFinite(n));
+
+/** Whether a page's finding carries a pixel probe the lint can act on; a probe of another shape is dropped so the computed ratio stands. */
+const probeOk = (f: ProbeFinding): boolean => !f.probe || (typeof f.probe === 'object' && typeof f.probe.path === 'string' && isRgb(f.probe.fg) && typeof f.probe.threshold === 'number');
+
+/** Whether a focus-walk entry has the shape the ring confirmation reads. */
+const ringOk = (x: RingProbe): boolean => typeof x.key === 'string' && typeof x.path === 'string' && typeof x.bare === 'boolean'
+  && (x.ratio == null || (typeof x.ratio === 'number' && Number.isFinite(x.ratio) && (x.ratio >= RING_FLOOR || isRgb(x.ring))));
 
 interface Found extends ProbeFinding { label: string }
 
 async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: number): Promise<void> {
   const file = isUrl(target) ? target : path.resolve(target);
+  let lineAt: (i: number) => number = () => 1;
   const report = (f: Found | ProbeFinding, src: string | null) => {
     const meta = ruleMeta(f.rule);
-    if (f.rule !== 'render' && (!meta || (f.grade !== 'fail' && f.grade !== 'warn'))) {
+    if (!meta || (f.grade !== 'fail' && f.grade !== 'warn')) {
       r.report('render', file, 1, `the page handed back a measurement the lint does not know (${String(f.rule).slice(0, 40)}); its scripts may be tampering with the probes`, { fix: 'a page must not touch the lint; remove whatever redefines window.__gstackLint or the layout APIs', source: 'render' });
       return;
     }
-    r.report(f.rule, file, lineOf(src, f.at), ('label' in f ? `[${f.label}] ` : '') + f.evidence, { fix: f.fix, suspected: f.grade === 'warn', source: 'render' });
+    r.report(f.rule, file, lineOf(src, f.at, lineAt), ('label' in f ? `[${f.label}] ` : '') + f.evidence, { fix: f.fix, suspected: f.grade === 'warn', source: 'render' });
   };
   if (isUrl(target)) {
     const err = await unreachable(target);
@@ -139,6 +151,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   }
   let src: string | null = null;
   if (!isUrl(target)) { try { src = fs.readFileSync(file, 'utf8'); } catch { src = null; } }
+  if (src) lineAt = lineIndex(src);
   const plan = measures();
   const opening = openingSteps();
   const steps: RenderStep[] = [...opening, ...plan.map((m) => evalStep(m.call, m.width, m.height))];
@@ -149,7 +162,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   if ('error' in setup || !Array.isArray(setup.value?.lost)) report({ rule: 'render', grade: 'fail', evidence: `the page could not be prepared for measurement: ${'error' in setup ? setup.error : 'the setup answer has no list of lost assets'}` }, null);
   else if (setup.value.lost.length) report({ rule: 'render', grade: 'warn', evidence: `fonts or stylesheets did not load (${setup.value.lost.slice(0, 2).join(', ')}): the measurements show a fallback face`, fix: 'fix the path or wait for the host, then measure again; never sign off a fallback face' }, null);
   const errs = parsed<string[]>(res.stdout.match(/^PAGE_ERRORS=(.+)$/m)?.[1]);
-  const uncaught = 'value' in errs && Array.isArray(errs.value) ? errs.value.find((e) => e.startsWith('uncaught: ')) : undefined;
+  const uncaught = 'value' in errs && Array.isArray(errs.value) ? errs.value.find((e) => typeof e === 'string' && e.startsWith('uncaught: ')) : undefined;
   if (uncaught) report({ rule: 'render', grade: 'fail', evidence: `a script threw on load: ${uncaught.slice(10, 100)}`, fix: 'fix the script; a page that throws ships half-working' }, null);
 
   const found: Found[] = [];
@@ -160,13 +173,17 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
     const list = 'error' in p ? null : (p.value as unknown);
     const bad = 'error' in p ? p.error : !Array.isArray(list) ? 'the answer is not a list' : (list as unknown[]).some((f) => !f || typeof f !== 'object') ? 'the list holds a non-object entry' : null;
     if (bad != null) { report({ rule: 'render', grade: 'fail', evidence: `the ${m.call.replace(/^P\.(\w+).*/, '$1')} measurement at ${m.label} failed: ${bad}` }, null); return; }
-    if (m.call === 'P.focus(P)') { rings = (list as RingProbe[]).filter((x) => typeof x.key === 'string'); return; }
+    if (m.call === 'P.focus(P)') {
+      rings = (list as RingProbe[]).filter(ringOk);
+      if (rings.length < (list as RingProbe[]).length) report({ rule: 'focus', grade: 'malformed' as ProbeFinding['grade'], evidence: '' }, null);
+      return;
+    }
     for (const f of list as ProbeFinding[]) {
       if (typeof f.rule !== 'string' || typeof f.evidence !== 'string' || (f.grade !== 'fail' && f.grade !== 'warn') || !ruleMeta(f.rule)) { report({ rule: String(f.rule ?? '?'), grade: 'malformed' as ProbeFinding['grade'], evidence: '' }, null); continue; }
       const key = f.rule + '|' + f.evidence;
       if (seen.has(key)) continue;
       seen.add(key);
-      found.push({ ...f, label: m.label });
+      found.push({ ...f, label: m.label, probe: probeOk(f) ? f.probe : undefined });
     }
   });
   const scrolls = found.filter((f) => f.rule === 'horizontal-scroll' && !f.at);
@@ -182,7 +199,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
 
   const textProbes = found.filter((f) => f.probe);
   const weakRings = rings.filter((x) => x.ratio != null && x.ratio < RING_FLOOR);
-  const confirmed = textProbes.length || weakRings.length ? await confirmPixels(file, run, timeoutMs, textProbes, weakRings) : null;
+  const confirmed = textProbes.length || weakRings.length ? await confirmPixels(file, run, timeoutMs, textProbes, weakRings).catch(() => null) : null;
   const dropped = new Set<string>();
   for (const f of textProbes) {
     const real = confirmed?.text.get(f.probe!.path);

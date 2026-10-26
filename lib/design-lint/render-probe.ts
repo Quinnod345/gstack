@@ -89,38 +89,11 @@ export function glHelpers() {
 
 export type Helpers = ReturnType<typeof glHelpers>;
 
-/** Everything installed on window.__gstackLint: the helpers and every measurement. */
-export interface Probes {
-  H: Helpers;
-  setup: typeof glSetup;
-  layout: typeof glLayout;
-  contrast: typeof glContrast;
-  accent: typeof glAccent;
-  focus: typeof glFocus;
-  occlusion: typeof glOcclusion;
-  hide: typeof glHide;
-  restore: typeof glRestore;
-  hero: typeof glHero;
-  space: typeof glSpace;
-  words: typeof glWords;
-  slots: typeof glSlots;
-  pictures: typeof glPictures;
-  marks: typeof glMarks;
-  photos: typeof glPhotos;
-  heroSpace: typeof glHeroSpace;
-  thin: typeof glThin;
-  gaps: typeof glGaps;
-  wide: typeof glWide;
-  quality: typeof glQuality;
-  rhythm: typeof glRhythm;
-  padding: typeof glPadding;
-  prose: typeof glProse;
-  fields: typeof glFields;
-  strain: typeof glStrain;
-  grid: typeof glGrid;
-}
-
 const PROBE_FNS = { setup: glSetup, layout: glLayout, contrast: glContrast, accent: glAccent, focus: glFocus, occlusion: glOcclusion, hide: glHide, restore: glRestore, hero: glHero, space: glSpace, words: glWords, slots: glSlots, pictures: glPictures, marks: glMarks, photos: glPhotos, heroSpace: glHeroSpace, thin: glThin, gaps: glGaps, wide: glWide, quality: glQuality, rhythm: glRhythm, padding: glPadding, prose: glProse, fields: glFields, strain: glStrain, grid: glGrid };
+
+/** Everything installed on window.__gstackLint: the helpers and every measurement, typed from PROBE_FNS so a probe is declared once. */
+export interface Probes extends ProbeFns { H: Helpers }
+type ProbeFns = typeof PROBE_FNS;
 
 export const PROBE_GLOBAL = 'window.__gstackLint';
 

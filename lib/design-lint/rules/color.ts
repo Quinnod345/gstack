@@ -6,7 +6,7 @@
  * genre exempts a page, no theme is pinned by name, so every check here runs
  * in its strict form.
  */
-import { bannedGradient, COLOR_LITERAL, hueIn, oklchOf, parseColor } from '../color';
+import { bannedGradient, COLOR_LITERAL, oklchOf, parseColor } from '../color';
 import type { LintContext } from '../context';
 import { mergedRules } from '../context';
 import { firstFamily, GENERIC_FAMILIES, isTokenRule, pxOf, resolveVars, splitTop, type CssDecl, type MergedRule, type Tokens } from '../css';
@@ -163,9 +163,9 @@ function check29Glow(ctx: LintContext, r: Reporter): void {
       const bgD = rule.decls.filter((d) => /^background(-color)?$/.test(d.prop)).pop();
       const rv = bgD ? resolveVars(bgD.value, ctx.tokens, local).trim() : '';
       const c = parseColor(rv);
-      const mixed = /color-mix\([^)]*\b(white|black|--color-(paper|ink))\b[^)]*\btransparent\b/i.test(rv);
+      const mixed = /color-mix\([^)]*\b(white|black|--color-(paper|ink))\b[^)]*\btransparent\b/i.exec(rv);
       const nearWhite = !!c && c.r > 0.85 && c.g > 0.85 && c.b > 0.85;
-      const nearBlack = !!c && c.r < 0.15 && c.g < 0.15 && c.b < 0.15;
+      const nearBlack = c ? c.r < 0.15 && c.g < 0.15 && c.b < 0.15 : !!mixed && /^(black|--color-ink)$/i.test(mixed[1]);
       if ((c && c.alpha < 0.95 && (nearWhite || nearBlack)) || (!c && mixed)) {
         once('glass:' + rule.selector, rule.file, bf.line, `glass panel: backdrop-filter blur over a translucent ${nearBlack ? 'black' : 'white'} on ${name}`, 'a solid or grained surface; elevation by lightness');
       }
@@ -245,8 +245,8 @@ function check48(ctx: LintContext, r: Reporter): void {
     }
   }
   for (const doc of ctx.docs) {
-    for (const m of doc.src.matchAll(/style\s*=\s*"([^"]*)"/gi)) {
-      const lit = new RegExp(COLOR_FN.source).exec(m[1]);
+    for (const m of doc.src.matchAll(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+      const lit = new RegExp(COLOR_FN.source).exec(m[1] ?? m[2]);
       if (lit && parseColor(lit[0])) r.report('literal-outside-tokens', doc.file, doc.lineOf(m.index!), `inline style colour literal ${trunc(lit[0], 30)}`);
     }
   }

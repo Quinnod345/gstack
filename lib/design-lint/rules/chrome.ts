@@ -201,7 +201,7 @@ function checkWireframeSlots(ctx: LintContext, r: Reporter): void {
   }
 }
 
-const FACT = /(?:[£$€¥]\s?\d[\d,.]*|\d[\d,.]*\s?(?:%|(?:pm|am|MAD|kg|g|ml|km|mi|miles)\b)|\b\d{1,2}:\d{2}\b)/gi;
+const FACT = /(?:[£$€¥]\s?\d[\d,.]*|(?<![\d,.])\d[\d,.]*\s?(?:%|(?:pm|am|MAD|kg|g|ml|km|mi|miles)\b)|\b\d{1,2}:\d{2}\b)/gi;
 const REGION = /^(section|header|footer|article|aside|nav|form|dialog)$/;
 
 // sloplint check69 (gate 69)
