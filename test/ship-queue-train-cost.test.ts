@@ -37,4 +37,13 @@ describe('train verdict cost line', () => {
     expect(line(queue(all, ['train', 'verdict', '--train', priced]).out, 'ATTEMPT:')).toBe('ATTEMPT: a1 gate run 101 GREEN cost=$1.50 (rule 2/2, judge 1/1)');
   }, 120_000);
 
+  // Value: protects=a train whose every case is priced at $0.00 (reused or free trials) still reports its cost as known;
+  // fails_when=the null guard on cost_usd becomes a falsy check, so a zero sum prints nothing and reads like an unpriced run;
+  // existing_gap=the two rows above price every panel above zero or leave some unpriced, never a known zero; seam=none
+  test('a train priced at zero prints cost=$0.00 rather than no cost at all', () => {
+    const fx = make();
+    const free = { ...GREEN_GATE, record: { ...GREEN_GATE.record, panels: [PASS('c1', 'rule', 0), PASS('c2', 'rule', 0), PASS('j1', 'judge', 0)] } };
+    const nonce = greenTrain(fx, free);
+    expect(line(queue(fx, ['train', 'verdict', '--train', nonce]).out, 'ATTEMPT:')).toBe('ATTEMPT: a1 gate run 101 GREEN cost=$0.00 (rule 2/2, judge 1/1)');
+  }, 60_000);
 });
