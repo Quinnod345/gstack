@@ -137,7 +137,9 @@ git worktree list --porcelain | awk 'BEGIN { RS=""; FS="\n" } {
   # git -C read describe whichever repository contains the directory, so its
   # own files would be invisible: report it broken, never safe.
   case "$flags" in *P*) printf '%s\t?\t?\tbroken\t?\t-\t-\treview\t%s\n' "$(du -sh "$wt" 2>/dev/null | awk '{print $1}')" "$wt"; continue ;; esac
-  if [ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" != "$(cd "$wt" && pwd -P)" ]; then
+  # --show-cdup is empty only when the directory is itself a toplevel; a path
+  # comparison would misfire where git and the shell spell one path differently.
+  if [ ! -e "$wt/.git" ] || [ -n "$(git -C "$wt" rev-parse --show-cdup 2>/dev/null || echo broken)" ]; then
     printf '%s\t?\t?\tbroken\t?\t-\t-\treview\t%s\n' "$(du -sh "$wt" 2>/dev/null | awk '{print $1}')" "$wt"
     continue
   fi

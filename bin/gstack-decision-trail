@@ -82,8 +82,8 @@ function appendRow(file: string, cells: readonly string[]): number {
   if (dir && dir !== "." && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   // Append the header too, never truncate: on a flaky mount the worst case is
   // one stray header line, not lost rows.
-  // A file whose first line is not the header (empty, blank, or rows written by
-  // hand) gets one appended; readRows skips a header line wherever it sits.
+  // A file with no header line anywhere (empty, blank, or rows written by hand)
+  // gets one appended once; readRows skips a header line wherever it sits.
   const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
   if (size > 0 && !endsWithNewline(file, size)) fs.appendFileSync(file, "\n");
   if (size === 0 || !hasHeader(file)) fs.appendFileSync(file, HEADER);
@@ -93,8 +93,8 @@ function appendRow(file: string, cells: readonly string[]): number {
 }
 
 function hasHeader(file: string): boolean {
-  const first = fs.readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
-  return first.replace(/^\uFEFF/, "").replace(/\r$/, "") === HEADER.trimEnd();
+  return fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "").split("\n")
+    .some(line => line.replace(/\r$/, "") === HEADER.trimEnd());
 }
 
 function endsWithNewline(file: string, size: number): boolean {
