@@ -9,7 +9,9 @@
 // milliseconds averaging 1000/60, calls window.__start() on frame PRE and
 // window.__tick(dt) from then on inside the same evaluate, seeks every CSS
 // animation to the fake clock from window.__mark (the page sets it when its
-// state classes change; 0 when absent), and screenshots. Output in <dir>:
+// state classes change; 0 when absent) or, for an animation first seen in a
+// frame where __mark did not move (a story's class toggle), from that frame,
+// and screenshots. Output in <dir>:
 // frames/%05d.png, still.png (<page>?still at the capture scale, CSS animations
 // finished), mask.png with --mask, and
 // capture.json (sizes, window, per-frame clock and loop time) for
@@ -109,8 +111,11 @@ try {
         if (i === pre) w.__start();
         if (i >= pre) w.__tick(dt / 1000);
         const now = performance.now();
+        const mark = w.__mark ?? 0;
+        const marked = mark !== w.__seenMark;
+        w.__seenMark = mark;
         for (const a of document.getAnimations() as any[]) {
-          a.__m ??= w.__mark ?? 0;
+          a.__m ??= marked ? mark : now;
           a.pause();
           a.currentTime = Math.max(0, now - a.__m);
         }

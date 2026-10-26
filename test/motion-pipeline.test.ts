@@ -132,6 +132,9 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       const relaxed = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES, '--min-db', '0']);
       expect(relaxed.code, relaxed.out + relaxed.err).toBe(0);
       expect(relaxed.out).toMatch(/^MOTION_SETTINGS: .*--min-db 0; defaults otherwise$/m);
+      const blank = run([ENCODE, 'check', path.join(dir, 'cap'), ...PHASES, '--min-db', '']);
+      expect(blank.code).toBe(2);
+      expect(blank.err).toContain("--min-db must be a non-negative number, got ''");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -212,6 +215,28 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 240_000);
+
+  // Value: protects=a CSS transition that a story starts with a class toggle is seeked from the frame it appears, not from the last
+  //   __mark, so it eases instead of popping; fails_when=new animations are seeded at __mark again; why_new=adversarial probe showed a
+  //   story transition exported ~100 ms ahead while every check passed; seam=none; no_claim=one linear opacity transition
+  test('a story transition started by a class toggle eases from the frame it starts', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
+    try {
+      const c = capture(dir, `<!doctype html><html><head><style>html, body { margin: 0; background: #000; }
+#s { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 0.2s linear; } #s.on { opacity: 1; }</style></head>
+<body><div id="s"></div><script>const s = document.getElementById('s'); window.__lt = 0;
+window.__start = () => { window.__lt = 0; window.__mark = performance.now(); };
+window.__tick = dt => { window.__lt += dt; if (window.__lt >= 0.1) s.classList.add('on'); };
+if (location.search.includes('still')) s.classList.add('on');</script></body></html>`, { mask: false });
+      expect(c.code, c.err).toBe(0);
+      const probe = run([FFMPEG!, '-hide_banner', '-loglevel', 'error', '-i', path.join(dir, 'cap', 'frames', '00026.png'), '-vf', 'format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-', '-f', 'null', '-']);
+      const yavg = Number(/YAVG=([\d.]+)/.exec(probe.out)?.[1]);
+      expect(yavg).toBeGreaterThan(90);
+      expect(yavg).toBeLessThan(170);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   // Value: protects=a page whose __tick never returns stops with MOTION_CAPTURE_FAILED instead of hanging the capture forever;
   //   fails_when=the per-frame 10 s bound is dropped; why_new=adversarial probe hung at 100% renderer CPU; seam=none;

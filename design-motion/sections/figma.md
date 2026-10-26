@@ -2,7 +2,7 @@
 <!-- Regenerate: bun run gen:skill-docs -->
 ## Figma source (optional, needs a token)
 
-Use this path only when `FIGMA_TOKEN` (or `FIGMA_ACCESS_TOKEN`) is set and the source is a Figma link with a node id. The token is a secret: pass it only as a header from the environment, never print it, echo it, write it to a file, or put it in chat or a commit.
+Use this path only when `FIGMA_TOKEN` (or `FIGMA_ACCESS_TOKEN`) is set and the source is a Figma link with a node id. Fill `<figma-file-key>` and `<figma-node-id>` only with values matching `^[A-Za-z0-9]+$` and `^[0-9]+[:-][0-9]+$`; anything else is not a Figma link. The token is a secret: pass it only as a header from the environment, never print it, echo it, write it to a file, or put it in chat or a commit.
 
 ```bash
 _FT="${FIGMA_TOKEN:-$FIGMA_ACCESS_TOKEN}"

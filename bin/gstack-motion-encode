@@ -81,7 +81,7 @@ function run(args: string[]) {
 function num(flag: string, fallback: number): number {
   const raw = flags.get(flag);
   if (raw === undefined) return fallback;
-  const v = Number(raw);
+  const v = raw.trim() === '' ? NaN : Number(raw);
   if (!Number.isFinite(v) || v < 0) die(2, `gstack-motion-encode: ${flag} must be a non-negative number, got '${raw}'`);
   return v;
 }
