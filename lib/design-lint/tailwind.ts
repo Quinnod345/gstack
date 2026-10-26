@@ -373,7 +373,7 @@ export function twTokensOf(doc: Doc, t: Tag): string[] {
     if (q === '"' || q === "'") { const e = tag.indexOf(q, i + 1); val = tag.slice(i + 1, e < 0 ? tag.length : e); }
     else if (q === '{') { val = tag.slice(i + 1, braceEnd(tag, i)); dyn = true; }
     else val = (/^[^\s>]*/.exec(tag.slice(i)) || [''])[0];
-    for (const t of dyn ? clsLits(val) : val.includes('{') ? twInterp(val) : val.split(/\s+/)) out.push(t);
+    for (const tok of dyn ? clsLits(val) : val.includes('{') ? twInterp(val) : val.split(/\s+/)) out.push(tok);
   }
   for (const d of tag.matchAll(/(?:^|\s)class:(?!list\b)([\w-]+)/g)) out.push(d[1]);
   return out.filter(Boolean);

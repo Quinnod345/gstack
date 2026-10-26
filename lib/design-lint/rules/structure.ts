@@ -353,7 +353,7 @@ function columnCount(value: string): number | null {
   if (/auto-fi(t|ll)|var\(/.test(value)) return null;
   let repeated = 0;
   const v = value.replace(/repeat\(\s*(\d+)\s*,\s*((?:[^()]|\([^()]*\))*)\)/g, (_, count: string, tracks: string) => {
-    repeated += parseInt(count, 10) * tracks.replace(/\([^()]*\)/g, 'X').trim().split(/\s+/).length;
+    repeated += parseInt(count, 10) * tracks.replace(/\([^()]*\)/g, 'X').replace(/\[[^\]]*\]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
     return ' ';
   });
   if (/repeat\(/.test(v)) return null;

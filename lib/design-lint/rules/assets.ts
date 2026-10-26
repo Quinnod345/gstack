@@ -20,13 +20,13 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     const lines = new Set<number>();
     let n = 0;
-    const icons = (doc.cache.emojiIcons ??= new Map<string, Finding>()) as Map<string, Finding>;
-    const flag = (line: number, what: string): boolean => {
-      if (lines.has(line) || n >= 8) return false;
+    const quoted = (doc.cache.emojiQuoted ??= new Map<string, Finding[]>()) as Map<string, Finding[]>;
+    const flag = (line: number, what: string, key?: string): void => {
+      if (lines.has(line) || n >= 8) return;
       lines.add(line);
       n++;
-      r.report('emoji-decoration', doc.file, line, what);
-      return true;
+      const found = r.report('emoji-decoration', doc.file, line, what);
+      if (key && found) { const list = quoted.get(key); if (list) list.push(found); else quoted.set(key, [found]); }
     };
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
@@ -35,9 +35,9 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
       const iconish = /icon|card|step|tier|feature|value|prop|badge/i.test(cls);
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const content = stripTags(inner.inner).replace(/\s+/g, ' ').trim();
+      const content = stripTags(inner.inner, false, 4).replace(/\s+/g, ' ').trim();
       if (content && content.length <= 4 && EMOJI.test(content) && (iconish || !/<[a-z]/.test(inner.inner))) {
-        if (flag(t.line, 'an emoji icon "' + content + '" in <' + t.name + ' class="' + trunc(cls, 28) + '">')) icons.set(content, r.findings[r.findings.length - 1]);
+        flag(t.line, 'an emoji icon "' + content + '" in <' + t.name + ' class="' + trunc(cls, 28) + '">', content);
         lines.add(doc.lineOf(t.end + inner.inner.search(EMOJI)));
         continue;
       }
@@ -45,12 +45,12 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
       const text = textOf(doc, i);
       const at = inner.inner.search(GLYPH);
       if (!text || at < 0) continue;
-      flag(doc.lineOf(t.end + at), 'an emoji in <' + t.name + '> "' + trunc(text, 32) + '"');
+      flag(doc.lineOf(t.end + at), 'an emoji in <' + t.name + '> "' + trunc(text, 32) + '"', trunc(text, 32));
     }
     const raw = doc.raw;
     const body = doc.masked;
-    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
-    for (const m of body.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(doc.lineOf(m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"');
+    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"', trunc(m[1].trim(), 32));
+    for (const m of body.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(doc.lineOf(m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"', trunc(m[1], 28));
     if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F?)\u200D?){1,3})\s*\1/gu)) flag(doc.lineOf(m.index!), 'an emoji passed as an icon: ' + m[2]);
   }
 }
@@ -207,7 +207,7 @@ function checkWrappingLabels(ctx: LintContext, r: Reporter): void {
       if (!button && !link) continue;
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const label = stripTags(inner.inner).replace(/\s+/g, ' ').trim();
+      const label = stripTags(inner.inner, false, 40).replace(/\s+/g, ' ').trim();
       if (label.length <= 24 || covered(cls, t.name)) continue;
       if (button) r.report('button-label-wraps', doc.file, t.line, 'the long label "' + trunc(label, 36) + '" on <' + t.name + '> can wrap, and nothing sets nowrap', { suspected: true });
       else r.report('link-wraps', doc.file, t.line, 'the long link "' + trunc(label, 36) + '" can wrap, and nothing sets nowrap');

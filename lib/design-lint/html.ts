@@ -27,7 +27,7 @@ export interface ClassCall { pos: number; name: string; toks: string[] }
 export interface Doc {
   file: string;
   kind: DocKind;
-  /** The text the tags were scanned from: the HTML, or the pseudo-HTML of a component, with comments blanked and every stray `<` (a tag start with no `>`) spaced out, positions kept, so no rule reads markup the browser never renders and no `[^>]*>` scan over it runs past its tag. */
+  /** The text the tags were scanned from: the HTML, or the pseudo-HTML of a component, with comments blanked and every `<` that starts no tag (a tag start with no `>`, `<1`, `a < b`; a `<!` or `<?` declaration with a `>` ahead stays) spaced out, positions kept, so no rule reads markup the browser never renders and no `[^>]*>` scan over it runs past its tag. */
   src: string;
   /** The original file text. */
   raw: string;
@@ -111,16 +111,18 @@ function blankRanges(s: string, ranges: Array<[number, number]>, cut = false): s
   return out + s.slice(at);
 }
 
-/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. */
-export function stripTags(s: string, keep = false): string {
-  let out = '', i = 0;
+/** s with every `<…>` run replaced by one space (or padded to spaces with keep set), in one linear pass; a `<` with no `>` after it is text. With a limit, the read stops once more than that many non-space characters are out, so a caller that only needs to know whether the text is short does not pay for an element that runs to the end of the file. */
+export function stripTags(s: string, keep = false, limit = Infinity): string {
+  let out = '', i = 0, seen = 0;
   for (;;) {
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
     const gt = s.indexOf('>', lt + 1);
     if (gt < 0) break;
-    out += s.slice(i, lt) + (keep ? pad(s.slice(lt, gt + 1)) : ' ');
+    const text = s.slice(i, lt);
+    out += text + (keep ? pad(s.slice(lt, gt + 1)) : ' ');
     i = gt + 1;
+    if (limit < Infinity && (seen += (text.match(/\S/g) || []).length) > limit) return out;
   }
   return out + s.slice(i);
 }
@@ -206,7 +208,7 @@ export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Do
   const src2 = blankStrays(live, strays);
   const masked = blankRanges(src2, bodies);
   const whole = [...scriptSpans, ...styleSpans].map((s): [number, number] => [s.start, s.end]).sort((a, b) => a[0] - b[0]);
-  const text = stripTags(blankRanges(live, whole, true))
+  const text = stripTags(blankRanges(src2, whole, true))
     .replace(/&quot;|&#0?34;/g, '"').replace(/&#0?39;|&apos;/g, "'")
     .replace(/&hellip;|&#8230;/g, '\u2026').replace(/&mdash;|&#8212;|&#x2014;/gi, '\u2014').replace(/&ndash;|&#8211;|&#x2013;/gi, '\u2013')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -757,9 +759,9 @@ export function textOf(doc: Doc, idx: number): string {
 export interface Element { idx: number; tag: Tag; inner: string }
 
 /** The elements opened by a tag named by `name` between tag indices from and to, each with its inner HTML from the shared pairing; a tag walk, so an unclosed element costs its own extent and nothing scans to the end of the file for it. */
-export function openTags(doc: Doc, name: RegExp, from = 0, to = doc.tags.length, pick: (t: Tag) => boolean = () => true, limit = Infinity): Element[] {
+export function openTags(doc: Doc, name: RegExp, from = 0, to = doc.tags.length, pick: (t: Tag) => boolean = () => true): Element[] {
   const out: Element[] = [];
-  for (let i = from; i < to && out.length < limit; i++) {
+  for (let i = from; i < to; i++) {
     const t = doc.tags[i];
     if (t.close || t.selfClosing || !name.test(t.name) || !pick(t)) continue;
     const inner = innerOf(doc, i);

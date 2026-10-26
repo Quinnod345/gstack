@@ -76,10 +76,15 @@ function flatBody(src: string, s: number, e: number): string {
   return out.join('');
 }
 
+/** A selector longer than this is a nesting blow-up (comma lists nested in comma lists), not a stylesheet selector; past it the nested selector stands without its parent, so a sheet costs its length and not parts^depth. */
+const MAX_SELECTOR = 8192;
+
 /** Expand a nested selector against its parent: `&` is replaced, a bare selector is descendant-joined. */
 function nestSelector(sel: string, parent: string): string {
   const p = parent.includes(',') ? `:is(${parent})` : parent;
-  return splitTop(sel).map((part) => part.includes('&') ? part.trim().replace(/&/g, p) : `${p} ${part.trim()}`).join(', ');
+  const parts = splitTop(sel).map((part) => part.trim());
+  if (sel.length + p.length * parts.length > MAX_SELECTOR) return parts.map((part) => part.replace(/&/g, '').trim()).filter(Boolean).join(', ') || p;
+  return parts.map((part) => part.includes('&') ? part.replace(/&/g, p) : `${p} ${part}`).join(', ');
 }
 
 /** Faces that read as monospace, whether they arrive as a token, a utility or a declaration; one list so every check classifies a face the same way. */
@@ -215,11 +220,12 @@ const MAX_RESOLVED = 8192;
 export function resolveVars(value: string, tokens: Tokens, local: Tokens | null = null, depth = 0, chain: ReadonlySet<string> = new Set()): string {
   if (!value || depth > 5 || value.length > MAX_RESOLVED || !value.includes('var(')) return value;
   const seen = new Set<string>();
+  let grown = 0;
   const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (m0, name: string, fb: string | undefined) => {
-    if (chain.has(name)) return m0;
+    if (chain.has(name) || grown > MAX_RESOLVED) return m0;
     const v = local && local[name] != null ? local[name] : tokens[name];
-    if (v != null) { seen.add(name); return v; }
-    if (fb != null) return fb.trim();
+    if (v != null && v.length <= MAX_RESOLVED) { seen.add(name); grown += v.length; return v; }
+    if (v == null && fb != null) return fb.trim();
     return m0;
   });
   if (out === value || out.length > MAX_RESOLVED) return out.length > MAX_RESOLVED ? value : out;

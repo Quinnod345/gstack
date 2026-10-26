@@ -192,11 +192,11 @@ export function glLayout(P: Probes, checkFold: boolean): ProbeFinding[] {
       const hr = h1.getBoundingClientRect();
       const scope = h1.closest('section, header, main, div') || document.body;
       const cta = Array.from(scope.querySelectorAll('a, button')).find((c) => vis(c) && (c.textContent || '').trim());
-      const fold = 800;
-      if (hr.bottom > fold || hr.top < 0) out.push({ rule: 'hero-fold', grade: 'fail', evidence: 'the headline crosses the 1280x800 fold (its bottom is at ' + Math.round(hr.bottom) + 'px)', fix: 'pull the display clamp down so the headline fits the fold', at: at(h1) });
+      const fold = innerHeight, view = innerWidth + 'x' + innerHeight;
+      if (hr.bottom > fold || hr.top < 0) out.push({ rule: 'hero-fold', grade: 'fail', evidence: 'the headline crosses the ' + view + ' fold (its bottom is at ' + Math.round(hr.bottom) + 'px)', fix: 'pull the display clamp down so the headline fits the fold', at: at(h1) });
       else if (cta) {
         const cr = cta.getBoundingClientRect();
-        if (cr.bottom > fold) out.push({ rule: 'hero-fold', grade: 'fail', evidence: 'the primary action sits below the 1280x800 fold (its bottom is at ' + Math.round(cr.bottom) + 'px)', fix: 'trim the hero padding so the action fits the fold', at: at(cta) });
+        if (cr.bottom > fold) out.push({ rule: 'hero-fold', grade: 'fail', evidence: 'the primary action sits below the ' + view + ' fold (its bottom is at ' + Math.round(cr.bottom) + 'px)', fix: 'trim the hero padding so the action fits the fold', at: at(cta) });
       }
     }
   }
@@ -293,7 +293,7 @@ export function glAccent(P: Probes): ProbeFinding[] {
   const targets = ['--color-accent', '--color-accent-2', '--accent', '--accent-2'].map((t) => toRgb(cs0.getPropertyValue(t))).filter((c): c is number[] => !!c);
   if (!targets.length) return out;
   const near = (str: string) => { const p = toRgb(str); return !!p && p[3] >= 0.5 && targets.some((t) => Math.abs(t[0] - p[0]) + Math.abs(t[1] - p[1]) + Math.abs(t[2] - p[2]) <= 30); };
-  const CW = 16, COLS = Math.ceil(innerWidth / CW), ROWS = Math.ceil(800 / CW);
+  const CW = 16, COLS = Math.ceil(innerWidth / CW), ROWS = Math.ceil(innerHeight / CW), view = innerWidth + 'x' + innerHeight;
   const grid = new Uint8Array(COLS * ROWS);
   let walked = 0;
   for (const el of document.querySelectorAll('body, body *')) {
@@ -305,7 +305,7 @@ export function glAccent(P: Probes): ProbeFinding[] {
     if (!isBg && !isTxt) continue;
     const r = el.getBoundingClientRect();
     const x0 = Math.max(0, Math.floor(r.left / CW)), x1 = Math.min(COLS - 1, Math.floor((Math.min(r.right, innerWidth) - 1) / CW));
-    const y0 = Math.max(0, Math.floor(r.top / CW)), y1 = Math.min(ROWS - 1, Math.floor((Math.min(r.bottom, 800) - 1) / CW));
+    const y0 = Math.max(0, Math.floor(r.top / CW)), y1 = Math.min(ROWS - 1, Math.floor((Math.min(r.bottom, innerHeight) - 1) / CW));
     const turned = cs.transform !== 'none' && !/^matrix\(1, 0, 0, 1, /.test(cs.transform);
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       if (turned) { const hit = document.elementFromPoint(x * CW + CW / 2, y * CW + CW / 2); if (!hit || !(hit === el || el.contains(hit))) continue; }
@@ -315,8 +315,8 @@ export function glAccent(P: Probes): ProbeFinding[] {
   let filled = 0;
   for (const c of grid) filled += c;
   const pct = (100 * filled) / (COLS * ROWS);
-  if (pct > 8) out.push({ rule: 'accent-footprint', grade: 'fail', evidence: 'the accent paints about ' + pct.toFixed(1) + '% of the 1280x800 viewport (over 8%)', fix: 'retreat the accent to 5% or less: large colour belongs to the paper and field tokens' });
-  else if (pct > 5) out.push({ rule: 'accent-footprint', grade: 'warn', evidence: 'the accent paints about ' + pct.toFixed(1) + '% of the 1280x800 viewport', fix: 'retreat the accent to 5% or less, or keep the surface on the record' });
+  if (pct > 8) out.push({ rule: 'accent-footprint', grade: 'fail', evidence: 'the accent paints about ' + pct.toFixed(1) + '% of the ' + view + ' viewport (over 8%)', fix: 'retreat the accent to 5% or less: large colour belongs to the paper and field tokens' });
+  else if (pct > 5) out.push({ rule: 'accent-footprint', grade: 'warn', evidence: 'the accent paints about ' + pct.toFixed(1) + '% of the ' + view + ' viewport', fix: 'retreat the accent to 5% or less, or keep the surface on the record' });
   return out;
 }
 

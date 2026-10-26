@@ -49,18 +49,21 @@ export class Reporter {
 
   constructor(readonly scope: 'page' | 'component' = 'page', readonly cwd = process.cwd()) {}
 
-  report(rule: string, file: string, line: number | null | undefined, evidence: string, opts: ReportOptions = {}): void {
+  /** Records one finding and returns it; null when the rule is page-only and the scope is component. */
+  report(rule: string, file: string, line: number | null | undefined, evidence: string, opts: ReportOptions = {}): Finding | null {
     const meta = ruleMeta(rule);
     if (!meta) throw new Error(`design-lint: unknown rule id ${rule}`);
-    if (this.scope === 'component' && meta.pageOnly) return;
+    if (this.scope === 'component' && meta.pageOnly) return null;
     const tier: Tier = opts.suspected && meta.tier === 'blocks' ? 'ask' : meta.tier;
-    this.findings.push({
+    const finding: Finding = {
       rule, tier, grade: tier,
       file: oneLine(relPath(file, this.cwd)), line: line || 1,
       evidence: trunc(field(evidence)),
       fix: trunc(field(opts.fix ?? meta.fix), 240),
       source: opts.source ?? (meta.render ? 'render' : 'static'),
-    });
+    };
+    this.findings.push(finding);
+    return finding;
   }
 }
 

@@ -31,7 +31,7 @@ export interface StaticResult {
 }
 
 /** A source file the lint did not read, and why; it is reported, because a page the lint could not read is not a pass. */
-export interface Skipped { file: string; why: string }
+export interface Skipped { file: string; kind: 'unreadable' | 'unparseable' | 'oversize'; why: string }
 
 /** The static tier before waivers: every context with the findings its rule families reported, so a caller can add the render tier's findings and settle the page's waivers once over both. */
 export interface RawStaticResult {
@@ -54,7 +54,7 @@ export function collectFiles(paths: string[], warn: (l: string) => void = () => 
   const visit = (p: string, top: boolean) => {
     let abs = path.resolve(p);
     let st: fs.Stats;
-    try { abs = fs.realpathSync(abs); st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); if (top) skipped.push({ file: abs, why: 'it cannot be read' }); return; }
+    try { abs = fs.realpathSync(abs); st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); if (top) skipped.push({ file: abs, kind: 'unreadable', why: 'it cannot be read' }); return; }
     if (seen.has(abs)) return;
     if (st.isDirectory()) {
       seen.add(abs);
@@ -68,7 +68,7 @@ export function collectFiles(paths: string[], warn: (l: string) => void = () => 
     if (st.size > MAX_FILE_BYTES) {
       const why = `${Math.round(st.size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit`;
       warn(`design-lint: skipped ${p} (${why})`);
-      skipped.push({ file: abs, why });
+      skipped.push({ file: abs, kind: 'oversize', why });
       return;
     }
     files.push(abs);
@@ -130,17 +130,18 @@ interface CssRead { raw: string; rules: CssRule[]; imports: string[] }
 /** Stylesheets read once per run: a bundle shared by forty pages is parsed once, not forty times. */
 class CssCache {
   private readonly files = new Map<string, CssRead | null>();
-  constructor(readonly roots: string[], readonly warn: (l: string) => void) {}
+  constructor(readonly roots: string[], readonly warn: (l: string) => void, readonly skipped: Skipped[] = []) {}
   read(f: string): CssRead | null {
     if (this.files.has(f)) return this.files.get(f)!;
     let out: CssRead | null = null;
     try {
       const size = fs.statSync(f).size;
-      if (size > MAX_FILE_BYTES) { this.warn(`design-lint: skipped ${f} (${Math.round(size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit)`); this.files.set(f, null); return null; }
+      if (size > MAX_FILE_BYTES) { const why = `${Math.round(size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit`; this.warn(`design-lint: skipped ${f} (${why})`); this.skipped.push({ file: f, kind: 'oversize', why }); this.files.set(f, null); return null; }
       const raw = fs.readFileSync(f, 'utf8');
       out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
     } catch (e) {
-      this.warn((e as NodeJS.ErrnoException).code === 'ENOENT' ? `design-lint: skipped ${f}, not found` : `design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`);
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') this.warn(`design-lint: skipped ${f}, not found`);
+      else { const why = `it could not be parsed (${(e as Error).message})`; this.warn(`design-lint: skipped ${f}, ${why}`); this.skipped.push({ file: f, kind: 'unparseable', why }); }
     }
     this.files.set(f, out);
     return out;
@@ -174,7 +175,7 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
   for (const doc of docList) {
     const root = rootOf(doc.file, cache.roots);
     for (const st of doc.styles) {
-      try { for (const rule of parseCss(st.css, doc.file, st.lineOffset)) rules.push(rule); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); continue; }
+      try { for (const rule of parseCss(st.css, doc.file, st.lineOffset)) rules.push(rule); } catch (e) { cache.warn(`design-lint: skipped a <style> block in ${doc.file}, it could not be parsed (${(e as Error).message})`); cache.skipped.push({ file: doc.file, kind: 'unparseable', why: `a <style> block could not be parsed (${(e as Error).message})` }); continue; }
       pending.push(...importsOf(st.css, path.dirname(doc.file), root));
     }
     pending.push(...linksOf(doc, path.dirname(doc.file), root));
@@ -211,7 +212,7 @@ function linkedCss(page: Doc, cache: CssCache): Set<string> {
  * directory, belongs to that page and is not linted again on its own.
  */
 export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void, roots: string[] = [], skipped: Skipped[] = []): LintContext[] {
-  const cache = new CssCache(roots, warn);
+  const cache = new CssCache(roots, warn, skipped);
   const groups = new Map<string, { css: string[]; pages: Doc[]; parts: Doc[] }>();
   for (const f of files) {
     const dir = path.dirname(f);
@@ -222,9 +223,10 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
       const doc = parseDoc(f, fs.readFileSync(f, 'utf8'));
       (doc.kind === 'html' ? g.pages : g.parts).push(doc);
     } catch (e) {
-      const why = (e as NodeJS.ErrnoException).code ? `it cannot be read (${(e as NodeJS.ErrnoException).code})` : `it could not be parsed (${(e as Error).message})`;
+      const kind = (e as NodeJS.ErrnoException).code ? 'unreadable' : 'unparseable';
+      const why = kind === 'unreadable' ? `it cannot be read (${(e as NodeJS.ErrnoException).code})` : `it could not be parsed (${(e as Error).message})`;
       warn(`design-lint: skipped ${f}, ${why}`);
-      skipped.push({ file: f, why });
+      skipped.push({ file: f, kind, why });
     }
   }
   const linkedBy = new Map<Doc, Set<string>>();
@@ -336,7 +338,7 @@ export function lintStaticRaw(paths: string[], opts: StaticOptions = {}): RawSta
     for (const doc of ctx.docs) doc.cache = {};
   }
   const skippedReporter = new Reporter(opts.scope ?? 'page', cwd);
-  for (const s of skippedFiles) skippedReporter.report('internal-error', s.file, 1, `skipped: ${s.why}; a page the lint could not read is not a pass`, { fix: /cannot be read/.test(s.why) ? 'check the path' : /parsed/.test(s.why) ? 'fix the markup the parser stopped on' : 'split the file, or lint the page that links it' });
+  for (const s of new Map(skippedFiles.map((s) => [s.file + '|' + s.why, s])).values()) skippedReporter.report('internal-error', s.file, 1, `skipped: ${s.why}; a page the lint could not read is not a pass`, { fix: s.kind === 'unreadable' ? 'check the path' : s.kind === 'unparseable' ? 'fix the markup the parser stopped on' : 'split the file, or lint the page that links it' });
   return { files, contexts, raw, skipped: skippedReporter.findings };
 }
 
