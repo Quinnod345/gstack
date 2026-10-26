@@ -18,8 +18,13 @@
 #   door_type          — one-way | two-way
 #                        (optional — looked up from registry if omitted)
 #   options_count      — number of options presented (positive integer)
-#   user_choice        — key user selected (free string; registry-options preferred)
-#   recommended        — option key the agent recommended (optional)
+#   user_choice        — key user selected (free string; registry-options preferred).
+#                        On hook-captured events (source=hook) for a registered
+#                        question_id, the clicked UI label is mapped to its
+#                        registered option key (#2623) and kept in choice_label.
+#                        Unmatched labels and other sources stay as given.
+#   recommended        — option key the agent recommended (optional; mapped
+#                        the same way on hook-captured events)
 #   followed_recommendation — bool (optional — computed if both present)
 #   session_id         — stable session identifier
 #   ts                 — ISO 8601 timestamp (auto-injected if missing)
@@ -46,8 +51,9 @@ INPUT="$1"
 TMPERR=$(mktemp "${TMPDIR:-/tmp}/gstack-question-log.XXXXXX") || { echo "gstack-question-log: could not create a temp file in ${TMPDIR:-/tmp}, so the question was not logged. Fix: point TMPDIR at a writable directory." >&2; exit 1; }
 trap 'rm -f "$TMPERR"' EXIT
 set +e
-VALIDATED=$(printf '%s' "$INPUT" | GSTACK_LIB_DIR="$SCRIPT_DIR/../lib" bun --no-env-file --config=/dev/null -e "
+VALIDATED=$(printf '%s' "$INPUT" | GSTACK_LIB_DIR="$SCRIPT_DIR/../lib" GSTACK_SCRIPTS_DIR="$SCRIPT_DIR/../scripts" bun --no-env-file --config=/dev/null -e "
 const { hasInjection } = await import(process.env.GSTACK_LIB_DIR + '/jsonl-store.ts');
+const { resolveOptionKey } = await import(process.env.GSTACK_SCRIPTS_DIR + '/psychographic-signals.ts');
 const path = require('path');
 const raw = await Bun.stdin.text();
 let j;
@@ -171,6 +177,23 @@ if (j.recommended !== undefined) {
     process.exit(1);
   }
   if (j.recommended.length > 64) j.recommended = j.recommended.slice(0, 64);
+}
+
+// Map the clicked UI label to its registered option key (#2623). SIGNAL_MAP
+// and question preferences are keyed by the registry's option keys, but the
+// PostToolUse hook only sees the label. Hook events and registered ids only;
+// an unmatched or ambiguous label stays as given. Agent-written rows keep
+// what the agent logged: skills such as plan-ceo-review log full mode names
+// that their own readers match on.
+if (j.source === 'hook') {
+  const key = resolveOptionKey(j.question_id, j.user_choice);
+  if (key !== undefined && key !== j.user_choice) {
+    j.choice_label = j.user_choice;
+    j.user_choice = key;
+  }
+  if (j.recommended !== undefined) {
+    j.recommended = resolveOptionKey(j.question_id, j.recommended) ?? j.recommended;
+  }
 }
 
 // followed_recommendation — compute if both sides present. An __unknown__

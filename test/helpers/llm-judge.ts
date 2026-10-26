@@ -187,6 +187,13 @@ export async function callJudge<T>(
     .filter(block => block.type === 'text')
     .map(block => block.text)
     .join('\n');
+  const parseJudgeText = (json: string): T => {
+    try {
+      return JSON.parse(json) as T;
+    } catch (error) {
+      throw new SyntaxError(`Judge response is not valid JSON (stop_reason=${response.stop_reason}, ${json.length} chars; full text in llm-judge-response-parse-error): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   try {
     if (response.stop_reason === 'max_tokens') {
       throw new Error(`Judge response truncated at max_tokens=${maxTokens} (model=${resolvedModel})`);
@@ -194,11 +201,11 @@ export async function callJudge<T>(
     if (response.stop_reason === 'refusal') throw new JudgeRefusalError(response);
     if (opts?.jsonSchema !== undefined) {
       if (response.stop_reason !== 'end_turn') throw new Error(`Structured judge did not complete: stop_reason=${response.stop_reason}`);
-      return JSON.parse(text) as T;
+      return parseJudgeText(text);
     }
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error(`Judge returned non-JSON: ${text.slice(0, 200)}`);
-    return JSON.parse(jsonMatch[0]) as T;
+    return parseJudgeText(jsonMatch[0]);
   } catch (error) {
     // The canonical full stderr spool retains this public response even when
     // parsing fails before a caller can record a judgment. Never copy content
