@@ -71,9 +71,9 @@ const LANDSCAPE_RE = /\b(?:landscape|tapestry)\b(?!\s+(?:mode|orientation|image|
 const METAPHOR_RE = new RegExp(String.raw`\b(?:${METAPHOR_NOUNS.map(m => m.word.replace('-', '[- ]')).join('|')})s?\b`, 'gi');
 const NOT_JUST_BUT_RE = /(?:\bnot|n['’]t)\s+(?:just|only|merely|simply)\b[^.!?\n]{0,120}?\bbut\b/gi;
 /** A sentence of four or more words, a colon, then a lowercase clause: the colon is doing a conjunction's job. */
-const MID_COLON_RE = /(?:^\s*(?:[-*+]|\d+\.)?\s*|[.!?]\s+)((?:[A-Za-z][\w'’-]*[,\s]+){3,}[A-Za-z][\w'’-]*): ([a-z][\w'’-]*(?:\s+[\w'’-]+){2,})/gm;
+const MID_COLON_RE = /(?:^[ \t]*(?:(?:[-*+]|\d+\.)[ \t]+)?|[.!?]\s+)((?:[A-Za-z][\w'’-]*[,\s]+){3,}[A-Za-z][\w'’-]*): ([a-z][\w'’-]*(?:\s+[\w'’-]+){2,})/gm;
 const INLINE_HEADER_RE = /^\s*(?:[-*+]|\d+\.)\s+\*\*([^*\n]{1,60}?):?\*\*:?\s+(\S+)/;
-const ARROW_RE = /(\S+)\s*(→|->|=>|⇒)\s*(\S+)/g;
+const ARROW_RE = /(\S{1,80})[ \t]*(→|->|=>|⇒)[ \t]*(\S{1,80})/g;
 const SENTENCE_START_RE = /(?:^|[.!?]\s+|^\s*(?:[-*+]|\d+\.)\s+)([A-Z][a-z]+)\s+([a-z]+s)\b(?=\s+[a-z])/gm;
 const BARE_NOUNS = new Set([
   'parser', 'user', 'agent', 'reviewer', 'runner', 'command', 'script', 'test', 'file', 'branch', 'build', 'gate',
@@ -100,14 +100,18 @@ const NUMERIC_SIDE = /^[\d$£€.,%+-]|^v?\d|^CODE$|^URL$|^(?:before|after)$/i;
 const LIST_INTRODUCER = /\b(?:examples?|following|these|this|below|measurements?|two|three|four|five|six)$/i;
 const trimSide = (s: string) => s.replace(/^[(\[`"'*_]+|[)\]`"'*_,.;:]+$/g, '');
 
-/** Replace fenced blocks, inline code, URLs and HTML comments with same-length placeholders so line numbers hold. */
+/** Replace fenced blocks, inline code, URLs and HTML comments (multi-line ones too) with same-length placeholders so line numbers hold. */
 export function maskProse(text: string): string {
   const lines = text.split('\n');
   let fence: string | null = null;
+  let comment = false;
   const out = lines.map((line) => {
     const open = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fence) { if (open && open[1]!.startsWith(fence[0]!) && open[1]!.length >= fence.length) fence = null; return ''; }
+    if (comment) { const end = line.indexOf('-->'); if (end < 0) return ''; comment = false; line = ' '.repeat(end + 3) + line.slice(end + 3); }
     if (open) { fence = open[1]!; return ''; }
+    const tail = line.lastIndexOf('<!--');
+    if (tail >= 0 && line.indexOf('-->', tail) < 0) { comment = true; line = line.slice(0, tail); }
     return line
       .replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length))
       .replace(/`[^`\n]*`/g, (m) => 'CODE' + ' '.repeat(Math.max(0, m.length - 4)))
@@ -164,9 +168,23 @@ export function unreleasedBlock(text: string): { text: string; line: number } | 
   return { text: section.lines.join('\n'), line: section.start + 1 };
 }
 
+/** The text with every line outside the named `## ` sections blanked, so line numbers hold; null when none of them is present. */
+export function sectionsOnly(text: string, names: string[]): string | null {
+  const wanted = new Set(names.map(n => n.trim().toLowerCase()).filter(Boolean));
+  let keep = false, found = false;
+  const out = text.split('\n').map((line) => {
+    const h = /^##\s+(.+?)\s*$/.exec(line);
+    if (h) { keep = wanted.has(h[1]!.toLowerCase()); found ||= keep; return ''; }
+    return keep ? line : '';
+  });
+  return found ? out.join('\n') : null;
+}
+
 export interface LintFilesOptions {
   /** Scan only each file's `[Unreleased]` CHANGELOG block. */
   unreleased?: boolean;
+  /** Scan only the text under these `## ` headings (the sections an author writes in a PR body). */
+  sections?: string[];
   /** Scan only the lines the working tree adds to each file since the merge base with this ref (the ref itself when no merge base resolves). */
   base?: string;
 }
@@ -194,6 +212,13 @@ export function lintFiles(files: string[], opts: LintFilesOptions = {}): ProseLi
       if (added === null) { result.empty.push(file); continue; }
       result.scanned.push(file);
       result.findings.push(...lintProse(added, file));
+      continue;
+    }
+    if (opts.sections) {
+      const picked = sectionsOnly(text, opts.sections);
+      if (picked === null) { result.empty.push(file); continue; }
+      result.scanned.push(file);
+      result.findings.push(...lintProse(picked, file));
       continue;
     }
     if (opts.unreleased) {

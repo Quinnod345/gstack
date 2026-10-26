@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addedOnly, lintProse, maskProse, renderProseLint, unreleasedBlock } from '../lib/prose-lint';
+import { addedOnly, lintProse, maskProse, renderProseLint, sectionsOnly, unreleasedBlock } from '../lib/prose-lint';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'prose-lint');
@@ -125,6 +125,31 @@ describe('lintProse: each rule, positive and negative', () => {
 });
 
 describe('selections', () => {
+  // Value: protects=the Step 19 compose gate reads only the sections an author writes, so a verbatim tool section (a review line such as "Problem → what you did") can never dead-end /ship; fails_when=a tool section's text is linted, an author section is skipped, heading case is significant, or a body with none of the headings reads as scanned; why_new=new selection; seam=none; no_claim=the compose block's heading list itself is pinned by the wiring test
+  test('sectionsOnly keeps only the named ## sections, line numbers intact, and is null when none is present', () => {
+    const body = [
+      '## Summary', 'The parser showcases a vibrant result.', '',
+      '## Pre-Landing Review', '[AUTO-FIXED] [x.ts:1] Problem → what you did', '',
+      '## blast radius', 'Touches the compose block only.', 'Caller -> callee is the only arrow here.',
+      '## Test plan', '- [x] bun test → 20 pass',
+    ].join('\n');
+    const picked = sectionsOnly(body, ['Summary', 'Blast radius'])!;
+    expect(picked.split('\n')).toHaveLength(body.split('\n').length);
+    expect(lintProse(picked, 'b.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 2], ['vocabulary', 2], ['arrow', 9]]);
+    expect(sectionsOnly(body, ['Why'])).toBeNull();
+    const gated = run([path.join(FIXTURES, 'slopped-changelog.md'), '--sections', '[1.0.0] - 2026-10-01', '--gate']);
+    expect(gated.code).toBe(1);
+    expect(gated.out).toMatch(/^PROSE: \S+slopped-changelog\.md:16 /m);
+    expect(gated.out).not.toMatch(/^PROSE: \S+slopped-changelog\.md:(5|8|9|10) /m);
+    expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', 'Nope', '--gate']).out).toContain('PROSE_LINT: none');
+  });
+
+  // Value: protects=an HTML comment that spans lines is never read, as the header promises; fails_when=the second line of a comment, or the text before its closing marker, produces a finding, or prose after the close is skipped; why_new=the mask test above covers one-line comments only; seam=none; no_claim=none beyond protects
+  test('a multi-line HTML comment is masked through its closing marker and prose after it is read', () => {
+    const text = ['Plain start. <!-- a vibrant', 'multi-line crucial comment', 'still pivotal --> The parser showcases it.', 'Showcasing a vibrant end.'].join('\n');
+    expect(lintProse(text, 'x.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 3], ['vocabulary', 4], ['vocabulary', 4]]);
+  });
+
   test('unreleasedBlock returns the block with its heading line, or null', () => {
     const text = fs.readFileSync(path.join(FIXTURES, 'slopped-changelog.md'), 'utf8');
     const block = unreleasedBlock(text)!;
@@ -225,6 +250,8 @@ describe('bin/gstack-prose-lint', () => {
     expect(run([path.join(FIXTURES, 'missing.md')]).code).toBe(2);
     expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--nope']).code).toBe(2);
     expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--unreleased', '--base', 'main']).code).toBe(2);
+    expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', 'Added', '--base', 'main']).code).toBe(2);
+    expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', '--gate']).code).toBe(2);
     const dir = run([FIXTURES]);
     expect(dir.code).toBe(2);
     expect(dir.err).toContain('cannot read');
@@ -243,7 +270,8 @@ describe('wiring', () => {
     expect(changelog).toContain('gstack-prose-lint CHANGELOG.md --base origin/<base> --gate');
     const prBody = read('ship/sections/pr-body.md.tmpl');
     const compose = prBody.slice(prBody.indexOf(': "${DOCS_SECTION_FILE:?'), prBody.indexOf('echo "PR_BODY_FILE: $PR_BODY_FILE"'));
-    expect(compose).toContain('gstack-prose-lint "$BODY_TOP_FILE" "$BODY_REST_FILE" --gate');
+    expect(compose).toContain(`gstack-prose-lint "$BODY_TOP_FILE" --sections 'What changed,Why,Summary,Blast radius' --gate`);
+    expect(compose).not.toContain('"$BODY_REST_FILE" --gate');
     expect(compose.indexOf('gstack-prose-lint')).toBeGreaterThan(compose.indexOf('is empty, so the body was never written'));
     expect(compose.indexOf('gstack-prose-lint')).toBeLessThan(compose.indexOf('{ awk 1 "$BODY_TOP_FILE"'));
     for (const host of ['claude', 'codex', 'factory', 'agy']) expect(fs.existsSync(path.join(ROOT, 'test', 'fixtures', 'golden', host + '-ship-SKILL.md'))).toBe(true);
@@ -258,14 +286,14 @@ describe('wiring', () => {
     expect(summary).toContain('## Blast radius');
     expect(summary).toContain('the one fact that makes that safe');
     expect(summary).toContain('file:line read, walked failure path, script ran, repro');
-    expect(summary).toContain('investigate/sections/blast-radius.md');
+    expect(summary).toContain('`~/.claude/skills/gstack/investigate/sections/blast-radius.md`, when present');
     expect(prBody).toContain('names what the user gets, not the mechanism');
     const capy = read('ship/sections/capy-pr.md.tmpl');
     expect(capy).toContain('`## Why`, `## Blast radius` and `## Approvals`');
     expect(capy).toMatch(/\*\*`## Why`:\*\* two or three sentences\. The first states the problem in the person's words/);
     expect(capy).toMatch(/BAD "[\s\S]+" GOOD "/);
     expect(capy).toContain("**`## Blast radius`:** the body template's item, written once");
-    expect(capy).toContain('investigate/sections/blast-radius.md');
+    expect(capy).toContain('`~/.claude/skills/gstack/investigate/sections/blast-radius.md`, when present');
   });
 
   test('the quality gate runs the lint over the [Unreleased] block, and NOTICE.md credits unslop', () => {
@@ -275,11 +303,11 @@ describe('wiring', () => {
     expect(read('docs/troubleshooting.md')).toContain('<a id="prose-lint-found"></a>');
   });
 
-  test('the shipped templates pass their own lint as a report (no gate), and the current [Unreleased] block gates clean', () => {
+  // Value: protects=a template run is a report (exit 0 and a trailer) even when the templates carry findings, so a template's em dashes and BAD examples never fail a check; fails_when=report mode exits nonzero on a finding; why_new=the earlier row accepted ok or found and proved nothing; seam=none; no_claim=the templates' own findings count is not pinned (it moves with every prose edit)
+  test('the shipped templates get a report, never a gate: exit 0 with a trailer even with findings', () => {
     const r = run(['ship/sections/changelog.md.tmpl', 'ship/sections/capy-pr.md.tmpl', 'ship/sections/pr-body.md.tmpl']);
     expect(r.code).toBe(0);
-    expect(r.out).toMatch(/PROSE_LINT: (ok|found=\d+) files=3\n$/);
-    const cl = run(['CHANGELOG.md', '--unreleased', '--gate']);
-    expect(cl.code).toBe(0);
+    expect(r.out).toMatch(/PROSE_LINT: found=\d+ files=3\n$/);
+    expect(r.err).toBe('');
   });
 });

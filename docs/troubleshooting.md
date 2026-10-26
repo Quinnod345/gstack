@@ -4469,8 +4469,10 @@ every flag and code.
 ## Prose lint (gstack-prose-lint)
 
 `bin/gstack-prose-lint` reads the prose /ship is about to publish, a CHANGELOG
-entry (Step 13) and the PR body drafts (Step 19), and the quality-gate workflow
-runs it over `CHANGELOG.md`'s `[Unreleased]` block. It decides only what a
+entry (Step 13) and the sections the author writes in the PR body (Step 19:
+`## What changed`, `## Why`, `## Summary` and `## Blast radius`, through
+`--sections`), and the quality-gate workflow runs it over `CHANGELOG.md`'s
+`[Unreleased]` block. It decides only what a
 regular expression can: autopilot vocabulary, "not just X, but Y", metaphor
 nouns, a colon used as a conjunction, a bold label that restates its line, an
 arrow or a dropped article standing in for a sentence. Fenced code, inline code,
@@ -4484,15 +4486,16 @@ file) it is a report: run it, read it, keep your em dashes.
 given. Each `PROSE: <file>:<line> <rule> "<match>" (<hint>)` line above the
 trailer names the rule and what to write instead; `PROSE_LINT: found=<n>` counts
 them. With `--unreleased` only the `## [Unreleased]` block was read; with
-`--base <ref>` only the lines the working tree added since the merge base.
+`--base <ref>` only the lines the working tree added since the merge base; with
+`--sections <a,b>` only the text under those `## ` headings.
 
 **Fix.** Rewrite each named line in the draft the way its hint says (a measurement
 such as `1.6740 → 1.7010` and the `before → after` heading are not findings), then
-rerun the same command. A finding inside a verbatim tool section of a PR body
-(an approvals table, issue links, a rendered review note) is fixed at its source
-or left as it is and named in the completion message, never edited by hand in the
-body. A rule that keeps flagging correct prose is a bug in `lib/prose-lint.ts`:
-file it with the sentence.
+rerun the same command. The PR body's verbatim tool sections (the approvals
+table, issue links, review findings, the coverage diagram) are outside
+`--sections` and are never read, so a finding there means the compose block was
+edited: restore its `--sections` list. A rule that keeps flagging correct prose
+is a bug in `lib/prose-lint.ts`: file it with the sentence.
 
 ## Quick answers
 
