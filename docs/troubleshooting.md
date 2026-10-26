@@ -2305,9 +2305,9 @@ exact tokens it finds in these positions:
 - an 11-digit id right after a run word on the same line, with an optional
   `:`, `#` or `=` between: `run`, `runs`, `screen`, `screens`, `gate`,
   `gates`, `backstop`, `bisect`, `rerun`, `dispatched`, `dispatch`,
-  `failed`, `passed`, `workflow`, `job`, `attempt`, `id`, `ids`
-  (`failed 40269992077 | rerun passed 40287239206`, `gate 40323989742`,
-  `run #19368712345`);
+  `failed`, `passed` (`failed 40269992077 | rerun passed 40287239206`,
+  `gate 40323989742`, `run #19368712345`); a generic word such as `id`,
+  `job`, `attempt` or `workflow` exempts nothing;
 - every 11-digit id chained after an allowlisted one through `, `, ` and `,
   ` & `, ` or ` or ` / `, optionally with a `(#1234)` between
   (`screen 40269992077 (#3434) and 40275443393 (#3453)`).

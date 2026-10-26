@@ -7,7 +7,7 @@
  * the real executable against stub gh/glab on POSIX.
  */
 import { describe, expect, test } from "bun:test";
-import { EXIT, runPost, type PostEnv } from "../lib/gstack-post";
+import { EXIT, mergeBodySections, runPost, type PostEnv } from "../lib/gstack-post";
 
 interface Call { cmd: string; args: string[]; input?: string }
 
@@ -227,9 +227,10 @@ describe("gstack-post owns the redaction scan", () => {
   });
 
   // Value: protects=an 11-digit GitHub Actions run id written after a run word (run, screen, gate, backstop, bisect, rerun, dispatched, failed, passed,
-  // workflow, job, attempt, id, with an optional ':' '#' '='), or chained after one with ",", "and", "&", "or" or "/" (a "(#1234)" between allowed), posts
-  // without a pii.phone.e164 confirmation; fails_when=real receipts ("failed 40269992077 | rerun passed 40287239206", "screen 40269992077 (#3434) and
-  // 40275443393 (#3453)", "gate 40323989742") need --confirm, or a bare 11-digit number, a 10-digit national number or an E.164 number stops reporting;
+  // with an optional ':' '#' '='), or chained after one with ",", "and", "&", "or" or "/" (a "(#1234)" between allowed), posts without a pii.phone.e164
+  // confirmation, while a generic word (id, job, attempt, workflow) exempts nothing; fails_when=real receipts ("failed 40269992077 | rerun passed
+  // 40287239206", "screen 40269992077 (#3434) and 40275443393 (#3453)", "gate 40323989742") need --confirm, "customer id 14155551234" or "job 40323989748"
+  // posts unconfirmed, or a bare 11-digit number, a 10-digit national number or an E.164 number stops reporting;
   // why_new=the receipt-token test allowlists only "run <id>" and the /actions/runs/ URL; seam=none; no_claim=none beyond protects
   test("run ids next to run words, and the ids chained after them, are not phone numbers; a bare id, a national number and an E.164 number still are", () => {
     const clean = [
@@ -239,7 +240,6 @@ describe("gstack-post owns the redaction scan", () => {
       "gates: 40323989742, 40323989743 or 40323989744",
       "backstop=40323989742 bisect #40323989745",
       "dispatched 40323989742 / 40323989746 & 40323989747",
-      "workflow 40323989742; job: 40323989748; attempt 40323989749; id 40323989750; ids 40323989751, 40323989752",
       "runs 40323989742 and 40323989753 (#3454), 40323989754",
     ];
     for (const body of clean) {
@@ -249,6 +249,9 @@ describe("gstack-post owns the redaction scan", () => {
     }
     const controls = [
       "the id is 19368712345",
+      "customer id 14155551234",
+      "job 40323989748",
+      "workflow 40323989742; attempt 40323989749; ids 40323989751, 40323989752",
       "40269992077 failed",
       "gate 40323989742. Then 40323989743 on its own",
       "gate 4155551234",
@@ -338,6 +341,29 @@ describe("gstack-post pr-body merges the PR body by section", () => {
     expect(sent(fenced).input).toBe("## Notes\n\n```md\n## not a heading\n```\n\n## Why\n\nnew\n");
   });
 
+  // Value: protects=a fence closes only on a run of its own character at least as long as the opener with nothing after it, so a ``` line inside a
+  // ```` block, a ```js line and a ~~~ line close nothing and the headings inside stay kept bytes, and a receipt fence that never closes is an unclosed
+  // fence rather than a receipt that swallows the sections after it; fails_when=a longer or info-string fence closes early and a heading inside the
+  // block is replaced (dropping the block's own closing fence and the sections after it), or an unclosed receipt fence loses ## Approvals;
+  // why_new=the fenced case above covers only a three-backtick block closed by its own fence; seam=fake run; no_claim=real gh
+  test("longer fences, info-string closers and an unclosed receipt fence never expose a heading inside them to the merge", () => {
+    const long = "## Notes\n\n````md\n```\n## Tests\nfake\n```\n````\n\n## Tests\n\nold\n";
+    const four = withBody(long, { "/b": "## Tests\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], four)).toBe(EXIT.posted);
+    expect(sent(four).input).toBe("## Notes\n\n````md\n```\n## Tests\nfake\n```\n````\n\n## Tests\n\nnew\n");
+    expect(four.stderr()).toBe("gstack-post: pr-body merged by section: replaced Tests; kept Notes; added none\n");
+
+    const info = withBody("## Notes\n\n```sh\n```js\n## Tests\n~~~\n```\n\n## Tests\n\nold\n", { "/b": "## Tests\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], info)).toBe(EXIT.posted);
+    expect(sent(info).input).toBe("## Notes\n\n```sh\n```js\n## Tests\n~~~\n```\n\n## Tests\n\nnew\n");
+
+    const unclosed = "```gstack-ship-receipt\nSHIP_RECEIPT: pr=5 head=aaaa\n\n## Summary\n\nold\n\n## Approvals\n\n- owner: do it\n";
+    const open = withBody(unclosed, { "/b": RECEIPT("bbbb") + "\n## Summary\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], open)).toBe(EXIT.posted);
+    expect(sent(open).input).toBe(RECEIPT("bbbb") + "\n" + unclosed + "\n## Summary\n\nnew\n");
+    expect(open.stderr()).toBe("gstack-post: pr-body merged by section: replaced none; kept leading text; added ship receipt, Summary\n");
+  });
+
   // Value: protects=--replace keeps the plain overwrite for a caller that composed the whole body, a current body with no H2 headings is kept as the leading
   // section, an empty current body posts the new body byte for byte, the scan runs on the merged bytes, and an unreadable current body is exit 3 with
   // the --replace hint rather than an overwrite; fails_when=--replace merges, headingless text is dropped, the merge changes a lone new body, a secret in a
@@ -369,5 +395,97 @@ describe("gstack-post pr-body merges the PR body by section", () => {
     expect(unreadable.stderr()).toContain("--replace");
     expect(unreadable.posts()).toEqual([]);
     expect(run(["pr-comment", "5", "--replace", "--body-file", "/b"], fakeEnv({ files: { "/b": "x" } }))).toBe(EXIT.usage);
+  });
+
+  // Value: protects=on GitLab the merge reads the MR's description from `glab mr view <n> --output json`, posts the merged bytes through
+  // `glab mr update --description=`, treats an empty answer as an empty body (the file is posted unchanged), and a non-JSON answer is exit 3 with the
+  // --replace hint and nothing posted; fails_when=the GitLab merge reads the wrong field or command, overwrites the MR on a failed read, or refuses an MR
+  // whose description is empty; why_new=the merge tests above run against gh only; seam=fake run answers glab mr view; no_claim=real glab
+  test("on GitLab the current description comes from glab mr view JSON; an empty answer is an empty body; a non-JSON answer refuses", () => {
+    const remote = "https://gitlab.com/grp/sub/proj.git";
+    const view = (stdout: string) => (c: Call) => (c.cmd === "glab" && c.args[0] === "mr" && c.args[1] === "view" ? { status: 0, stdout } : undefined);
+    const merged = fakeEnv({ remote, files: { "/b": "## Why\n\nnew\n" }, respond: view(JSON.stringify({ iid: 8, description: "## What changed\n\n- old\n\n## Why\n\nold\n" }) + "\n") });
+    expect(run(["pr-body", "8", "--body-file", "/b"], merged)).toBe(EXIT.posted);
+    expect(merged.calls.find(c => c.cmd === "glab" && c.args[1] === "view")!.args).toEqual(["mr", "view", "8", "--output", "json"]);
+    expect(merged.posts()).toEqual([{ cmd: "glab", args: ["mr", "update", "8", "--description=## What changed\n\n- old\n\n## Why\n\nnew\n"], input: undefined }]);
+    expect(merged.stderr()).toBe("gstack-post: pr-body merged by section: replaced Why; kept What changed; added none\n");
+
+    const empty = fakeEnv({ remote, files: { "/b": "## Why\n\nnew\n" }, respond: view("") });
+    expect(run(["pr-body", "8", "--body-file", "/b"], empty)).toBe(EXIT.posted);
+    expect(empty.posts()[0]!.args).toEqual(["mr", "update", "8", "--description=## Why\n\nnew\n"]);
+    const nullDescription = fakeEnv({ remote, files: { "/b": "## Why\n\nnew\n" }, respond: view('{"iid":8,"description":null}\n') });
+    expect(run(["pr-body", "8", "--body-file", "/b"], nullDescription)).toBe(EXIT.posted);
+    expect(nullDescription.posts()[0]!.args).toEqual(["mr", "update", "8", "--description=## Why\n\nnew\n"]);
+
+    const garbled = fakeEnv({ remote, files: { "/b": "## Why\n\nnew\n" }, respond: view("<html>502</html>\n") });
+    expect(run(["pr-body", "8", "--body-file", "/b"], garbled)).toBe(EXIT.cliFailed);
+    expect(garbled.stderr()).toContain("cannot read PR 8's current body to merge into (glab returned no JSON)");
+    expect(garbled.stderr()).toContain("--replace");
+    expect(garbled.posts()).toEqual([]);
+  });
+
+  // Value: protects=section matching survives the bodies GitHub actually returns and the shapes /ship composes: a CRLF current body (web-edited) keeps
+  // its kept section's bytes and still replaces the same-titled section, a receipt new to a body without one goes first (where gstack-ship-receipt puts
+  // it), a current body with two same-titled sections replaces the first and keeps the second, and a current body with no trailing newline still gets a
+  // blank-line seam before an appended section; fails_when=a CRLF title no longer matches an LF one (the section is appended as a duplicate), a kept
+  // CRLF section is rewritten, a new receipt lands after the sections, the second duplicate is dropped, or an appended section is glued to the last line;
+  // why_new=the merge tests above use LF bodies with unique titles and a receipt that already exists; seam=none (mergeBodySections); no_claim=rendering
+  test("a CRLF current body, a receipt new to the body, duplicate titles and a body without a trailing newline merge by section", () => {
+    const crlfKept = "## What changed\r\n\r\n- old\r\n\r\n";
+    const crlf = mergeBodySections(crlfKept + "## Why\r\n\r\nBecause.\r\n", "## why\n\nnew\n");
+    expect([crlf.replaced, crlf.kept, crlf.added]).toEqual([["Why"], ["What changed"], []]);
+    expect(crlf.body.startsWith(crlfKept)).toBe(true);
+    expect(crlf.body.endsWith("\n## why\n\nnew\n")).toBe(true);
+    expect(crlf.body).not.toContain("Because.");
+    expect(crlf.body.match(/^ {0,3}## /gm)).toHaveLength(2);
+
+    const receipt = "```gstack-ship-receipt\n{\n  \"pr\": \"5\"\n}\n```\n";
+    const fresh = mergeBodySections("## A\n\na\n", receipt + "## A\n\nb\n");
+    expect(fresh.body).toBe(receipt + "\n## A\n\nb\n");
+    expect([fresh.replaced, fresh.kept, fresh.added]).toEqual([["A"], [], ["ship receipt"]]);
+
+    const twice = mergeBodySections("## A\na\n## A\na2\n", "## A\nnew\n");
+    expect(twice.body).toBe("## A\nnew\n\n## A\na2\n");
+    expect([twice.replaced, twice.kept]).toEqual([["A"], ["A"]]);
+
+    const glued = mergeBodySections("## A\n\na", "## B\n\nb");
+    expect(glued.body).toBe("## A\n\na\n\n## B\n\nb");
+    expect(mergeBodySections("## A\n\na\n\n", "## B\n\nb\n").body).toBe("## A\n\na\n\n## B\n\nb\n");
+  });
+
+  // Value: protects=the body /ship composes (lib/ship-receipt.ts placeReceiptFirst: the receipt block, one blank line, then the sections) reposts
+  // idempotently: merged into a PR body of the same shape it yields the file's bytes, the receipt stays byte-first, and the stderr line reports no
+  // addition; fails_when=the blank line after the receipt is read as new leading text and prepended before the receipt (one more leading newline per
+  // repost, "added leading text" on every /ship re-READY), or a kept blank line is counted as added; why_new=the merge tests above post a receipt-only
+  // file or a file without a receipt, never the composed shape; seam=none (mergeBodySections); no_claim=the gh round trip
+  test("the composed receipt-then-sections body reposts byte for byte, receipt first, with nothing reported as added", () => {
+    const receipt = (head: string) => "```gstack-ship-receipt\n{\n  \"head\": \"" + head + "\"\n}\n```\n";
+    const composed = (head: string, summary: string) => receipt(head) + "\n## Summary\n\n" + summary + "\n\n## Test plan\n\n- [x] bun test\n";
+    const first = mergeBodySections(composed("aaaa", "old"), composed("bbbb", "new"));
+    expect(first.body).toBe(composed("bbbb", "new"));
+    expect([first.replaced, first.kept, first.added]).toEqual([["ship receipt", "Summary", "Test plan"], [], []]);
+    const again = mergeBodySections(first.body, composed("bbbb", "new"));
+    expect(again.body).toBe(composed("bbbb", "new"));
+    expect(again.added).toEqual([]);
+  });
+
+  // Value: protects=leading prose in the file replaces the current body's leading prose instead of being prepended again, so a repost of a file that
+  // opens with text keeps one copy; fails_when=text sections are never matched and the file's leading text is treated as fresh on every post;
+  // why_new=the merge tests above post files that open with a heading or a receipt, never with prose; seam=none (mergeBodySections); no_claim=the gh round trip
+  test("leading prose in the file replaces the current leading prose and reposts once", () => {
+    const current = "Intro line\n\n## Summary\n\nold\n\n## Approvals\n\nx\n";
+    const once = mergeBodySections(current, "Intro line\n\n## Summary\n\nnew\n");
+    expect(once.body).toBe("Intro line\n\n## Summary\n\nnew\n\n## Approvals\n\nx\n");
+    expect([once.replaced, once.kept, once.added]).toEqual([["leading text", "Summary"], ["Approvals"], []]);
+    const twice = mergeBodySections(once.body, "Intro line\n\n## Summary\n\nnew\n");
+    expect(twice.body).toBe(once.body);
+    const fresh = mergeBodySections("## Summary\n\nold\n", "Intro line\n\n## Summary\n\nnew\n");
+    expect(fresh.body).toBe("Intro line\n\n## Summary\n\nnew\n");
+    expect(fresh.added).toEqual(["leading text"]);
+    const receipt = "```gstack-ship-receipt\n{\n  \"head\": \"a\"\n}\n```\n";
+    const afterReceipt = mergeBodySections("Intro line\n\n## Summary\n\nold\n", receipt + "note\n\n## Summary\n\nnew\n");
+    expect(afterReceipt.body).toContain("Intro line\n");
+    expect(afterReceipt.body).toContain("note\n");
+    expect(afterReceipt.replaced).toEqual(["Summary"]);
   });
 });

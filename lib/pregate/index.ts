@@ -123,7 +123,8 @@ export function writePregateFile(repoRoot: string, rel: string, file: PregateFil
     try {
       const mirror = pregateMirrorPath(file.tree);
       fs.mkdirSync(path.dirname(mirror), { recursive: true });
-      fs.writeFileSync(mirror, json);
+      fs.writeFileSync(`${mirror}.${process.pid}.tmp`, json);
+      fs.renameSync(`${mirror}.${process.pid}.tmp`, mirror);
     } catch {}
   }
   return abs;

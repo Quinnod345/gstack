@@ -27,9 +27,10 @@ describe('issue intent (pure)', () => {
   });
 
   // Value: protects=a parenthesised named reference "(name #N, #M)", "(name PR #N)" or "(name issue #N)" is a cross-repo reference to that name, never a
-  // same-repo Refs line or a promotion candidate, while "(see #12)", "(#301)" and "Fixes #12" keep their meaning; fails_when=the bare-#N rule reads the
-  // numbers as this repository's issues (Refs lines and fix-#N prompts for issues that do not exist here), or a reference word in the parentheses is taken
-  // for a repository name; why_new=the intent tests cover owner/repo#N as the only cross form; seam=none; no_claim=none beyond protects
+  // same-repo Refs line or a promotion candidate, while "(see #12)", "(closing #12)", "(cf. #12)", "(v1.2 #3)", "(#301)" and "Fixes #12" keep their
+  // meaning; fails_when=the bare-#N rule reads the numbers as this repository's issues (Refs lines and fix-#N prompts for issues that do not exist here), or
+  // a closure, reference, filler or version word in the parentheses is taken for a repository name (the issue then vanishes from Refs and from the fix-#N
+  // offer as a phantom cross-repo reference); why_new=the intent tests cover owner/repo#N as the only cross form; seam=none; no_claim=none beyond protects
   test('a parenthesised named reference is a cross-repo reference, never a same-repo Refs or promotion candidate', () => {
     const named = mentionsIn('ship-queue: screen verdict from the run (gbrain #7625, #7606)\n\nPorts the fix from (gbrain PR #7630) and (acme/tools issue #4).\n');
     expect(named.map(x => [x.repo ?? '', x.issue, x.intent])).toEqual([['gbrain', 7625, 'refs'], ['gbrain', 7606, 'refs'], ['gbrain', 7630, 'refs'], ['acme/tools', 4, 'refs']]);
@@ -37,7 +38,7 @@ describe('issue intent (pure)', () => {
     expect(links).toEqual({ fixes: [], refs: [], flakes: [], cross: ['acme/tools#4', 'gbrain#7606', 'gbrain#7625', 'gbrain#7630'], unreadable: [] });
     expect(renderIssueLines(links)).toEqual(['Refs acme/tools#4', 'Refs gbrain#7606', 'Refs gbrain#7625', 'Refs gbrain#7630']);
     expect(promotionCandidates(named, links)).toEqual([]);
-    for (const word of ['see', 'fixes', 'refs', 'related', 'part of', 'follow-up', 'closes', 'PR', 'issue']) {
+    for (const word of ['see', 'fixes', 'refs', 'related', 'part of', 'follow-up', 'closes', 'PR', 'issue', 'closing', 'addresses', 'fixing', 'implements', 'cf.', 'e.g.', 'i.e.', 'bug', 'upstream PR', 'v1.2', 'supersedes', 'duplicate of']) {
       expect([word, mentionsIn(`retry (${word} #12)`).map(x => [x.repo ?? '', x.issue, x.intent])]).toEqual([word, [['', 12, 'refs']]]);
     }
     expect(mentionsIn('v1.2.3 (#301) release notes').map(x => [x.repo ?? '', x.issue])).toEqual([['', 301]]);

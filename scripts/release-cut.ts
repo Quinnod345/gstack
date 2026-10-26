@@ -97,7 +97,7 @@ export function gateVerdict(gh: Gh, repo: string, sha: string, o: GateOptions = 
     const named = runs.filter(c => c.name === name);
     if (named.some(c => c.status !== 'completed')) return { green: false, why: `${name} is still running`, pending: true };
     if (named.some(c => c.conclusion === 'success')) continue;
-    const train = name === backstop && o.evidence ? o.evidence.bySha.get(sha) ?? o.evidence.byTree.get(o.treeOf?.(sha) ?? '') : undefined;
+    const train = name === backstop && name !== required && o.evidence ? o.evidence.bySha.get(sha) ?? o.evidence.byTree.get(o.treeOf?.(sha) ?? '') : undefined;
     if (train) { via = `train ${train}`; continue; }
     if (named.length === 0) return { green: false, why: `no ${name} check run`, pending: false };
     return { green: false, why: `${name} concluded ${named.map(c => c.conclusion).join(',')}`, pending: false };
@@ -131,13 +131,16 @@ export function readTrainNotes(git: Git, notesRef = NOTES_REF): TrainNotes {
   for (const line of listed.out.split('\n')) {
     const blob = line.split(' ')[0];
     if (!blob) continue;
-    let r: NoteRecord;
-    try { r = JSON.parse(git(['cat-file', 'blob', blob]).out) as NoteRecord; } catch { continue; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(git(['cat-file', 'blob', blob]).out); } catch { continue; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const r = parsed as NoteRecord;
     if (r.kind === 'freeze' && !r.cleared_at) notes.freeze = `queue frozen since train ${r.train ?? '?'}: ${r.reason ?? 'red backstop'}`;
-    if (r.kind !== 'train' || !r.nonce || !['green', 'merging', 'merged'].includes(r.state ?? '')) continue;
-    for (const m of r.merged ?? []) {
-      if (m.sha) notes.evidence.bySha.set(m.sha, r.nonce);
-      if (m.tree) notes.evidence.byTree.set(m.tree, r.nonce);
+    if (r.kind !== 'train' || typeof r.nonce !== 'string' || !r.nonce || !['green', 'merging', 'merged'].includes(r.state ?? '')) continue;
+    for (const m of Array.isArray(r.merged) ? r.merged : []) {
+      if (!m || typeof m !== 'object') continue;
+      if (typeof m.sha === 'string') notes.evidence.bySha.set(m.sha, r.nonce);
+      if (typeof m.tree === 'string') notes.evidence.byTree.set(m.tree, r.nonce);
     }
   }
   return notes;

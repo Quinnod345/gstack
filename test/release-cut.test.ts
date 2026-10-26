@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { bunIsolationArgs } from '../lib/bun-isolation';
 import {
   BACKSTOP_CHECK, NOTES_CAP, NOTES_REF, REQUIRED_CHECK, changelogEntries, compareVersions, cutRelease, describePlan, gateVerdict, gitIn,
-  planRelease, releaseNotes, type Gh,
+  planRelease, readTrainNotes, releaseNotes, type Gh, type Git,
 } from '../scripts/release-cut';
 
 const bases: string[] = [];
@@ -175,6 +175,48 @@ describe('release-cut: planning', () => {
     git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
     expect(planRelease({ repo: f.repo, git: f.git, gh: f.gh }).ok).toBe(true);
   });
+
+  // Value: protects=one read of the trains notes ref feeds both gates: a fetch failure other than a missing ref refuses the plan with its message, a
+  // missing ref is no freeze and no evidence, a blob that is not JSON, is JSON that is not an object (null, an array, a string, a number), carries a
+  // malformed merged[] or a non-string nonce, or is a train without a nonce is skipped while a freeze and a train in the same
+  // ref are both read (the freeze still wins over the evidence); fails_when=a fetch error is read as "no notes" and a frozen or ungated main is
+  // released, an unparsable note aborts the read, or evidence from a later note is lost once a freeze is seen; why_new=the freeze test covers one
+  // readable freeze record only and the evidence tests never mix record kinds or break the fetch; seam=none; no_claim=a real origin outage
+  test('readTrainNotes: a fetch error refuses, a missing ref holds nothing, junk notes are skipped, and a freeze beside train evidence still refuses', () => {
+    const f = fixture();
+    const head = f.shas['1.0.3']!;
+    const failing: Git = (args) => (args[0] === 'fetch' ? { ok: false, out: 'fatal: unable to access the remote: Could not resolve host' } : f.git(args));
+    const broken = planRelease({ repo: f.repo, git: failing, gh: f.gh });
+    expect(broken).toEqual({ ok: false, code: 'REFUSED', message: 'cannot fetch ' + NOTES_REF + ': fatal: unable to access the remote: Could not resolve host' });
+    const absent = readTrainNotes(f.git);
+    expect([absent.error, absent.freeze, absent.evidence.bySha.size, absent.evidence.byTree.size]).toEqual([null, null, 0, 0]);
+
+    const add = (record: string, on: string) => git(f.seed, 'notes', '--ref=' + NOTES_REF, 'add', '-f', '-m', record, on);
+    add('not json {', f.shas['1.0.0']!);
+    for (const junk of ['null', '[]', '"train"', '7', JSON.stringify({ kind: 'train', nonce: 'bad1', state: 'green', merged: 'x' }), JSON.stringify({ kind: 'train', nonce: 'bad2', state: 'green', merged: [null, 'y', { sha: 3, tree: ['t'] }] }), JSON.stringify({ kind: 'train', nonce: 9, state: 'green', merged: [{ sha: f.shas['1.0.0'] }] })]) {
+      add(junk, f.shas['1.0.0']!);
+      git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+      const read = readTrainNotes(f.git);
+      expect([junk, read.error, read.freeze, read.evidence.bySha.size, read.evidence.byTree.size]).toEqual([junk, null, null, 0, 0]);
+    }
+    add(JSON.stringify({ schema: 1, kind: 'train', state: 'merged', merged: [{ sha: f.shas['1.0.1'], tree: 't1' }] }), f.shas['1.0.1']!);
+    add(JSON.stringify({ schema: 1, kind: 'train', nonce: 'ok1', state: 'green', merged: [{ pr: '2' }, { sha: f.shas['1.0.2'] }, { tree: 'tree-only' }] }), f.shas['1.0.2']!);
+    add(JSON.stringify({ schema: 1, kind: 'freeze', train: 'ok1', reason: 'backstop red', cleared_at: null }), head);
+    git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+    const mixed = readTrainNotes(f.git);
+    expect(mixed.error).toBeNull();
+    expect(mixed.freeze).toBe('queue frozen since train ok1: backstop red');
+    expect([...mixed.evidence.bySha]).toEqual([[f.shas['1.0.2']!, 'ok1']]);
+    expect([...mixed.evidence.byTree]).toEqual([['tree-only', 'ok1']]);
+    f.state.checks[f.shas['1.0.2']!] = backstop('completed', 'neutral');
+    const frozen = planRelease({ repo: f.repo, ref: f.shas['1.0.2'], git: f.git, gh: f.gh });
+    expect(frozen).toEqual({ ok: false, code: 'REFUSED', message: 'queue frozen since train ok1: backstop red' });
+    add(JSON.stringify({ schema: 1, kind: 'freeze', train: 'ok1', reason: 'backstop red', cleared_at: 'y' }), head);
+    git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+    const thawed = planRelease({ repo: f.repo, ref: f.shas['1.0.2'], git: f.git, gh: f.gh });
+    expect(thawed.ok, JSON.stringify(thawed)).toBe(true);
+    if (thawed.ok) expect(thawed.plan.via).toBe('train ok1');
+  });
 });
 
 describe('release-cut: train evidence gates a commit whose backstop never settled', () => {
@@ -217,10 +259,11 @@ describe('release-cut: train evidence gates a commit whose backstop never settle
     if (plain.ok) { expect(plain.plan.via).toBe(BACKSTOP_CHECK); expect(describePlan(plain.plan, false)[0]).toBe('CANDIDATE: ' + f.shas['1.0.2'] + ' (' + plain.plan.date + ') [hotfix: --ref] gated by ' + BACKSTOP_CHECK); }
   });
 
-  // Value: protects=train evidence never relaxes the rest of the gate: a covered commit still needs a successful required check run, no red check run (a red
-  // backstop included), nothing still running, and only a green, merging or merged record counts; fails_when=a covered commit with a failed free-tests run,
-  // a red windows lane or a red backstop is released, a running check is not waited for, or a red or superseded train record is read as evidence;
-  // why_new=the first train test covers the accepting path only; seam=none; no_claim=none beyond protects
+  // Value: protects=train evidence never relaxes the rest of the gate: a covered commit still needs a successful required check run (also when
+  // --required-check and --backstop-check name the same check, where evidence substitutes for nothing), no red check run (a red backstop included),
+  // nothing still running, and only a green, merging or merged record counts; fails_when=a covered commit with a failed free-tests run, a red windows lane
+  // or a red backstop is released, a running check is not waited for, a red or superseded train record is read as evidence, or equal check names let a
+  // covered commit with zero check runs through; why_new=the first train test covers the accepting path only; seam=none; no_claim=none beyond protects
   test('a covered commit is still refused by a red check run, a red backstop, a missing or failed required run, a running run, or a red/superseded record', () => {
     const f = fixture();
     const head = f.shas['1.0.3']!;
@@ -234,11 +277,18 @@ describe('release-cut: train evidence gates a commit whose backstop never settle
     expect(gate(backstop('in_progress', null))).toBe('--ref ' + head.slice(0, 12) + ' is not green: ' + BACKSTOP_CHECK + ' is still running');
     expect(gate([...backstop('completed', 'neutral'), { name: 'slices-report', status: 'queued', conclusion: null }])).toBe('--ref ' + head.slice(0, 12) + ' is not green: check runs still going: slices-report');
     expect(gate(backstop('completed', 'neutral'))).toBe('green');
+    f.state.checks[head] = [];
+    const same = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'ci' });
+    expect(same.ok ? 'green' : same.message).toBe('--ref ' + head.slice(0, 12) + ' is not green: no ci check run');
+    f.state.checks[head] = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    const sameGreen = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'ci' });
+    expect(sameGreen.ok ? sameGreen.plan.via : sameGreen.message).toBe('ci');
 
     for (const state of ['red', 'superseded', 'incomplete', 'free-green']) {
       note(f, train('t1', state, [{ sha: head, tree }]), head);
       expect([state, gate(backstop('completed', 'neutral'))]).toEqual([state, '--ref ' + head.slice(0, 12) + ' is not green: ' + BACKSTOP_CHECK + ' concluded neutral']);
     }
+
     for (const sha of Object.values(f.shas)) f.state.checks[sha] = backstop('completed', 'neutral');
     const none = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
     expect(none.ok).toBe(false);

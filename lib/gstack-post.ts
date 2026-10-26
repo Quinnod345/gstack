@@ -142,25 +142,32 @@ interface Section { key: string; label: string; text: string }
  * ````gstack-ship-receipt```` block is its own section (lib/ship-receipt.ts
  * extractReceipt reads it); text before the first heading is the leading
  * text, and text after a receipt block before the next heading is kept with
- * a key of its own, so it is never replaced.
+ * a key of its own, so it is never replaced. A fence closes only on a run of
+ * its own character at least as long as the opener with nothing after it
+ * (CommonMark), so a ``` line inside a ```` block and a ```js line close
+ * nothing; a receipt fence that never closes is an ordinary unclosed fence,
+ * so the rest of the body stays one kept section instead of a receipt.
  */
-function splitSections(body: string): Section[] {
+function splitSections(body: string, receipts = true): Section[] {
   const out: Section[] = [];
   let fence: string | null = null;
   let plain = 0;
   const open = (key: string, label: string) => out.push({ key, label, text: "" });
-  const openText = () => open(`text:${plain}`, plain++ === 0 ? "leading text" : "trailing text");
+  const openText = () => out.length === 0 ? open("text:lead", "leading text") : open(`text:${plain++}`, "trailing text");
+  const closes = (run: string) => new RegExp(`^ {0,3}${run[0] === "`" ? "`" : "~"}{${run.length},}\\s*$`).test(bare);
+  let bare = "";
   for (const line of body.split(/(?<=\n)/)) {
-    const bare = line.replace(/\r?\n$/, "");
-    const fenceOpen: RegExpExecArray | null = fence === null ? /^ {0,3}(```|~~~)/.exec(bare) : null;
-    if (fenceOpen && bare.trim() === "```" + RECEIPT_FENCE) { open("receipt", "ship receipt"); fence = "receipt"; }
-    else if (fence === "receipt") { out.at(-1)!.text += line; if (bare.trim() === "```") { fence = null; openText(); } continue; }
+    bare = line.replace(/\r?\n$/, "");
+    const fenceOpen: RegExpExecArray | null = fence === null ? /^ {0,3}(`{3,}|~{3,})/.exec(bare) : null;
+    if (fenceOpen && receipts && bare.trim() === "```" + RECEIPT_FENCE) { open("receipt", "ship receipt"); fence = "receipt"; }
+    else if (fence === "receipt") { out.at(-1)!.text += line; if (closes("```")) { fence = null; openText(); } continue; }
     else if (fenceOpen) fence = fenceOpen[1]!;
-    else if (fence && bare.trim().startsWith(fence)) fence = null;
+    else if (fence && closes(fence)) fence = null;
     else if (fence === null && /^ {0,3}## /.test(bare)) { const title = bare.replace(/^ {0,3}## /, "").trim(); open(`h2:${title.toLowerCase()}`, title); }
     if (out.length === 0) openText();
     out.at(-1)!.text += line;
   }
+  if (fence === "receipt") return splitSections(body, false);
   return out.filter(s => s.text !== "");
 }
 
@@ -169,17 +176,21 @@ function splitSections(body: string): Section[] {
  * file replaces the same-keyed section of the current body in place, current
  * sections the file does not rewrite are kept byte for byte, new `## `
  * sections are appended after them, and a new receipt or leading text goes
- * first (where lib/ship-receipt.ts puts the receipt). A blank line separates
- * the two sides of every seam the merge creates; two kept neighbours keep
- * their bytes. An empty current body yields the file unchanged.
+ * first (where lib/ship-receipt.ts puts the receipt). Text outside sections
+ * matches by role (the file's leading text replaces the leading text; text
+ * after a receipt block never replaces an intro), and whitespace-only text in
+ * the file is dropped, so reposting the body /ship composes (receipt, blank
+ * line, sections) yields the same bytes. A blank
+ * line separates the two sides of every seam the merge creates; two kept
+ * neighbours keep their bytes. An empty current body yields the file unchanged.
  */
 export function mergeBodySections(current: string, incoming: string): { body: string; replaced: string[]; kept: string[]; added: string[] } {
   const now = splitSections(current);
-  const next = splitSections(incoming);
+  const next = splitSections(incoming).filter(n => !(n.key.startsWith("text:") && n.text.trim() === ""));
   const used = new Set<Section>();
   const replaced: string[] = [], kept: string[] = [], added: string[] = [];
   const merged: Section[] = now.map(s => {
-    const match = next.find(n => !used.has(n) && n.key === s.key && !n.key.startsWith("text:"));
+    const match = next.find(n => !used.has(n) && n.key === s.key);
     if (!match) { if (s.text.trim()) kept.push(s.label); return s; }
     used.add(match); replaced.push(s.label); return match;
   });
@@ -317,8 +328,8 @@ function repoReleaseVersions(env: PostEnv): string[] {
   return [...versions];
 }
 
-/** A run word with an optional ':' '#' '=' right before an 11-digit token: `run 19368712345`, `gate=40323989742`, `job: 40323989748`. */
-const RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed|workflow|job|attempt|ids?)\s*[:#=]?\s*$/i;
+/** A run word with an optional ':' '#' '=' right before an 11-digit token: `run 19368712345`, `gate=40323989742`, `rerun passed 40287239206`. */
+const RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed)\s*[:#=]?\s*$/i;
 /** Between two 11-digit tokens of one list: `, `, ` and `, ` & `, ` or `, ` / `, with an optional `(#1234)` after the first. */
 const RUN_ID_CHAIN = /^(?:\s*\(#\d+\))?\s*(?:,|and|&|or|\/)\s*$/i;
 
@@ -330,9 +341,10 @@ const RUN_ID_CHAIN = /^(?:\s*\(#\d+\))?\s*(?:,|and|&|or|\/)\s*$/i;
  * run id inside an /actions/runs/ URL (the engine already exempts the URL
  * itself; this covers its link text), and an 11-digit run id right after a run
  * word on the same line (run, runs, screen, screens, gate, gates, backstop,
- * bisect, rerun, dispatched, dispatch, failed, passed, workflow, job, attempt,
- * id, ids, with an optional ':' '#' '=' between: `failed 40269992077`,
- * `gate 40323989742`, `run #19368712345`), plus every 11-digit id chained
+ * bisect, rerun, dispatched, dispatch, failed, passed, with an optional ':'
+ * '#' '=' between: `failed 40269992077`, `gate 40323989742`,
+ * `run #19368712345`; generic words such as id, job, attempt and workflow
+ * exempt nothing, since `customer id 14155551234` is a number), plus every 11-digit id chained
  * after an allowlisted one through ", ", " and ", " & ", " or " or " / ",
  * optionally with a "(#1234)" between (`screen 40269992077 (#3434) and
  * 40275443393 (#3453)`). Only the exact tokens found in those positions are
