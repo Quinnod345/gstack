@@ -396,6 +396,7 @@ Everything repo-specific is a parameter. Fill them once in the crew rules file
 | `STAMP_FILES` | the files a version stamp may touch | `VERSION`, `package.json`, `CHANGELOG.md` |
 | `KNOWN_INFRA_FLAKES` | the named infra failures a lane may rerun once | a job that times out on one runner image |
 | `SPEND` | standing paid-eval spend and its cap per rerun | gates, screens, focused cases; cap per rerun |
+| `CONTROLLER` | the thread or name every ask and READY goes to | the Captain's thread code |
 
 The repo's `.gstack/ship-policy.json` carries the `train` block (`gate_workflow`,
 `free_workflow`, `full_gate_check`, `max_size`, `fill_hours`), so the queue tool and the
@@ -464,8 +465,9 @@ rest in READY order. Fewer than `TRAIN_MAX` PRs wait until the oldest READY is
 `FILL_HOURS` old; one urgent PR goes alone with `--urgent`. Announce `ORDER` to the lanes.
 Refusals happen before any spend and each names its PR: a moved head (get a new READY),
 no receipt at that head, a fork head, a real-code conflict (rebuild without that PR and
-send it back to merge `BASE`; this is the only time a lane merges `BASE`), and free tests
-red on the train branch (treat as a red train with no paid spend).
+send it back to merge `BASE`; apart from the slot's stamp commit below, this is the only
+time a lane merges `BASE` into a READY branch), and free tests red on the train branch
+(treat as a red train with no paid spend).
 
 ### 2. Verdict
 
@@ -517,9 +519,11 @@ i's head, stamped with its future version (`gstack-restamp --after`): if slot i 
 expected, the real merge is the same tree and the gate is reused. Use it when slots are
 long and the queue is deep.
 
-**Severe race (option).** When several severe fixes are close, call the slot for all of
-them; the first complete READY takes it and the rest restamp to the next version at
-their own call. Never hold a slot for a PR that has not sent a READY.
+**Severe race (option).** When several severe fixes are close and the next train will be
+urgent, tell all their lanes at once; the first complete READY takes that train and the
+rest join the following one at their own call. Inside a built train the order is fixed
+(the stamp and verify refuse a reorder), so the race is for a train, never for a slot.
+Never hold a train for a PR that has not sent a READY.
 
 ### 4. A red train: flaky rule, bisect, rebuild once
 
@@ -532,7 +536,8 @@ A `RED` case already failed twice in-run, so it is real; never rerun the whole g
 
 The bisect runs only the red cases on every prefix. `ATTRIBUTED #<pr>`: rebuild without
 it and send that lane the case and both runs. Red on every prefix including T0: `BASE`
-is broken; fix forward through an urgent one-PR train first. Every prefix green: the
+is broken; fix forward first, through an urgent one-PR train, or through
+`train build --repair` when the queue is frozen (a freeze refuses `--urgent`). Every prefix green: the
 bisect earns exactly one unchanged `train rebuild`; report both runs, and a second red
 goes to a repair lane. Any other pattern: no rebuild, a repair lane. An infra-only or
 incomplete census earns one re-dispatch (`train rebuild --infra`). Bisect results never

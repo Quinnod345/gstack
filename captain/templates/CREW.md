@@ -7,7 +7,8 @@ date and the words. Add rules at the end; never renumber.
 Parameters: `REPO=<owner/name>` · `BASE=<main>` · `REQUIRED_CHECKS=<check names>` ·
 `FULL_GATE_CHECK=<check the train gate publishes>` · `TRAIN_MAX=<5>` · `FILL_HOURS=<3>` ·
 `MERGE_METHOD=<squash|merge>` · `STAMP_FILES=<VERSION, package.json, CHANGELOG.md, …>` ·
-`KNOWN_INFRA_FLAKES=<named jobs, or none>` · `CONTROLLER=<thread code or name>`.
+`KNOWN_INFRA_FLAKES=<named jobs, or none>` · `SPEND=<pre-approved paid runs; cap per rerun>` ·
+`CONTROLLER=<thread code or name>`.
 
 1. **Session start.** Load the gstack skill and run its install check (`--check`). Put
    the `gstack:` trailer line in your first report. Run no gstack workflow without a

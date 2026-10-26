@@ -54,7 +54,7 @@ export interface ParsedReply {
 
 export const PAGE_SIZE = 7;
 /** Reply openers that take every recommendation: `rec` and its silent aliases. */
-const REC_ALIASES: string[][] = [['rec'], ['all'], ['approve', 'all'], ['accept', 'all'], ['take', 'all', 'recommendations']];
+const REC_ALIASES: string[][] = [['rec'], ['all'], ['approve', 'all'], ['accept', 'all'], ['take', 'all', 'recommendations'], ['do', 'it']];
 const ID_RE = /^[a-z]*[0-9]+$/;
 
 export function validateGateList(list: unknown): string[] {

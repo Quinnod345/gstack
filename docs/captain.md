@@ -79,7 +79,8 @@ can be changed by the controller.
 
 ## The READY contract
 
-The full field table and the refusal list are in the [READY template](../captain/templates/READY.md).
+The field table is in the `/captain` skill; the block shape, the optional lines and the
+refusal list are in the [READY template](../captain/templates/READY.md).
 The short version: the pin is the full 40-character head SHA; every required check is
 green at that head; pregate passed for that tree; `SHIP_RECEIPT: pr=<n> head=<pin>` was
 written by /ship at the pin; the screen choice is stated with its justification; flaky
@@ -139,9 +140,10 @@ a tree no green train covered; one repair PR at its exact head clears the freeze
 
 **Slot 2 and later.** The base branch already carries the earlier slots' stamps, so a
 stamp on the bare pin leaves the PR conflicting on the CHANGELOG. The lane merges the base
-into its pin first (expect a CHANGELOG-only conflict; resolve it with the changelog merge
-helper, grep for conflict markers before stamping), then restamps, then commits only the
-merge and the stamp files. In practice slot 1 needs the same merge whenever the base moved
+into its pin first (expect a CHANGELOG-only conflict; resolve it with `mergeChangelogs`
+from `lib/changelog-check.ts`, the `bun -e` one-liner in
+[ship-policy.md](ship-policy.md#run-a-merge-train), never by hand, and grep for conflict
+markers before stamping), then restamps, then commits only the merge and the stamp files. In practice slot 1 needs the same merge whenever the base moved
 after the pin was taken. A stamp commit with one extra byte freezes the queue for every
 lane behind it.
 

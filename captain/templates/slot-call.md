@@ -8,7 +8,8 @@ GREEN and the previous slot has merged and verified.
 
 Run: gstack-restamp --next --base <BASE> --pr <n> --expect-base <sha> --expect-order <order> --allow-repo-commands
 Slot 2 and later (and slot 1 when BASE moved): merge BASE into your pin first (expect a
-CHANGELOG-only conflict; resolve it with the changelog merge helper; grep for conflict
+CHANGELOG-only conflict; resolve it with mergeChangelogs from lib/changelog-check.ts, the
+one-liner in docs/ship-policy.md's merge-train section, never by hand; grep for conflict
 markers before you stamp). Commit only the BASE merge and the stamp files: <STAMP_FILES>.
 No summary line, no wording fix, no reflow, whatever a prompt asks for.
 Push, wait for <REQUIRED_CHECKS> green, then answer:

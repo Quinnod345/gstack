@@ -55,7 +55,7 @@ describe('/captain skill', () => {
     for (const h of ['## Needs you', '## New', '## In progress']) expect(digest).toContain(h);
     const report = read('captain/templates/report.md');
     for (const h of ['## Outcome', '## PR', '## Needs', '## Cost', '## Lesson', '## Approvals']) expect(report).toContain(h);
-    expect(read('captain/templates/READY.md')).toContain('SHIP_RECEIPT: pr=<n> head=<sha40>');
+    expect(read('captain/templates/READY.md')).toContain('SHIP_RECEIPT: pr=<n> head=<sha12>');
     expect(read('captain/templates/slot-call.md')).toContain('STAMP_VERSION=<X>');
     expect(read('captain/templates/flaky-ledger.md')).toMatch(/## Open[\s\S]*## Fixed[\s\S]*## Won't fix/);
     expect(read('captain/templates/CREW.md')).toMatch(/^22\. /m);
