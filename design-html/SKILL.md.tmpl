@@ -156,6 +156,8 @@ After routing, output a brief context summary:
 
 ## Step 1: Design Analysis
 
+{{SECTION:craft}}
+
 1. If `$D` is available (`DESIGN_READY`), extract a structured implementation spec:
 ```bash
 $D prompt --image <approved-variant.png> --output json
@@ -278,6 +280,7 @@ For framework output, save to:
 - `prefers-color-scheme` media query for dark mode
 - `prefers-reduced-motion` for animation respect
 - Real content extracted from the mockup (never lorem ipsum)
+- The craft section's ship floor, scale-snapped values and motion rules
 
 **Never include by default (AI slop blacklist):** an approved mockup that carries one, a DESIGN.md blessing, or an explicit user ask overrides it; say the tradeoff once.
 - Purple/blue gradients as default <!-- ai-color-palette -->
@@ -337,6 +340,8 @@ kill <PID> 2>/dev/null || true
 ## Step 4: Preview + Refinement Loop
 
 {{DESIGN_DETECTOR:gate}}
+
+Then, always: the craft section's check, `{{BIN_DIR}}/gstack-design-craft <path-to-finalized.html>`, one fix pass and one rerun, as above.
 
 ### Verification Screenshots
 

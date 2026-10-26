@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.227.0] - 2026-10-26
 
 **Windows: gstack's record bins stop losing review, question, learning and timeline records when Git Bash path conversion is off (#3415).** Since GSTA-56 every shell bin started Bun with `--config=/dev/null`. Native `bun.exe` cannot open `/dev/null`: it exits 1 with `EINVAL` on Bun 1.3.10, 1.4.2 and 1.4.4 (measured on windows-latest). Git Bash hides this by rewriting the argument to `nul`, but only while MSYS path conversion is on. With it off (`MSYS_NO_PATHCONV` set to any value, even empty; `MSYS2_ARG_CONV_EXCL=*`; or Cygwin), `gstack-review-log`, `gstack-question-log` and `gstack-learnings-log` exited 1 with nothing written, and `gstack-timeline-log` exited 0 with nothing written.
 
@@ -27,6 +27,60 @@
   - The shell-caller detector also skips a `--config` value before deciding whether a call starts a program, so `bun --no-env-file --config=<anything> -e` no longer passes unchecked. The tree has no such call.
   - Negative controls, each of which fails the check: the old spelling, a variable without the default, an empty `--config=`, a missing, late or altered definition, a `local` definition used from another function, and a reverted bin.
   - No threshold, budget, timeout, trial count or case kind changed.
+
+## [1.91.226.0] - 2026-10-26
+
+**/review can re-review just its own fixes after a fixing pass, under the same rules as /ship (#3339).** Before, every /review fix cycle reran the whole review over the whole branch, so a large branch could hit the three-cycle stop on findings in code the earlier passes had already read. Now the pass after an edited pass starts with `gstack-review-log --start review --fix-range` and its checklist, specialists and QA read only what changed since that pass. The Step 4.8 adversarial review still reads the whole branch on every pass, because its rows carry their own freshness. A narrowed pass is never the final review: when it makes no edits, /review runs one full pass before writing the final record, and a fix-range record is never CURRENT. Garry's "do it" on 2026-10-24 for a fix-range re-review with a final full pass covers it.
+
+### Changed
+- **`review/SKILL.md.tmpl`** Step 3: the first pass always starts full. The pass right after an edited pass starts with `--start review --fix-range`, and wherever that pass sets DIFF_BASE outside Step 4.8 it uses the printed `FIX_BASE=<sha>` instead. Step 4.8 and every other `<base>` use (state-matrix detection, the gate, banned-terms and slop scans, the queue check) keep the base branch. State-matrix detection builds `origin/<base>` from its argument, and the slop scan diffs `<base>...HEAD`, which is empty while /review's fixes are uncommitted. If the logger refuses (for example, the first pass read uncommitted work, so no commit marks what it read), the pass starts full.
+- **Step 5.8**: an edited pass now saves its own record with `converged:false` before the repeat, because the fix-range start takes its base from that record. Before, only the final pass was logged. Step 5.0 never treats this invocation's own records as prior reviews, so a defect the user skipped this invocation is not suppressed on the next pass and still counts as unresolved. "No edits" fills the final record only after a full pass; after a fix-range pass it repeats Steps 3–5 with a full start. Each logged pass finishes its own REVIEW_START.
+- Nearby prose was tightened to pay for the growth (the slop-scan note, the Step 4.7 probe-reuse rule, the search-before-recommending list, the version-compare note, the final-report and Greptile lines). Every host's review SKILL.md shrank by 36 characters, and its size pin was lowered to match. The Claude skeleton is 80,581 bytes against its 80,900 cap.
+
+### Tests
+- `test/review-fix-range.test.ts` adds five cases. Two check the rendered rules: the first pass's start block has no `--fix-range`, only the pass after an edited pass narrows, FIX_BASE replaces only DIFF_BASE outside Step 4.8, a refusal falls back to a full start, the edited pass is logged before the repeat and kept out of Step 5.0, and a fix-range pass is never final. Three run /review's real order on every pass against the real logger: core start, then the Step 4.8 attempt's start and finish, then fixes in the working tree, then the core finish with the pass's own token, and never a commit. A committed first pass narrows the next repeat to the uncommitted fixes, and the following repeat is refused back to a full pass that is CURRENT. A zero-edit fix-range row is UNVERIFIED even if it were logged. A first pass over uncommitted work can't be narrowed.
+- `test/review-workflow-clarity.test.ts`: three expectations follow the new contract: the "No edits" marker, the edited pass saving its record with `converged:false`, and each pass finishing its own token instead of only the final one. The test formerly named "finish only the final core token without log-time capture" is now "each logged pass finishes its own core token without log-time capture". It still requires one `--finish REVIEW_START`, no `--start review` in Step 5.8 and no log-time token capture.
+
+### Gate integrity
+- One gate change to review: /review may narrow a repeat pass. Verdict: this does not weaken what the final review covers, because a narrowed pass can't be the final record. The logger never marks a fix-range row CURRENT, Step 5.8 requires a full pass after a zero-edit fix-range pass, Step 4.8 stays full, and Step 5.0 can't suppress this invocation's skipped defects through its own intermediate records. Mutation checks on the rendered skill, each caught by the suite:
+  - letting a fix-range pass be final;
+  - dropping the full-pass condition on "No edits";
+  - narrowing every repeat;
+  - dropping the refusal fallback;
+  - narrowing the first pass;
+  - not logging the edited pass;
+  - logging after the repeat;
+  - narrowing Step 4.8 and other base uses;
+  - letting Step 5.0 read this invocation's records.
+- No threshold, budget, timeout, trial count or case kind changed. Size pins only went down.
+
+## [1.91.225.0] - 2026-10-26
+
+**/design-html builds landing pages around one visitor action and pages that look finished, without inventing proof; adapted from Elaya's design skills (GSTA-92).** Freeform /design-html asked for purpose, audience and feel, then built. It never asked for the one action the page exists for or where the traffic comes from, and nothing caught a page that shipped with invented customers and numbers, a dead `href="#"`, a scroll-listener reveal, `100vh`, or no description, favicon or working skip link. Now every run reads a craft section at Step 1, and a free checker counts the tells at Step 4. Adapted from Elaya's [ai-design-skills](https://github.com/elayadesign/ai-design-skills) (landing-page-design, design-to-motion) and [redesign-skill](https://github.com/elayadesign/redesign-skill), MIT, © 2026 Elaya. Thank you, Elaya.
+
+### Changed
+- **/design-html reads `sections/craft.md` on every run (Step 1).** The spec opens with `Surface: Persuade` or `Surface: other`. A Persuade page (landing, pricing, waitlist, campaign, comparison) asks at most three multiple-choice questions (primary action, traffic source, published or reference) and states the rest in one `Assumed:` line; picks one of four archetypes with a reason; keeps the hero budget (one proof signal only when real proof exists, never a metric row) and chooses the rest of the page from the archetype and objections; gives the primary action real invalid, pending, failure and success states. Every page: claims (testimonials, logos, results, prices, guarantees) come only from the user, and missing proof is left out or marked `[Needs proof: …]`; illustrative data looks real; a ship floor scoped to full documents (title, description, favicon, share tags on shareable pages, `og:image` only from a supplied URL, a skip link that reaches `<main>`, landmarks, alt text, inline validation, no dead links, `aria-current` on route navigation); scale snapping with readability floors and the nested-radius rule; balanced line breaks; motion rules for the one authored moment (content visible without script, `IntersectionObserver`, cheap properties only, no `scale(0)`, named curves, `100dvh`).
+- **Step 4** runs `bin/gstack-design-craft` after the Slop Gate, whether or not the detector is installed, with the gate's contract: one fix pass, one rerun, the rest accepted with a reason, once more when the refinement loop ends. The hand-off opens with a "Before this can ship" block: proof markers, production dependencies, exceptions, and every claim the check changed.
+- **/design-shotgun**: a landing, pricing or campaign screen's variants also differ in page archetype, keep the one primary action identical, and carry their section outline as a caption.
+
+### Added
+- **`bin/gstack-design-craft`** (`lib/design-craft.ts`): prints `CRAFT_CHECK: <id> <count> <fix>` per tell and `CRAFT_RESULT: clean` (exit 0) or `<n> issue(s)` (exit 1); exit 2 on a non-HTML, empty or unreadable file. Copy rules read decoded visible text; `alert()` counts only in scripts; head and navigation rules run only on a full document. Buzzwords report under the catalog's `marketing-buzzword` id.
+- **NOTICE.md** and `licenses/MIT-elaya.txt`. Not carried over, because they conflict with gstack's design rules: Elaya's fixed fonts (Geist and Poppins are on gstack's overused-display list), palette, spacing values and icon sets, gradient hero text, mandatory scroll reveals and tagline section, and the island nav.
+
+### Tests
+- `test/design-craft.test.ts`: every tell with its count; a finished page, inlined Pretext, a `100vh` line with its `100dvh` fallback, discount copy and in-page anchors stay clean; look-alike attributes, encoded markers, `!important` and reversed fallbacks; skip links judged by position and target in any language; the craft section's banned words and names all flagged; CLI exit codes.
+- `design-html-slop-gate` also requires the craft check to run once or twice; the design-html carve guard requires the craft section read.
+
+## [1.91.224.0] - 2026-10-25
+
+**`/context-restore` now says when commits landed after a checkpoint was saved, instead of offering finished steps as the plan.** `/context-save` recorded the branch, a timestamp and the modified files, but not the commit, so a checkpoint saved before a step was committed came back with that step still listed under Remaining Work. Ported from #3316 by @soyames, with their commit kept.
+
+### Fixed
+- **`bin/gstack-slug --stamp-checkpoint`** also writes `head:`, the commit the save describes, next to `remote:`, `project_root:` and `worktree:`. A re-stamp replaces it rather than adding a second line.
+- **`/context-restore`** compares `head:` with `HEAD` before presenting. When commits landed after the save it prints how many and lists up to ten, and puts every Remaining Work item under Verify first. A saved commit that is not in this checkout's history (saved on another branch, rebased, reset, or not fetched) is reported the same way. A malformed `head:` is checked as 40 or 64 hex digits before any git command sees it, `head:` is read from the frontmatter only, and outside git the comparison uses the saved `worktree:` before `project_root:`. Checkpoints saved before this keep their usual sorting with a one-line note.
+
+### Tests
+- `test/context-restore-head.test.ts` runs the real save-path, stamp and head-check blocks from the generated SKILL.md files in fixture repos: unchanged, two commits landed, diverged after a reset, resumed from another branch, a nested linked worktree restored from outside git, a re-stamp after a new commit, pre-tracking, a `head:` that appears only in the body, and a `head: $(touch pwned)` that must never execute.
 
 ## [1.91.223.0] - 2026-10-25
 
