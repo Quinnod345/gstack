@@ -88,7 +88,7 @@ describe('directiveFor — per-session-kind instruction', () => {
     // fails_when=the literal "Unattended session block" pointer returns; why_new=CQ3 checks the resolver prose only,
     // not this hook; seam=none; no_claim=model behaviour after the injection, and other session-block pointers such as
     // the spawned one (pure function; unit only)
-    expect(d).not.toContain('Unattended session block');
+    expect(d).not.toMatch(/unattended[- ]session[`'\s]*block/i);
   });
 
   test('spawned directive carries a self-contained destructive carve-out (#2733 review)', () => {

@@ -24,6 +24,8 @@ import { generateAskUserFormat } from '../scripts/resolvers/preamble/generate-as
 import { directiveFor } from '../hosts/claude/hooks/auq-error-fallback-hook.ts';
 import { expectMentions, expectTokens } from './helpers/prompt-structure';
 
+const UNATTENDED_POINTER = /unattended[- ]session[`'\s]*block|per its printed/i;
+
 function makeCtx(): TemplateContext {
   return {
     skillName: 'test-skill',
@@ -223,8 +225,7 @@ describe('generateAskUserFormat — runtime-failure prose fallback', () => {
       // Value: protects=the failure fallback's unattended branch states its rule with no pointer to a section the reader
       // never sees; fails_when=the "(Unattended session block)" pointer returns to that branch; why_new=CQ3 reads item 1
       // only and the hook test reads the hook only; seam=none; no_claim=model behaviour after an AUQ failure (unit only)
-      expect(unattended).not.toContain('Unattended session block');
-      expect(unattended).not.toContain('per its printed');
+      expect(unattended).not.toMatch(UNATTENDED_POINTER);
     }
   });
 
@@ -377,8 +378,7 @@ describe('CQ3 — Tool resolution item 1 states the unattended rule with no sect
       const item1 = out.split('\n').find(line => line.startsWith('1. **\`SESSION_KIND: spawned\` echoed**')) ?? '';
       expect(item1, 'Tool resolution item 1 must exist').not.toBe('');
       expectMentions(item1, [['unattended', 'consent', 'unrecommended question', 'approval gate', 'pending']], `${skillName} item 1`);
-      expect(item1).not.toContain('Unattended session block');
-      expect(item1).not.toContain('per its printed');
+      expect(item1).not.toMatch(UNATTENDED_POINTER);
     });
   }
 });
