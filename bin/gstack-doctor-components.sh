@@ -307,6 +307,8 @@ gstack_result_anchor() {
     PR_SHOTS_IDENTICAL) printf '%s' 'pr-shots-identical' ;;
     PR_SHOTS_RENDER_FAILED) printf '%s' 'pr-shots-render-failed' ;;
     LAUNCH_FILE_UNWRITABLE) printf '%s' 'capy-install-launch-file-unwritable' ;;
+    PR_WAIT_BLOCKED) printf '%s' 'pr-wait-blocked' ;;
+    PR_WAIT_REFUSED) printf '%s' 'pr-wait-refused' ;;
     *) return 1 ;;
   esac
 }

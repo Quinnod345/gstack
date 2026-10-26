@@ -1,0 +1,35 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+/**
+ * gstack-pr-wait — watch one pull request and print one line per real event.
+ *
+ *   gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS]
+ *
+ * Exit 0 when the --until condition is met or the PR merged, 1 when it needs
+ * action (PR_WAIT_BLOCKED), 2 on bad input or a duplicate watcher
+ * (PR_WAIT_REFUSED). Review-bot lists: `gstack-config set pr_wait_gating_bots`
+ * and `pr_wait_advisory_bots`. Logic: lib/pr-wait.ts and lib/pr-wait-github.ts.
+ *
+ * Design ported from tstack's pr-wait (t3dotgg/tstack, MIT, Copyright (c) 2026
+ * Theo Browne; NOTICE.md). Docs: docs/troubleshooting.md#gstack-pr-wait
+ */
+import { spawnGh } from '../lib/ci-gate';
+import { prWaitMain } from '../lib/pr-wait';
+
+const code = prWaitMain(process.argv.slice(2), {
+  gh: spawnGh,
+  vars: process.env,
+  pid: process.pid,
+  now: () => Date.now(),
+  sleep: ms => Bun.sleepSync(ms),
+  out: text => process.stdout.write(text),
+  err: text => process.stderr.write(text),
+  pidAlive: pid => {
+    try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+  },
+}, release => {
+  process.on('exit', release);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.on(signal, () => { release(); process.exit(signal === 'SIGINT' ? 130 : 143); });
+  }
+});
+process.exit(code);

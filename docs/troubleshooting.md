@@ -4359,6 +4359,53 @@ conflict-only base merge, a test-only change or release metadata, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
+<a id="gstack-pr-wait"></a>
+## gstack-pr-wait
+
+`gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change]
+[--interval SECONDS]` watches one pull request and prints one stdout line per
+real event, prefixed `#<pr>`; progress and recoverable errors go to stderr.
+`/land-and-deploy` Step 3 runs it with `--until green`. Exit 0 means the
+`--until` condition is met or the PR merged; exit 1 and 2 end with one of the
+two codes below. Required checks come from the base branch's rulesets and
+classic branch protection; a 403 on the classic protection read (a token
+without admin scope) is logged and skipped, and the rulesets read still names
+the required checks. The review-bot lists are configuration:
+`gstack-config set pr_wait_gating_bots greptile,macroscope` and
+`pr_wait_advisory_bots coderabbit` (`none` empties a list).
+
+<a id="pr-wait-blocked"></a>
+### `#<pr> stopped: action needed (PR_WAIT_BLOCKED)`
+
+**Meaning.** Exit 1. The condition cannot be met without a change to the PR:
+the lines above it say which. A required check failed (name and link; with no
+required checks configured, every non-bot check gates); the merge state is
+DIRTY (the branch conflicts with its base); the PR was closed without merging;
+`--until ready` is blocked by unresolved review threads or a BEHIND branch; or
+GitHub stayed unreachable for ten polls, or answered with a non-transient
+error (`gstack-pr-wait stopped: <gh message>`).
+
+**Fix.** Act on the named line: fix the failing check and push, rebase or
+update the branch, resolve the threads, or read the gh message. Then start
+`gstack-pr-wait` again; its state file remembers what it already reported, so
+only new events print. A watcher that stopped on a gh error restarts cleanly
+once `gh auth status` passes.
+
+<a id="pr-wait-refused"></a>
+### `gstack-pr-wait: the watcher did not start — ... (PR_WAIT_REFUSED)`
+
+**Meaning.** Exit 2, before any poll. The target is not a PR number or URL,
+`--repo` is not `owner/name`, no repository could be read from the checkout,
+the PR cannot be read with the current `gh` login, an option is unknown, or
+another `gstack-pr-wait` process (the line names its pid) already watches
+this PR from the same state root, so a second one would print duplicate
+events.
+
+**Fix.** Pass the number or URL and `--repo owner/name`, check `gh auth
+status`, or let the running watcher finish. If no events reach you from the
+named pid, `kill <pid>` and start again; a lock whose pid is no longer alive
+is taken over without that step.
+
 ## gstack-error-capture
 
 `gstack-error-capture` runs one target CLI for `/devex-review` Step 3 with no

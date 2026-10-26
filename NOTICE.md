@@ -86,6 +86,15 @@ grew the diff cuts first; the end of the budget is not approval) in
 are written in gstack's words and mapped onto gstack's blocking floor. No sentence is copied,
 so no license text is carried; this entry is a courtesy.
 
+Design port (`skills/babysit-pr/scripts/pr-wait`, at 7de017b3; license text:
+`licenses/MIT-tstack.txt`): `bin/gstack-pr-wait`, `lib/pr-wait.ts` and
+`lib/pr-wait-github.ts` follow pr-wait's design (one stdout line per real event,
+`--until green|ready|any-change`, exit 0/1/2, required checks from rulesets and
+classic protection, two identical polls before green, the base-moved-and-touches-
+this-PR event, BEHIND and DIRTY, a per-PR lock, a 6-hour baseline), rewritten in
+TypeScript on gstack's bun shebang, state root, result codes and config keys;
+no Python line is carried. Each file names the source in its header.
+
 ## pstack — Copyright Lauren Tan — MIT License
 
 https://github.com/cursor/plugins (`pstack/skills/interrogate`, `lead-judgment.md`). Ideas,
