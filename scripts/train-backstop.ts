@@ -192,8 +192,9 @@ function freeze(o: BackstopOptions, c: { gh: GhRunner; git: Git; repoKey: string
 }
 
 const USAGE = `usage: bun run scripts/train-backstop.ts run --repo <owner/name> --branch <main> --sha <sha>
-    [--settle-minutes 60] [--poll-seconds 60] [--gate-deadline-minutes 270] [--summary <file>]
-Exit 0 when inert, superseded, covered, deferred to a freeze's own backstop, or gated green; 1 when it froze the queue or could not finish.`;
+    [--settle-minutes 60] [--poll-seconds 60] [--gate-deadline-minutes 270] [--summary <file>] [--outputs <file>]
+Exit 0 when inert, superseded, covered, deferred to a freeze's own backstop, or gated green; 1 when it froze the queue or could not finish.
+--outputs appends action=<action> (the workflow reads it as a step output and publishes the main-backstop check run from it).`;
 
 if (import.meta.main) {
   const [command, ...rest] = process.argv.slice(2);
@@ -208,5 +209,7 @@ if (import.meta.main) {
     console.log(line);
     if (summary) fs.appendFileSync(summary, `- ${line}\n`);
   }
+  const outputs = flag('outputs');
+  if (outputs) fs.appendFileSync(outputs, `action=${action}\n`);
   process.exit(action === 'frozen' || action === 'failed' ? 1 : 0);
 }

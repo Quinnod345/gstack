@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { BUZZWORDS, checkCraft, formatCraft, visibleText } from '../lib/design-craft';
+import { acceptFindings, BUZZWORDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
 import { catalogEntry } from '../lib/design-catalog';
+import { selectTests } from './helpers/test-selection';
+import { E2E_TOUCHFILES } from './helpers/touchfiles-data';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN = path.join(ROOT, 'bin', 'gstack-design-craft');
@@ -21,8 +23,8 @@ const CLEAN = `<!doctype html><html lang="en"><head><title>Ledgerline: close the
 <main id="main"><h1>Close the books in 2 days, not 9</h1><p>Teams at Halvorsen Freight cut month-end by 47.2%. Save 20% yearly. 100% open source. 30-day refund.</p><img src="x.png" alt=""></main>
 <script>const io = new IntersectionObserver(() => {}); window.showAlert = () => {};</script></body></html>`;
 
-function run(file?: string) {
-  const r = Bun.spawnSync([BIN, ...(file ? [file] : [])], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
+function run(file?: string, ...extra: string[]) {
+  const r = Bun.spawnSync([BIN, ...(file ? [file] : []), ...extra], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 }
 
@@ -114,5 +116,107 @@ describe('design-craft check', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
+  test('an exception covers its id up to the accepted count; a higher count stays an issue and names the accepted count', () => {
+    const findings = checkCraft(DIRTY);
+    const { issues, accepted } = acceptFindings(findings, [
+      { id: 'placeholder-brand', count: 1, reason: 'Acme is the real customer' },
+      { id: 'round-number', count: 2, reason: 'supplied figures' },
+      { id: 'scroll-listener', count: 5, reason: 'unused' },
+    ]);
+    expect(accepted).toEqual([{ id: 'placeholder-brand', count: 1, reason: 'Acme is the real customer' }, { id: 'scroll-listener', count: 1, reason: 'unused' }]);
+    expect(issues.find(f => f.id === 'round-number')?.fix).toEndWith('(2 accepted earlier: supplied figures)');
+    expect(issues).toHaveLength(findings.length - 2);
+    expect(formatCraft([], accepted)).toBe('CRAFT_ACCEPTED: placeholder-brand 1 Acme is the real customer\nCRAFT_ACCEPTED: scroll-listener 1 unused\nCRAFT_RESULT: clean (2 accepted)');
+    const carried = [{ id: 'round-number', count: 1, reason: 'first run' }, { id: 'round-number', count: 3, reason: 'supplied figures' }];
+    for (const list of [carried, [...carried].reverse()]) {
+      expect(acceptFindings([{ id: 'round-number', count: 3, fix: 'use the supplied figure' }], list)).toEqual({ issues: [], accepted: [{ id: 'round-number', count: 3, reason: 'supplied figures' }] });
+    }
+  });
+
+  test('parseCraftExceptions reads the finalized.json design-html writes and rejects a malformed list', () => {
+    const skill = fs.readFileSync(path.join(ROOT, 'design-html', 'SKILL.md'), 'utf-8');
+    const block = skill.slice(skill.indexOf('Write `finalized.json` alongside the HTML')).match(/```json\n([\s\S]*?)```/)![1];
+    const record = JSON.parse(block.replace(/<number of refinement iterations>|<n>/g, '1'));
+    expect(parseCraftExceptions(JSON.stringify(record))).toEqual([{ id: '<craft id>', count: 1, reason: '<why accepted>' }]);
+    expect(parseCraftExceptions('{"mode":"freeform"}')).toEqual([]);
+    expect(parseCraftExceptions('{"craft_exceptions":[{"id":"oops","count":1,"reason":"quoted\\nfrom the user"}]}')).toEqual([{ id: 'oops', count: 1, reason: 'quoted from the user' }]);
+    for (const bad of ['[]', 'null', '{"craft_exceptions":{}}', '{"craft_exceptions":[{"id":"oops","count":0,"reason":"x"}]}', '{"craft_exceptions":[{"id":"oops","count":1,"reason":" "}]}', '{"craft_exceptions":[{"id":"oops","count":1.5,"reason":"x"}]}']) {
+      expect(() => parseCraftExceptions(bad)).toThrow();
+    }
+  });
+
+  test('the CLI reports accepted tells as CRAFT_ACCEPTED lines: exit 0 when only accepted ones remain, 1 for the rest, 2 on a bad exceptions file after a full check with none accepted', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-craft-accepted-'));
+    try {
+      const page = path.join(dir, 'finalized.html');
+      const record = path.join(dir, 'finalized.json');
+      fs.writeFileSync(page, CLEAN.replace('Halvorsen Freight', 'Acme'));
+      fs.writeFileSync(record, JSON.stringify({ mode: 'evolve', craft_exceptions: [{ id: 'placeholder-brand', count: 1, reason: 'Acme Freight is the customer' }] }));
+      expect(run(page, '--accepted', record)).toMatchObject({ code: 0, out: 'CRAFT_ACCEPTED: placeholder-brand 1 Acme Freight is the customer\nCRAFT_RESULT: clean (1 accepted)\n' });
+      expect(run(page).code).toBe(1);
+      fs.writeFileSync(page, CLEAN.replace('Halvorsen Freight', 'Acme and Nexus'));
+      const twice = run(page, '--accepted', record);
+      expect(twice.code).toBe(1);
+      expect(twice.out).toBe('CRAFT_CHECK: placeholder-brand 2 use a supplied customer, or a fitting name in sample data (1 accepted earlier: Acme Freight is the customer)\nCRAFT_RESULT: 1 issue(s)\n');
+      fs.writeFileSync(page, DIRTY);
+      const dirty = run(page, '--accepted', record);
+      expect(dirty.code).toBe(1);
+      expect(dirty.out).toContain('CRAFT_ACCEPTED: placeholder-brand 1 ');
+      expect(dirty.out.trim().split('\n').at(-1)).toBe('CRAFT_RESULT: 17 issue(s), 1 accepted');
+      fs.writeFileSync(path.join(dir, 'old.json'), JSON.stringify({ mode: 'freeform' }));
+      expect(run(page, '--accepted', path.join(dir, 'old.json')).out).toBe(run(page).out);
+      fs.writeFileSync(path.join(dir, 'bad.json'), '{"craft_exceptions":[{"id":"oops"}]}');
+      fs.writeFileSync(path.join(dir, 'broken.json'), '{');
+      for (const name of ['bad.json', 'broken.json', 'missing.json']) {
+        const bad = run(page, '--accepted', path.join(dir, name));
+        expect(bad).toMatchObject({ code: 2, out: run(page).out });
+        expect(bad.err).toContain('checked with none accepted');
+      }
+      fs.writeFileSync(page, CLEAN);
+      expect(run(page, '--accepted', path.join(dir, 'broken.json'))).toMatchObject({ code: 2, out: 'CRAFT_RESULT: clean\n' });
+      expect(run(page, '--accepted').code).toBe(2);
+      expect(run(page, '--strict').code).toBe(2);
+      expect(run(page, '--accepted', record, 'extra').code).toBe(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('design-shotgun to design-html handoff', () => {
+  const ARCHETYPES = ['classic-hero', 'long-form-story', 'minimal-conversion', 'comparison'];
+  const read = (...p: string[]) => fs.readFileSync(path.join(ROOT, ...p), 'utf-8');
+
+  test('design-shotgun records the chosen archetype and outline in approved.json, and design-html takes them as given', () => {
+    const shotgun = read('design-shotgun', 'SKILL.md');
+    const craft = read('design-html', 'sections', 'craft.md');
+    const html = read('design-html', 'SKILL.md');
+    for (const id of ARCHETYPES) {
+      expect(shotgun).toContain(`\`${id}\``);
+      expect(craft).toContain(`\`${id}\``);
+    }
+    const save = shotgun.slice(shotgun.indexOf('## Step 6: Save & Next Steps'));
+    expect(save).toMatch(/add the chosen variant's `archetype` id and `sections`[^.]*to it with the Edit tool/);
+    expect(html.slice(html.indexOf('### Case A'), html.indexOf('### Case B'))).toContain('any `archetype`\nand `sections`');
+    expect(craft).toMatch(/When approved\.json carries an `archetype`[^.]*: take it and its `sections` outline as given[^.]*do not re-pick or re-ask/);
+  });
+
+  test('a change to the craft checker selects the design-html-slop-gate E2E that runs it', () => {
+    for (const file of ['lib/design-craft.ts', 'bin/gstack-design-craft']) {
+      expect(selectTests([file], E2E_TOUCHFILES).selected).toContain('design-html-slop-gate');
+    }
+  });
+
+  test('design-html persists accepted exceptions and passes them back with --accepted', () => {
+    const html = read('design-html', 'SKILL.md');
+    const craft = read('design-html', 'sections', 'craft.md');
+    expect(html).toMatch(/gstack-design-craft <path-to-finalized\.html>` \(plus `--accepted` per the section\)/);
+    expect(craft).toContain('records each one in `craft_exceptions`');
+    expect(craft).toContain('append `--accepted <that finalized.json>` to the command');
+    expect(craft).toContain('CRAFT_ACCEPTED: <id> <count> <reason>');
   });
 });

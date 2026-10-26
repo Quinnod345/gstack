@@ -1,0 +1,114 @@
+name: Weekly release
+# Tags the newest green commit on main as v<VERSION>, publishes the GitHub
+# Release, and fast-forwards refs/heads/stable to it (docs/releases.md). Team
+# installs follow stable, so this is the only thing that moves them. Runs
+# every Monday morning Pacific; run it by hand with a ref for a hotfix, or
+# with dry_run to see the plan and change nothing. A pull request that touches
+# the release tooling runs the dry run against main with a read-only token,
+# which is the only pre-merge exercise of the real workflow. The candidate's
+# gate must already be green (free-tests and main-backstop check runs
+# succeeded, every check run finished and none red, no active freeze): this
+# workflow never runs tests or paid evals. Dispatch it from main: the cut job
+# runs only there, with main's tooling.
+on:
+  schedule:
+    # Monday 14:00 UTC: 07:00 PDT, 06:00 PST.
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the plan (candidate, tag, stable move, notes) and change nothing'
+        type: boolean
+        default: true
+      ref:
+        description: 'Hotfix: release this commit of main instead of the newest green one (full 40-hex SHA)'
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - '.github/workflows/weekly-release.yml'
+      - 'scripts/release-cut.ts'
+
+# One cut at a time; a second dispatch waits for the first. A pull request's
+# dry run is its own group.
+concurrency:
+  group: weekly-release-${{ github.event.pull_request.number || 'cut' }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  cut:
+    name: Cut the release
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # The tag, the stable branch and the release.
+      contents: write
+      # Reads the candidate's check runs.
+      checks: read
+    steps:
+      # The dispatched ref supplies the tooling; the release candidate always
+      # comes from origin/main, which fetch-depth 0 brings along with every
+      # branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Fetch stable and the tags
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin '+refs/heads/stable:refs/remotes/origin/stable' 2>/dev/null || echo "origin has no stable yet: this cut creates it"
+          git fetch --quiet --tags origin
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Plan and cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_REF" ] && ! [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be the full 40-hex SHA of a commit on main, not '$RELEASE_REF'"
+            exit 1
+          fi
+          args=(--repo "$GITHUB_REPOSITORY" --summary "$GITHUB_STEP_SUMMARY")
+          [ "$DRY_RUN" = true ] && args+=(--dry-run)
+          [ -n "$RELEASE_REF" ] && args+=(--ref "$RELEASE_REF")
+          echo "## Weekly release ($([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'cut'))" >> "$GITHUB_STEP_SUMMARY"
+          bun --no-env-file --config=/dev/null --no-install run scripts/release-cut.ts "${args[@]}"
+
+  dry-run:
+    name: Dry run against main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Plan only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin '+refs/heads/stable:refs/remotes/origin/stable' 2>/dev/null || echo "origin has no stable yet"
+          git fetch --quiet --tags origin
+          echo "## Weekly release (dry run from PR #${{ github.event.pull_request.number }})" >> "$GITHUB_STEP_SUMMARY"
+          bun --no-env-file --config=/dev/null --no-install run scripts/release-cut.ts --repo "$GITHUB_REPOSITORY" --summary "$GITHUB_STEP_SUMMARY" --dry-run
