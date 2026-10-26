@@ -159,6 +159,17 @@ export const RELEASE_RESULT_CODES = {
     summary: 'an added or changed test line compares an elapsed wall-clock or CPU time against a bound, or sleeps and then asserts (a warning, not a block)',
     fix: 'assert on the outcome, an injected clock or a forced deadline instead; when the bound is the contract, add `gstack-timing-ok: <reason>` in a comment on the line or the line above',
   },
+  // Lane D (GSTA-112): the no-policy warning and the environment-cause verdict.
+  PREGATE_NO_POLICY: {
+    anchor: 'pregate-no-policy',
+    summary: 'the repository has no pregate policy yet (no .gstack/pregate.json on the base branch and no user-owned file) and a touched file maps to no test lane; a warn, with a starter policy printed',
+    fix: 'review the printed starter, write it with `gstack-pregate init`, edit the TODO entries, then commit .gstack/pregate.json on the base branch; from then on an unmapped file is PREGATE_NO_LANE',
+  },
+  PREGATE_ENVIRONMENT: {
+    anchor: 'pregate-environment',
+    summary: 'a check could not run because of the machine, not the diff: a runner or guard binary missing from PATH, a network error or quota refusal before any test ran, a full disk, or an unverified runtime; incomplete, never pass',
+    fix: 'read the `environment:` line (kind and evidence), repair that on this machine or run the lane remotely (`--remote`, `gstack-pregate clear`), then rerun; a waiver cites the kind, never a test name',
+  },
   // Field list 2, W2 (approval classes) and W3 (state-machine round-trip matrix).
   APPROVAL_CLASSES_INVALID: {
     anchor: 'approval-classes-invalid',
@@ -196,5 +207,26 @@ export const RELEASE_RESULT_CODES = {
     anchor: 'regen-deps-missing',
     summary: 'a regen command exited 0 with different outputs while package.json declares dependencies and node_modules is missing, so the outputs were not verified',
     fix: 'install the dependencies (the printed command, such as bun install), then rerun the check',
+  },
+  // The /ship review loop's finding scope (gstack-review-scope) and the receipt carry (gstack-ship-receipt carry).
+  REVIEW_SCOPE_INPUT: {
+    anchor: 'review-scope-input',
+    summary: 'gstack-review-scope was given input it cannot classify: findings that are not a JSON array of objects, a --pass or --policy outside its values, or a pass 2+ call without --range-base',
+    fix: 'pass the Step 9.3 findings as a JSON array (--findings <file> or stdin), --pass <n> from the invocation record, and from pass 2 on --range-base <sha> (HEAD at the start of the previous pass)',
+  },
+  REVIEW_SCOPE_RANGE: {
+    anchor: 'review-scope-range',
+    summary: 'gstack-review-scope could not read the diff it scopes findings against: the base or the range base does not resolve, or the range base is not an ancestor of HEAD',
+    fix: 'fetch origin/<base>, check --range-base against the saved pass heads, and start a full pass (--pass 1) when history was rewritten',
+  },
+  RECEIPT_CARRY_REFUSED: {
+    anchor: 'receipt-carry-refused',
+    summary: 'gstack-ship-receipt carry could not carry the /ship receipt to HEAD: the PR body has no receipt, the receipt head is not an ancestor of HEAD (rebase or force-push), or the product diff could not be compared',
+    fix: 'merge the base in instead of rebasing, keep the reviewed head in HEAD\'s history, then rerun carry; otherwise run /ship on the new head',
+  },
+  RECEIPT_CARRY_PRODUCT_CHANGED: {
+    anchor: 'receipt-carry-product-changed',
+    summary: 'the product diff against the base changed between the receipt\'s head and HEAD (a product file differs beyond a base merge, a test-only fix or release metadata), so the reviewed verdict does not cover HEAD',
+    fix: 'run /ship on the new head; the receipt carries only when every changed path is a test, release metadata or the base merge and the product patch-id is unchanged',
   },
 } as const satisfies Record<string, ResultCode>;

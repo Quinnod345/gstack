@@ -9,12 +9,14 @@
 import { ARTIFACT_SCHEMAS, checkSchema, type ShipReceipt, type ValidationError } from './headless-artifacts';
 import { approvalSummary } from './approval-citations';
 import { renderIssueLines } from './issue-links';
+import { matchesAny } from './ship-policy';
+import { stampFileKind, versionStampOnly } from './pregate/stamp-only';
 
 export const RECEIPT_FENCE = 'gstack-ship-receipt';
 const KEY_ORDER: Array<keyof ShipReceipt> = [
   'schema_version', 'pr', 'head', 'version', 'base', 'gated_tree', 'predecessor', 'tree', 'gate_reuse', 'gate', 'ci', 'spend_usd',
   'session_kind', 'artifacts_consumed', 'run', 'thread', 'policy', 'queue_mode', 'preregistration', 'history',
-  'pregate', 'requires_remote', 'issues', 'approval',
+  'pregate', 'requires_remote', 'issues', 'approval', 'review_loop', 'carry',
 ];
 
 /** Keys in the fixed order so identifiers lead; undefined values are dropped. */
@@ -116,7 +118,142 @@ export function receiptSummaryLine(r: ShipReceipt): string {
   if (r.session_kind) parts.push(`session_kind=${r.session_kind}`);
   if (r.artifacts_consumed) parts.push(`artifacts_consumed=${r.artifacts_consumed}`);
   if (r.approval) parts.push(`approval=${approvalSummary(r.approval)}`);
+  const loop = parseReviewLoop(r.review_loop);
+  if (loop) parts.push(`passes=${loop.passes} blocking_found=${loop.blocking_found} deferred=${loop.deferred}`);
+  if (r.carry && typeof r.carry.from === 'string') parts.push(`carried_from=${r.carry.from.slice(0, 12)}`);
   return `SHIP_RECEIPT: ${oneLine(parts.join(' '))}`;
+}
+
+
+// ---------------------------------------------------------------------------
+// carry: the receipt follows a head whose product diff is unchanged
+// ---------------------------------------------------------------------------
+/**
+ * Paths whose change never invalidates a /ship verdict on its own: tests (the
+ * reviewed product code is what the verdict covers; CI at the new head reruns
+ * them, unreviewed) and release metadata (the version stamp, the changelog, the
+ * agents digest). A repo extends the lists through its ship policy
+ * (`stamp_files`, `stamp_paths`, `release_outputs`, `changelog`); lockfiles are
+ * product unless the policy names them, because a dependency change is a
+ * product change. The test globs name code extensions only: an API contract
+ * such as `openapi.spec.yaml` is product.
+ */
+const TEST_CODE_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'rb', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'dart', 'php', 'cs'];
+export const CARRY_TEST_GLOBS: readonly string[] = [
+  'test/**', 'tests/**', 'spec/**', '__tests__/**', 'e2e/**', 'cypress/**', '**/__tests__/**',
+  ...TEST_CODE_EXTENSIONS.flatMap(ext => [`**/*.test.${ext}`, `**/*.spec.${ext}`]),
+  '**/*_test.go', '**/test_*.py', '**/*_test.py', '**/*_spec.rb', '**/*Test.java', '**/*Tests.swift',
+];
+export const CARRY_METADATA_GLOBS: readonly string[] = ['VERSION', 'CHANGELOG.md', 'package.json', 'agents-digest/**'];
+
+export type CarryClass = 'product' | 'test' | 'metadata';
+export interface CarryPlanInput {
+  /** The reviewed head the receipt names. */
+  from: string; head: string;
+  /** Paths changed between from and head, classified. */
+  changed: Array<{ path: string; class: CarryClass }>;
+  /** Product patch-ids at both heads (empty string for no product diff). */
+  productPatchId: { from: string; head: string };
+  testPatchId: { from: string; head: string };
+  /** Product paths whose patch against the base differs between the two heads. */
+  changedProduct: string[];
+  mergeCommits: number;
+  rangeDiff: string;
+}
+export interface CarryRecord { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[] }
+export type CarryPlan = { ok: true; carry: CarryRecord } | { ok: false; code: 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_CARRY_REFUSED'; message: string };
+
+/** The file's text at the reviewed head and at HEAD, with the release version each head carries (from `VERSION`, else `package.json`). */
+export interface CarryChange { before: string | null; after: string | null; oldVersion?: string | null; newVersion?: string | null }
+
+/**
+ * A policy-named stamp path's change is a stamp when the new text reads as the
+ * old text once every new version in it is the old one: the rule the tree receipt
+ * applies to the same `stamp_paths`, `stamp_files` and `release_outputs` before
+ * the train accepts a stamp commit. No version change, or a file missing on
+ * either side, is not a stamp.
+ */
+export function stampOnlyText(change: CarryChange): boolean {
+  const { before, after, oldVersion, newVersion } = change;
+  if (before === null || after === null || !oldVersion || !newVersion || oldVersion === newVersion) return false;
+  return after.split(newVersion).join(oldVersion) === before;
+}
+
+/**
+ * One changed path's carry class. The changelog and the agents digest are
+ * metadata. A manifest (`package.json`, `VERSION`) is metadata only while its
+ * from..head change is a version stamp and nothing else (`versionStampOnly`): a
+ * dependency, a script or a new key is product. A path the policy names under
+ * `stamp_files`, `stamp_paths` or `release_outputs` is metadata only while its
+ * change is a stamp (`versionStampOnly` for a manifest kind, `stampOnlyText`
+ * otherwise): a logic change in a stamped source file is product, as it is for
+ * the tree receipt. `change` carries the texts; a caller without them gets the
+ * list-only answer.
+ */
+export function classifyCarryPath(rel: string, extra: { metadata?: readonly string[] } = {}, change?: CarryChange): CarryClass {
+  const stamp = () => !change || (stampFileKind(rel) ? versionStampOnly(rel, change.before, change.after).stampOnly : stampOnlyText(change));
+  if (matchesAny(CARRY_METADATA_GLOBS, rel)) return !change || !stampFileKind(rel) || versionStampOnly(rel, change.before, change.after).stampOnly ? 'metadata' : 'product';
+  if (matchesAny(extra.metadata ?? [], rel)) return stamp() ? 'metadata' : 'product';
+  if (matchesAny(CARRY_TEST_GLOBS, rel)) return 'test';
+  return 'product';
+}
+
+/**
+ * The carry decision: the receipt follows `head` when the product diff
+ * against the base has the same patch-id at both heads, which is what a
+ * conflict-only base merge, a test-only fix or a release-metadata change
+ * leaves behind. A product patch that differs is RECEIPT_CARRY_PRODUCT_CHANGED,
+ * whatever else changed.
+ */
+export function planCarry(input: CarryPlanInput): CarryPlan {
+  if (input.productPatchId.from !== input.productPatchId.head) {
+    const named = input.changedProduct.slice(0, 20);
+    return { ok: false, code: 'RECEIPT_CARRY_PRODUCT_CHANGED', message: `product diff changed between ${input.from.slice(0, 12)} and ${input.head.slice(0, 12)}: ${named.join(', ') || 'patch-id differs'}${input.changedProduct.length > named.length ? ` (+${input.changedProduct.length - named.length} more)` : ''}` };
+  }
+  const reasons: string[] = [];
+  if (input.mergeCommits > 0) reasons.push(input.mergeCommits === 1 ? 'base merge' : `${input.mergeCommits} base merges`);
+  if (input.testPatchId.from !== input.testPatchId.head) reasons.push('test-only change');
+  if (input.changed.some(c => c.class === 'metadata')) reasons.push('release metadata');
+  if (!reasons.length) reasons.push(input.changed.length ? 'no product change' : 'no content change');
+  return {
+    ok: true,
+    carry: {
+      from: input.from, reason: reasons.join(' + '), product_patch_id: input.productPatchId.head || 'none',
+      changed_paths: input.changed.slice(0, 50).map(c => `${c.class}:${c.path}`), merge_commits: input.mergeCommits, range_diff: input.rangeDiff,
+      covers: ['pre-landing review', 'adversarial review', 'gate integrity', 'documentation audit'],
+      reruns: ['CI at head (gstack-ship-queue ready requires it); test and helper code changed since the reviewed head runs there unreviewed'],
+    },
+  };
+}
+
+/**
+ * The carried receipt: the same evidence, bound to the new head, with the carry
+ * recorded. A receipt carried before keeps the reviewed head as `from` and adds
+ * this hop's merges and paths, so the record always names the head a review saw.
+ */
+export function carryReceipt(receipt: ShipReceipt, head: string, carry: CarryRecord): ShipReceipt {
+  const prior = receipt.carry;
+  const merged: CarryRecord = !prior ? carry : {
+    ...carry, from: prior.from, reason: prior.reason === carry.reason ? carry.reason : `${prior.reason} + ${carry.reason}`,
+    merge_commits: prior.merge_commits + carry.merge_commits,
+    changed_paths: [...prior.changed_paths, ...carry.changed_paths.filter(p => !prior.changed_paths.includes(p))].slice(0, 50),
+  };
+  return orderReceipt({ ...receipt, head, carry: merged });
+}
+
+/** The loop counters the factory scorecard reads (passes, blocking_found, deferred), as `write --review-loop` records them. */
+export type ReviewLoopReceipt = NonNullable<ShipReceipt['review_loop']>;
+export function parseReviewLoop(value: unknown): ReviewLoopReceipt | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  const n = (k: string) => (typeof v[k] === 'number' && Number.isInteger(v[k]) && (v[k] as number) >= 0 ? (v[k] as number) : undefined);
+  const passes = n('passes'); const blocking = n('blocking_found'); const deferred = n('deferred');
+  if (passes === undefined || blocking === undefined || deferred === undefined) return undefined;
+  const out: ReviewLoopReceipt = { passes, blocking_found: blocking, deferred };
+  if (n('noted') !== undefined) out.noted = n('noted');
+  if (n('fixed') !== undefined) out.fixed = n('fixed');
+  if (typeof v.scope === 'string') out.scope = v.scope.slice(0, 20);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

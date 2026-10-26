@@ -89,7 +89,7 @@ describe('shared-code skill distribution', () => {
         }
         if (host.name !== 'codex' && !host.suppressedResolvers?.includes('REVIEW_ARMY')) {
           const stages = ['#### 1. Parse outputs', '#### 2. Validate severity', '#### 3. Identify and merge',
-            '#### 4. Apply specialist confidence gates', '#### 5. Score and present specialists'];
+            '#### 4. Lead judgment', '#### 5. Apply specialist confidence gates', '#### 6. Score and present specialists'];
           const positions = stages.map(stage => parent.indexOf(stage));
           expect(positions.every(position => position >= 0)).toBe(true);
           expect(positions).toEqual([...positions].sort((a, b) => a - b));

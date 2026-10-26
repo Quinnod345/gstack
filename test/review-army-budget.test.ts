@@ -8,7 +8,7 @@ const ROOT = path.resolve(import.meta.dir, '..');
 
 test.each([
   ['consensus', 'review-army-consensus', 'SQL injection'],
-  ['N+1', 'review-army-perf-n-plus-one', 'N+1 queries in posts_controller.rb'],
+  ['N+1', 'review-army-perf-n-plus-one', 'SPECIALIST REVIEW: 1 findings (1 critical, 0 informational) from 1 specialist\nN+1 queries in posts_controller.rb'],
 ])('%s drains its timed-out capture before Bun retries or removes the fixture', (_label, caseId, report) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-army-finalization-'));
   try {

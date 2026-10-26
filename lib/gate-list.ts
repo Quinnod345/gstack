@@ -6,7 +6,7 @@
  * grammar: `rec` (every item takes its recommendation, plan changes
  * included), `<id><option>` tokens (`d3b uc1a`), or `rec except <tokens>`
  * (the same operation as listing the overrides). `all`, `approve all`,
- * `accept all` and `take all recommendations` are silent aliases of `rec`;
+ * `accept all`, `take all recommendations` and `do it` are silent aliases of `rec`;
  * `as-is` (alias `all as-is`) keeps every direction: each item takes its
  * option that does not change the plan (`changes_plan: false`). Bare yes/no
  * is ambiguous across multi-option items and is reported as unparsed, never
@@ -54,7 +54,7 @@ export interface ParsedReply {
 
 export const PAGE_SIZE = 7;
 /** Reply openers that take every recommendation: `rec` and its silent aliases. */
-const REC_ALIASES: string[][] = [['rec'], ['all'], ['approve', 'all'], ['accept', 'all'], ['take', 'all', 'recommendations']];
+const REC_ALIASES: string[][] = [['rec'], ['all'], ['approve', 'all'], ['accept', 'all'], ['take', 'all', 'recommendations'], ['do', 'it']];
 const ID_RE = /^[a-z]*[0-9]+$/;
 
 export function validateGateList(list: unknown): string[] {
