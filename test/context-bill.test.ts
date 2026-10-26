@@ -975,6 +975,7 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(code).toBe(2);
     expect(out.text()).toContain("No SKILL.md files found");
     expect(out.text()).not.toContain("--exact: sending");
+    expect(out.text()).not.toContain("no markdown skill file");
     expect(calls.length).toBe(0);
     expect(receipts).toEqual([]);
   });
