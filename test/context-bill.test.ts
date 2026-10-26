@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { canRevokeWrites } from "./helpers/fs-caps";
+import { bunIsolationArgs } from "../lib/bun-isolation";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1192,6 +1193,36 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     });
     expect(sameFileMoved.code).toBe(1);
     expect(sameFileMoved.err).toContain("changed after it was walked");
+  });
+
+  it("refuses a walked file swapped for a FIFO instead of hanging", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fifo-"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(skills, "qa", "a.md"), "A");
+    const script = path.join(tmp, "probe.ts");
+    fs.writeFileSync(
+      script,
+      [
+        `import fs from "node:fs";`,
+        `import { spawnSync } from "node:child_process";`,
+        `import { exactSendSet, measureExactTokens } from ${JSON.stringify(path.join(ROOT, "lib", "context-bill.ts"))};`,
+        `const root = ${JSON.stringify(skills)};`,
+        `const sendSet = exactSendSet(root);`,
+        `fs.unlinkSync(${JSON.stringify(path.join(skills, "qa", "a.md"))});`,
+        `spawnSync("mkfifo", [${JSON.stringify(path.join(skills, "qa", "a.md"))}], { timeout: 5_000 });`,
+        `const fetchImpl = (async () => ({ ok: true, json: async () => ({ input_tokens: 9 }) })) as never;`,
+        `try { await measureExactTokens(root, { sendSet, model: "m", apiKey: "sk-test", fetchImpl, egressHome: ${JSON.stringify(tmp)} }); console.log("SENT"); }`,
+        `catch (error) { console.log("REFUSED " + (error as Error).message); }`,
+      ].join("\n"),
+    );
+    const result = Bun.spawnSync([process.execPath, ...bunIsolationArgs(), script], { timeout: 15_000 });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain("REFUSED");
+    expect(result.stdout.toString()).toContain("changed after it was walked");
   });
 
   it("sends files in the root and the linked gstack checkout, and refuses and names anything else a link reaches", async () => {

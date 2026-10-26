@@ -891,13 +891,14 @@ export function exactSendSet(root: string): ExactSendSet {
  * following a final link, and only if it is still the same regular file at
  * the same realpath. A link retargeted, a file replaced, or a parent directory
  * swapped for a link after the walk is refused, so nothing the bill did not
- * walk can be sent.
+ * walk can be sent. The open does not block, so a file swapped for a FIFO is
+ * refused as not a regular file instead of hanging the run.
  */
 function readWalkedFile(real: string, dev: number, ino: number, file: string, root: string): string {
   const changed = () => new Error(`${file} changed after it was walked; nothing from ${root} was sent. Run again.`);
   let fd: number;
   try {
-    fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
   } catch {
     throw changed();
   }
