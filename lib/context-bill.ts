@@ -799,9 +799,7 @@ export function exactSendFiles(root: string): string[] {
   const priced = new Set<string>();
   buildBill(resolved, {
     tokensOf: (key) => {
-      try {
-        priced.add(fs.realpathSync(key.endsWith(fmSuffix) ? key.slice(0, -fmSuffix.length) : key));
-      } catch {}
+      priced.add(fs.realpathSync(key.endsWith(fmSuffix) ? key.slice(0, -fmSuffix.length) : key));
       return 0;
     },
   });
