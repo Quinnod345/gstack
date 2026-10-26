@@ -30,12 +30,14 @@ needed, because every skill reads `PROACTIVE` from `gstack-skill-start` at the
 start of each run and the router (`/gstack`) applies it to its routing rules. A
 value gstack does not know (a hand-edited `proactive: maybe`) reads as `core`.
 
-One surface does not follow the setting yet: the `## Skill routing` section
-gstack offers to append to your project's CLAUDE.md lists every routing rule and
-tells the host to invoke any matching skill. If you accepted it before the
-`core` default, trim that section to the four core rules (or delete it and let
-gstack offer it again); making the injected section follow `proactive` is
-tracked as a follow-up.
+One surface follows the setting only in part: the `## Skill routing` section
+gstack offers to append to your project's CLAUDE.md. Under `off` the offer is
+not made, because those rules are the auto-invocation you turned off (a section
+already in CLAUDE.md stays; delete it yourself). Under `core` the offered
+section still lists every routing rule and tells the host to invoke any
+matching skill. If you accepted it before the `core` default, trim that section
+to the four core rules (or delete it and let gstack offer it again); making the
+offered section follow `core` is tracked as a follow-up.
 
 gstack asks once, after the telemetry question, which of the three you want.
 "Say stop suggesting" in a session runs `gstack-config set proactive off` for you.

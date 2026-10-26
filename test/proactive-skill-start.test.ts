@@ -85,6 +85,25 @@ describe('gstack-skill-start PROACTIVE status line', () => {
     }
   });
 
+  test('the CLAUDE.md routing offer fires under core and not under off (the routing rules are the auto-invocation off turns off)', () => {
+    const cases: Array<[string, boolean]> = [
+      ['update_check: false\n', true],
+      ['update_check: false\nproactive: off\n', false],
+      ['update_check: false\nproactive: false\n', false],
+    ];
+    for (const [config, offered] of cases) {
+      const state = freshState(config);
+      fs.writeFileSync(path.join(state, '.proactive-prompted'), '');
+      try {
+        const out = runStart(path.join(BIN, 'gstack-skill-start'), state);
+        expect(out, config).toContain('HAS_ROUTING: no');
+        expect(out.includes('GSTACK_INSTRUCTION_BEGIN: routing-injection '), config).toBe(offered);
+      } finally {
+        fs.rmSync(state, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('regression: with no gstack-config beside it, the fallback reports the config default, not a stale literal', () => {
     const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-proactive-ss-bin-'));
     const state = freshState('update_check: false\n');

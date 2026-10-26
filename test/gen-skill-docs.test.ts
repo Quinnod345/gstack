@@ -2276,10 +2276,11 @@ describe('preamble routing injection (bin/gstack-skill-start emission layer)', (
   });
 
   test('routing injection only fires when all conditions met', () => {
-    // Must be: HAS_ROUTING=no AND ROUTING_DECLINED=false AND PROACTIVE_PROMPTED=yes
+    // Must be: HAS_ROUTING=no AND ROUTING_DECLINED=false AND PROACTIVE_PROMPTED=yes AND the offer is not switched off by proactive off/false
     expect(SKILL_START_SCRIPT).toContain(
-      'if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ]; then',
+      'if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_ROUTING_OFFER" = "yes" ]; then',
     );
+    expect(SKILL_START_SCRIPT).toContain('case "$_PROACTIVE" in off|false) _ROUTING_OFFER="no" ;; *) _ROUTING_OFFER="yes" ;; esac');
   });
 
   test('routing section content includes key routing rules', () => {

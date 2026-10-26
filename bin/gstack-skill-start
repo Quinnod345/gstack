@@ -591,8 +591,10 @@ fi
 
 # Routing injection (interactive: AUQ + CLAUDE.md append + commit). The body
 # is a quoted heredoc (markdown backticks must stay literal), so the resolved
-# bin path is substituted via sed on the __BIN__ placeholder.
-if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ]; then
+# bin path is substituted via sed on the __BIN__ placeholder. Under off the
+# routing rules are the auto-invocation the user turned off, so no offer.
+case "$_PROACTIVE" in off|false) _ROUTING_OFFER="no" ;; *) _ROUTING_OFFER="yes" ;; esac
+if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_ROUTING_OFFER" = "yes" ]; then
   sed "s|__BIN__|$_BIN|g" <<'EOI' | _emit_block routing-injection
 gstack works best when the project CLAUDE.md includes skill routing rules. If no CLAUDE.md exists in the project root, create it. Use AskUserQuestion:
 
