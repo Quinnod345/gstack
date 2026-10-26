@@ -182,13 +182,13 @@ mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 # sq STRING: STRING as one single-quoted shell word.
 sq() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 
-# remote_cancel NAME PHASE: end the session a watched PHASE started on the VM
-# (its leader pid is in ~/.ubirun-PHASE.sid there), bounded to 20 seconds.
-# Killing the local ssh client alone leaves a silent remote command running
-# until it next writes to the closed channel.
+# remote_cancel NAME SIDFILE: end the session a watched command started on the
+# VM (its leader pid is in SIDFILE there), bounded to 20 seconds. Killing the
+# local ssh client alone leaves a silent remote command running until it next
+# writes to the closed channel.
 remote_cancel() {
-  local name=$1 phase=$2 cpid i=0
-  remote "$name" "sid=\$(cat ~/.ubirun-$phase.sid 2>/dev/null); [ -z \"\$sid\" ] || { pkill -TERM -s \"\$sid\"; sleep 2; pkill -KILL -s \"\$sid\"; }; true" >/dev/null 2>&1 </dev/null &
+  local name=$1 sidf=$2 cpid i=0
+  remote "$name" "sid=\$(cat $sidf 2>/dev/null); [ -z \"\$sid\" ] || { pkill -TERM -s \"\$sid\"; sleep 2; pkill -KILL -s \"\$sid\"; }; true" >/dev/null 2>&1 </dev/null &
   cpid=$!
   while kill -0 "$cpid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 1; i=$(( i + 1 )); done
   kill "$cpid" 2>/dev/null || true
@@ -201,14 +201,17 @@ remote_cancel() {
 # RUN_TIMEOUT seconds in total: exit 124, reason and the last 40 lines on
 # stderr. The ssh runs in its own session (python3's setsid) so the watchdog
 # kills it and anything it started, not just the shell that launched it; on
-# the VM the command runs in its own session too, whose leader pid is written
-# to ~/.ubirun-PHASE.sid so remote_cancel can end it when the client is killed.
+# the VM the command runs in its own session too (setsid where the image has
+# it), whose leader pid is written to ~/.ubirun-PHASE-<runner pid>.sid so
+# remote_cancel can end it when the client is killed.
 watched() {
-  local name=$1 phase=$2 cmd=$3 out pid rc=0 start now last_beat idle elapsed why="" old_traps
+  local name=$1 phase=$2 cmd=$3 out pid rc=0 start now last_beat idle elapsed why="" old_traps inner sidf
+  sidf="~/.ubirun-$phase-$$.sid"
   load "$name"
   out="$(state_dir "$name")/$phase.log"
   : >"$out"
-  cmd="setsid -w bash -c $(sq "printf %s \$\$ >~/.ubirun-$phase.sid; $cmd")"
+  inner=$(sq "printf %s \$\$ >$sidf; $cmd")
+  cmd="if command -v setsid >/dev/null 2>&1; then setsid -w bash -c $inner; else bash -c $inner; fi; rc=\$?; rm -f $sidf; exit \$rc"
   # The caller's stdin is handed to the background ssh explicitly (a background
   # job in a non-interactive shell would otherwise read /dev/null), so piped
   # input reaches the remote command as it did before the watchdog.
@@ -244,7 +247,7 @@ watched() {
       kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       trap - INT TERM; eval "$old_traps"
-      remote_cancel "$name" "$phase"
+      remote_cancel "$name" "$sidf"
       return 124
     fi
     if [ "$HEARTBEAT" -gt 0 ] && [ $(( now - last_beat )) -ge "$HEARTBEAT" ]; then

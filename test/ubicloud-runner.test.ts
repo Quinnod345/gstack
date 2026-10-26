@@ -252,7 +252,7 @@ esac
       expect(err).toMatch(/watchdog: ssh printed nothing for \d+s \(UBI_IDLE_TIMEOUT=2\); killing it. Last output:/);
       expect(err.indexOf('line one')).toBeGreaterThan(err.indexOf('Last output:'));
       expect(readFileSync(join(f.root, 'state/vm-a/ssh.log'), 'utf8')).toContain('line one');
-      expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toMatch(/sid=\$\(cat ~\/\.ubirun-ssh\.sid .*pkill -TERM -s/);
+      expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toMatch(/sid=\$\(cat ~\/\.ubirun-ssh-\d+\.sid .*pkill -TERM -s/);
       writeFileSync(ssh, '#!/usr/bin/env bash\nfor i in 1 2 3 4 5 6; do echo "tick $i"; sleep 0.5; done\n');
       const beating = Bun.spawnSync(['bash', join(DIR, 'ubi-runner.sh'), 'ssh', 'vm-a', 'true'], { env: { ...env, UBI_IDLE_TIMEOUT: '0', UBI_HEARTBEAT: '1' }, timeout: 60_000 });
       expect(beating.exitCode).toBe(0);
@@ -371,8 +371,8 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       expect(err).toMatch(/watchdog: setup printed nothing for \d+s \(UBI_IDLE_TIMEOUT=2\)/);
       expect(err).toContain('setup failed (exit 124)');
       expect(f.ssh()).not.toContain('bash -lc');
-      expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toContain('cat ~/.ubirun-setup.sid');
-      expect(f.ssh()).toMatch(/setsid -w bash -c 'printf %s \$\$ >~\/\.ubirun-setup\.sid; cd work\/[^ ]+ && \. ~\/\.ubirun-env && bash -l ~\/\.ubirun-setup\.sh'/);
+      expect(readFileSync(join(f.root, 'cancel.log'), 'utf8')).toMatch(/cat ~\/\.ubirun-setup-\d+\.sid/);
+      expect(f.ssh()).toMatch(/setsid -w bash -c 'printf %s \$\$ >~\/\.ubirun-setup-\d+\.sid; cd work\/[^ ]+ && \. ~\/\.ubirun-env && bash -l ~\/\.ubirun-setup\.sh'; else bash -c '[^']*'; fi; rc=\$\?; rm -f ~\/\.ubirun-setup-\d+\.sid; exit \$rc/);
       expect(f.calls()).toContain('destroy');
       expect(err).toMatch(/destroyed eu-central-h1\/ubirun-thrd1-\d{10}-[0-9a-f]{8}-t4/);
       expect(f.listed()).toBe('');
