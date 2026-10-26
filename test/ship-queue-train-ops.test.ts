@@ -313,8 +313,8 @@ describe('train prune --stale and train watch', () => {
 
 describe('verify --post-merge', () => {
   // Value: protects=after a train merges, the coordinator watches main's push workflows at the merged sha until they settle instead of a background gh chain a restart kills (GBrain practice 8);
-  // fails_when=a pending check is called settled, a red check is called green, or the command needs process state; why_new=no post-merge watch existed; seam=the gh shim's check runs at a sha; no_claim=which workflows main runs
-  test('waits for every check run at the sha to complete, prints each, is green only when none failed, red with the failed names, and resumable after a timeout', () => {
+  // fails_when=a pending check is called settled, a red check is called green, a pending or failed commit status (the legacy status API, which ciAtHead counts) is reported as red with no name or as green, or the command needs process state; why_new=no post-merge watch existed; seam=the gh shim's check runs and commit statuses at a sha; no_claim=which workflows main runs
+  test('waits for every check run at the sha to complete, prints each, is green only when none failed, red with the failed names, pending or red on a commit status, and resumable after a timeout', () => {
     const fx = make();
     const sha = fx.repo.git('rev-parse', 'HEAD');
     fx.write(d => { d.ci[sha] = [{ name: 'free-tests', status: 'completed', conclusion: 'success' }, { name: 'windows-free-tests', status: 'in_progress', conclusion: null }, { name: 'main-backstop', status: 'completed', conclusion: 'neutral' }]; });
@@ -337,7 +337,15 @@ describe('verify --post-merge', () => {
     expect(line(green.out, 'POST_MERGE:')).toBe(`POST_MERGE: ${sha.slice(0, 12)} green (passed=2 failed=0 pending=0 skipped=1)`);
     expect(green.out.split('\n').filter(l => l.startsWith('CHECK: ')).sort()).toEqual(['CHECK: free-tests success', 'CHECK: main-backstop neutral', 'CHECK: windows-free-tests success']);
     expect(next(green.out)).toBe('NEXT: none');
-    fx.write(d => { d.ci[sha] = []; });
+    fx.write(d => { d.statuses = { [sha]: [{ state: 'pending', context: 'ci/vendor' }] }; });
+    const statusPending = queue(fx, ['verify', '--post-merge', sha, '--timeout', '1']);
+    expect([statusPending.status, line(statusPending.out, 'POST_MERGE:')]).toEqual([EXIT.refused, `POST_MERGE: ${sha.slice(0, 12)} pending (passed=2 failed=0 pending=1 skipped=1)`]);
+    expect(statusPending.err).toMatch(/have not settled at the timeout: a commit status still running.*\(QUEUE_TRAIN_PENDING\)/);
+    fx.write(d => { d.statuses = { [sha]: [{ state: 'failure', context: 'ci/vendor' }] }; });
+    const statusRed = queue(fx, ['verify', '--post-merge', sha, '--timeout', '1']);
+    expect([statusRed.status, line(statusRed.out, 'POST_MERGE:')]).toEqual([EXIT.fail, `POST_MERGE: ${sha.slice(0, 12)} red (passed=2 failed=1 pending=0 skipped=1)`]);
+    expect(statusRed.err).toMatch(/are red: a commit status \(no check run failed\).*\(QUEUE_POST_MERGE_RED\)/);
+    fx.write(d => { d.statuses = {}; d.ci[sha] = []; });
     const none = queue(fx, ['verify', '--post-merge', sha, '--timeout', '1']);
     expect([none.status, line(none.out, 'POST_MERGE:')]).toEqual([EXIT.refused, `POST_MERGE: ${sha.slice(0, 12)} none (passed=0 failed=0 pending=0 skipped=0)`]);
     expect(none.err).toMatch(new RegExp(`no check run has attached to ${sha.slice(0, 12)} yet.*\\(QUEUE_TRAIN_PENDING\\)`));

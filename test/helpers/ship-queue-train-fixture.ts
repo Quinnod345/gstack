@@ -45,6 +45,8 @@ export interface ShimData {
   repo: string; origin: string; nextId: number; prs: Record<string, unknown>; runs: Array<Record<string, unknown>>;
   artifacts: Record<string, Record<string, unknown>>; checks: Record<string, Array<{ name: string; status: string; conclusion: string | null }>>;
   ci: Record<string, unknown[]>; rules: Record<string, Rule>; artifact: string; log: Array<Record<string, unknown>>;
+  /** Commit statuses (the legacy status API) at a sha, beside the check runs in `ci`. */
+  statuses?: Record<string, Array<{ state: string; context: string }>>;
 }
 
 export interface TrainFixture { repo: FixtureRepo; state: string; dataFile: string; env: Record<string, string>; read: () => ShimData; write: (fn: (d: ShimData) => void) => void }
@@ -202,7 +204,7 @@ function shimSource(): string {
     "  const named = /commits\\/([0-9a-f]+)\\/check-runs\\?check_name=([^&]+)/.exec(a[1] || '');",
     "  if (named) { const list = (d.checks[named[1]] || []).filter(c => c.name === decodeURIComponent(named[2])); out({ total_count: list.length, check_runs: list }); }",
     "  const paged = /commits\\/([0-9a-f]+)\\/(check-runs|status)\\?.*page=(\\d+)/.exec(a[1] || '');",
-    "  if (paged) { const list = paged[2] === 'check-runs' ? (d.ci[paged[1]] || []) : []; const key = paged[2] === 'check-runs' ? 'check_runs' : 'statuses';",
+    "  if (paged) { const list = paged[2] === 'check-runs' ? (d.ci[paged[1]] || []) : ((d.statuses || {})[paged[1]] || []); const key = paged[2] === 'check-runs' ? 'check_runs' : 'statuses';",
     "    out(paged[3] === '1' ? { total_count: list.length, state: 'success', [key]: list } : { total_count: list.length, [key]: [] }); }",
     "}",
     "fail('gh shim: unsupported ' + a.join(' '));",

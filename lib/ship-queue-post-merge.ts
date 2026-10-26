@@ -8,7 +8,9 @@
  * until none is still running or the timeout passes, prints one `CHECK:`
  * line per check, and a `POST_MERGE:` summary that is green only when at
  * least one check completed and none failed; a neutral or skipped check is
- * skipped, never red. Rerun it after an interruption and it continues.
+ * skipped, never red. Commit statuses count too: a pending status keeps the
+ * commit pending, a failed one makes it red (named as a commit status when no
+ * check run failed). Rerun it after an interruption and it continues.
  */
 import { ciAtHead, type QueueContext } from './ship-queue';
 import { outFailed, outOk, outPending, type TrainOut } from './ship-queue-train';
@@ -25,17 +27,17 @@ export async function verifyPostMerge(ctx: QueueContext, o: PostMergeOptions): P
   for (;;) {
     const ci = ciAtHead(ctx, o.sha);
     const lines = [`POST_MERGE: ${ci.line.replace(/^(\S+) at ([0-9a-f]+)/, '$2 $1')}`, ...ci.checks.map(c => `CHECK: ${c.name} ${c.status === 'completed' ? c.conclusion ?? 'unknown' : c.status}`)];
-    const settled = !ci.checks.some(c => c.status !== 'completed') && !ci.line.startsWith('unknown');
+    const settled = !ci.none && !/^(pending|unknown) /.test(ci.line) && !ci.checks.some(c => c.status !== 'completed');
     if (settled && ci.green) return outOk(lines, 'none', 'none');
-    if (settled && ci.checks.length) {
+    if (settled) {
       const red = ci.checks.filter(c => c.status === 'completed' && !['success', 'skipped', 'neutral'].includes(c.conclusion ?? '')).map(c => c.name);
-      return outFailed({ code: 'QUEUE_POST_MERGE_RED', message: `main's push workflows at ${at} are red: ${red.join(', ')}` }, lines,
+      return outFailed({ code: 'QUEUE_POST_MERGE_RED', message: `main's push workflows at ${at} are red: ${red.join(', ') || 'a commit status (no check run failed)'}` }, lines,
         `read the red run, repair on a new PR or roll back; ${Q} train status names the freeze if the backstop filed one`, 'none');
     }
     if (Date.now() >= deadline) {
       const pending = ci.checks.filter(c => c.status !== 'completed').map(c => c.name);
       const message = ci.line.startsWith('unknown') ? `the check runs at ${at} are unreadable (${ci.line.replace(/^unknown at [0-9a-f]+ /, '')})`
-        : ci.checks.length ? `main's push workflows at ${at} have not settled at the timeout: ${pending.join(', ')} still running` : `no check run has attached to ${at} yet`;
+        : ci.none ? `no check run has attached to ${at} yet` : `main's push workflows at ${at} have not settled at the timeout: ${pending.join(', ') || 'a commit status'} still running`;
       return outPending({ code: 'QUEUE_TRAIN_PENDING', message }, lines, again, 'none');
     }
     await sleep(o.pollMs);
