@@ -232,12 +232,15 @@ Before writing ANY fix, verify your hypothesis.
 - "Quick fix for now" — there is no "for now." Fix it right or escalate.
 - Proposing a fix before tracing data flow — you're guessing.
 - Each fix reveals a new problem elsewhere — wrong layer, not wrong code.
+- Two fixes that shared one premise failed the same gate — write the premise down in one sentence and test it before a third fix. The evidence already points away from it.
 
 ---
 
 ## Phase 4: Implementation
 
 Once root cause is confirmed:
+
+{{SECTION:blast-radius}}
 
 1. **Fix the root cause, not the symptom.** The smallest change that eliminates the actual problem.
 

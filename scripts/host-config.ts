@@ -140,6 +140,17 @@ export interface HostConfig {
   learningsMode?: 'full' | 'basic';
   /** Anti-prompt-injection boundary instruction for cross-model invocations. */
   boundaryInstruction?: string;
+
+  // --- Session transcripts ---
+  /**
+   * Where this host keeps its own chat transcripts on disk, read by
+   * /context-restore's no-checkpoint fallback (sections/transcripts.md).
+   * `root` is the path pattern shown to the user; `layout` says how the
+   * current workspace's files are told apart from another project's. Absent:
+   * the host declares no transcript store, and the skill says so and falls
+   * back to the shared record and git.
+   */
+  transcripts?: { root: string; layout: string };
 }
 
 // --- Validation ---

@@ -33,6 +33,12 @@
       "file": "backlog.md",
       "title": "Backlog mode: classify each open issue still_open / already_fixed <commit> / partially_fixed / owned_elsewhere, read-only table, no closing",
       "trigger": "running `/investigate --backlog` (read-only issue triage instead of Phases 1–5)"
+    },
+    {
+      "id": "blast-radius",
+      "file": "blast-radius.md",
+      "title": "Blast radius: the one fact the change is safe because of, the five-rung evidence ladder, look where grep stops, cleared risks listed apart",
+      "trigger": "fixing a shared helper, library call or data format, or when asked what a change could break"
     }
   ]
 }

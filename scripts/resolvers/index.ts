@@ -55,6 +55,7 @@ import { generateCoordinatorContract } from './coordinator-contract';
 import { generateAutoplanDriverCodes, generateAutoplanDriverCommands, generateAutoplanDriverFiles, generateAutoplanDriverGate, generateAutoplanDriverPhases, generateAutoplanDriverResultFormat } from './autoplan-driver';
 import { generateQAScope, generateQAExploratory, generateQAFunctional, generateQAResource, generateQAReview, generateQAReviewPreflight, generateQAMethodReads } from './qa';
 import { generateVoiceTriggerRouting } from './voice-triggers';
+import { generateTranscriptDiscovery, generateTranscriptSources } from './transcripts';
 
 export const RESOLVERS: Record<string, ResolverFn> = {
   AUTOPLAN_PUBLICATION_HOOK: generateAutoplanPublicationHook,
@@ -189,4 +190,6 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   AUTOPLAN_DRIVER_CODES: generateAutoplanDriverCodes,
   SECTION,
   SECTION_INDEX,
+  TRANSCRIPT_SOURCES: generateTranscriptSources,
+  TRANSCRIPT_DISCOVERY: generateTranscriptDiscovery,
 };

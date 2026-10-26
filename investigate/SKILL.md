@@ -417,6 +417,7 @@ sections. Read a section in full before doing its step; do not work from memory.
 | investigating a timing-dependent failure or corrupted shared state (a race), before proposing a fix | `sections/race.md` |
 | investigating a judged or scored metric that regressed between two revisions (an eval bisect) | `sections/eval-bisect.md` |
 | running `/investigate --backlog` (read-only issue triage instead of Phases 1–5) | `sections/backlog.md` |
+| fixing a shared helper, library call or data format, or when asked what a change could break | `sections/blast-radius.md` |
 ---
 
 
@@ -651,12 +652,16 @@ Before writing ANY fix, verify your hypothesis.
 - "Quick fix for now" — there is no "for now." Fix it right or escalate.
 - Proposing a fix before tracing data flow — you're guessing.
 - Each fix reveals a new problem elsewhere — wrong layer, not wrong code.
+- Two fixes that shared one premise failed the same gate — write the premise down in one sentence and test it before a third fix. The evidence already points away from it.
 
 ---
 
 ## Phase 4: Implementation
 
 Once root cause is confirmed:
+
+> **STOP.** Before fixing a shared helper, library call or data format, or when asked what a change could break, Read `~/.claude/skills/gstack/investigate/sections/blast-radius.md` and execute it
+> in full. Do not work from memory — that section is the source of truth for this step.
 
 1. **Fix the root cause, not the symptom.** The smallest change that eliminates the actual problem.
 
