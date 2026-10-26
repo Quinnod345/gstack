@@ -32,11 +32,16 @@ const PLAN = 'paid-plan';
 
 /** The newest attempt's artifact of a name family (`<name>-a<attempt>`); null when the run uploaded none or the list is unreadable. */
 function newestArtifact(ctx: QueueContext, slug: string, run: number, name: string): string | null | 'unreadable' {
-  const r = ctx.gh(['api', `repos/${slug}/actions/runs/${run}/artifacts?per_page=100`]);
-  let list: { artifacts?: Array<{ name?: string; expired?: boolean }> } | null = null;
-  try { list = r.ok ? JSON.parse(r.out) : null; } catch {}
-  if (!Array.isArray(list?.artifacts)) return 'unreadable';
-  const hits = list.artifacts.map(a => ({ name: a.name ?? '', expired: !!a.expired, attempt: Number(new RegExp(`^${name}-a(\\d+)$`).exec(a.name ?? '')?.[1]) }))
+  const artifacts: Array<{ name?: string; expired?: boolean }> = [];
+  for (let page = 1; page <= 20; page++) {
+    const r = ctx.gh(['api', `repos/${slug}/actions/runs/${run}/artifacts?per_page=100&page=${page}`]);
+    let list: { artifacts?: Array<{ name?: string; expired?: boolean }> } | null = null;
+    try { list = r.ok ? JSON.parse(r.out) : null; } catch {}
+    if (!Array.isArray(list?.artifacts)) return 'unreadable';
+    artifacts.push(...list.artifacts);
+    if (list.artifacts.length < 100) break;
+  }
+  const hits = artifacts.map(a => ({ name: a.name ?? '', expired: !!a.expired, attempt: Number(new RegExp(`^${name}-a(\\d+)$`).exec(a.name ?? '')?.[1]) }))
     .filter(a => Number.isSafeInteger(a.attempt)).sort((a, b) => b.attempt - a.attempt);
   if (!hits.length) return null;
   return hits[0]!.expired ? 'unreadable' : hits[0]!.name;
