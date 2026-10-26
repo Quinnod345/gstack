@@ -195,6 +195,25 @@ describe("upstream fix a: root-as-container + walkMd exclusions", () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("skips a git checkout inside or linked from a skill, as it skips the root's gstack/ checkout", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-nested-repo-"));
+    fs.mkdirSync(path.join(tmp, "qa", "vendor", "lib", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(tmp, "qa", "vendor", "lib", "README.md"), "VENDORED ".repeat(500));
+    const ext = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-nested-repo-ext-"));
+    fs.mkdirSync(path.join(ext, ".git"));
+    fs.writeFileSync(path.join(ext, "NOTES.md"), "LINKED-REPO");
+    fs.symlinkSync(ext, path.join(tmp, "qa", "linked"));
+    const walked = walkMd(path.join(tmp, "qa")).map((f) => path.relative(tmp, f));
+    const billed = buildBill(tmp).skills[0].totalMdBytes;
+    const skillBytes = fileBytes(tmp, "qa", "SKILL.md");
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ext, { recursive: true, force: true });
+    expect(walked).toEqual([path.join("qa", "SKILL.md")]);
+    expect(billed).toBe(skillBytes);
+  });
+
   it("walkMd skips node_modules and dot-directories", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-walk-"));
     fs.writeFileSync(path.join(tmp, "real.md"), "x");
@@ -1247,12 +1266,13 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.mkdirSync(path.join(tmp, "alpha"));
     fs.writeFileSync(path.join(tmp, "alpha", "SKILL.md"), "---\nname: alpha\ndescription: d\n---\n# alpha\n");
     fs.writeFileSync(path.join(tmp, "alpha", "empty.md"), "");
+    fs.writeFileSync(path.join(tmp, "alpha", "blank.md"), " \n");
     fs.mkdirSync(path.join(tmp, "beta"));
     fs.writeFileSync(path.join(tmp, "beta", "SKILL.md"), "# beta has no frontmatter\n");
     const inner = fakeFetch() as unknown as (u: string, i: { body: string }) => Promise<unknown>;
     const strict = (async (u: string, i: { body: string }) =>
-      JSON.parse(i.body).messages[0].content === ""
-        ? { ok: false, status: 400, text: async () => "messages.0: user messages must have non-empty content" }
+      !/\S/.test(JSON.parse(i.body).messages[0].content)
+        ? { ok: false, status: 400, text: async () => "messages: text content blocks must contain non-whitespace text" }
         : inner(u, i)) as never;
     const measured = await measureExactTokens(tmp, { model: "m", apiKey: "sk-test", fetchImpl: strict, egressHome });
     const bill = buildBill(tmp, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource, missedKeys: measured.missedKeys });
@@ -1260,6 +1280,52 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect([...measured.missedKeys]).toEqual([]);
     expect(bill.tokenEstimateErrorPct).toBe(0);
     expect(bill.tokenSource).toBe("count_tokens (m)");
+  });
+
+  it("sends nothing and writes no receipt when every billed file is blank", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-blank-"));
+    fs.mkdirSync(path.join(tmp, "skills", "qa"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "skills", "qa", "SKILL.md"), "\n");
+    const home = path.join(tmp, "egress");
+    const calls: { body: string }[] = [];
+    const measured = await measureExactTokens(path.join(tmp, "skills"), { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome: home });
+    const stderr = capture();
+    const code = await contextBillMain([path.join(tmp, "skills"), "--exact", "--json"], {
+      stdout: capture().stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome: home,
+    });
+    const receipts = listReceipts(home).length;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(calls).toEqual([]);
+    expect(receipts).toBe(0);
+    expect([...measured.missedKeys]).toEqual([]);
+    expect(code).toBe(0);
+    expect(stderr.text()).not.toContain("sending the content");
+    expect(stderr.text()).toContain("nothing was sent");
+  });
+
+  it("still bills the tree when the state root is not a readable directory", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-stateroot-file-"));
+    const stateRoot = path.join(tmp, "statefile");
+    fs.writeFileSync(stateRoot, "not a directory");
+    fs.mkdirSync(path.join(tmp, "skills", "qa"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "skills", "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    const stdout = capture();
+    const code = await contextBillMain([path.join(tmp, "skills"), "--exact", "--json"], {
+      stdout: stdout.stream,
+      stderr: capture().stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(),
+      egressHome,
+      stateRoot,
+    });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.text()).tokenSource).toBe("count_tokens (claude-opus-4-5)");
   });
 
   it("refuses a walked file swapped for a FIFO instead of hanging", () => {

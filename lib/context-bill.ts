@@ -875,10 +875,19 @@ export interface ExactSendSet {
   refused: WalkedFile[];
   /** Realpath of the gstack checkout the root's gstack/ entry links to, when there is one. */
   checkout?: string;
-  /** Realpath of gstack's render folder ($GSTACK_STATE_ROOT/render), when it exists. */
+  /** Realpath of gstack's render folder ($GSTACK_STATE_ROOT/render) when it is a real directory; a render link is not trusted. */
   render?: string;
   /** Realpaths of the SKILL.md files whose frontmatter the bill prices. */
   frontmatter: Set<string>;
+}
+
+/** The realpath of `dir` when it is a real directory, not a link; otherwise (missing, unreadable, a file) undefined. */
+function realDirectory(dir: string): string | undefined {
+  try {
+    return fs.lstatSync(dir).isDirectory() ? fs.realpathSync(dir) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A git checkout with VERSION, setup and a SKILL.md named gstack. */
@@ -896,7 +905,7 @@ function isGstackCheckout(dir: string): boolean {
  * (the root's gstack/ entry, when it is a git checkout whose SKILL.md is named
  * gstack and which has VERSION and setup) or inside gstack's render folder
  * ($GSTACK_STATE_ROOT/render, where setup renders the SKILL.md files some
- * installs link to) are sent; anything else a link reaches is refused and
+ * installs link to; trusted only as a real directory, not a link) are sent; anything else a link reaches is refused and
  * estimated offline. Each file is judged by its realpath, so a link out of
  * one of those folders is refused too.
  *
@@ -914,8 +923,7 @@ export function exactSendSet(root: string, stateRoot: string = resolveStateRoot(
   const rootReal = fs.realpathSync(resolved);
   const gstackEntry = path.join(resolved, "gstack");
   const checkout = isGstackCheckout(gstackEntry) ? fs.realpathSync(gstackEntry) : undefined;
-  const renderDir = path.join(stateRoot, "render");
-  const render = fs.lstatSync(renderDir, { throwIfNoEntry: false })?.isDirectory() ? fs.realpathSync(renderDir) : undefined;
+  const render = realDirectory(path.join(stateRoot, "render"));
   const approved = [rootReal, checkout, render].filter((d): d is string => d !== undefined);
   for (const dir of findSkillDirs(resolved)) {
     frontmatter.add(fs.realpathSync(path.join(dir, "SKILL.md")));
@@ -997,13 +1005,15 @@ export interface ExactMeasurement {
  */
 export async function measureExactTokens(
   root: string,
-  { sendSet, model, apiKey, fetchImpl = fetch, onProgress, egressHome }: {
+  { sendSet, model, apiKey, fetchImpl = fetch, onProgress, onSend, egressHome }: {
     /** The send set from exactSendSet(root), when the caller already computed it. */
     sendSet?: ExactSendSet;
     model: string;
     apiKey: string;
     fetchImpl?: FetchLike;
     onProgress?: (done: number, total: number) => void;
+    /** Called with the files about to be sent, after they are read and before the receipt; not called when nothing is sent. */
+    onSend?: (files: WalkedFile[]) => void;
     egressHome?: string;
   },
 ): Promise<ExactMeasurement> {
@@ -1016,8 +1026,9 @@ export async function measureExactTokens(
   const opts: CountTokensOptions = { model, apiKey, fetchImpl };
 
   const texts = new Map<string, string>();
-  // Empty texts are not sent (count_tokens rejects empty content); they are
-  // measured as zero tokens.
+  // Blank texts are not sent (count_tokens rejects content with no
+  // non-whitespace text); they are measured as zero tokens. When nothing is
+  // left to send, no receipt is written and no request is made.
   const counts = new Map<string, number>();
   // The send set holds each real file once, so each is sent once. The bill keys
   // the same file by every lexical path it is billed under; measuredAs maps a
@@ -1031,13 +1042,52 @@ export async function measureExactTokens(
     const text = readWalkedFile(walked, root);
     measuredAs.set(fileIdentity(real, walked), file);
     realOf.set(file, real);
-    if (text) texts.set(file, text);
+    if (/\S/.test(text)) texts.set(file, text);
     else counts.set(file, 0);
     if (!frontmatter.has(real)) continue;
     const fm = parseFrontmatter(text);
     if (fm.block) texts.set(frontmatterKey(file), fm.block);
     else counts.set(frontmatterKey(file), 0);
   }
+
+  // A key the send set does not hold (a non-.md foreign-host file, or a file
+  // refused as outside the root, the checkout and the render folder) falls back to the
+  // estimate rather than billing zero. So does a key whose file is no longer
+  // the one measured (a link retargeted, or the file rewritten, since the walk).
+  // Misses are counted, not swallowed: a bill that is part-measured and
+  // part-estimated must not present itself as measured.
+  const missed = new Set<string>();
+  const fmSuffix = frontmatterKey("");
+  const measuredKey = (key: string): string | undefined => {
+    const isFm = key.endsWith(fmSuffix);
+    let real: string;
+    let st: fs.Stats;
+    try {
+      real = realpathStepwise(isFm ? key.slice(0, -fmSuffix.length) : key);
+      st = fs.lstatSync(real);
+    } catch {
+      return undefined;
+    }
+    const lexical = measuredAs.get(fileIdentity(real, st));
+    return lexical === undefined ? undefined : isFm ? frontmatterKey(lexical) : lexical;
+  };
+  const tokensOf: TokensOf = (key, bytes) => {
+    const alias = measuredKey(key);
+    const exact = alias === undefined ? undefined : counts.get(alias);
+    if (exact !== undefined) return exact;
+    missed.add(key);
+    return estimateTokensOf(key, bytes);
+  };
+  const measurement: ExactMeasurement = {
+    tokenSource: `count_tokens (${model})`,
+    tokensOf,
+    measuredFiles: 0,
+    counts,
+    realOf,
+    missedKeys: missed,
+  };
+  if (texts.size === 0) return measurement;
+  onSend?.(files.filter((f) => texts.has(f.path)));
 
   // Receipt-before-send. Content-free: file count + total bytes only.
   try {
@@ -1074,43 +1124,8 @@ export async function measureExactTokens(
     }
   };
   await Promise.all(Array.from({ length: Math.min(EXACT_CONCURRENCY, keys.length) }, worker));
-
-  // A key the send set does not hold (a non-.md foreign-host file, or a file
-  // refused as outside the root, the checkout and the render folder) falls back to the
-  // estimate rather than billing zero. So does a key whose file is no longer
-  // the one measured (a link retargeted, or the file rewritten, since the walk).
-  // Misses are counted, not swallowed: a bill that is part-measured and
-  // part-estimated must not present itself as measured.
-  const missed = new Set<string>();
-  const fmSuffix = frontmatterKey("");
-  const measuredKey = (key: string): string | undefined => {
-    const isFm = key.endsWith(fmSuffix);
-    let real: string;
-    let st: fs.Stats;
-    try {
-      real = realpathStepwise(isFm ? key.slice(0, -fmSuffix.length) : key);
-      st = fs.lstatSync(real);
-    } catch {
-      return undefined;
-    }
-    const lexical = measuredAs.get(fileIdentity(real, st));
-    return lexical === undefined ? undefined : isFm ? frontmatterKey(lexical) : lexical;
-  };
-  const tokensOf: TokensOf = (key, bytes) => {
-    const alias = measuredKey(key);
-    const exact = alias === undefined ? undefined : counts.get(alias);
-    if (exact !== undefined) return exact;
-    missed.add(key);
-    return estimateTokensOf(key, bytes);
-  };
-  return {
-    tokenSource: `count_tokens (${model})`,
-    tokensOf,
-    measuredFiles: counts.size,
-    counts,
-    realOf,
-    missedKeys: missed,
-  };
+  measurement.measuredFiles = counts.size;
+  return measurement;
 }
 
 export interface Calibration {
@@ -1278,27 +1293,36 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       }
       return {};
     }
-    const treeReal = fs.realpathSync(tree);
-    const outsideTree = set.files.filter((f) => !encloses(treeReal, f.real));
-    const inCheckout = outsideTree.filter((f) => set.checkout && encloses(set.checkout, f.real)).length;
-    const inRender = outsideTree.length - inCheckout;
-    const from = [
-      inCheckout ? `${inCheckout} of them in the gstack checkout ${set.checkout}` : "",
-      inRender ? `${inRender} in gstack's render folder ${set.render}` : "",
-    ].filter(Boolean);
-    stderr.write(
-      `--exact: sending the content of ${set.files.length} .md file(s) under ${tree}` +
-        (from.length ? ` (${from.join(", ")})` : "") +
-        ` to api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
-    );
+    let announced = false;
+    const announce = (sent: WalkedFile[]) => {
+      announced = true;
+      const treeReal = fs.realpathSync(tree);
+      const outsideTree = sent.filter((f) => !encloses(treeReal, f.real));
+      const inCheckout = outsideTree.filter((f) => set.checkout && encloses(set.checkout, f.real)).length;
+      const inRender = outsideTree.length - inCheckout;
+      const from = [
+        inCheckout ? `${inCheckout} of them in the gstack checkout ${set.checkout}` : "",
+        inRender ? `${inRender} in gstack's render folder ${set.render}` : "",
+      ].filter(Boolean);
+      stderr.write(
+        `--exact: sending the content of ${sent.length} .md file(s) under ${tree}` +
+          (from.length ? ` (${from.join(", ")})` : "") +
+          ` to api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
+      );
+    };
     try {
       const measured = await measureExactTokens(tree, {
         sendSet: set,
         model: flags.exactModel,
         apiKey: options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "",
         fetchImpl: options.fetchImpl,
+        onSend: announce,
         egressHome: options.egressHome,
       });
+      if (!announced) {
+        stderr.write(`--exact: every billed .md file under ${tree} is blank; nothing was sent, so the bill uses the offline estimate.\n`);
+        return {};
+      }
       return {
         tokensOf: measured.tokensOf,
         tokenSource: measured.tokenSource,
