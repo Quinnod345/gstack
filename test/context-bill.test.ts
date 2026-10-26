@@ -391,6 +391,17 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("bills a subdirectory whose SKILL.md is a directory to its container, as discovery does not count it as a skill", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-skilldir-"));
+    fs.writeFileSync(path.join(root, "SKILL.md"), "---\nname: c\ndescription: d\n---\n# c\n");
+    fs.mkdirSync(path.join(root, "sub", "SKILL.md"), { recursive: true });
+    fs.writeFileSync(path.join(root, "sub", "notes.md"), "n".repeat(500));
+    const bill = buildBill(root);
+    fs.rmSync(root, { recursive: true, force: true });
+    expect(bill.skills.map((s) => s.name)).toEqual([path.basename(root)]);
+    expect(bill.skills[0].totalMdBytes).toBe(bill.skills[0].skillMdBytes + 500);
+  });
+
   it("refuses a parent link when the root's own name starts with '..'", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-dotdot-"));

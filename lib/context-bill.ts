@@ -210,6 +210,14 @@ function parseFrontmatter(text: string): { bytes: number; keys: string[]; block:
  * Dirent type check sees none of them. Dangling links and anything that is
  * neither a file nor a directory are null.
  */
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function entryKind(p: string, e: fs.Dirent): "file" | "dir" | null {
   if (e.isFile()) return "file";
   if (e.isDirectory()) return "dir";
@@ -289,7 +297,7 @@ export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkill
       } else if (
         kind !== "dir" ||
         fs.existsSync(path.join(p, ".git")) ||
-        (opts.skipNestedSkills && current === dir && fs.existsSync(path.join(p, "SKILL.md")))
+        (opts.skipNestedSkills && current === dir && isFile(path.join(p, "SKILL.md")))
       ) {
         continue;
       }
