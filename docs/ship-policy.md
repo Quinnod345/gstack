@@ -191,7 +191,7 @@ dispatches the free workflows on the branch (`gh workflow run free-tests.yml
 clears the requires-remote pregate lanes with those runs
 (`gstack-pregate clear --remote <lane> --run-url <run>`) and reruns `ready`,
 which passes because the dispatched check runs attach to the commit; the
-`ci-hint:` line then says the dispatched runs count. The `ci-hint:` line is
+`ci-hint:` line then says those non-pull_request runs count. The `ci-hint:` line is
 advisory text for the lane; nothing parses it, and a PR whose head is on a fork
 gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
 PR is `QUEUE_SCREEN_STALE_REF` (there is no merge ref to screen), so it READYs

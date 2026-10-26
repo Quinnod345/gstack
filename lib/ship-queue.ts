@@ -130,10 +130,10 @@ function ciAtHead(ctx: QueueContext, sha: string): { line: string; green: boolea
  */
 function conflictHint(mergeable: unknown, ci: { green: boolean; none: boolean }, branch: string | undefined, fork: boolean, head: string): string | null {
   if (mergeable !== 'CONFLICTING') return null;
-  const ref = branch && /^[\w./-]+$/.test(branch) ? `--ref ${branch}` : '--ref <branch>';
+  const ref = branch && /^[\w.][\w./-]*$/.test(branch) ? `--ref ${branch}` : '--ref <branch>';
   if (ci.none && fork) return `ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${head.slice(0, 12)}) and its head is on a fork, so the free workflows cannot be dispatched here; the coordinator decides (advisory)`;
   if (ci.none) return `ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${head.slice(0, 12)}); dispatch the free workflows on the branch (gh workflow run free-tests.yml ${ref} && gh workflow run windows-free-tests.yml ${ref}), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready (advisory)`;
-  if (ci.green) return `ci-hint: PR conflicts with the base (no merge ref); the runs at ${head.slice(0, 12)} were dispatched on the branch, which counts (advisory)`;
+  if (ci.green) return `ci-hint: PR conflicts with the base (no merge ref); the runs at ${head.slice(0, 12)} were not pull_request runs (dispatched on the branch, or push-triggered), and they count (advisory)`;
   return null;
 }
 

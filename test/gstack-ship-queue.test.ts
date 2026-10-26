@@ -427,8 +427,10 @@ describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, 
     expect(r.status).toBe(EXIT.refused);
     expect(line(r.out, 'ci: ')).toBe(`ci: none at ${at} (passed=0 failed=0 pending=0 skipped=0)`);
     expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${at}); dispatch the free workflows on the branch (gh workflow run free-tests.yml --ref pr-a && gh workflow run windows-free-tests.yml --ref pr-a), clear the pregate lanes with their run URLs (gstack-pregate clear --remote <lane> --run-url <run>), then rerun ready (advisory)`);
-    const odd = readyWith('CONFLICTING', { check_runs: [] }, { headRefName: 'x;$(curl evil)' });
-    expect(line(odd.r.out, 'ci-hint: ')).toContain('gh workflow run free-tests.yml --ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>');
+    for (const name of ['x;$(curl evil)', '--field']) {
+      const odd = readyWith('CONFLICTING', { check_runs: [] }, { headRefName: name });
+      expect(line(odd.r.out, 'ci-hint: ')).toContain('gh workflow run free-tests.yml --ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>');
+    }
     const fork = readyWith('CONFLICTING', { check_runs: [] }, { isCrossRepository: true });
     expect(line(fork.r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref, so pull_request CI did not run on ${fork.at}) and its head is on a fork, so the free workflows cannot be dispatched here; the coordinator decides (advisory)`);
   }, 240_000);
@@ -436,7 +438,7 @@ describe('ready on a PR that conflicts with the base (CHANGELOG-only conflicts, 
   test('dispatched runs green at the head and a conflict: READY, with the hint saying the dispatched runs count', () => {
     const { r, at } = readyWith('CONFLICTING', { check_runs: [pass] });
     expect(r.status).toBe(EXIT.ok);
-    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were dispatched on the branch, which counts (advisory)`);
+    expect(line(r.out, 'ci-hint: ')).toBe(`ci-hint: PR conflicts with the base (no merge ref); the runs at ${at} were not pull_request runs (dispatched on the branch, or push-triggered), and they count (advisory)`);
   }, 120_000);
 
   test('no hint without a conflict, and none while the dispatched runs are red or pending', () => {
