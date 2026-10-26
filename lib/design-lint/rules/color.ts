@@ -12,7 +12,6 @@ import { mergedRules } from '../context';
 import { firstFamily, GENERIC_FAMILIES, isTokenRule, pxOf, resolveVars, splitTop, type CssDecl, type MergedRule, type Tokens } from '../css';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
-import { twGroup } from '../tailwind';
 
 const COLOR_FN = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
 
@@ -93,15 +92,6 @@ function check2(ctx: LintContext, r: Reporter): void {
       const banned = bannedGradient(gradientHues(washes, ctx.tokens), ctx.tokens);
       if (banned) r.report('purple-blue-gradient', rule.file, d.line, `${banned} gradient on ${rule.selector}`, { fix: 'one anchor hue; drop the gradient' });
     }
-  }
-  for (const it of twGroup(ctx).items) {
-    const { stops, gradientText } = it.info;
-    if (!stops.length || (!gradientText && stops.length < 2)) continue;
-    const hues = stops.map((s) => s.hue).filter((h): h is number => h != null);
-    const banned = bannedGradient(hues, ctx.twTokens ?? ctx.tokens);
-    const list = stops.map((s) => s.value).join(' ');
-    if (banned) r.report('purple-blue-gradient', it.file, it.line, `${banned} gradient${gradientText ? ' text' : ''} (${list}) on <${it.tag}>`);
-    else if (gradientText) r.report('gradient-text', it.file, it.line, `gradient text (${list}) on <${it.tag}>`);
   }
 }
 

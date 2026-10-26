@@ -168,30 +168,7 @@ describe('design-lint colour: literal-outside-tokens (48, blocks)', () => {
   });
 });
 
-describe('design-lint colour: Tailwind gradients through the parsed class strings', () => {
-  test('a purple-to-blue stop pair blocks, a one-hue gradient text asks, and no items means no findings', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-color-tw-'));
-    fs.writeFileSync(path.join(dir, 'tokens.css'), TOKENS);
-    const ctx = buildContext(dir, [path.join(dir, 'tokens.css')], [], { cwd: dir });
-    const info = { classes: [], bg: null, text: null, sizePx: null, trackingEm: null, upper: false, smallCaps: false, mono: false, variants: new Set<string>() };
-    const items: TwItem[] = [
-      { file: path.join(dir, 'Hero.tsx'), line: 4, idx: 2, tag: 'div', info: { ...info, gradientText: false, stops: [{ kind: 'palette', hue: 293, value: 'from-purple-500' }, { kind: 'palette', hue: 260, value: 'to-blue-500' }] } },
-      { file: path.join(dir, 'Hero.tsx'), line: 9, idx: 5, tag: 'span', info: { ...info, gradientText: true, stops: [{ kind: 'palette', hue: 70, value: 'from-amber-400' }, { kind: 'palette', hue: 50, value: 'to-orange-600' }] } },
-      { file: path.join(dir, 'Hero.tsx'), line: 12, idx: 7, tag: 'p', info: { ...info, gradientText: false, stops: [{ kind: 'palette', hue: 293, value: 'bg-purple-500' }] } },
-    ];
-    ctx.cache.tw = { items, variants: new Set<string>() };
-    const r = new Reporter('component', dir);
-    runColor(ctx, r);
-    expect(r.findings.filter((f) => f.rule === 'purple-blue-gradient' || f.rule === 'gradient-text').map((f) => [f.rule, f.grade, f.line, f.evidence])).toEqual([
-      ['purple-blue-gradient', 'blocks', 4, 'purple-to-blue gradient (from-purple-500 to-blue-500) on <div>'],
-      ['gradient-text', 'ask', 9, 'gradient text (from-amber-400 to-orange-600) on <span>'],
-    ]);
-    const empty = buildContext(dir, [path.join(dir, 'tokens.css')], [], { cwd: dir });
-    const r2 = new Reporter('component', dir);
-    runColor(empty, r2);
-    expect(r2.findings).toEqual([]);
-  });
-});
+// The Tailwind forms of 2a/2b are the component family's (rules/component.ts, test/design-lint-tailwind.test.ts).
 
 describe('design-lint colour: fixtures', () => {
   const MINE = new Set(['purple-blue-gradient', 'gradient-text', 'pure-black-white', 'absolute-surface-token', 'zero-chroma-neutrals', 'accent-footprint', 'glow-wash', 'cream-palette', 'framework-palette', 'literal-outside-tokens']);
