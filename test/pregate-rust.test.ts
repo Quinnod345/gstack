@@ -365,7 +365,8 @@ describe('gstack-pregate on a Rust workspace', () => {
     const repo = rustRepo();
     commit(repo, { 'engine/crates/lonely/src/lib.rs': 'pub fn alone() { }\n' });
     const r = run(repo, cargoShim(repo));
-    expect(r.status).not.toBe(EXIT.ok);
-    expect(r.out).toContain('FAIL lanes — engine/crates/lonely/src/lib.rs has no test lane');
+    expect(r.out).toContain('(PREGATE_NO_POLICY)');
+    expect(r.out).toContain('no policy: engine/crates/lonely/src/lib.rs have no test lane');
+    expect(r.out).not.toMatch(/^tests {6}lanes {5}pass /m);
   }, 60_000);
 });

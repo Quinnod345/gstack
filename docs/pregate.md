@@ -73,6 +73,7 @@ the byte-pinned `/ship` renders in `test/fixtures/golden/`).
 | `price_file` | repo-relative path of the paid gate's call-plan data file (`GSTACK_EVAL_CALLS v1`); `gstack-eval-plan price-gate` prices from it and never executes anything ([docs/eval-calls.md](eval-calls.md)) |
 | `stall_timeout_s` | seconds a test command may print nothing before its process group is killed and the check is `incomplete` (`PREGATE_STALLED`); default 300, `0` disables; `--stall-timeout` overrides (see [supervision](#supervision)) |
 | `remote_gate` | the repo's remote test gate command; under 8 cores the local test tier becomes a `requires-remote` obligation naming it, and `--remote` runs it (see [remote gate](#remote-gate)) |
+| `allowlist` | `[{ finding, paths?, pattern?, reason }]`: benign findings the `secrets` check accepts and names as allowlisted, by gstack-redact finding id or non-secret category, path globs and a pattern anchored at the finding; never `env.value` (see [allowlist](#allowlist)) |
 
 Only the `origin/<base>` copy or the user-owned file below is honoured, so a
 downgrade is reviewed (or is the user's own) before it takes effect. A repo that
@@ -104,6 +105,23 @@ instead of falling back to defaults. A base copy git cannot read (and
 `git ls-tree` cannot confirm is absent) refuses with `POLICY_SOURCE_UNAVAILABLE`
 instead of handing the run to the user file.
 `gstack-pregate validate` / `init` cover the working-tree file.
+
+<a id="no-policy"></a>
+**No policy yet.** A repository with no `.gstack/pregate.json` on the base
+branch and no user-owned file runs under the defaults, and a touched file that
+maps to no test is then a **warning**, not the hard `PREGATE_NO_LANE`: the
+`lanes` row is `warn` with `PREGATE_NO_POLICY`, the selected tests still run
+(a red lane is still `fail`, an unknown platform matrix is still a
+`requires-remote` obligation), and the table prints a starter policy drafted
+from the repository (`PREGATE_STARTER:` lines: the detected runner, the test
+directories, the CI lanes, then the JSON between `begin` and `end`, with a
+`dependencies` entry per unmapped touched file mapped to the tests nearest it
+or sharing its stem, never `[]`, and a `TODO` line for each file nothing
+covers). `run` writes nothing; `gstack-pregate init` is the explicit write.
+Once any policy exists (committed on the base, or the user-owned file), an
+unmapped file is `PREGATE_NO_LANE` again: the warning is for the first /ship
+in a new repository (three Captains lost their first pass to it), never a way
+to hide missing coverage. `--policy-from head` with a head policy is strict too.
 
 `gstack-pregate init` writes a draft built from the repo, not a fixed example.
 It prints the languages it found and the runner each language's tests would
@@ -426,6 +444,104 @@ guard is a *command* with its own fix line. Older gstack refuses unknown keys
 (`PREGATE_CONFIG_INVALID`), so a repo commits `guards` only after the gstack
 that reads them ships. The worked gbrain configuration is in
 [gbrain worked configs](#gbrain-worked-configs).
+
+<a id="allowlist"></a>
+## Allowlist: benign findings the secrets check accepts
+
+The `secrets` check cannot be downgraded, and that is right for a key. It also
+refused 1,800 per-trial dummy tokens in eval receipts (`"key": "sk-trial-<id>"`
+reads as `env.kv`), an 11-digit Actions run id read as a phone number, and
+excalidraw.com's public Firebase key that every rebuild of a bundle re-adds
+(harness-evals #81/#83, GSTA-102, GSTA-106). `allowlist` in the policy names
+those, each with its scope and its reason:
+
+```json
+{ "allowlist": [
+    { "finding": "env.kv", "paths": ["evals/**/receipts/*.json"], "pattern": "sk-trial-[0-9a-f-]+", "reason": "dummy per-trial meter ids" },
+    { "finding": "pii.phone.e164", "pattern": "\\d{11}", "reason": "GitHub Actions run ids in reports" },
+    { "finding": "google.api_key", "paths": ["lib/render/dist/bundle.js"], "pattern": "AIza[0-9A-Za-z_-]{35}", "reason": "the vendor's public web key, restricted server-side" } ] }
+```
+
+- `finding` is a gstack-redact finding id (`env.kv`, `google.api_key`,
+  `pii.phone.e164`, `internal.hostname`, …) or one of the categories `pii`,
+  `internal`, `hygiene`, `legal`. A secret is always named by its id; the
+  `secret` category cannot be allowlisted whole.
+- `paths` are contained globs over the added file's repo path; `pattern` is a
+  regular expression matched **at the finding's position in the added line**
+  and ending at a token boundary, so a dummy token's shape never covers a real
+  key that shares its line or starts the same way. One of the two is required;
+  `reason` always is, and the record repeats it.
+- **`env.value` is never allowlisted.** It is the real value of a
+  credential-named variable of the environment pregate ran in (#3449), found in
+  the added lines whatever its shape. Validation refuses an entry naming it
+  (`PREGATE_CONFIG_INVALID`), and the matcher never consults the list for it,
+  so a stale or hand-edited policy cannot silence it either.
+
+The `secrets` row says `N allowlisted (<ids>)` and lists each allowlisted
+finding with the entry (`allowlisted env.kv (evals/receipts/t1.json, added line
+3) by allowlist[0] env.kv: dummy per-trial meter ids`); `inputs.allowlist`
+carries the entries' digest, so a changed list is a changed input. The list is
+read from the base branch's copy (reviewed) or the user-owned file, like every
+other key; an unparsed scanner report keeps its exit-code verdict and is never
+allowlisted.
+
+<a id="environment"></a>
+## Environment failures, apart from diff failures
+
+A lane that could not run is not a lane that failed. When a check could not run
+its command because of the machine (truther #617: a root runner with a vitest
+config that found no file, a corpus fetch that stalled on one host and passed
+on another), the check is `incomplete` under its own code,
+**`PREGATE_ENVIRONMENT`**, with `cause: "environment"` and an
+`environment: { kind, evidence }` object in `pregate.json`, an
+`environment: <kind> — <evidence>` table line, and a fix that says so. A
+failure the branch caused carries `cause: "diff"` (`PREGATE_LANE_FAILED`,
+`PREGATE_GUARD_FAILED`, `PREGATE_SECRETS`). Kinds:
+
+| Kind | Evidence |
+|---|---|
+| `missing-binary` | exit 127, `command not found`, a spawn `ENOENT`, a runner tool `not on PATH` (dart, flutter, cargo, a package manager) |
+| `network` | `ENOTFOUND`, `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EAI_AGAIN`, `Could not resolve host`, `fetch failed`, a TLS handshake or certificate failure |
+| `quota` | `quota`, `429 Too Many Requests`, `rate limit`, `insufficient_quota` (a vCPU quota on the remote backend) |
+| `disk` | `ENOSPC`, `No space left on device`, `EDQUOT` |
+| `runtime` | the install verdict or the pinned Bun refused (`BUN_RESOLUTION_DRIFT`, `INSTALL_UNVERIFIED`) |
+| `tool` | gstack's own scanner (gstack-redact) did not finish or exited outside its contract |
+
+The classifier is conservative. A local lane that exited non-zero is read from
+its output **only when its runner reported no test summary** (nothing ran); a
+run whose summary counts `N ran, M failed` is the diff's failure whatever its
+log says, so a test that failed on `ECONNREFUSED` is still a red test. A
+remote gate that exited without a `PREGATE_REMOTE:` line and whose output
+names a quota or network error never ran the tests, so it is environment and
+the obligation stays uncleared. A guard that ran and said no is the diff's; a
+guard whose command the shell could not find is the machine's. A stall or a
+timeout keeps `PREGATE_STALLED` / `PREGATE_INCOMPLETE`: a hang has no
+single cause.
+
+`gstack-pregate verify` reports `PREGATE_ENVIRONMENT: <n> check(s) blocked by
+the environment (<kinds>), not by the diff` when every incomplete check is
+environment-caused, and names the kinds beside the generic
+`PREGATE_INCOMPLETE` otherwise; `--json` carries `cause` and `environment`
+per check. A lane that waives such a run cites the kind and the evidence, not a
+test name, and clears the lane remotely (`--remote`, or `gstack-pregate clear`
+with a run URL) rather than on the broken machine. Incomplete never passes.
+
+<a id="scratch"></a>
+## Scratch: one directory per run, under the state root
+
+Every run owns `<state root>/projects/<slug>/pregate/runs/<run id>/` (mode
+0700; `<run id>` is `--run <id>` reduced to `[A-Za-z0-9._-]`, else
+`<UTC stamp>-<pid>-<4 hex>`). The secrets scan's added-line copies
+(`secrets/`, deleted after the scan), the lane log (`lanes/lanes.log`), each
+guard's log (`guards/<id>.log`) and the remote gate's log and file list
+(`remote/`) live there, never under `os.tmpdir()`: two pregates in parallel
+(two lanes on one machine, a subagent beside its parent) never share a path,
+and the log a `fix:` line names survives a host that wipes `/tmp` between
+wakes. `pregate.json` records the directory as `scratch`, the table prints
+`scratch: <dir>`, and `--explain` names it. Runs older than 7 days under the
+same project are pruned when a new run starts (the current run never is). An
+unwritable state root falls back to a private directory under `os.tmpdir()`,
+still one per run, and `--explain` says so.
 
 <a id="timing"></a>
 ## Timing assertions

@@ -383,10 +383,12 @@ describe('gstack-pregate (bin)', () => {
       '.work/round-3-plan.md': '# plan\n',
       'lib/orphan.js': 'exports.lonely = () => 2;\n',
     });
+    // With no policy anywhere the unmapped source file is the PREGATE_NO_POLICY warning with a starter (Lane D), still never a pass, and the Markdown stays docs.
     const bad = pregate(mixed, ['--only', 'lanes']);
-    expect(bad.status).toBe(EXIT.fail);
-    expect(bad.err).toContain('(PREGATE_NO_LANE)');
-    expect(bad.out).toContain('lanes: FAIL lanes — lib/orphan.js has no test lane');
+    expect(bad.status).toBe(EXIT.ok);
+    expect(bad.err).not.toContain('PREGATE_NO_LANE');
+    expect(bad.out).toContain('(PREGATE_NO_POLICY)');
+    expect(bad.out).toContain('lanes: no policy: lib/orphan.js have no test lane');
     expect(bad.out).toContain('docs/no-tests (empty lane): .work/round-3-plan.md');
     expect(bad.out).not.toContain('.work/round-3-plan.md has no test lane');
 

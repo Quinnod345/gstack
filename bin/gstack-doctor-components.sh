@@ -282,6 +282,8 @@ gstack_result_anchor() {
     QUEUE_SCREEN_STALE_REF) printf '%s' 'queue-screen-stale-ref' ;;
     READY_SCREEN_CHOICE_REQUIRED) printf '%s' 'ready-screen-choice-required' ;;
     PREGATE_TIMING_ASSERTION) printf '%s' 'pregate-timing-assertion' ;;
+    PREGATE_NO_POLICY) printf '%s' 'pregate-no-policy' ;;
+    PREGATE_ENVIRONMENT) printf '%s' 'pregate-environment' ;;
     APPROVAL_CLASSES_INVALID) printf '%s' 'approval-classes-invalid' ;;
     APPROVAL_CLASS_FOUND) printf '%s' 'approval-class-found' ;;
     APPROVAL_CITATION_MISSING) printf '%s' 'approval-citation-missing' ;;

@@ -3052,8 +3052,10 @@ Other non-Markdown documentation goes in `empty_lanes` on the base branch.
 Dart files under `integration_test/` or `test_driver/` need a device, so pregate
 never runs them: declare `"**/integration_test/**": []` (and
 `"**/test_driver/**": []`) under `dependencies` and let CI run them.
-With no policy yet, `gstack-pregate init` drafts the `dependencies` entries
-from the repo and lists the files it could not place. `--explain` prints every mapping and why. For a file with no lane it also prints the import
+With no policy anywhere (no base copy, no user-owned file) an unmapped file is
+the warning [`PREGATE_NO_POLICY`](#pregate-no-policy) with a starter policy
+printed, not this error; `gstack-pregate init` writes that draft and lists the
+files it could not place. `--explain` prints every mapping and why. For a file with no lane it also prints the import
 specifiers in test files that resolved to no repo file (for example a
 `tsconfig.json` `paths` alias such as `@/lib/x` whose target is missing) and any
 `extends` hop that was not followed (only relative `extends`, at most 4 hops). If
@@ -3072,9 +3074,12 @@ should have found it, report the specifier as a resolver gap.
 <a id="pregate-incomplete"></a>
 ### `PREGATE_INCOMPLETE`
 
-**Meaning.** A check timed out, its tool is unavailable, repo commands were not
-allowed, or the working tree changed while the check ran. Incomplete is never
-pass and blocks publication.
+**Meaning.** A check timed out, repo commands were not allowed, no runner is
+declared or detected, or the working tree changed while the check ran.
+Incomplete is never pass and blocks publication. A tool missing from PATH, a
+network or quota error before any test ran, or a full disk is
+[`PREGATE_ENVIRONMENT`](#pregate-environment) instead, so the machine's failure
+reads apart from the diff's.
 
 **Fix.** Pass `--allow-repo-commands`, install the tool (for a Dart package the
 message names `not on PATH: dart` or `flutter`; fvm also works when the repo pins
@@ -3109,6 +3114,47 @@ as attested rather than validated.
 **Fix.** Run the remote gate on the tree pregate tested and pass its output
 file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
 <usd> --allow-repo-commands` run and validate it.
+
+<a id="pregate-no-policy"></a>
+### `PREGATE_NO_POLICY`
+
+**Meaning.** The repository has no pregate policy yet (no `.gstack/pregate.json`
+on the base branch and no user-owned `<state root>/projects/<slug>/pregate.json`)
+and a touched file maps to no test lane. Under no policy that is a `warn`, not
+`PREGATE_NO_LANE`: the selected tests still ran (a red lane is still `fail`),
+and the table printed a starter policy drafted from the repository
+(`PREGATE_STARTER:` lines: runner, test directories, CI lanes, the JSON between
+`begin` and `end`, a `TODO` per file nothing covers). `run` wrote nothing.
+Details: [docs/pregate.md](pregate.md#no-policy).
+
+**Fix.** Review the starter, write it with `gstack-pregate init` (it refuses to
+overwrite an existing file without `--force`), edit each `TODO` (a test that
+names the file, a `dependencies` entry, or `[]` for a file with no behaviour),
+run `gstack-pregate validate`, then commit `.gstack/pregate.json` on the base
+branch. From then on an unmapped file is `PREGATE_NO_LANE`.
+
+<a id="pregate-environment"></a>
+### `PREGATE_ENVIRONMENT`
+
+**Meaning.** A check could not run its command because of the machine, not the
+diff: a runner or guard binary missing from PATH (exit 127, `command not
+found`, a tool `not on PATH`), a network error or a quota refusal before any
+test was counted, a full disk, an unverified runtime, or gstack's own scanner
+not finishing. The check is `incomplete` (never pass) with `cause:
+"environment"` and `environment: { kind, evidence }` in `pregate.json`, and
+the table prints `environment: <kind> — <evidence>`. A test that failed and
+whose log also names a connection error is **not** this code: the runner's own
+summary counted a failure, so it is `PREGATE_LANE_FAILED` with `cause:
+"diff"`. Kinds and the rule: [docs/pregate.md](pregate.md#environment).
+
+**Fix.** Repair what the `environment:` line names on this machine (install the
+tool, restore the network or the quota, free the disk, repair the runtime), or
+run the lane where it can run: `gstack-pregate --stage tests --remote
+--spend-cap <usd> --allow-repo-commands`, or the CI job and `gstack-pregate
+clear --remote <workflow.yml/job> --run-url <url>`. A lane that waives the run
+cites the kind and the evidence, never a test name; `verify` prints
+`PREGATE_ENVIRONMENT: <n> check(s) blocked by the environment (<kinds>), not by
+the diff` so a coordinator can tell the two apart.
 
 <a id="pregate-stale"></a>
 ### `PREGATE_STALE`

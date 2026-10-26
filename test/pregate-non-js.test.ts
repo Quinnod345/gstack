@@ -72,28 +72,28 @@ describe('Django files loaded by name have a lane (#3266)', () => {
     const plain = fixture(DJANGO_APP);
     commit(plain, { 'orders/admin.py': 'from django.contrib import admin\nadmin.site.site_header = "Orders"\n' });
     const r = lanes(plain);
-    expect(r.status).toBe(EXIT.fail);
-    expect(r.out).toContain('FAIL lanes — orders/admin.py has no test lane');
+    expect(r.out).toContain('(PREGATE_NO_POLICY)');
+    expect(r.out).toContain('no policy: orders/admin.py have no test lane');
     expect(r.out).not.toContain('(framework)');
 
     const quoted = fixture({ ...DJANGO_APP, 'docs_example.py': 'EXAMPLE = """\nINSTALLED_APPS = []\n"""\n# ROOT_URLCONF = "config.urls"\n' });
     commit(quoted, { 'orders/admin.py': 'from django.contrib import admin\nadmin.site.site_header = "Orders"\n' });
     const q = lanes(quoted);
-    expect(q.out).toContain('FAIL lanes — orders/admin.py has no test lane');
+    expect(q.out).toContain('no policy: orders/admin.py have no test lane');
     expect(q.out).not.toContain('(framework)');
 
     const noDjango = fixture({ 'app/settings.py': 'INSTALLED_APPS = ["app.plugins.Core"]\n', 'app/__init__.py': '', 'app/plugins.py': 'class Core: pass\n', 'app/admin.py': 'X = 1\n', 'app/models.py': 'Y = 2\n', 'tests/test_app.py': 'def test_x():\n    assert True\n' });
     commit(noDjango, { 'app/admin.py': 'X = 2\n' });
     const n = lanes(noDjango);
-    expect(n.out).toContain('FAIL lanes — app/admin.py has no test lane');
+    expect(n.out).toContain('no policy: app/admin.py have no test lane');
     expect(n.out).not.toContain('(framework)');
 
     const django = fixture({ ...DJANGO_APP, 'config/settings.py': SETTINGS });
     commit(django, { 'scripts/oneoff.py': 'print("not loaded by Django or any test")\n' });
     const bad = lanes(django);
-    expect(bad.status).toBe(EXIT.fail);
-    expect(bad.err).toContain('(PREGATE_NO_LANE)');
-    expect(bad.out).toContain('FAIL lanes — scripts/oneoff.py has no test lane');
+    expect(bad.out).toContain('(PREGATE_NO_POLICY)');
+    expect(bad.out).toContain('no policy: scripts/oneoff.py have no test lane');
+    expect(bad.out).not.toMatch(/^tests {6}lanes {5}pass /m);
   });
 
   test('DJANGO_SETTINGS_MODULE in pytest.ini names the settings module when it assigns neither INSTALLED_APPS nor ROOT_URLCONF directly', () => {
@@ -148,8 +148,10 @@ describe('assets, licence text and tool config take an empty lane (#3267)', () =
       '.gstack/icon.svg': '<svg/>\n',
     });
     const r = lanes(repo);
-    expect(r.status).toBe(EXIT.fail);
-    for (const f of ['.nvmrc', '.env.test', '.github/workflows/lint.yml', 'notes/sketch.txt', 'lib/orphan.js', '.rspec', '.husky/pre-commit', 'styles/colors.css', 'src/__image_snapshots__/home.png', '.gstack/icon.svg']) expect(r.out).toContain(`FAIL lanes — ${f} has no test lane`);
+    const unmapped = ['.nvmrc', '.env.test', '.github/workflows/lint.yml', 'notes/sketch.txt', 'lib/orphan.js', '.rspec', '.husky/pre-commit', 'styles/colors.css', 'src/__image_snapshots__/home.png', '.gstack/icon.svg'];
+    const noPolicy = /^\s*lanes: no policy: (.*) have no test lane/m.exec(r.out)![1]!.split(' ');
+    for (const f of unmapped) expect(noPolicy).toContain(f);
+    expect(r.out).toContain('(PREGATE_NO_POLICY)');
     expect(r.out).not.toContain('no-tests (assets and tool config)');
 
     const named = fixture({ 'assets/logo.svg': '<svg/>\n', 'test/logo.test.js': "const test = require('node:test');\nconst fs = require('node:fs');\ntest('logo', () => { fs.readFileSync('assets/logo.svg', 'utf8'); });\n" });
