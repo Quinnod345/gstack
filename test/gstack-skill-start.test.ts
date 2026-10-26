@@ -23,6 +23,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { generatePreamble } from '../scripts/resolvers/preamble';
 import { HOST_PATHS, type TemplateContext } from '../scripts/resolvers/types';
+import { expectMentions } from './helpers/prompt-structure';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const START = path.join(ROOT, 'bin', 'gstack-skill-start');
@@ -389,6 +390,7 @@ describe('gstack-skill-start behavior', () => {
     for (const text of Object.values(blocks)) {
       expect(text).not.toContain('skill=<name>');
       expect(text).toMatch(/never choose them/);
+      expectMentions(text, [['destructive', 'irreversible', 'pending']], 'printed unattended-session block');
       expect(text).toMatch(/never approve a gate/);
       expect(text).toMatch(/never publish, push, sync or send data off this machine/);
     }
