@@ -478,7 +478,7 @@ _dc_check_revision() {
 # project rule, never a security minimum, so the row is PASS, SKIP or WARN
 # and never fails the run (the supported minimum is _dc_check_min_revision).
 _dc_check_floor() {
-  local project="$CHECK_PROJECT" file floor installed fix
+  local project="$CHECK_PROJECT" file flat floor installed fix
   if [ -z "$project" ]; then
     project=$(git rev-parse --show-toplevel 2>/dev/null)
     [ -n "$project" ] && [ "$(cd "$project" && pwd -P)" = "$ROOT_REAL" ] && project=""
@@ -492,11 +492,14 @@ _dc_check_floor() {
     _dc_row SKIP floor "$project declares none ($GSTACK_PROJECT_FLOOR_FILE absent; set $GSTACK_PROJECT_FLOOR_FIELD there to require a gstack version)"
     return
   fi
-  # Whitespace-insensitive: the value may sit on the line after its field.
-  floor=$(tr '\n\r\t' '   ' < "$file" 2>/dev/null | sed -n 's/.*"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"\([0-9][0-9.]*\)".*/\1/p' | head -1 | clamp '0-9.' 32)
+  # Whitespace-insensitive (the value may sit on the line after its field), the
+  # first occurrence wins (the top-level field in a policy file), and only the
+  # first 64 KiB are read: a real policy is a few KB.
+  flat=$(head -c 65536 "$file" 2>/dev/null | tr '\n\r\t' '   ')
+  floor=$(printf '%s' "$flat" | grep -o '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"[0-9][0-9.]*"' | head -1 | sed 's/.*"\([0-9][0-9.]*\)"$/\1/' | clamp '0-9.' 32)
   if [ -z "$floor" ]; then
-    if tr '\n\r\t' '   ' < "$file" 2>/dev/null | grep -q '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"'; then
-      _dc_row SKIP floor "$file sets $GSTACK_PROJECT_FLOOR_FIELD to something other than a dotted version (gstack-ship-queue rejects it)"
+    if printf '%s' "$flat" | grep -q '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"'; then
+      _dc_row SKIP floor "$file sets $GSTACK_PROJECT_FLOOR_FIELD to something other than a plain dotted version"
     else
       _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_FIELD (null or absent)"
     fi

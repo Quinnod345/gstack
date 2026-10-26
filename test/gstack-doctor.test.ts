@@ -674,13 +674,17 @@ describe('gstack-doctor --check', () => {
     expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets no min_gstack_version (null or absent))` });
     // A present value that is not a dotted version is named as such, never read as "absent"; the shell never evaluates it.
     write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "1.2.3-rc1; $(touch /tmp/pwned)"\n}\n');
-    expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets min_gstack_version to something other than a dotted version (gstack-ship-queue rejects it))` });
+    expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets min_gstack_version to something other than a plain dotted version)` });
+    expect(fs.existsSync('/tmp/pwned')).toBe(false);
     write(path.join(project, '.gstack/ship-policy.json'), `{\n  "min_gstack_version": "${VERSION}"\n}\n`);
     const met = row(f, ['--project', project]);
     expect(met.rows.floor).toEqual({ status: 'PASS', rest: `${VERSION} declared by ${project}/.gstack/ship-policy.json (installed ${VERSION})` });
     // Valid JSON may put the value on the line after its field (found by Codex in /ship's adversarial review).
     write(path.join(project, '.gstack/ship-policy.json'), `{\n  "bump": "patch",\n  "min_gstack_version":\n    "${VERSION}"\n}\n`);
     expect(row(f, ['--project', project]).rows.floor.status).toBe('PASS');
+    // The first occurrence is the top-level field: a later nested one never lowers the floor (found by Codex).
+    write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "999.0.0.0",\n  "$schema": {"min_gstack_version": "0.0.0"}\n}\n');
+    expect(row(f, ['--project', project]).rows.floor.status).toBe('WARN');
     write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "999.0.0.0"\n}\n');
     const wrapper = '/drive/skills/gstack/scripts/install.sh';
     const unmet = row(f, ['--project', project, '--for', 'health'], { GSTACK_CAPY_WRAPPER_PATH: wrapper });
