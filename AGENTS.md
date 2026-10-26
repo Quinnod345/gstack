@@ -64,6 +64,7 @@ Invoke them by name (e.g., `/office-hours`).
 | `/learn` | Manage what gstack learned across sessions. |
 | `/retro` | Weekly retro with per-person breakdowns and shipping streaks. |
 | `/health` | Code quality dashboard (type checker, linter, tests, dead code). |
+| `/captain` | Run a crew from one controller: READY contract, merge trains, digest, approvals shapes, daily flaky pass. Also `/crew`. Templates in `captain/templates/`, team guide in `docs/captain.md`. |
 | `/benchmark` | Performance regression detection (page load, Core Web Vitals). |
 | `/ubicloud` | Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs with a reaper, quota preflight, hang watchdog, one committed verify per repository. |
 | `/benchmark-models` | Cross-model benchmark for skills (Claude, GPT, Gemini side-by-side). |

@@ -138,6 +138,7 @@ export const SKILL_REQUIREMENTS: Readonly<Record<string, SkillRequirement>> = {
   'connect-chrome': BROWSER,
   'land-and-deploy': BROWSER,
   'benchmark-models': CLAUDE_ONLY,
+  captain: CLAUDE_ONLY,
   careful: CLAUDE_ONLY,
   'claude-code': CLAUDE_ONLY,
   'context-restore': CLAUDE_ONLY,
