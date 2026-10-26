@@ -80,7 +80,10 @@ const pregateJson = (repo: FixtureRepo) => JSON.parse(fs.readFileSync(path.join(
 const policyLabel = (repo: FixtureRepo) => `origin/main@${repo.git('rev-parse', 'origin/main').slice(0, 12)}:.gstack/ship-policy.json`;
 const describeStamps = STAMP_FILES.map(f => `${f.path} (${f.rule})`).join(', ');
 
-describe('clear --receipt accepts a stamp-only predecessor tree (gate ahead of the stamp)', () => {
+// Like test/pregate-remote.test.ts, this expects the Linux-host lanes verdict: on windows-latest the fixture's Linux lane is a
+// requires-remote obligation too, so the single-obligation assertions and `verify` ok do not hold there. The curation list in
+// scripts/lib/windows-curation.ts is the usual home for that; this file skips itself so the shared list is not edited here.
+describe.skipIf(process.platform === 'win32')('clear --receipt accepts a stamp-only predecessor tree (gate ahead of the stamp)', () => {
   test('a receipt for the gated tree clears the stamped head; the substitution names the trees, the policy and every file with its rule, and verify passes', async () => {
     const { repo, gated, gatedTree } = gatedRepo();
     const head = stamp(repo);
