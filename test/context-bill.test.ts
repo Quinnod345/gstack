@@ -1338,6 +1338,45 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     return { code, calls, err: stderr.text() };
   }
 
+  it("sends a render install's files from gstack's render folder, and refuses a link out of it", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-render-"));
+    const stateRoot = path.join(tmp, "state");
+    const rendered = path.join(stateRoot, "render", "claude", "review");
+    fs.mkdirSync(path.join(rendered, "sections"), { recursive: true });
+    fs.writeFileSync(path.join(rendered, "SKILL.md"), "---\nname: review\ndescription: d\n---\n# RENDER-SKILL\n");
+    fs.writeFileSync(path.join(rendered, "sections", "a.md"), "RENDER-SECTION");
+    fs.mkdirSync(path.join(tmp, "Documents"));
+    fs.writeFileSync(path.join(tmp, "Documents", "diary.md"), "PRIVATE-DIARY");
+    fs.symlinkSync(path.join(tmp, "Documents", "diary.md"), path.join(rendered, "notes.md"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "review"), { recursive: true });
+    for (const name of ["SKILL.md", "sections", "notes.md"]) fs.symlinkSync(path.join(rendered, name), path.join(skills, "review", name));
+
+    const calls: { body: string }[] = [];
+    const stdout = capture();
+    const stderr = capture();
+    const code = await contextBillMain([skills, "--exact", "--json"], {
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+      stateRoot,
+    });
+    const renderReal = fs.realpathSync(path.join(stateRoot, "render"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+    const err = stderr.text();
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.body.includes("RENDER-SKILL"))).toBe(true);
+    expect(calls.some((c) => c.body.includes("RENDER-SECTION"))).toBe(true);
+    expect(calls.some((c) => c.body.includes("PRIVATE-DIARY"))).toBe(false);
+    expect(err).toContain(`2 in gstack's render folder ${renderReal}`);
+    expect(err).toContain("not sending 1 .md file(s)");
+    expect(err).toContain(`  ${path.join("review", "notes.md")}\n`);
+    expect(JSON.parse(stdout.text()).tokenSource).toStartWith("mixed: ");
+  });
+
   it("names each outside directory once, collapsing nested ones, and lists every refused file", async () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-egress-dirs-"));
