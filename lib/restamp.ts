@@ -68,7 +68,7 @@ export interface RestampResult {
 
 function sha256(buf: Buffer | string): string { return createHash('sha256').update(buf).digest('hex'); }
 function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): { ok: boolean; out: string; err: string; status: number | null } {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000, env: env ?? process.env });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000, env: env ?? process.env, maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: (r.stdout ?? '').replace(/\n$/, ''), err: (r.stderr ?? '').trim(), status: r.status };
 }
 class Refusal extends Error { constructor(public code: ResultCodeName, message: string, public extra: Partial<RestampResult> = {}) { super(message); } }
@@ -380,9 +380,19 @@ function runStages(o: RestampOptions, plan: Plan, staging: string, since: string
     const r = reheadChangelog(fs.readFileSync(clPath, 'utf8'), { from, to: plan.newVersion, date, file: clRel! });
     if (r.error) { cl.status = 'failed'; cl.detail = r.error.message; throw new Refusal(r.error.code, `${clRel}: ${r.error.message}; nothing written to the branch`); }
     if (r.moved) fs.writeFileSync(clPath, r.text);
-    const check = checkChangelog(fs.readFileSync(clPath, 'utf8'), plan.newVersion, clRel!);
-    if (check.length) { cl.status = 'failed'; cl.detail = check[0]!.message; throw new Refusal(check[0]!.code, `${check[0]!.path}: ${check[0]!.message}; nothing written to the branch`); }
-    cl.status = 'done'; cl.detail = r.moved ? `${r.from} -> ${r.to}` : `already headed ${plan.newVersion}`;
+    // Inherited duplicates are allowed at the larger count of two base readings: the base tip and
+    // `since`, the commit the branch's own lines are counted from (its fork point, or the predecessor's
+    // head in a gate-ahead stamp), so neither a duplicate main collapsed after the fork nor one it
+    // gained since refuses the PR. A reading the base cannot show (the PR adds the file) is named.
+    const readings = [...new Set([plan.baseSha, since])].map(sha => ({ sha, cl: git(o.repoRoot, ['show', `${sha}:${clRel}`]) }));
+    const readable = readings.filter(x => x.cl.ok);
+    const unreadable = readings.filter(x => !x.cl.ok).map(x => `${x.sha.slice(0, 12)}:${clRel}`);
+    const baseNote = unreadable.length === 0 ? '' : readable.length === 0
+      ? `; base ${clRel} unreadable at ${unreadable.join(', ')}, so every duplicate heading counts`
+      : `; base ${clRel} unreadable at ${unreadable.join(', ')}, inherited headings counted at ${readable.map(x => x.sha.slice(0, 12)).join(', ')} only`;
+    const check = checkChangelog(fs.readFileSync(clPath, 'utf8'), plan.newVersion, clRel!, readable.map(x => x.cl.out + '\n'));
+    if (check.length) { cl.status = 'failed'; cl.detail = check[0]!.message + baseNote; throw new Refusal(check[0]!.code, `${check[0]!.path}: ${check[0]!.message}${baseNote}; nothing written to the branch`); }
+    cl.status = 'done'; cl.detail = (r.moved ? `${r.from} -> ${r.to}` : `already headed ${plan.newVersion}`) + baseNote;
   } else { cl.status = 'skipped'; cl.detail = clRel ? `${clRel} absent` : 'changelog: null'; }
   injected('changelog');
 
@@ -578,7 +588,9 @@ function gateAhead(o: RestampOptions, plan: Plan, stages: StageRecord[], common:
     if (resolvable) {
       for (const c of conflicts) {
         if (c === plan.policy.changelog) {
-          const merged = mergeChangelogs(git(dir, ['show', `:2:${c}`]).out + '\n', git(dir, ['show', `:3:${c}`]).out + '\n');
+          const stage = (n: number) => git(dir, ['show', `:${n}:${c}`]);
+          const [base, ours, theirs] = [stage(1), stage(2), stage(3)];
+          const merged = ours.ok && theirs.ok ? mergeChangelogs(ours.out + '\n', theirs.out + '\n', base.ok ? base.out + '\n' : undefined) : null;
           if (merged === null) { unresolved = [c]; break; }
           fs.writeFileSync(path.join(dir, c), merged);
         } else git(dir, ['checkout', '--theirs', '--', c]);

@@ -41,7 +41,7 @@ const prVersionEnv = (process.env.PR_VERSION ?? "").trim();
 if (process.env.BASE_REF && process.env.HEAD_SHA) {
   const train = classifyTrainHead({ repoRoot: process.cwd(), baseRef: process.env.BASE_REF, head: process.env.HEAD_SHA });
   if (train.kind === "unstamped") {
-    console.log(`✓ ${tag} is unstamped under the base's train policy: VERSION, package.json and the release outputs match its merge base, and the CHANGELOG change is confined to [Unreleased]. The lane stamps at its slot.`);
+    console.log(`✓ ${tag} is unstamped under the base's train policy: VERSION and package.json match its merge base, any changed release output is what the release tool generates at the merge base's VERSION, and the CHANGELOG change is confined to [Unreleased]. The lane stamps at its slot.`);
     process.exit(0);
   }
   if (train.kind === "invalid") {

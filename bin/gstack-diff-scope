@@ -42,6 +42,12 @@ MIGRATIONS=false
 API=false
 AUTH=false
 
+# Test-file paths, the same rule the test-bootstrap resolver counts as
+# TESTFILES (scripts/resolvers/testing.ts; test/diff-scope.test.ts keeps the two
+# identical). Nested test dirs and Python's test_*.py / tests.py were missed by
+# the root-anchored globs alone (#3335).
+TEST_PATH_RE='(^|/)(tests?|spec|__tests__)/|(^|/)tests?\.py$|(^|/)test_[^/]+\.py$|_test\.(go|py|rb|ts|js|exs|dart)$|\.(test|spec)\.[jt]sx?$|_spec\.rb$|Test\.(java|kt)$'
+
 _print_flags() {
   echo "SCOPE_FRONTEND=$FRONTEND"
   echo "SCOPE_BACKEND=$BACKEND"
@@ -126,7 +132,9 @@ for f in ${FILES_LIST[@]+"${FILES_LIST[@]}"}; do
   case "$f" in
     *.test.*|*.spec.*|*_test.*|*_spec.*) m_tests=true ;;
     test/*|tests/*|spec/*|__tests__/*|cypress/*|e2e/*) m_tests=true ;;
+    conftest.py|*/conftest.py) m_tests=true ;;
   esac
+  if [[ "$f" =~ $TEST_PATH_RE ]]; then m_tests=true; fi
 
   # Docs
   case "$f" in

@@ -12,6 +12,7 @@
  * prune, ready's screen choice, and the policy gate.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
@@ -19,7 +20,7 @@ import { TRAIN_HELP } from '../lib/ship-queue-train-cli';
 import { BASE_POLICY, cleanup, runBin } from './helpers/restamp-fixture';
 import { coordinatorClone } from './helpers/ship-queue-fixture';
 import {
-  COMPLETE, FAIL, GREEN_GATE, PASS, RED_GATE, TRAIN_BLOCK, TRAIN_POLICY, dispatches, line, nonceOf, openPr, queue, readyReceipt, repoKey, trainFixture, trainJson,
+  COMPLETE, FAIL, GREEN_GATE, PASS, RED_GATE, TRAIN_BLOCK, TRAIN_POLICY, dispatches, githubOrigin, line, mergeRefCommit, nonceOf, openPr, queue, readyReceipt, repoKey, setPrBody, shippedBody, trainFixture, trainJson, urlKey,
   type Rule, type TrainFixture,
 } from './helpers/ship-queue-train-fixture';
 
@@ -127,11 +128,61 @@ describe('ready under a train policy: the screen choice', () => {
     expect(dispatches(fx)).toEqual([]);
   }, 120_000);
 
+  test("GSTA-67: a lane whose origin is another URL form of the repository (#3331's git.capy.ai) writes its receipt under the owner/repo key", () => {
+    const { fx, head, pregate } = readyFixture();
+    githubOrigin(fx, 'https://git.capy.ai/fixture/repo.git');
+    const ok = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
+    expect(ok.status).toBe(EXIT.ok);
+    const canonical = urlKey('https://github.com/fixture/repo');
+    expect(canonical).not.toBe(urlKey('https://git.capy.ai/fixture/repo'));
+    expect(line(ok.out, 'READY_RECEIPT:')).toContain(path.join(fx.state, 'ship-queue', 'ready', canonical, `1-${head}.json`));
+  }, 120_000);
+
+  test("GSTA-67: ready refuses a head the Version Gate refuses (#3345's CHANGELOG replaced a released heading)", () => {
+    const fx = make();
+    const head = openPr(fx, '1', { changelog: cl => cl.replace('## [1.2.3.0] - 2026-10-01', '## [Unreleased]\n\n- #1 change') });
+    fx.write(d => { d.ci[head] = [{ status: 'completed', conclusion: 'success' }]; });
+    const tree = runBin(fx.repo, 'gstack-wtree', []).out.trim();
+    const pregate = path.join(fx.repo.root, 'pregate.json');
+    fs.writeFileSync(pregate, JSON.stringify({ schema_version: 1, tree, head, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
+    const r = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toContain(`the Version Gate refuses ${head.slice(0, 12)}: CHANGELOG.md drops released heading 1.2.3.0`);
+    expect(r.err).toContain('(QUEUE_NOT_READY)');
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
+  }, 120_000);
+
+  test('rule 22: READY needs the /ship receipt for this head in the PR body; none or another head refuses before any receipt is written, with no flag around it', () => {
+    const { fx, head, pregate } = readyFixture();
+    setPrBody(fx, '1', '## What changed\n\nno /ship ran\n');
+    const none = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
+    expect(none.status).toBe(EXIT.refused);
+    expect(none.out).toContain('SHIP_RECEIPT: none in the PR body');
+    expect(none.err).toMatch(/PR #1's body carries no ship receipt; fix: run \/ship on the branch .*there is no flag to skip this \(QUEUE_RECEIPT_MISSING\)/);
+    expect(next(none.out)).toBe('NEXT: fix the refusal, then gstack-ship-queue ready --pr 1 --screen|--no-screen');
+    const other = 'd'.repeat(40);
+    setPrBody(fx, '1', shippedBody('1', other));
+    const stale = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.out).toContain(`SHIP_RECEIPT: pr=1 head=dddddddddddd version=- base=main`);
+    expect(stale.err).toMatch(new RegExp(`PR #1's ship receipt is for dddddddddddd, not the head ${head.slice(0, 12)} being merged; fix: rerun /ship .*\\(QUEUE_RECEIPT_STALE\\)`));
+    setPrBody(fx, '1', shippedBody('2', head));
+    expect(queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']).err).toMatch(/PR #1's ship receipt names pr=2, not this PR.*\(QUEUE_RECEIPT_STALE\)/);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
+    setPrBody(fx, '1', shippedBody('1', head, { version: '1.2.4.0', session_kind: 'unattended' }));
+    const ok = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
+    expect(ok.status).toBe(EXIT.ok);
+    expect(line(ok.out, 'SHIP_RECEIPT:')).toBe(`SHIP_RECEIPT: pr=1 head=${head.slice(0, 12)} version=1.2.4.0 base=main session_kind=unattended`);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready', repoKey(fx), `1-${head}.json`))).toBe(true);
+  }, 120_000);
+
   test('--screen dispatches one screen with the PR, its merge SHA and the policy; a repeat adopts it; a broad screen never adopts the narrow one', () => {
     const { fx, head, pregate } = readyFixture();
+    const mergeSha = fx.repo.git('ls-remote', 'origin', 'refs/pull/1/merge').split(/\s/)[0]!;
+    expect(mergeSha).not.toBe(head);
     const dry = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen', '--dry-run']);
     expect(dry.status).toBe(EXIT.ok);
-    expect(line(dry.out, 'SCREEN_DISPATCH:')).toMatch(new RegExp(`^SCREEN_DISPATCH: evals\\.yml --ref main evals_all=false expected_sha=${head} nonce=pr\\.screen\\.narrow-\\S+ base_ref=main base_sha=[0-9a-f]{40} screen_pr=1 screen_merge_sha=${head} screen_policy=narrow \\(dry run: not dispatched\\)$`));
+    expect(line(dry.out, 'SCREEN_DISPATCH:')).toMatch(new RegExp(`^SCREEN_DISPATCH: evals\\.yml --ref main evals_all=false expected_sha=${mergeSha} nonce=pr\\.screen\\.narrow-\\S+ base_ref=main base_sha=[0-9a-f]{40} screen_pr=1 screen_merge_sha=${mergeSha} screen_policy=narrow \\(dry run: not dispatched\\)$`));
     expect(dispatches(fx)).toEqual([]);
     fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });
     const first = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
@@ -143,6 +194,99 @@ describe('ready under a train policy: the screen choice', () => {
     expect(broad.status).toBe(EXIT.ok);
     expect(dispatches(fx).map(d => (d.inputs as any).screen_policy)).toEqual(['narrow', 'broad']);
     expect(queue(fx, ['ready', '--pr', '1', '--broad']).status).toBe(EXIT.usage);
+  }, 120_000);
+
+  // Value: protects=--screen never dispatches against a merge ref GitHub has not recomputed for the PR head (GSTA-95 on #3431: a stale ref made evals.yml plan 0 cases and report success);
+  // fails_when=the merge ref's second parent is not compared with the PR head, or a missing merge ref keeps the old QUEUE_NOT_READY code; why_new=the --screen test above only sees a fresh merge ref; seam=none; no_claim=GitHub's real recompute timing (a bare origin stands in)
+  test('--screen refuses QUEUE_SCREEN_STALE_REF when refs/pull/<n>/merge lags the PR head or is missing, dispatching nothing; a recomputed merge ref admits it', () => {
+    const { fx, head, pregate } = readyFixture();
+    const { repo } = fx;
+    fs.appendFileSync(path.join(repo.work, 'pr-1.txt'), 'pushed after the merge ref was computed\n');
+    repo.git('commit', '-qam', 'more');
+    const moved = repo.git('rev-parse', 'HEAD');
+    repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/pull/1/head');
+    fx.write(d => { (d.prs['1'] as any).headRefOid = moved; (d.prs['1'] as any).body = shippedBody('1', moved); d.ci[moved] = [{ status: 'completed', conclusion: 'success' }]; });
+    const pregate2 = path.join(repo.root, 'pregate2.json');
+    fs.writeFileSync(pregate2, JSON.stringify({ schema_version: 1, tree: runBin(repo, 'gstack-wtree', []).out.trim(), head: moved, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
+    const stale = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toMatch(new RegExp(`refs/pull/1/merge \\([0-9a-f]{12}\\) merges ${head.slice(0, 12)}, not the PR head ${moved.slice(0, 12)}.*\\(QUEUE_SCREEN_STALE_REF\\)`));
+    expect(line(stale.out, 'NEXT:')).toBe('NEXT: resolve the conflict with main (or wait for GitHub to recompute refs/pull/1/merge), push, then gstack-ship-queue ready --pr 1 --screen; a screen dispatched on a stale merge ref plans no cases');
+    repo.git('push', '-q', 'origin', ':refs/pull/1/merge');
+    const missing = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    expect(missing.status).toBe(EXIT.refused);
+    expect(missing.err).toMatch(/has no refs\/pull\/1\/merge.*\(QUEUE_SCREEN_STALE_REF\)/);
+    const tree = repo.git('rev-parse', `${moved}^{tree}`);
+    const main = repo.git('rev-parse', 'origin/main');
+    const badMerge = spawnSync('git', ['-C', repo.origin, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { input: `tree ${tree}\nparent ${main}\nparent ${moved}\nauthor A <a@example.com> 1700000000 +0000\ncommitter B 1700000000 +0000\n\nmerge without a committer email\n`, encoding: 'utf8', timeout: 30_000 }).stdout.trim();
+    spawnSync('git', ['-C', repo.origin, 'update-ref', 'refs/pull/1/merge', badMerge], { timeout: 30_000 });
+    repo.git('config', 'fetch.fsckObjects', 'true');
+    const unfetchable = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    expect(unfetchable.status).toBe(EXIT.refused);
+    expect(unfetchable.err).toMatch(/could not fetch refs\/pull\/1\/merge from origin: .*\(QUEUE_SCREEN_STALE_REF\)/);
+    expect(line(unfetchable.out, 'NEXT:')).toBe('NEXT: check the remote, then gstack-ship-queue ready --pr 1 --screen');
+    repo.git('config', '--unset', 'fetch.fsckObjects');
+    const originUrl = repo.git('remote', 'get-url', 'origin');
+    repo.git('remote', 'set-url', 'origin', path.join(repo.root, 'no-such-origin.git'));
+    const unlisted = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    repo.git('remote', 'set-url', 'origin', originUrl);
+    expect(unlisted.status).toBe(EXIT.refused);
+    expect(unlisted.err).toMatch(/could not list origin's refs: .*\(QUEUE_SCREEN_STALE_REF\)/);
+    expect(unlisted.err.split('\n').filter(Boolean).length).toBe(1);
+    expect(dispatches(fx)).toEqual([]);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
+    repo.git('push', '-q', '-f', 'origin', `${mergeRefCommit(fx, moved)}:refs/pull/1/merge`);
+    const fresh = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen', '--dry-run']);
+    expect([fresh.status, fresh.err]).toEqual([EXIT.ok, '']);
+    expect(line(fresh.out, 'SCREEN_DISPATCH:')).toContain('(dry run: not dispatched)');
+  }, 120_000);
+
+  // Value: protects=a finished screen that planned 0 cases never counts as a screen: ready dispatches a fresh one instead of adopting it and train build seats the slot unscreened with a SCREEN: line;
+  // fails_when=the census is not read (a hollow run is followed, or ORDER says screened); why_new=no test reads a screen run's record; seam=none; no_claim=evals.yml's real artifact (the shim's record stands in)
+  test('a screen run that planned 0 cases is not followed by ready and is counted as not-run by train build', () => {
+    const { fx, head, pregate } = readyFixture();
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: null }; });
+    const first = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(first.status).toBe(EXIT.ok);
+    expect(line(first.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 100 /);
+    const again = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(again.status).toBe(EXIT.ok);
+    expect(line(again.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 101 .* \(not following run 100 planned no cases \(no paid-plan artifact; concluded success\): a screen that planned nothing is not a screen\)$/);
+    expect(dispatches(fx, 'evals.yml').length).toBe(2);
+    const build = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect(build.status).toBe(EXIT.ok);
+    expect(line(build.out, 'SCREEN:')).toBe('SCREEN: #1 run 101 planned no cases (no paid-plan artifact; concluded success); counted as not-run, the slot rides unscreened');
+    expect(line(build.out, 'ORDER:')).toBe('ORDER: 1:#1(unscreened)');
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 0 } }; });
+    const emptyPlan = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(line(emptyPlan.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 102 .*not following run 101 planned no cases/);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 3 } }; });
+    const live = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(live.status).toBe(EXIT.ok);
+    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 103 .*not following run 102 planned no cases \(an empty plan manifest; concluded success\)/);
+    const followed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(followed.status).toBe(EXIT.ok);
+    expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
+    expect(dispatches(fx, 'evals.yml').length).toBe(4);
+    const liveBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([liveBuild.status, line(liveBuild.out, 'ORDER:'), line(liveBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });
+    const runningBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([runningBuild.status, line(runningBuild.out, 'ORDER:'), line(runningBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success' }; d.artifacts['103']['paid-plan'] = { reuse: 'confirmed' }; });
+    const unreadable = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([unreadable.status, line(unreadable.out, 'ORDER:'), line(unreadable.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan manifest.json is unreadable; counted as screened, unverified"]);
+    const stillFollowed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(line(stillFollowed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
+    fx.write(d => { (d as any).expired = { '103': true }; });
+    const expired = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([expired.status, line(expired.out, 'ORDER:'), line(expired.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan artifact has expired; counted as screened, unverified"]);
+    fx.write(d => { (d as any).expired = {}; d.runs = d.runs.filter(r => (r as any).databaseId !== 103); });
+    const gone = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([gone.status, line(gone.out, 'ORDER:'), line(gone.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 run 103 is unreadable; counted as screened, unverified']);
+    fx.write(d => { (d as any).repo = ''; });
+    const noSlug = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([noSlug.status, line(noSlug.out, 'ORDER:'), line(noSlug.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 the repository slug is unreadable; counted as screened, unverified']);
   }, 120_000);
 });
 
@@ -207,6 +351,57 @@ describe('train build', () => {
     expect(dispatches(fx)).toEqual([]);
   }, 120_000);
 
+  test("GSTA-67: a PR whose CHANGELOG drops a released heading (#3345's pin 1eb7092) is a CHANGELOG conflict, never merged with the damage", () => {
+    const fx = make();
+    const h1 = openPr(fx, '1');
+    const h2 = openPr(fx, '2', { changelog: cl => cl.replace('## [1.2.3.0] - 2026-10-01', '## [Unreleased]\n\n- #2 change') });
+    readyReceipt(fx, '1', h1);
+    readyReceipt(fx, '2', h2);
+    const r = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, '--dry-run']);
+    expect(r.status).toBe(EXIT.fail);
+    expect(line(r.out, 'QUEUE_TRAIN_CONFLICT:')).toContain('stopped at #2 (conflicts: CHANGELOG.md (ours drops released heading 1.2.3.0 that the merge base carries)) after merging #1');
+    expect(dispatches(fx)).toEqual([]);
+  }, 120_000);
+
+  test("GSTA-67: READY receipts under any URL form of the repository admit (#3331's receipt was keyed on git.capy.ai, the coordinator's origin on github.com)", () => {
+    const fx = make();
+    githubOrigin(fx, 'https://github.com/fixture/repo.git');
+    const h1 = openPr(fx, '1');
+    const h2 = openPr(fx, '2');
+    readyReceipt(fx, '1', h1, { key: urlKey('https://git.capy.ai/fixture/repo') });
+    readyReceipt(fx, '2', h2, { key: urlKey('https://github.com/fixture/repo') });
+    const r = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, '--dry-run']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(line(r.out, 'ORDER:')).toBe('ORDER: 1:#1(unscreened) 2:#2(unscreened)');
+    const h3 = openPr(fx, '3');
+    readyReceipt(fx, '3', h3, { key: urlKey('https://gitlab.com/fixture/repo') });
+    expect(queue(fx, ['train', 'build', '--prs', `3@${h3}`, '--dry-run']).err).toMatch(/no READY receipt for #3 .*\(QUEUE_NOT_READY\)/);
+  }, 120_000);
+
+  test('GSTA-67 --order: an explicit slot order (#3343 catalog before the #3337 docs that describe it) replaces READY order and carries into NEXT; the default is unchanged', () => {
+    const fx = make();
+    const docs = openPr(fx, '3337');
+    const catalog = openPr(fx, '3343');
+    readyReceipt(fx, '3337', docs, { at: '2026-10-18T07:00:00.000Z' });
+    readyReceipt(fx, '3343', catalog, { at: '2026-10-18T08:00:00.000Z' });
+    const pins = `3337@${docs},3343@${catalog}`;
+    expect(line(queue(fx, ['train', 'build', '--prs', pins, '--dry-run']).out, 'ORDER:')).toBe('ORDER: 1:#3337(unscreened) 2:#3343(unscreened)');
+    const dry = queue(fx, ['train', 'build', '--prs', pins, '--order', '3343,3337', '--dry-run']);
+    expect(dry.status).toBe(EXIT.ok);
+    expect(line(dry.out, 'ORDER:')).toBe('ORDER: 1:#3343(unscreened) 2:#3337(unscreened) (explicit --order)');
+    expect(dry.out).toMatch(new RegExp(`^SLOT: 1 #3343 head=${catalog} `, 'm'));
+    expect(next(dry.out)).toBe(`NEXT: gstack-ship-queue train build --prs 3343@${catalog},3337@${docs} --order 3343,3337`);
+    const partial = queue(fx, ['train', 'build', '--prs', pins, '--order', '3343']);
+    expect(partial.status).toBe(EXIT.refused);
+    expect(partial.err).toContain('--order must list every PR in --prs exactly once (--prs has #3337,#3343; got 3343)');
+    expect(queue(fx, ['train', 'build', '--train', 'x', '--order', '3343']).status).toBe(EXIT.usage);
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const real = queue(fx, ['train', 'build', '--prs', pins, '--order', '3343,3337']);
+    expect(real.status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonceOf(real.out));
+    expect([t.slots.map((s: any) => s.pr), t.explicit_order, t.prefixes[1].pr]).toEqual([['3343', '3337'], true, '3343']);
+  }, 180_000);
+
   test('refusals: a fork PR, a moved head, a PR without READY, and a train still filling (until --urgent)', () => {
     const fx = make();
     const h1 = openPr(fx, '1');
@@ -232,6 +427,39 @@ describe('train build', () => {
     expect(urgent.status).toBe(EXIT.ok);
     expect(trainJson(fx, nonceOf(urgent.out)).urgent).toBe(true);
     expect(dispatches(fx, 'evals.yml').length).toBe(1);
+  }, 180_000);
+
+  test('rule 22: a pin whose PR body has no current /ship receipt is refused by name before any write, push or dispatch, dry run included; the pinned-head receipt admits it', () => {
+    const fx = make();
+    const h1 = openPr(fx, '1');
+    const h2 = openPr(fx, '2', { shipped: false });
+    readyReceipt(fx, '1', h1);
+    readyReceipt(fx, '2', h2);
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const refsBefore = remoteRefs(fx);
+    for (const args of [['--dry-run'], []]) {
+      const r = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, ...args]);
+      expect(r.status).toBe(EXIT.refused);
+      expect(r.err).toMatch(/PR #2's body carries no ship receipt; fix: run \/ship on the branch .*\(QUEUE_RECEIPT_MISSING\)/);
+      expect(r.out).toContain('SHIP_RECEIPT: none in the PR body');
+      expect(next(r.out)).toBe("NEXT: #2's lane runs /ship, then gstack-ship-queue ready --pr 2 --screen|--no-screen; then gstack-ship-queue train build --prs <pins>");
+      expect(result(r.out)).toBe('GSTACK_RESULT: skill=ship-queue status=refused run=none');
+    }
+    setPrBody(fx, '2', shippedBody('2', 'a'.repeat(40)));
+    const stale = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, '--dry-run']);
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toMatch(new RegExp(`PR #2's ship receipt is for aaaaaaaaaaaa, not the head ${h2.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`));
+    setPrBody(fx, '2', '```gstack-ship-receipt\n{"schema_version":1}\n```\n');
+    expect(queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, '--dry-run']).err).toMatch(/PR #2's ship receipt is invalid \(.*\).*\(QUEUE_RECEIPT_MISSING\)/);
+    setPrBody(fx, '2', shippedBody('1', h2));
+    expect(queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`, '--dry-run']).err).toMatch(/PR #2's ship receipt names pr=1, not this PR.*\(QUEUE_RECEIPT_STALE\)/);
+    expect(remoteRefs(fx)).toBe(refsBefore);
+    expect(dispatches(fx)).toEqual([]);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'trains'))).toBe(false);
+    setPrBody(fx, '2', shippedBody('2', h2));
+    const ok = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`]);
+    expect(ok.status).toBe(EXIT.ok);
+    expect(dispatches(fx).length).toBe(2);
   }, 180_000);
 
   test('free tests red, cancelled, missing or on another SHA refuse with QUEUE_TRAIN_FREE_RED before any paid dispatch', () => {
@@ -521,6 +749,53 @@ describe('verify, freeze, repair and clear', () => {
     expect(JSON.parse(fs.readFileSync(freezeFile, 'utf8')).cleared_at).toBe('2026-10-18T12:00:00.000Z');
     expect(queue(fx, ['train', 'status']).out).not.toContain('QUEUE_TRAIN_FROZEN');
   }, 300_000);
+  test("rule 22: verify --train binds the receipt to the pinned head when the current head is its stamp commit; a receipt for another head refuses the slot and merges nothing", () => {
+    const fx = make();
+    const { h1, nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const coord = coordinatorClone(fx.repo);
+    const v = () => queue(fx, ['verify', '--pr', '1', '--train', nonce], {}, coord);
+    const { repo } = fx;
+    repo.git('checkout', '-q', '-B', 'lane1', h1);
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.4.0\n');
+    repo.git('commit', '-qam', 'v1.2.4.0 stamp');
+    const stamped = repo.git('rev-parse', 'HEAD');
+    repo.git('push', '-q', '-f', 'origin', `${stamped}:refs/pull/1/head`);
+    const ok = v();
+    expect(ok.status).toBe(EXIT.ok);
+    expect(ok.out).toContain(`head: ${stamped} (same modulo stamps (1 stamp file(s)))`);
+    expect(ok.out).toContain(`SHIP_RECEIPT: pr=1 head=${h1.slice(0, 12)} version=- base=main (binds the pinned head)`);
+    expect(line(ok.out, 'MERGE_CONDITION:')).toBe(`MERGE_CONDITION: sha=${stamped}`);
+    setPrBody(fx, '1', shippedBody('1', 'b'.repeat(40)));
+    const stale = v();
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toMatch(new RegExp(`PR #1's ship receipt is for bbbbbbbbbbbb, not the head ${h1.slice(0, 12)} or ${stamped.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`));
+    expect(stale.out).not.toContain('MERGE_CONDITION:');
+    expect(next(stale.out)).toBe("NEXT: #1's lane runs /ship and READYs again; then gstack-ship-queue train build --prs <pins>");
+    expect(trainJson(fx, nonce).merged).toEqual([]);
+    setPrBody(fx, '1', '');
+    expect(v().err).toContain('(QUEUE_RECEIPT_MISSING)');
+    setPrBody(fx, '1', '```gstack-ship-receipt\n{"schema_version":1}\n```\n');
+    const invalid = v();
+    expect(invalid.err).toMatch(/PR #1's ship receipt is invalid \(.*\).*\(QUEUE_RECEIPT_MISSING\)/);
+    expect(invalid.out).not.toContain('MERGE_CONDITION:');
+    setPrBody(fx, '1', shippedBody('2', h1));
+    const otherPr = v();
+    expect(otherPr.err).toMatch(/PR #1's ship receipt names pr=2, not this PR.*\(QUEUE_RECEIPT_STALE\)/);
+    expect(otherPr.out).not.toContain('MERGE_CONDITION:');
+    expect(trainJson(fx, nonce).merged).toEqual([]);
+    setPrBody(fx, '1', shippedBody('1', stamped));
+    expect(v().out).toContain(`SHIP_RECEIPT: pr=1 head=${stamped.slice(0, 12)} version=- base=main (binds the current head)`);
+    const saved = fx.read().prs['1'];
+    fx.write(d => { delete d.prs['1']; });
+    const unreadable = v();
+    expect(unreadable.status).toBe(EXIT.refused);
+    expect(unreadable.err).toContain('(QUEUE_PROOF_MISSING)');
+    expect(unreadable.out).not.toContain('MERGE_CONDITION:');
+    fx.write(d => { d.prs['1'] = saved; });
+    expect(trainJson(fx, nonce).merged).toEqual([]);
+  }, 300_000);
+
   test('from slot 2 on, a head that merges main into the pin verifies when its tree is the slot\'s prefix modulo stamps', () => {
     const fx = make();
     const { h2, nonce } = twoPrTrain(fx);
@@ -556,5 +831,51 @@ describe('verify, freeze, repair and clear', () => {
     const moved = v('2');
     expect(moved.status).toBe(EXIT.fail);
     expect(moved.err).toMatch(new RegExp(`#2 moved past its pinned head ${h2.slice(0, 12)} and is not T2 modulo stamps \\(${stray.slice(0, 12)}: .*\\(QUEUE_TRAIN_MOVED\\)`));
+  }, 300_000);
+
+  test("GSTA-67 (#3345 at 593e61c): a merged-in head whose CHANGELOG was resolved by hand verifies even where T<i>'s mechanical CHANGELOG differs; an invented line or a head without main is still refused", () => {
+    const fx = make();
+    const h1 = openPr(fx, '1', { changelog: false });
+    const h2 = openPr(fx, '2', { changelog: cl => cl.replace('# Changelog\n', '# Changelog\n\n## [Unreleased]\n\n- #2 change\n').replace('## [1.2.2.0] - 2026-09-01\n\n', '') });
+    readyReceipt(fx, '1', h1);
+    readyReceipt(fx, '2', h2);
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const nonce = nonceOf(queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`]).out);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    expect(fx.repo.git('show', `${t.prefixes[2].commit}:CHANGELOG.md`)).not.toContain('## [1.2.2.0]');
+    const coord = coordinatorClone(fx.repo);
+    const v = () => queue(fx, ['verify', '--pr', '2', '--train', nonce], {}, coord);
+    const main1 = publishMain(fx, t.prefixes[1].commit, '1.2.4.0');
+    const { repo } = fx;
+    const laneHead = (entry: string, parents: string[]) => {
+      repo.git('reset', '-q', '--hard');
+      repo.git('checkout', '-q', '-B', 'lane2', h2);
+      repo.git('rm', '-rq', '.');
+      repo.git('checkout', t.prefixes[2].commit, '--', '.');
+      fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+      fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), repo.git('show', `${main1}:CHANGELOG.md`).replace('# Changelog\n', `# Changelog\n\n## [1.2.5.0] - 2026-10-18\n\n${entry}\n`) + '\n');
+      repo.git('add', '-A');
+      const head = repo.git('commit-tree', repo.git('write-tree'), ...parents.flatMap(p => ['-p', p]), '-m', 'merge main into #2 (CHANGELOG by hand), stamp 1.2.5.0');
+      repo.git('push', '-q', '-f', 'origin', `${head}:refs/pull/2/head`);
+      return head;
+    };
+
+    const byHand = laneHead('- #2 change', [h2, main1]);
+    const ok = v();
+    expect(ok.status).toBe(EXIT.ok);
+    expect(ok.out).toContain(`head: ${byHand} (T2 with main merged in, same modulo stamps (1 stamp file(s)) except CHANGELOG.md, resolved as main's CHANGELOG.md plus #2's own entry)`);
+    expect(line(ok.out, 'MERGE_CONDITION:')).toBe(`MERGE_CONDITION: sha=${byHand}`);
+
+    const invented = laneHead('- #2 change\n- added after the gate', [h2, main1]);
+    const refused = v();
+    expect(refused.status).toBe(EXIT.fail);
+    expect(refused.err).toContain(`#2 moved past its pinned head ${h2.slice(0, 12)} and is not T2 modulo stamps (${invented.slice(0, 12)}: differs from T2 in CHANGELOG.md, which is not main's plus #2's own entry: the PR's entry holds a line its pin never added: "- added after the gate"; against the pin it differs: `);
+    expect(refused.err).toContain('(QUEUE_TRAIN_MOVED)');
+
+    const orphan = laneHead('- #2 change', [h2]);
+    const noMain = v();
+    expect(noMain.status).toBe(EXIT.fail);
+    expect(noMain.err).toContain(`(${orphan.slice(0, 12)}: does not contain main ${main1.slice(0, 12)}; against the pin it differs: `);
   }, 300_000);
 });

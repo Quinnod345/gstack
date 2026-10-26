@@ -7,6 +7,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { usePrivateStateRoot } from './helpers/private-state-root';
 import { expectMentions } from './helpers/prompt-structure';
+import { generateFailureRouting } from '../scripts/resolvers/preamble/generate-test-failure-triage';
+import { readShippedSkillRouting } from './helpers/shipped-skill-routing';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 
@@ -2040,6 +2042,37 @@ describe('Test failure triage in ship skill', () => {
   test('ship/SKILL.md uses in-branch language for stop condition', () => {
     const content = readShipUnion();
     expectMentions(content, [['in-branch', 'unfixed', 'stop']], 'content');
+  });
+});
+
+describe('Failure routing: verified cause → fix, unknown cause → bounded triage (#3157, #3158)', () => {
+  const rule = generateFailureRouting();
+  const unknownCause = rule.slice(rule.indexOf('**Cause unknown:** ') + '**Cause unknown:** '.length);
+
+  test('the router sends bug reports through the failure rule, not straight to /investigate', () => {
+    const router = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    expect(router).toContain(rule);
+    const bugRule = router.split('\n').find(line => line.startsWith('- User reports a bug'));
+    expect(bugRule).toContain('**Failures**');
+    expect(bugRule).not.toMatch(/→ invoke `\/investigate`$/);
+  });
+
+  test('the rule keeps the root-cause bar on both paths', () => {
+    expect(rule).toMatch(/\*\*Cause supplied\*\*[^\n]*one read-only check[^\n]*If it does not, invoke `\/investigate` before any further tracing or edit/);
+    expect(unknownCause).toMatch(/^make one read-only triage pass[^\n]*Do not reproduce, test hypotheses or search wider[^\n]*still unclear, invoke `\/investigate` before any broader diagnosis or edit\.$/);
+  });
+
+  test('the routing gstack offers for CLAUDE.md, and this repo\'s own, check the cause before /investigate', () => {
+    const bugRule = readShippedSkillRouting().rules.find(line => line.startsWith('- Bugs/errors'));
+    expect(bugRule).toMatch(/→ invoke \/investigate, unless one read-only check confirms the cause/);
+    expect(fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf-8').split('\n')).toContain(bugRule!);
+  });
+
+  test('/ship fixes a pre-existing failure through the same bounded triage', () => {
+    const tests = fs.readFileSync(path.join(ROOT, 'ship', 'sections', 'tests.md'), 'utf-8');
+    const fixNow = tests.slice(tests.indexOf('**If "Investigate and fix now":**'), tests.indexOf('**If "Add as P0 TODO":**'));
+    expect(fixNow).toContain('- One read-only root-cause pass, then `/investigate` if unclear.');
+    expect(fixNow).not.toContain('/investigate mindset');
   });
 });
 

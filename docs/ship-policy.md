@@ -168,9 +168,25 @@ gate: command="<gate_command>" full_e2e=no gate-ahead=none
 SHIP_RECEIPT: pr=42 head=<head12> …
 ```
 
+CI's Version Gate (`scripts/compare-pr-version.ts`) accepts that head as
+unstamped when `VERSION` and `package.json`'s version match its merge base, the
+CHANGELOG change is confined to `[Unreleased]`, and any changed release output
+is byte for byte what `release_tool` generates at the head's merge base
+`VERSION` (the head's own, so a later stamp on main changes nothing), so a
+generator change ships with its regenerated output and the slot's restamp
+regenerates it again. A release output that differs from that (a hand edit, one generated at a
+bumped version, or one the tool never writes), a `VERSION` bump or a
+`package.json` version change classifies the head as stamped, and it must then
+carry base + bump. The tool runs as head code in a throwaway worktree with a
+bare environment and no tokens; one that fails at the head is an error, never
+a pass.
+
 It refuses (`QUEUE_NOT_READY`) when the working tree has tracked edits, HEAD
 is not the PR's pushed head, CI at that exact head is not green, or the pregate
-result is not a current pass. Send the block as printed.
+result is not a current pass, and (`QUEUE_RECEIPT_MISSING`,
+`QUEUE_RECEIPT_STALE`) when the PR body carries no /ship receipt for that
+head: /ship runs before every READY ([details](#ship-before-ready)). Send the
+block as printed.
 
 **2. Lane behind another PR: gate ahead.** Gate the tree the queue will have
 once the predecessor lands, while it is still open:
@@ -304,13 +320,53 @@ are mirrored to origin as git notes on `refs/notes/gstack-trains` before any
 remote effect, so a lost machine loses nothing: `train status` on a clean
 state root rebuilds them. `GSTACK_SHIP_QUEUE_NOW` pins the clock for tests.
 
+<a id="ship-before-ready"></a>
+**0. Lane: /ship before READY.** Every READY follows a /ship run on the branch
+at the head being READY'd, including a re-READY after a push (Garry,
+2026-10-25: "we should really be using the gstack ship skill before merging
+PRs"). /ship runs the tests, both reviews, the gate-integrity list and the docs
+audit, and ends by writing its receipt into the PR body
+(`gstack-ship-receipt write --pr <n> … --body <file>`, posted with
+`gstack-post pr-body`). Under `queue_mode: stamp-at-merge` it bumps no version
+and never merges or merges main into the branch; the train still stamps at the
+slot. The queue enforces this at every step from the PR body alone:
+
+- `ready` refuses with `QUEUE_RECEIPT_MISSING` when the body has no valid
+  receipt and with `QUEUE_RECEIPT_STALE` when the receipt's `head` is not the
+  head being READY'd (or its `pr` is another PR); the informational
+  `SHIP_RECEIPT:` line still prints. There is no flag around it.
+- `train build` refuses a pin whose PR has no current receipt with the same
+  codes, naming the PR, before anything is written, pushed or dispatched,
+  `--dry-run` included.
+- `verify --train` refuses the slot with the same codes before printing
+  `MERGE_CONDITION`.
+
+**The stamp keeps the pin's receipt.** The slot's stamp commit changes only
+stamp files (and, from slot 2 on, merges main into the pin), so no /ship runs
+on it: the receipt written for the pinned head stays the binding one. `verify
+--train` accepts a receipt whose `head` is either the slot's pinned head or
+the current head, and the re-READY after the stamp push (`ready` at the stamp
+commit) accepts the receipt for the pin when HEAD is the pin plus stamp files,
+or (from slot 2 on) the pin merged with main plus stamp files on top of the
+merge; any other head is `QUEUE_RECEIPT_STALE`, including a merge of main with
+no stamp above it (a lane's own push under rule 14) and a merge whose pin side
+carries an edit made after /ship.
+
+This is a process gate, not an authenticity check: the receipt is a block in
+the PR body, which the PR author writes, so the codes prove that /ship was run
+and recorded for this head, not that nobody typed the block by hand. Fork heads
+are already refused (`QUEUE_TRAIN_UNTRUSTED`). The `ship-run.json` that
+`gstack-ship-receipt result` writes under the lane's state root is a
+normalized copy of that same block bound to the head it was run at, not an
+authenticity proof either.
+
 **1. Lane: READY with a screen choice.** Under a train policy READY needs an
 explicit choice:
 
 ```bash
 gstack-ship-queue ready --pr 42                    # prints SCREEN: lines and the recommendation, refuses
 gstack-ship-queue ready --pr 42 --no-screen        # READY receipt; the PR rides unscreened
-gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA
+gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (QUEUE_SCREEN_STALE_REF when GitHub's merge ref lags the head)
 ```
 
 Without a choice it prints the `SCREEN:` selection (with
@@ -326,7 +382,17 @@ dispatches `gate_workflow` with `screen_pr`, `screen_merge_sha` (the
 the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
-it.
+it. Before dispatching, `ready` fetches the merge ref and requires its second
+parent to be the PR head: a missing or lagging merge ref (GitHub stops
+recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
+included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
+no cases and reports success. A finished screen that planned no cases (no
+`paid-plan` artifact, which a superseded run never uploads, or a plan manifest
+with nothing planned) is never followed as a screen: `ready --screen`
+dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
+no cases …; counted as not-run` and seats the slot unscreened. A plan the
+queue cannot read keeps the slot screened, with `SCREEN: #<n> <reason>;
+counted as screened, unverified`.
 
 **2. Coordinator: build.** Name the pins exactly as READY reported them:
 
@@ -337,7 +403,9 @@ gstack-ship-queue train build --prs 41@<sha>,42@<sha>,43@<sha>
 
 It prints `ORDER:` (the slot order to announce: screened PRs first in READY
 order, then unscreened; when `max_size` or more unscreened PRs wait they form
-their own train and `HELD:` lists them), one `PREFIX: T<i> <commit>
+their own train and `HELD:` lists them; `--order <pr>,<pr>,...` naming every
+pinned PR once replaces that rule, for a PR that must merge before another,
+and the train's later `NEXT:` rebuilds keep it), one `PREFIX: T<i> <commit>
 tree=<tree>` per prefix and one `SLOT:` per PR. `--dry-run` adds the
 `ESTIMATE:` line and writes, pushes and dispatches nothing. Otherwise it
 writes `train.json`, pushes `train/<nonce>`, dispatches `free_workflow` there
@@ -348,14 +416,20 @@ has waited `fill_hours` (`QUEUE_TRAIN_WAITING`); `--urgent` dispatches a
 one-PR train at once. The same pins on the same base return the live train
 instead of a second one; `train build --train <nonce>` resumes a train from
 its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork
-head), `QUEUE_TRAIN_MOVED` (a head moved from its pin), `QUEUE_NOT_READY` (no
-READY receipt at that head), `QUEUE_TRAIN_CONFLICT` (the printed
+head), `QUEUE_TRAIN_MOVED` (a head moved from its pin),
+`QUEUE_RECEIPT_MISSING` and `QUEUE_RECEIPT_STALE` (the PR body has no /ship
+receipt for the pin; see [/ship before READY](#ship-before-ready)),
+`QUEUE_NOT_READY` (no READY receipt at that head), `QUEUE_TRAIN_CONFLICT` (the printed
 `QUEUE_TRAIN_CONFLICT: train <id> stopped at #<pr> (conflicts: <files>) after
 merging #<a>,#<b>; nothing dispatched, no branch pushed; fix: …` line names
 the build without that PR) and `QUEUE_TRAIN_FREE_RED` (free tests red,
 missing, cancelled or on another SHA). In a merge, version files take the
 prefix's side and the CHANGELOG merges by section, since the stamp at merge
-rewrites both.
+rewrites both; a PR whose CHANGELOG drops or renames a released heading (or
+carries a released entry's text in a section of its own) is a CHANGELOG
+conflict, never merged with the damage. READY receipts and train records are
+keyed on origin's GitHub owner/repo, so lanes whose origin uses another URL
+form (git.capy.ai, ssh, a token URL) share the coordinator's queue.
 
 **3. Coordinator: status and verdict.**
 
@@ -406,13 +480,13 @@ EVAL_POLICY records it. Bisect results never turn a train green.
 ```bash
 git fetch origin main
 git merge --no-ff --no-commit origin/main        # expect a CHANGELOG.md conflict only
-bun --no-env-file --config=/dev/null -e "import { mergeChangelogs } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogs(s(2), s(3)); if (!m) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m);"
+bun --no-env-file --config=/dev/null -e "import { mergeChangelogs } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogs(s(2), s(3), s(1)); if (!m) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m);"
 git add CHANGELOG.md && git commit --no-edit
 gstack-restamp --next --base main --pr 42 --expect-base <main sha> --expect-order <order> --allow-repo-commands
 git add CHANGELOG.md VERSION package.json <release outputs> && git commit -m "v<X> stamp" && git push
 ```
 
-A conflict in any file other than CHANGELOG.md means the merge isn't the train's prefix. Stop and report it. `verify` accepts the resulting head because its tree equals T<i> modulo stamps; the `head:` line says "T<i> with main merged in".
+A conflict in any file other than CHANGELOG.md means the merge isn't the train's prefix. Stop and report it. When the helper says the CHANGELOG needs a hand merge, take main's CHANGELOG unchanged and put your own entry above it. `verify` accepts the resulting head because it contains main and its tree equals T<i> modulo stamps, with its CHANGELOG judged as main's plus lines your pin added, however the conflict was resolved; the `head:` line says "T<i> with main merged in".
 
 **5. Coordinator: verify, merge, verify again.** For each slot in order:
 
@@ -423,8 +497,9 @@ gstack-ship-queue verify --pr 41 --train <nonce>   # VERIFY_TRAIN: #41 merged; m
 ```
 
 Before a merge, main's tree must equal the prefix before the PR modulo stamps
-and the PR must be at its pin (stamps aside) or at T<i> modulo stamps (its pin
-with main merged in); after it, main's tree
+and the PR must be at its pin (stamps aside) or contain main and be T<i>
+modulo stamps (its pin with main merged in; its CHANGELOG must be main's with
+only lines from the pin's own CHANGELOG diff above it); after it, main's tree
 must equal the prefix after it. Anything else is `QUEUE_TRAIN_TREE_MISMATCH`
 (or `QUEUE_TRAIN_MOVED`). When nothing of the train has merged, that is a plain
 refusal: build a new train on current main. When earlier slots already
@@ -470,6 +545,20 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 
 The PR body's first section is the ship receipt (`gstack-ship-receipt write … --body`),
 written by the pr-body section of `/ship` after the body is composed.
+
+## What `/land-and-deploy` reads from it
+
+Step 3.4 runs `show-effective --base <base>` before the merge and prints one
+`VERSION_CHECK:` verdict for the PR head:
+
+| Policy | Stops when | Passes |
+|---|---|---|
+| `queue_mode: stamp-at-merge` | the head's VERSION is not the base's version plus one bump, or the changelog's top two headings at the head are not that version and then the base's top entry (`STOP stamp stale`: run `gstack-restamp --next` on the branch, push the stamp, rerun) | an exact stamp; other open PRs' tentative stamps are ignored |
+| `queue_mode: claim-at-open` (and no policy file) | another open PR holds the same VERSION, or the base is already at or above it (`VERSION drift detected`: rerun `/ship`) | any unique VERSION above the base, including a MICRO bump or one below a sibling's claim |
+
+An invalid policy, an unreadable claim list or a missing VERSION is `unavailable`:
+the skill reports it and CI's version gate is the backstop. A base at or above the
+branch VERSION still stops.
 
 <a id="stamp-at-merge"></a>
 ## `queue_mode: stamp-at-merge`

@@ -682,15 +682,15 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
   // test/skill-e2e-context-skills.test.ts. These are periodic-tier because
   // each one spawns claude -p and costs ~$0.20-$0.40. Collectively they
   // verify the thing the /checkpoint → /context-save rename was for.
-  'context-save-routing':                  [ 'context-save/**', 'scripts/resolvers/preamble.ts', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-save-then-restore-roundtrip':   ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'context-save/**', 'context-restore/**', 'bin/gstack-slug', 'bin/gstack-remote-identity.sh', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-restore-fragment-match':        [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-restore-provenance-order':      ['context-save/**', 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-restore-empty-state':           [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-restore-list-delegates':        [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-restore-legacy-compat':         [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-save-list-current-branch':      [ 'context-save/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
-  'context-save-list-all-branches':        [ 'context-save/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts'],
+  'context-save-routing':                  [ 'context-save/**', 'scripts/resolvers/preamble.ts', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-save-then-restore-roundtrip':   ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'context-save/**', 'context-restore/**', 'bin/gstack-slug', 'bin/gstack-remote-identity.sh', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-restore-fragment-match':        [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-restore-provenance-order':      ['context-save/**', 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-restore-empty-state':           [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-restore-list-delegates':        [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-restore-legacy-compat':         [ 'context-restore/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-save-list-current-branch':      [ 'context-save/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
+  'context-save-list-all-branches':        [ 'context-save/**', 'test/skill-e2e-context-skills.test.ts', 'bin/gstack-skill-start', 'test/helpers/shipped-skill-routing.ts', 'test/helpers/context-restore-fragment.ts'],
 
   // Document-release
   'document-release': [ 'test/helpers/outside-voice-evidence.ts', 'bin/gstack-version-bump', 'document-release/**', 'test/skill-e2e-workflow.test.ts', 'test/fixtures/coverage-audit-fixture.ts', 'test/helpers/coverage-audit.ts', 'test/helpers/coverage-audit-evidence.ts', 'test/helpers/office-hours-attempt.ts'],
@@ -856,7 +856,7 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
   'design-review-detector-shim-dom': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-review/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/outside-voice.ts', 'lib/design-detect-contract.ts', 'lib/dom-dump-script.ts', 'lib/dom-dump.js', 'bin/gstack-design-detect.ts', 'browse/src/**', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/fixtures/review-eval-design-slop.*', 'test/skill-e2e-design.test.ts',
     'scripts/resolvers/testing.ts', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
   'design-review-plugin-handoff': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-review/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/outside-voice.ts', 'scripts/resolvers/testing.ts', 'lib/design-catalog.ts', 'lib/design-detect-contract.ts', 'bin/gstack-design-detect.ts', 'test/helpers/hermetic-env.ts', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/skill-e2e-design.test.ts', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
-  'design-html-slop-gate':          ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-html/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/outside-voice.ts', 'lib/design-detect-contract.ts', 'bin/gstack-design-detect.ts', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/skill-e2e-design.test.ts', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
+  'design-html-slop-gate':          ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-html/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/outside-voice.ts', 'lib/design-detect-contract.ts', 'bin/gstack-design-detect.ts', 'lib/design-craft.ts', 'bin/gstack-design-craft', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/skill-e2e-design.test.ts', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
 
   // /diagram (diagram-render bundle consumers). Triplet = deterministic
   // functional (gate); authoring quality = LLM-judged benchmark (periodic).
@@ -1125,6 +1125,10 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
 
      "scripts/resolvers/preamble/generate-preamble-bash.ts", "scripts/resolvers/preamble/generate-completion-status.ts"
   ],
+  'router-failure-verified-cause': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-contradicted-cause': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-triage-resolves': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
+  'router-failure-triage-unclear': ['SKILL.md.tmpl', 'SKILL.md', 'scripts/resolvers/preamble/generate-test-failure-triage.ts', 'investigate/SKILL.md.tmpl', 'lib/bun-isolation.ts', 'test/skill-e2e-failure-routing.test.ts'],
 };
 
 /**
@@ -1525,6 +1529,10 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
   'overlay-harness-claude-dedicated-tools-vs-bash-sonnet': 'periodic',
   'overlay-harness-claude-dedicated-tools-vs-bash-opus-5-5': 'periodic',
   'journey-negatives': 'periodic',
+  'router-failure-verified-cause': 'gate',
+  'router-failure-contradicted-cause': 'gate',
+  'router-failure-triage-resolves': 'gate',
+  'router-failure-triage-unclear': 'gate',
 };
 
 /**
@@ -1890,6 +1898,10 @@ export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
   'overlay-harness-claude-dedicated-tools-vs-bash-sonnet': 'rule',
   'overlay-harness-claude-dedicated-tools-vs-bash-opus-5-5': 'rule',
   'journey-negatives': 'rule',
+  'router-failure-verified-cause': 'rule',
+  'router-failure-contradicted-cause': 'rule',
+  'router-failure-triage-resolves': 'rule',
+  'router-failure-triage-unclear': 'rule',
   'review/SKILL.md workflow': 'judge',
   'setup-browser-cookies/SKILL.md workflow': 'judge',
   'browse/SKILL.md reference': 'judge',

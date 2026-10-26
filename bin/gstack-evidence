@@ -19,9 +19,24 @@
  * `tests_ran` (zero-run green, W3 of docs/designs/HONEST_WORK_GATE_INTEGRITY.md)
  * is parsed from a bounded tail of the streamed output for the supported
  * runners only: bun (shard-engine's summary parser where importable; executed =
- * pass + fail, so an all-skip run is 0), jest, vitest, pytest, rspec, and Go's
- * zero-only case (every package `[no test files]`). The last summary per
- * runner wins; anything else is "unknown". Three states, never merged:
+ * pass + fail, so an all-skip run is 0), jest, vitest, pytest, rspec, Go's
+ * zero-only case (every package `[no test files]`), gstack's own shard runner
+ * (`bun run test:free` / `test:ubicloud`: the sum of its per-shard
+ * `[test:free] PASS — N tests` epilogues, or a files-from run's
+ * `FILES-FROM RESULT: … tests=N`), and a `gstack-pregate --remote` lane (the
+ * remote gate's `PREGATE_REMOTE: … tests=N` row, or the cleared obligation's
+ * `cleared by remote-gate … tests=N` receipt). The shard runner and the remote
+ * gate print only bun's terminal totals, which count skipped tests, so for
+ * those two the number is "ran, skips included" rather than executed (the shard
+ * runner refuses a shard whose bun summary counts fewer files than planned, but
+ * a shard whose files all loaded and executed nothing still passes with that
+ * total). When the shard runner spoke, its verdict stands for the whole tail:
+ * the tail is the stdout tail then the stderr tail, so a line's position says
+ * nothing about when it was printed across streams, and bun's own counts (on
+ * stderr) would otherwise outrank a 10k-test run whichever of the two ran
+ * first. Any summary when it did not speak follows the last-summary-wins rule;
+ * anything else is "unknown".
+ * Three states, never merged:
  * a count, 0 (ZERO-RUN, graded like STALE by `check`) and unknown (non-blocking).
  *
  * TRANSPARENCY INVARIANT (load-bearing): the child's exit code is ALWAYS the
@@ -76,7 +91,7 @@ interface EvidenceRecord {
   wtree?: string;
   log_path?: string;
   redacted?: boolean;
-  /** Executed tests per the runner's own summary; "unknown" when no supported summary was seen. */
+  /** The runner's own test count (executed for bun/jest/vitest/pytest/rspec; ran with skips included for gstack's shard runner and the remote gate), 0 for ZERO-RUN, or "unknown" when no supported summary was seen. */
   tests_ran?: number | "unknown";
 }
 
@@ -108,7 +123,17 @@ const ANSI = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 const strip = (l: string) => l.replace(ANSI, "").replace(/\r$/, "");
 const count = (text: string, word: string): number => Number(new RegExp(`(\\d+) ${word}\\b`).exec(text)?.[1] ?? 0);
 
-/** Bun: the last "Ran N tests across M files" block; executed = its " N pass" + " N fail" lines. */
+/**
+ * Bun: the last "Ran N tests across M files" block; executed = its " N pass" +
+ * " N fail" lines. Bun always prints that counts block (" 0 pass" / " 0 fail"
+ * even for an all-skip or empty run), so a terminal line with no " N pass"
+ * above it is a line gstack's quiet shard runner forwarded (it forwards the
+ * terminal line without the " N pass" line), not a bun summary:
+ * it is skipped and the shard runner's own epilogue counts. A terminal line
+ * that itself says "Ran 0 tests" is ZERO-RUN even without counts, unless the
+ * shard runner spoke: a forwarded "Ran 0 tests across 1 file" is one shard's
+ * empty file, not the run.
+ */
 async function bunTestsRan(lines: string[]): Promise<{ at: number; ran: number } | null> {
   let isTerminal = (l: string) => /^Ran \d+ tests? across \d+ files?\. \[/.test(l);
   try {
@@ -119,7 +144,7 @@ async function bunTestsRan(lines: string[]): Promise<{ at: number; ran: number }
   }
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!isTerminal(lines[i])) continue;
-    let pass = 0;
+    let pass: number | null = null;
     let fail = 0;
     for (let j = i - 1; j >= 0 && j >= i - 12; j--) {
       if (isTerminal(lines[j])) break;
@@ -128,9 +153,62 @@ async function bunTestsRan(lines: string[]): Promise<{ at: number; ran: number }
       if (p) pass = Number(p[1]);
       if (f) fail = Number(f[1]);
     }
+    if (pass === null) {
+      if (/^Ran 0 tests? across/.test(lines[i])) return { at: i, ran: 0 };
+      continue;
+    }
     return { at: i, ran: pass + fail };
   }
   return null;
+}
+
+/**
+ * gstack's shard runner (scripts/test-free-shards.ts; `bun run test:free` /
+ * `test:ubicloud`). Its quiet shards forward bun's terminal line without the
+ * counts the bun branch reads, so each shard's epilogue "[test:free] PASS — N
+ * tests, M files, Ts." carries the shard's "Ran N" total (skips included) and
+ * the run's total is their sum; a files-from run ends with "[test:free]
+ * FILES-FROM RESULT: files=F tests=N failed=K exit=E", the same sum. Only the
+ * last run in the tail counts (its "[test:free] full suite:" / "files-from" /
+ * "QUICK SUBSET" start line); the other parsers decide only when no runner
+ * line at all is in the tail. A run with a "FAIL —" or "FLAKY-PASS —" epilogue and no FILES-FROM
+ * total has lost a shard's count (a FAIL epilogue carries none; the flaky retry
+ * re-runs only the failing files), so it is unknown rather than a partial sum.
+ * The runner's verdict covers the whole tail once it spoke: the tail is
+ * stdout-then-stderr, bun's counts block is on stderr and the runner's
+ * epilogues are on stdout, so "after" cannot be told from "before" across the
+ * two streams and a bun block printed before the suite (a focused file run
+ * first) would otherwise record its count, or ZERO-RUN, for a 10k-test run.
+ * The quiet shards forward only count-less terminal lines (a shard's "Ran 0
+ * tests across 1 file" is one empty file, not the run); under `--verbose` they
+ * forward whole blocks, which the runner's sum outranks. The epilogue is
+ * matched as the runner's whole line (the log path may contain spaces); like
+ * every runner summary here it is the child's own stdout, so a test that
+ * forges one is trusted the same way a forged bun summary is (see W3's trust
+ * model), and the exit is never derived from it. Returns undefined when no
+ * runner line is in the tail. A verdict line (PASS/FAIL/FLAKY-PASS epilogue or
+ * FILES-FROM RESULT) without its start line means the start line was evicted
+ * from the tail (a chatty default-mode or --verbose run): the runner spoke,
+ * the sum is incomplete, so the result is unknown rather than a forwarded
+ * shard block's count. A full-suite start line names its shard count
+ * ("across N shard processes", plus one exclusive host-state shard when it
+ * says so); fewer PASS epilogues than that (killed mid-shards, `--ci-verify`)
+ * is unknown, never a partial sum. An empty shard prints "shard i/N: 0 files,
+ * 0s, pass" instead of a PASS epilogue and counts as zero.
+ */
+function shardRunnerTestsRan(lines: string[]): number | "unknown" | undefined {
+  const verdictLine = /^\s*\[test:free\] (?:PASS — |FAIL — |FLAKY-PASS — |FILES-FROM RESULT: )/;
+  const start = lines.findLastIndex((l) => /^\s*\[test:free\] (?:full suite:|files-from |QUICK SUBSET:)/.test(l));
+  if (start < 0) return lines.some((l) => verdictLine.test(l)) ? "unknown" : undefined;
+  const run = lines.slice(start);
+  const result = /^\s*\[test:free\] FILES-FROM RESULT: files=\d+ tests=(\d+) failed=\d+ exit=\d+\s*$/;
+  const total = run.findLast((l) => result.test(l));
+  if (total) return Number(result.exec(total)![1]);
+  if (run.some((l) => /^\s*\[test:free\] (?:FAIL|FLAKY-PASS) — /.test(l) || /^\s*\[test:free\] PASS — \? tests/.test(l))) return "unknown";
+  const counts = run.map((l) => /^\s*\[test:free\] PASS — (\d+) tests?, \d+ files?, \d+s\. Full log: \S.*$/.exec(l)?.[1] ?? (/^\s*\[test:free\] shard \d+\/\d+: 0 files, \d+s, pass\s*$/.test(l) ? "0" : undefined)).filter((n): n is string => n !== undefined);
+  const planned = /across (\d+) shard processes/.exec(run[0]!);
+  const expected = planned ? Number(planned[1]) + (/exclusive host-state file/.test(run[0]!) ? 1 : 0) : 1;
+  return counts.length >= expected ? counts.reduce((sum, n) => sum + Number(n), 0) : "unknown";
 }
 
 function otherRunnersTestsRan(lines: string[]): { at: number; ran: number } | null {
@@ -162,14 +240,28 @@ function otherRunnersTestsRan(lines: string[]): { at: number; ran: number } | nu
   const goNoTests = lines.filter((l) => /^\?\s+\S+\s+\[no test files\]$/.test(l));
   const goRan = lines.some((l) => /^(?:ok|FAIL|---)\s/.test(l));
   if (goNoTests.length > 0 && !goRan) hits.push({ at: last(/\[no test files\]$/), ran: 0 });
+  // gstack-pregate --remote: the remote gate's own "PREGATE_REMOTE: tree=… tests=N failed=M"
+  // line (tests = the shard runner's FILES-FROM RESULT sum, relayed by scripts/ubicloud/pregate-remote.sh;
+  // lib/pregate/checks/lanes.ts parseRemoteReport is the canonical parser), rendered as a lane
+  // row under "lanes:" in the pregate table, and the obligation's "requires-remote: … cleared by
+  // remote-gate tree=… tests=N" receipt line (lib/pregate/index.ts). Whole lines, like every
+  // other runner pattern here, so a prefixed or quoted echo does not count (the row is indented
+  // under "lanes:" by design, so indentation is accepted). When both appear they carry the same
+  // count; the later one wins.
+  for (const re of [/^\s*(?:lanes:\s+)?PREGATE_REMOTE: tree=\S+ tests=(\d+) failed=\d+(?: spent=\S+)?\s*$/, /^\s*requires-remote: .* cleared by remote-gate tree=\S+ tests=(\d+)\b/]) {
+    i = last(re);
+    if (i >= 0) hits.push({ at: i, ran: Number(re.exec(lines[i])![1]) });
+  }
   if (hits.length === 0) return null;
   return hits.reduce((a, b) => (b.at > a.at ? b : a));
 }
 
-/** The executed-test count from the output tail, or "unknown". Never throws into the caller's exit path. */
+/** The runner-reported test count from the output tail (see the header for which runners report executed vs ran), 0, or "unknown". Never throws into the caller's exit path. */
 async function parseTestsRan(tail: string): Promise<number | "unknown"> {
   if (process.env.GSTACK_EVIDENCE_FAULT === "tests_ran") throw new Error("injected tests_ran parser fault");
   const lines = tail.split("\n").map(strip);
+  const shard = shardRunnerTestsRan(lines);
+  if (shard !== undefined) return shard;
   const candidates = [await bunTestsRan(lines), otherRunnersTestsRan(lines)].filter((c): c is { at: number; ran: number } => c !== null);
   if (candidates.length === 0) return "unknown";
   return candidates.reduce((a, b) => (b.at > a.at ? b : a)).ran;
