@@ -48,7 +48,7 @@ const BARE = /(?<![A-Za-z0-9_./-])#(\d+)\b/g;
 /** `(name #N[, #M]…)`, `(name PR #N)`, `(name issue #N)`: the name, then every number. */
 const NAMED = /\(([A-Za-z][\w.-]*(?:\/[\w.-]+)?)\s+(?:(?:PR|issue)\s+)?(#\d+(?:,\s*#\d+)*)\)/gi;
 /** Words that open a reference in parentheses without naming a repository. */
-const NOT_A_NAME = /^(?:fix(?:es|ed|ing)?|clos(?:e[sd]?|ing)|resolv(?:e[sd]?|ing)|address(?:es|ed|ing)?|implement(?:s|ed|ing)?|supersed(?:es|ed|ing)|replac(?:es|ed|ing)|track(?:s|ed|ing)?|block(?:s|ed|ing)?|dup|duplicates?|bugs?|upstream|refs?|see|related|partial(?:ly)?|part|context|follow-?up|defer(?:red)?|prs?|issues?|gh|via|from|after|since|with|in|by|for|also|cf\.?|e\.?g\.?|i\.?e\.?|and|or|per|of|to|on|at|as|is|was|the|an?|this|that|not|no|vs\.?|like|v\d+(?:\.\d+)*)$/i;
+const NOT_A_NAME = /^(?:fix(?:es|ed|ing)?|clos(?:e[sd]?|ing)|resolv(?:e[sd]?|ing)|address(?:es|ed|ing)?|implement(?:s|ed|ing)?|supersed(?:es|ed|ing)|replac(?:es|ed|ing)|track(?:s|ed|ing)?|block(?:s|ed|ing)?|dup|duplicates?|bugs?|upstream|refs?|see|related|partial(?:ly)?|part|context|follow-?up|defer(?:red)?|prs?|issues?|gh|via|from|after|since|with|in|by|for|also|cf\.?|e\.?g\.?|i\.?e\.?|and|or|per|of|to|on|at|as|is|was|the|an?|this|that|not|no|vs\.?|like|v\d[\w.-]*)$/i;
 
 /** Mentions in one commit message: trailer lines carry closure intent, everything else is a reference. */
 export function mentionsIn(message: string, source = 'commit'): IssueMention[] {

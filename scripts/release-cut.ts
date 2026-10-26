@@ -139,8 +139,8 @@ export function readTrainNotes(git: Git, notesRef = NOTES_REF): TrainNotes {
     if (r.kind !== 'train' || typeof r.nonce !== 'string' || !r.nonce || !['green', 'merging', 'merged'].includes(r.state ?? '')) continue;
     for (const m of Array.isArray(r.merged) ? r.merged : []) {
       if (!m || typeof m !== 'object') continue;
-      if (typeof m.sha === 'string') notes.evidence.bySha.set(m.sha, r.nonce);
-      if (typeof m.tree === 'string') notes.evidence.byTree.set(m.tree, r.nonce);
+      if (typeof m.sha === 'string' && m.sha) notes.evidence.bySha.set(m.sha, r.nonce);
+      if (typeof m.tree === 'string' && m.tree) notes.evidence.byTree.set(m.tree, r.nonce);
     }
   }
   return notes;

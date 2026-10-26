@@ -193,7 +193,7 @@ describe('release-cut: planning', () => {
 
     const add = (record: string, on: string) => git(f.seed, 'notes', '--ref=' + NOTES_REF, 'add', '-f', '-m', record, on);
     add('not json {', f.shas['1.0.0']!);
-    for (const junk of ['null', '[]', '"train"', '7', JSON.stringify({ kind: 'train', nonce: 'bad1', state: 'green', merged: 'x' }), JSON.stringify({ kind: 'train', nonce: 'bad2', state: 'green', merged: [null, 'y', { sha: 3, tree: ['t'] }] }), JSON.stringify({ kind: 'train', nonce: 9, state: 'green', merged: [{ sha: f.shas['1.0.0'] }] })]) {
+    for (const junk of ['null', '[]', '"train"', '7', JSON.stringify({ kind: 'train', nonce: 'bad1', state: 'green', merged: 'x' }), JSON.stringify({ kind: 'train', nonce: 'bad2', state: 'green', merged: [null, 'y', { sha: 3, tree: ['t'] }, { sha: '', tree: '' }] }), JSON.stringify({ kind: 'train', nonce: 9, state: 'green', merged: [{ sha: f.shas['1.0.0'] }] })]) {
       add(junk, f.shas['1.0.0']!);
       git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
       const read = readTrainNotes(f.git);

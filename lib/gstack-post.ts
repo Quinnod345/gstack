@@ -145,10 +145,11 @@ interface Section { key: string; label: string; text: string }
  * a key of its own, so it is never replaced. A fence closes only on a run of
  * its own character at least as long as the opener with nothing after it
  * (CommonMark), so a ``` line inside a ```` block and a ```js line close
- * nothing; a receipt fence that never closes is an ordinary unclosed fence,
- * so the rest of the body stays one kept section instead of a receipt.
+ * nothing; a receipt fence that never closes makes the body from that line
+ * on one section the merge never matches (`unclosed-receipt`), so it is kept
+ * byte for byte instead of being read as a receipt or as replaceable text.
  */
-function splitSections(body: string, receipts = true): Section[] {
+function splitSections(body: string): Section[] {
   const out: Section[] = [];
   let fence: string | null = null;
   let plain = 0;
@@ -159,7 +160,7 @@ function splitSections(body: string, receipts = true): Section[] {
   for (const line of body.split(/(?<=\n)/)) {
     bare = line.replace(/\r?\n$/, "");
     const fenceOpen: RegExpExecArray | null = fence === null ? /^ {0,3}(`{3,}|~{3,})/.exec(bare) : null;
-    if (fenceOpen && receipts && bare.trim() === "```" + RECEIPT_FENCE) { open("receipt", "ship receipt"); fence = "receipt"; }
+    if (fenceOpen && bare.trim() === "```" + RECEIPT_FENCE) { open("receipt", "ship receipt"); fence = "receipt"; }
     else if (fence === "receipt") { out.at(-1)!.text += line; if (closes("```")) { fence = null; openText(); } continue; }
     else if (fenceOpen) fence = fenceOpen[1]!;
     else if (fence && closes(fence)) fence = null;
@@ -167,7 +168,7 @@ function splitSections(body: string, receipts = true): Section[] {
     if (out.length === 0) openText();
     out.at(-1)!.text += line;
   }
-  if (fence === "receipt") return splitSections(body, false);
+  if (fence === "receipt") Object.assign(out.at(-1)!, { key: "unclosed-receipt", label: "unclosed receipt fence" });
   return out.filter(s => s.text !== "");
 }
 
@@ -190,7 +191,7 @@ export function mergeBodySections(current: string, incoming: string): { body: st
   const used = new Set<Section>();
   const replaced: string[] = [], kept: string[] = [], added: string[] = [];
   const merged: Section[] = now.map(s => {
-    const match = next.find(n => !used.has(n) && n.key === s.key);
+    const match = s.key === "unclosed-receipt" ? undefined : next.find(n => !used.has(n) && n.key === s.key);
     if (!match) { if (s.text.trim()) kept.push(s.label); return s; }
     used.add(match); replaced.push(s.label); return match;
   });

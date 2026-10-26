@@ -284,9 +284,10 @@ printing `PREGATE: … (from the state root's pregate/by-tree/<tree12>.json,
 recorded by another checkout)`. This is for the lane whose `gstack-pregate
 --remote` had to run from a separate clone (a worktree cannot host it): the
 clone's record clears the lane's own checkout as long as both hold the same
-tree. Only a complete run stands in: the mirror must name every registered
-check (so a `--only` or single-stage run is "a partial run without …"), be
-recorded against `origin/<base>` and not under `--policy-from head`;
+tree. Only a run that holds the tests stage stands in (what `--stage tests
+--remote` writes, `checks=[lanes]`; a `--only timing` or preflight-only run
+is "a run without the tests stage"), and it must be recorded against
+`origin/<base>` and not under `--policy-from head`;
 otherwise the `PREGATE:` line says why the mirror cannot stand in. A record
 whose own checks failed or stayed incomplete is final and no mirror overrides
 it. An explicit `--pregate <file>` that verifies is used as before; a mirror

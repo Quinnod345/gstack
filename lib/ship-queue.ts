@@ -28,7 +28,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { PregateFile } from './headless-artifacts';
-import { CHECK_IDS, pregateMirrorPath, readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
+import { CHECKS, pregateMirrorPath, readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
 import { bindReceipt, extractReceipt } from './ship-receipt';
@@ -187,17 +187,19 @@ function gateEvidence(ctx: QueueContext, pr: string, head: string, attempt: Atte
 }
 
 /**
- * Why a by-tree mirror cannot stand in for this checkout's own record, or
- * null. The mirror is keyed by tree alone, so any pregate run anywhere mints
- * one; only a complete run (every registered check, so no `--only` or single
- * stage) against the same base under a reviewed policy (not `--policy-from
- * head`) is publication evidence for this PR.
+ * Why a by-tree pregate mirror cannot stand in for this checkout's own
+ * record, or null. The mirror is keyed by tree alone, so any pregate run
+ * anywhere mints one; what the lane case needs from it is the test tier that
+ * `gstack-pregate --stage tests --remote` ran in the clone, so the mirror
+ * must hold every tests-stage check (a `--only timing` or preflight-only run
+ * is not evidence), be recorded against the same base, and not come from
+ * `--policy-from head`.
  */
 function mirrorGap(file: PregateFile, base: string): string | null {
   if (!(file.base ?? '').startsWith(`origin/${base}@`)) return `recorded against ${file.base ?? 'no base'}, not origin/${base}`;
   if (file.policy?.startsWith('head ')) return 'recorded under the unreviewed head policy';
-  const missing = CHECK_IDS.filter(id => !file.checks.some(c => c.id === id));
-  return missing.length ? `a partial run without ${missing.join(', ')}` : null;
+  const missing = CHECKS.filter(c => c.stage === 'tests' && !file.checks.some(k => k.id === c.id)).map(c => c.id);
+  return missing.length ? `a run without the tests stage (${missing.join(', ')})` : null;
 }
 
 function gateLine(policy: LoadedPolicy, attempt: AttemptRecord | null): string {

@@ -293,11 +293,11 @@ describe('ready', () => {
     expect(stalePregate.status).toBe(EXIT.refused);
     expect(stalePregate.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
     // A lane that cleared its pregate from a separate clone (gstack-pregate --remote cannot run in a worktree) holds the verdict under
-    // <state root>/pregate/by-tree/<tree>.json; ready reads that mirror for the current tree when its own record is stale or missing, and only a
-    // complete run (every registered check) against origin/main under a reviewed policy stands in: a --only run, another base or a head policy is named.
+    // <state root>/pregate/by-tree/<tree>.json; ready reads that mirror for the current tree when its own record is stale or missing, and only a run
+    // that holds the tests stage (what `--stage tests --remote` writes: checks=[lanes]) against origin/main under a reviewed policy stands in: a
+    // --only timing run, another base or a head policy is named on the PREGATE line instead.
     const stateRoot = path.join(repo.root, 'state-root');
-    const CHECK_IDS = ['regen', 'secrets', 'strays', 'literals', 'timing', 'guards', 'lanes'];
-    const complete = { base: `origin/main@${repo.git('rev-parse', 'origin/main').slice(0, 12)}`, policy: 'origin/main@abc (no .gstack/pregate.json)', checks: CHECK_IDS.map(id => ({ id, status: 'pass' })) };
+    const complete = { base: `origin/main@${repo.git('rev-parse', 'origin/main').slice(0, 12)}`, policy: 'origin/main@abc (no .gstack/pregate.json)', checks: [{ id: 'lanes', status: 'pass' }] };
     const fromSuffix = `(from the state root's pregate/by-tree/${'TREE'}.json, recorded by another checkout)`;
     const movedShim = ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } });
     const movedTree = runBin(repo, 'gstack-wtree', []).out.trim();
@@ -312,7 +312,7 @@ describe('ready', () => {
     expect(missing.out).toMatch(/^PREGATE: missing \(\.gstack\/tmp\/pregate\.json; run gstack-pregate run --allow-repo-commands\)$/m);
     const suffix = fromSuffix.replace('TREE', movedTree.slice(0, 12));
     const partial = { ...complete, checks: [{ id: 'timing', status: 'pass' }] };
-    for (const [bad, why] of [[partial, 'a partial run without regen, secrets, strays, literals, guards, lanes'], [{ ...complete, base: 'origin/develop@0123456789ab' }, 'recorded against origin/develop@0123456789ab, not origin/main'], [{ ...complete, policy: 'head (unreviewed) .gstack/pregate.json' }, 'recorded under the unreviewed head policy']] as const) {
+    for (const [bad, why] of [[partial, 'a run without the tests stage (lanes)'], [{ ...complete, base: 'origin/develop@0123456789ab' }, 'recorded against origin/develop@0123456789ab, not origin/main'], [{ ...complete, policy: 'head (unreviewed) .gstack/pregate.json' }, 'recorded under the unreviewed head policy']] as const) {
       fs.writeFileSync(mirror, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'pass', ...bad }));
       const ignored = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
       expect(ignored.status).toBe(EXIT.refused);
@@ -321,7 +321,7 @@ describe('ready', () => {
     fs.writeFileSync(mirror, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'pass', ...complete }));
     const fromMirror = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
     expect([fromMirror.status, fromMirror.err]).toEqual([EXIT.ok, '']);
-    expect(line(fromMirror.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=7 ${suffix}`);
+    expect(line(fromMirror.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1 ${suffix}`);
     const missingFromMirror = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
     expect([missingFromMirror.status, missingFromMirror.err]).toEqual([EXIT.ok, '']);
     expect(line(missingFromMirror.out, 'PREGATE:')).toContain(suffix);
@@ -337,7 +337,7 @@ describe('ready', () => {
     fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'requires-remote', checks: [{ id: 'lanes', status: 'requires-remote' }], requires_remote: [obligation] }));
     const uncleared = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
     expect([uncleared.status, uncleared.err]).toEqual([EXIT.ok, '']);
-    expect(line(uncleared.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=7 ${suffix}`);
+    expect(line(uncleared.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1 ${suffix}`);
     fs.writeFileSync(local, '{ not json');
     const unreadable = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
     expect([unreadable.status, unreadable.err]).toEqual([EXIT.ok, '']);

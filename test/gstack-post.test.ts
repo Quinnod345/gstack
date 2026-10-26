@@ -361,7 +361,21 @@ describe("gstack-post pr-body merges the PR body by section", () => {
     const open = withBody(unclosed, { "/b": RECEIPT("bbbb") + "\n## Summary\n\nnew\n" });
     expect(run(["pr-body", "5", "--body-file", "/b"], open)).toBe(EXIT.posted);
     expect(sent(open).input).toBe(RECEIPT("bbbb") + "\n" + unclosed + "\n## Summary\n\nnew\n");
-    expect(open.stderr()).toBe("gstack-post: pr-body merged by section: replaced none; kept leading text; added ship receipt, Summary\n");
+    expect(open.stderr()).toBe("gstack-post: pr-body merged by section: replaced none; kept unclosed receipt fence; added ship receipt, Summary\n");
+
+    const prose = withBody(unclosed, { "/b": "Updated introduction\n\n## Summary\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], prose)).toBe(EXIT.posted);
+    expect(sent(prose).input).toBe("Updated introduction\n\n" + unclosed + "\n## Summary\n\nnew\n");
+
+    const inside = withBody("Intro\n\n## Notes\n\n" + unclosed, { "/b": "New intro\n\n## Notes\n\nnew notes\n\n## Approvals\n\n- owner: still\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], inside)).toBe(EXIT.posted);
+    expect(sent(inside).input).toBe("New intro\n\n## Notes\n\nnew notes\n\n" + unclosed + "\n## Approvals\n\n- owner: still\n");
+    expect(inside.stderr()).toBe("gstack-post: pr-body merged by section: replaced leading text, Notes; kept unclosed receipt fence; added Approvals\n");
+
+    const after = withBody(RECEIPT("aaaa") + "\n## Why\n\nold\n\n" + unclosed, { "/b": RECEIPT("bbbb") + "\n## Why\n\nnew\n" });
+    expect(run(["pr-body", "5", "--body-file", "/b"], after)).toBe(EXIT.posted);
+    expect(sent(after).input).toBe(RECEIPT("bbbb") + "\n## Why\n\nnew\n\n" + unclosed);
+    expect(after.stderr()).toBe("gstack-post: pr-body merged by section: replaced ship receipt, Why; kept unclosed receipt fence; added none\n");
   });
 
   // Value: protects=--replace keeps the plain overwrite for a caller that composed the whole body, a current body with no H2 headings is kept as the leading

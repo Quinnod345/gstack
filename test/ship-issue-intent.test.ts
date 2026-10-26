@@ -38,7 +38,7 @@ describe('issue intent (pure)', () => {
     expect(links).toEqual({ fixes: [], refs: [], flakes: [], cross: ['acme/tools#4', 'gbrain#7606', 'gbrain#7625', 'gbrain#7630'], unreadable: [] });
     expect(renderIssueLines(links)).toEqual(['Refs acme/tools#4', 'Refs gbrain#7606', 'Refs gbrain#7625', 'Refs gbrain#7630']);
     expect(promotionCandidates(named, links)).toEqual([]);
-    for (const word of ['see', 'fixes', 'refs', 'related', 'part of', 'follow-up', 'closes', 'PR', 'issue', 'closing', 'addresses', 'fixing', 'implements', 'cf.', 'e.g.', 'i.e.', 'bug', 'upstream PR', 'v1.2', 'supersedes', 'duplicate of']) {
+    for (const word of ['see', 'fixes', 'refs', 'related', 'part of', 'follow-up', 'closes', 'PR', 'issue', 'closing', 'addresses', 'fixing', 'implements', 'cf.', 'e.g.', 'i.e.', 'bug', 'upstream PR', 'v1.2', 'v1.2.3-rc1', 'supersedes', 'duplicate of']) {
       expect([word, mentionsIn(`retry (${word} #12)`).map(x => [x.repo ?? '', x.issue, x.intent])]).toEqual([word, [['', 12, 'refs']]]);
     }
     expect(mentionsIn('v1.2.3 (#301) release notes').map(x => [x.repo ?? '', x.issue])).toEqual([['', 301]]);
