@@ -701,10 +701,15 @@ describe("--budget", () => {
 
 describe("--exact (opt-in measurement; offline here via an injected fetch)", () => {
   let egressHome: string;
+  let savedStateRoot: string | undefined;
   beforeAll(() => {
     egressHome = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-egress-"));
+    savedStateRoot = process.env.GSTACK_STATE_ROOT;
+    process.env.GSTACK_STATE_ROOT = path.join(egressHome, "state");
   });
   afterAll(() => {
+    if (savedStateRoot === undefined) delete process.env.GSTACK_STATE_ROOT;
+    else process.env.GSTACK_STATE_ROOT = savedStateRoot;
     try { fs.chmodSync(path.join(egressHome, "security"), 0o700); } catch {}
     fs.rmSync(egressHome, { recursive: true, force: true });
   });
@@ -1218,6 +1223,45 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(bill.skills[0].totalMdTokens).toBeGreaterThan(12_000);
   });
 
+  it("never reuses a measurement for a file replaced by one with the same size and mtime", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-same-stat-"));
+    fs.mkdirSync(path.join(tmp, "qa"));
+    fs.writeFileSync(path.join(tmp, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    const ref = path.join(tmp, "qa", "ref.md");
+    fs.writeFileSync(ref, "a".repeat(3_000));
+    const mtime = new Date("2026-01-01T00:00:00Z");
+    fs.utimesSync(ref, mtime, mtime);
+    const measured = await measureExactTokens(tmp, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(), egressHome });
+    const replacement = path.join(tmp, "qa", ".replacement");
+    fs.writeFileSync(replacement, "b".repeat(3_000));
+    fs.utimesSync(replacement, mtime, mtime);
+    fs.renameSync(replacement, ref);
+    buildBill(tmp, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource, missedKeys: measured.missedKeys });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(measured.missedKeys.has(ref)).toBe(true);
+  });
+
+  it("keeps a bill measured when a skill has no frontmatter or a reference is empty", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-zero-"));
+    fs.mkdirSync(path.join(tmp, "alpha"));
+    fs.writeFileSync(path.join(tmp, "alpha", "SKILL.md"), "---\nname: alpha\ndescription: d\n---\n# alpha\n");
+    fs.writeFileSync(path.join(tmp, "alpha", "empty.md"), "");
+    fs.mkdirSync(path.join(tmp, "beta"));
+    fs.writeFileSync(path.join(tmp, "beta", "SKILL.md"), "# beta has no frontmatter\n");
+    const inner = fakeFetch() as unknown as (u: string, i: { body: string }) => Promise<unknown>;
+    const strict = (async (u: string, i: { body: string }) =>
+      JSON.parse(i.body).messages[0].content === ""
+        ? { ok: false, status: 400, text: async () => "messages.0: user messages must have non-empty content" }
+        : inner(u, i)) as never;
+    const measured = await measureExactTokens(tmp, { model: "m", apiKey: "sk-test", fetchImpl: strict, egressHome });
+    const bill = buildBill(tmp, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource, missedKeys: measured.missedKeys });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect([...measured.missedKeys]).toEqual([]);
+    expect(bill.tokenEstimateErrorPct).toBe(0);
+    expect(bill.tokenSource).toBe("count_tokens (m)");
+  });
+
   it("refuses a walked file swapped for a FIFO instead of hanging", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fifo-"));
@@ -1233,9 +1277,10 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
         `import { spawnSync } from "node:child_process";`,
         `import { exactSendSet, measureExactTokens } from ${JSON.stringify(path.join(ROOT, "lib", "context-bill.ts"))};`,
         `const root = ${JSON.stringify(skills)};`,
-        `const sendSet = exactSendSet(root);`,
+        `const sendSet = exactSendSet(root, ${JSON.stringify(path.join(tmp, "state"))});`,
         `fs.unlinkSync(${JSON.stringify(path.join(skills, "qa", "a.md"))});`,
         `spawnSync("mkfifo", [${JSON.stringify(path.join(skills, "qa", "a.md"))}], { timeout: 5_000 });`,
+        `if (!fs.lstatSync(${JSON.stringify(path.join(skills, "qa", "a.md"))}).isFIFO()) { console.log("NOFIFO"); process.exit(0); }`,
         `const fetchImpl = (async () => ({ ok: true, json: async () => ({ input_tokens: 9 }) })) as never;`,
         `try { await measureExactTokens(root, { sendSet, model: "m", apiKey: "sk-test", fetchImpl, egressHome: ${JSON.stringify(tmp)} }); console.log("SENT"); }`,
         `catch (error) { console.log("REFUSED " + (error as Error).message); }`,
@@ -1244,6 +1289,7 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     const result = Bun.spawnSync([process.execPath, ...bunIsolationArgs(), script], { timeout: 15_000 });
     fs.rmSync(tmp, { recursive: true, force: true });
     expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).not.toContain("NOFIFO");
     expect(result.stdout.toString()).toContain("REFUSED");
     expect(result.stdout.toString()).toContain("changed after it was walked");
   });
@@ -1375,6 +1421,35 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(err).toContain("not sending 1 .md file(s)");
     expect(err).toContain(`  ${path.join("review", "notes.md")}\n`);
     expect(JSON.parse(stdout.text()).tokenSource).toStartWith("mixed: ");
+  });
+
+  it("does not trust a render folder that is itself a link", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-render-link-"));
+    const elsewhere = path.join(tmp, "elsewhere");
+    fs.mkdirSync(elsewhere);
+    fs.writeFileSync(path.join(elsewhere, "notes.md"), "PRIVATE-NOTES");
+    const stateRoot = path.join(tmp, "state");
+    fs.mkdirSync(stateRoot);
+    fs.symlinkSync(elsewhere, path.join(stateRoot, "render"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(path.join(elsewhere, "notes.md"), path.join(skills, "qa", "notes.md"));
+    const calls: { body: string }[] = [];
+    const stderr = capture();
+    const code = await contextBillMain([skills, "--exact", "--json"], {
+      stdout: capture().stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+      stateRoot,
+    });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.body.includes("PRIVATE-NOTES"))).toBe(false);
+    expect(stderr.text()).toContain("not sending 1 .md file(s)");
   });
 
   it("names each outside directory once, collapsing nested ones, and lists every refused file", async () => {
