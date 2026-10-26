@@ -363,79 +363,107 @@ describe('gstack-developer-profile --derive', () => {
 });
 
 // -----------------------------------------------------------------------
-// Per-session bound (#2623): one session moves a dimension at most as far
-// as the largest single delta in SIGNAL_MAP.
+// Per-day bound (#2623): one UTC day moves a dimension at most as far as the
+// largest single delta in SIGNAL_MAP, whatever session_id the writers log.
 // -----------------------------------------------------------------------
 
-describe('gstack-developer-profile per-session bound', () => {
+describe('gstack-developer-profile per-day bound', () => {
   const CAP = Math.max(...Object.values(SIGNAL_MAP).flatMap((byChoice) => Object.values(byChoice).flat().map((d) => Math.abs(d.delta))));
-  const arch = (session_id: string | undefined, user_choice = 'fix-now', i = 0) =>
-    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice, ts: `2026-04-0${i + 1}T10:00:00Z`, ...(session_id ? { session_id } : {}) });
+  const arch = (day: number, user_choice = 'fix-now', extra: Record<string, unknown> = {}) =>
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice, ts: `2026-04-${String(day).padStart(2, '0')}T10:00:00Z`, ...extra });
   const inferred = () => (readProfile() as { inferred: { values: Record<string, number>; contributing_events: Record<string, number> } }).inferred;
+  const value = (total: number) => +normalizeToDimensionValue(total).toFixed(3);
 
   test('the bound is the largest single delta in the signal map', () => {
     expect(CAP).toBe(0.06);
   });
 
-  test('five answers in one session move a dimension by the bound, not by their sum', () => {
-    for (let i = 0; i < 5; i++) arch('one-review', 'fix-now', i);
+  test('five answers on one day move a dimension by the bound, not by their sum', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: 'one-review' });
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(CAP).toFixed(3));
-    expect(inferred().values.risk_tolerance).toBe(+normalizeToDimensionValue(-CAP).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect(inferred().values.risk_tolerance).toBe(value(-CAP));
     expect(inferred().contributing_events.architecture_care).toBe(5);
   });
 
-  test('the same five answers across five sessions are not bounded (negative control)', () => {
-    for (let i = 0; i < 5; i++) arch(`s${i}`, 'fix-now', i);
+  test('the same five answers on five days are not bounded (negative control)', () => {
+    for (let i = 0; i < 5; i++) arch(i + 1, 'fix-now', { session_id: 'one-review' });
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(5 * 0.05).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(5 * 0.05));
   });
 
-  test('rows without a session_id each count as their own session', () => {
-    for (let i = 0; i < 3; i++) arch(undefined, 'fix-now', i);
+  test('a second day still moves the dimension after the first day is capped (negative control)', () => {
+    for (let i = 0; i < 5; i++) arch(1);
+    for (let i = 0; i < 5; i++) arch(2);
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(2 * CAP));
   });
 
-  test('rows with an unsubstituted SESSION_ID placeholder each count as their own session', () => {
-    for (let i = 0; i < 3; i++) arch('SESSION_ID', 'fix-now', i);
+  test('distinct session_ids on one day share the day bound', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: `s${i}` });
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(CAP));
   });
 
-  test('rows with an empty session_id each count as their own session', () => {
-    for (let i = 0; i < 3; i++) {
-      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: '' });
+  test('an unsubstituted SESSION_ID placeholder is bounded per day like any other id', () => {
+    for (let i = 0; i < 5; i++) arch(1, 'fix-now', { session_id: 'SESSION_ID' });
+    for (let i = 0; i < 3; i++) arch(i + 2, 'fix-now', { session_id: 'SESSION_ID' });
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(CAP + 3 * 0.05));
+  });
+
+  test('one review logged by both the hook and the agent is bounded once per day', () => {
+    for (let i = 0; i < 5; i++) {
+      arch(1, 'fix-now', { source: 'hook', tool_use_id: `t${i}`, session_id: 'claude-conversation-uuid' });
+      arch(1, 'fix-now', { session_id: '1234-1700000000-ab' });
     }
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(CAP));
+    expect(inferred().contributing_events.architecture_care).toBe(10);
   });
 
-  test('answers in one session net out before the bound applies', () => {
-    arch('mixed', 'fix-now', 0);
-    arch('mixed', 'accept-risk', 1);
+  test('the day is the UTC day of ts', () => {
+    arch(1, 'fix-now');
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: '2026-04-01T20:00:00-08:00' });
     runDev('--derive');
-    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(0.05 - 0.04).toFixed(3));
+    expect(inferred().values.architecture_care).toBe(value(2 * 0.05));
   });
 
-  test('--trace shows the capped session and a total that matches --derive', () => {
-    for (let i = 0; i < 5; i++) arch('one-review', 'fix-now', i);
-    arch('later', 'defer', 6);
+  test('rows without a parseable ts are each their own bucket', () => {
+    for (let i = 0; i < 3; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: 'not-a-date' });
+    }
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(3 * 0.05));
+  });
+
+  test('answers on one day net out before the bound applies', () => {
+    arch(1, 'fix-now');
+    arch(1, 'accept-risk');
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(value(0.05 - 0.04));
+  });
+
+  test('--trace shows the capped day and a total that matches --derive', () => {
+    for (let i = 0; i < 5; i++) arch(1);
+    arch(7, 'defer');
     runDev('--derive');
     const r = runDev('--trace', 'architecture_care');
     expect(r.stdout).toContain('6 events for architecture_care');
-    expect(r.stdout).toContain('session one-review: +0.250 capped to +0.060');
-    expect(r.stdout).not.toContain('session later');
-    expect(r.stdout).toContain(`TOTAL: +0.040 (each session capped at ±${CAP}) → ${inferred().values.architecture_care.toFixed(3)}`);
+    expect(r.stdout).toContain('day 2026-04-01: +0.250 capped to +0.060');
+    expect(r.stdout).not.toContain('day 2026-04-07');
+    expect(r.stdout).toContain(`TOTAL: +0.040 (each UTC day capped at ±${CAP}) → ${inferred().values.architecture_care.toFixed(3)}`);
     const risk = runDev('--trace', 'risk_tolerance');
-    expect(risk.stdout).toContain('session one-review: -0.100 capped to -0.060');
+    expect(risk.stdout).toContain('day 2026-04-01: -0.100 capped to -0.060');
   });
 
   test('--trace replaces control characters in logged fields', () => {
-    for (let i = 0; i < 5; i++) arch('a\nTOTAL: +9.999 \u001b[31mforged\u007f\u009b', 'fix-now', i);
+    for (let i = 0; i < 2; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', ts: '\u001b\u007f\u009b\nTOTAL: +9.999' });
+    }
     const r = runDev('--trace', 'architecture_care');
     expect(r.stdout.split('\n').filter((l) => l.startsWith('TOTAL:'))).toHaveLength(1);
-    expect(r.stdout).toContain('session a?TOTAL: +9.999 ?[31mforged??: +0.250 capped to +0.060');
+    expect(r.stdout).toContain('  ????TOTAL: +9.999  plan-eng-review-arch-finding');
     expect(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(r.stdout)).toBe(false);
   });
 });

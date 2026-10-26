@@ -12,7 +12,7 @@
 #   --profile           emit the full profile as JSON (all fields).
 #   --gap               emit declared-vs-inferred gap as JSON.
 #   --trace <dim>       show events that contributed to a dimension, each
-#                       session clamped by the per-session bound, and the total.
+#                       UTC day clamped by the per-day bound, and the total.
 #   --narrative         (v2 stub) output a coach bio paragraph.
 #   --vibe              (v2 stub) output the one-word archetype.
 #   --check-mismatch    detect meaningful gaps between declared and observed.
@@ -407,14 +407,15 @@ do_gap() {
 # -----------------------------------------------------------------------
 # Signal accumulation shared by --derive and --trace, so the trace always
 # explains exactly the value derive wrote. Each row's SIGNAL_MAP deltas are
-# summed per (session, dimension) and each session's sum is clamped to
-# ±cap, where cap is the largest single delta in SIGNAL_MAP: one session
-# moves a dimension at most as far as one strong answer. Without the bound
-# a single /plan-eng-review (about five answers) moved a dimension by 0.25
-# and about eight sessions pinned it at 1.0 (#2623). A row without a
-# session_id, or with an unsubstituted placeholder such as SESSION_ID, is
-# its own session. The bound keys on the writer's session_id,
-# which differs between the PostToolUse hook and the agent's own log call.
+# summed per (UTC day, dimension) and each day's sum is clamped to ±cap,
+# where cap is the largest single delta in SIGNAL_MAP: one day moves a
+# dimension at most as far as one strong answer. Without the bound a single
+# /plan-eng-review (about five answers) moved a dimension by 0.25 and about
+# eight reviews pinned it at 1.0 (#2623). The bound keys on the row's ts,
+# not its session_id: writers log different ids for one review (the
+# PostToolUse hook logs the host conversation, the agent the preamble run)
+# and an unsubstituted placeholder such as SESSION_ID would merge or split
+# reviews. A row without a parseable ts is its own bucket.
 # The body is a single-quoted bash string: its JS must not contain a single
 # quote (use double quotes or backticks), or the assignment ends early and
 # every subcommand fails to parse.
@@ -428,7 +429,7 @@ function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
     }
   }
   const contributing = Object.fromEntries(dims.map((d) => [d, 0]));
-  const sessions = new Map();
+  const buckets = new Map();
   const rows = [];
   const skills = new Set();
   const qids = new Set();
@@ -448,22 +449,23 @@ function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
     const deltas = Object.hasOwn(byChoice, e.user_choice) ? byChoice[e.user_choice] : [];
     if (!Array.isArray(deltas) || deltas.length === 0) continue;
     signalEvents++;
-    const real = typeof e.session_id === "string" && e.session_id && !/^[A-Z_]+$/.test(e.session_id);
-    const session = real ? e.session_id : "row-" + count;
-    const sums = sessions.get(session) || {};
-    sessions.set(session, sums);
+    const when = e.ts ? new Date(e.ts) : null;
+    const day = when && !Number.isNaN(when.getTime()) ? when.toISOString().slice(0, 10) : null;
+    const key = day ? "day " + day : "row " + count;
+    const bucket = buckets.get(key) || { day: day || "undated row " + count, sums: {} };
+    buckets.set(key, bucket);
     for (const d of deltas) {
-      sums[d.dim] = (sums[d.dim] || 0) + d.delta;
-      rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, session, dim: d.dim, delta: d.delta });
+      bucket.sums[d.dim] = (bucket.sums[d.dim] || 0) + d.delta;
+      rows.push({ ts: e.ts, question_id: e.question_id, choice: e.user_choice, day: bucket.day, dim: d.dim, delta: d.delta });
     }
     for (const dim of new Set(deltas.map((d) => d.dim))) contributing[dim] = (contributing[dim] ?? 0) + 1;
   }
   const totals = Object.fromEntries(dims.map((d) => [d, 0]));
   const capped = [];
-  for (const [session, sums] of sessions) {
+  for (const { day, sums } of buckets.values()) {
     for (const [dim, sum] of Object.entries(sums)) {
       const bounded = Math.max(-cap, Math.min(cap, sum));
-      if (Math.abs(sum - bounded) > 1e-9) capped.push({ session, dim, sum, bounded });
+      if (Math.abs(sum - bounded) > 1e-9) capped.push({ day, dim, sum, bounded });
       totals[dim] = (totals[dim] ?? 0) + bounded;
     }
   }
@@ -581,10 +583,10 @@ do_trace() {
           console.log('  ' + clean(r.ts).slice(0,19) + '  ' + clean(r.question_id) + '  → ' + clean(r.choice) + '  (' + signed(r.delta) + ')');
         }
         for (const c of acc.capped.filter((c) => c.dim === target)) {
-          console.log('  session ' + clean(c.session) + ': ' + signed(c.sum, 3) + ' capped to ' + signed(c.bounded, 3));
+          console.log('  day ' + clean(c.day) + ': ' + signed(c.sum, 3) + ' capped to ' + signed(c.bounded, 3));
         }
         const total = acc.totals[target] ?? 0;
-        console.log('TOTAL: ' + signed(total, 3) + ' (each session capped at ±' + acc.cap + ') → ' + normalizeToDimensionValue(total).toFixed(3));
+        console.log('TOTAL: ' + signed(total, 3) + ' (each UTC day capped at ±' + acc.cap + ') → ' + normalizeToDimensionValue(total).toFixed(3));
       }
     });
   "
