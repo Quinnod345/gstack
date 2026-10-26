@@ -783,6 +783,31 @@ async function countTokens(text: string, { model, apiKey, fetchImpl }: CountToke
   return json.input_tokens;
 }
 
+/**
+ * The files --exact sends: the .md files the root walk reaches that the bill
+ * actually prices, each real file once. The root walk alone would also reach
+ * files a skill's own walk refuses (a symlinked skill's link up to its real
+ * parent), and those must not leave the machine when nothing bills them.
+ *
+ * The root is resolved before keying. buildBill resolves its root, so a
+ * relative root here would produce keys that never match and every lookup
+ * would fall back to the estimate.
+ */
+export function exactSendFiles(root: string): string[] {
+  const resolved = path.resolve(root);
+  const fmSuffix = frontmatterKey("");
+  const priced = new Set<string>();
+  buildBill(resolved, {
+    tokensOf: (key) => {
+      try {
+        priced.add(fs.realpathSync(key.endsWith(fmSuffix) ? key.slice(0, -fmSuffix.length) : key));
+      } catch {}
+      return 0;
+    },
+  });
+  return walkMd(resolved).filter((file) => priced.has(fs.realpathSync(file)));
+}
+
 export interface ExactMeasurement {
   tokenSource: string;
   tokensOf: TokensOf;
@@ -823,14 +848,11 @@ export async function measureExactTokens(
   const opts: CountTokensOptions = { model, apiKey, fetchImpl };
 
   const texts = new Map<string, string>();
-  // The walk returns each real file once, so each is sent once. The bill keys
+  // The send set holds each real file once, so each is sent once. The bill keys
   // the same file by every lexical path it is billed under; lexicalOf maps a
   // real file back to the one key that was measured.
   const lexicalOf = new Map<string, string>();
-  // Resolve before keying. buildBill resolves its root, so a relative root here
-  // would produce keys that never match and every lookup would fall back to the
-  // estimate -- exact mode silently degrading to the thing it replaces.
-  for (const file of walkMd(path.resolve(root))) {
+  for (const file of exactSendFiles(root)) {
     const text = fs.readFileSync(file, "utf8");
     texts.set(file, text);
     lexicalOf.set(fs.realpathSync(file), file);
@@ -1039,7 +1061,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
   }> => {
     if (!flags.exact) return {};
     if (!fs.existsSync(tree)) throw new Error(`No such tree: ${path.resolve(tree)}`);
-    const walked = walkMd(tree);
+    const walked = exactSendFiles(tree);
     const treeReal = fs.realpathSync(tree);
     const outside = walked.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
     stderr.write(

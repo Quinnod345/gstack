@@ -899,6 +899,33 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("sends nothing the bill does not price, even what the root walk reaches", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-send-set-"));
+    const skills = path.join(tmp, "skills");
+    const ext = path.join(tmp, "ext");
+    fs.mkdirSync(skills);
+    fs.mkdirSync(path.join(ext, "cc"), { recursive: true });
+    fs.mkdirSync(path.join(ext, "private"));
+    fs.writeFileSync(path.join(ext, "cc", "SKILL.md"), "---\nname: cc\ndescription: d\n---\n# cc\n");
+    fs.writeFileSync(path.join(ext, "private", "notes.md"), "PRIVATE-NOTES");
+    fs.symlinkSync(ext, path.join(ext, "cc", "up"));
+    fs.symlinkSync(path.join(ext, "cc"), path.join(skills, "cc"));
+    const calls: { body: string }[] = [];
+    const stderr = capture();
+    const code = await contextBillMain([skills, "--exact", "--json"], {
+      stdout: capture().stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+    });
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.body.includes("PRIVATE-NOTES"))).toBe(false);
+    expect(stderr.text()).toContain("sending the content of 1 .md file(s)");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it("names a missing tree, without a raw ENOENT or any request", async () => {
     const out = capture();
     const calls: { body: string }[] = [];
