@@ -49,6 +49,39 @@ export function extractReceipt(body: string): { found: boolean; receipt?: ShipRe
   }
 }
 
+export type ReceiptBindingCode = 'QUEUE_RECEIPT_MISSING' | 'QUEUE_RECEIPT_STALE';
+export type ReceiptBinding =
+  | { ok: true; receipt: ShipReceipt; head: string; line: string }
+  | { ok: false; code: ReceiptBindingCode; message: string; line: string };
+
+/**
+ * The /ship receipt a PR body must carry before READY, train build or a train
+ * merge (CREW rule 22; docs/ship-policy.md#ship-before-ready): a valid block
+ * whose `head` is one of the accepted heads. `accepted` is the head being
+ * READY'd, or the slot's pinned head beside the current head when the current
+ * head is the pin's stamp commit (the stamp changes only stamp files, so the
+ * receipt written for the pin stays the binding one). `line` is the
+ * informational `SHIP_RECEIPT:` line the READY block prints either way.
+ */
+export function bindReceipt(body: string, pr: string | undefined, accepted: readonly string[]): ReceiptBinding {
+  const subject = pr === undefined ? "the receipt's" : `PR #${pr}'s`;
+  const ex = extractReceipt(body);
+  if (!ex.found) return { ok: false, code: 'QUEUE_RECEIPT_MISSING', message: `${subject} body carries no ship receipt`, line: 'SHIP_RECEIPT: none in the PR body' };
+  if (!ex.receipt || ex.errors.length) {
+    const why = ex.errors[0] ? oneLine(`${ex.errors[0].message} at ${ex.errors[0].path}`).slice(0, 200) : 'invalid';
+    return { ok: false, code: 'QUEUE_RECEIPT_MISSING', message: `${subject} ship receipt is invalid (${why})`, line: 'SHIP_RECEIPT: invalid in the PR body' };
+  }
+  const r = ex.receipt;
+  const line = receiptSummaryLine(r);
+  const head = accepted.find(h => h === r.head || (r.head.length >= 12 && h.startsWith(r.head)));
+  if (!head) {
+    const want = accepted.map(h => h.slice(0, 12)).join(' or ');
+    return { ok: false, code: 'QUEUE_RECEIPT_STALE', message: `${subject} ship receipt is for ${oneLine(r.head.slice(0, 12))}, not the head ${want} being merged`, line };
+  }
+  if (pr !== undefined && r.pr !== undefined && String(r.pr) !== pr) return { ok: false, code: 'QUEUE_RECEIPT_STALE', message: `${subject} ship receipt names pr=${r.pr}, not this PR`, line };
+  return { ok: true, receipt: r, head, line };
+}
+
 /** The block becomes the first section of the body: an existing block is replaced in place at the top, prose follows. */
 export function placeReceiptFirst(body: string, receipt: ShipReceipt): string {
   const block = renderReceiptBlock(receipt);
@@ -70,6 +103,9 @@ export function missingIssueLines(body: string, issues: NonNullable<ShipReceipt[
   return expected.filter(e => !have.some(l => l === e || l.startsWith(`${e} `)));
 }
 
+/** Receipt fields come from the PR body, so anything printed from one stays on its own line, control characters included. */
+const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f\u0080-\u009f\u2028\u2029]+/g, ' ');
+
 /** The first lines of the completion message to the coordinator: identifiers only. */
 export function receiptSummaryLine(r: ShipReceipt): string {
   const parts = [`pr=${r.pr ?? '-'}`, `head=${r.head.slice(0, 12)}`, `version=${r.version ?? '-'}`, `base=${r.base}`];
@@ -80,7 +116,7 @@ export function receiptSummaryLine(r: ShipReceipt): string {
   if (r.session_kind) parts.push(`session_kind=${r.session_kind}`);
   if (r.artifacts_consumed) parts.push(`artifacts_consumed=${r.artifacts_consumed}`);
   if (r.approval) parts.push(`approval=${approvalSummary(r.approval)}`);
-  return `SHIP_RECEIPT: ${parts.join(' ')}`;
+  return `SHIP_RECEIPT: ${oneLine(parts.join(' '))}`;
 }
 
 // ---------------------------------------------------------------------------

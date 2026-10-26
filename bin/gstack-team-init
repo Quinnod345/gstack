@@ -18,6 +18,7 @@
 BASH_COMPAT=50
 
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 
 MODE="${1:-}"
 
@@ -192,7 +193,7 @@ HOOK_EOF
   if ! command -v bun >/dev/null 2>&1; then
     echo "  ! bun not found — manually add this PreToolUse hook (matcher Skill|skill, \"onFailure\": \"block\") to .claude/settings.json:"
     echo "    $HOOK_COMMAND"
-  elif GSTACK_SETTINGS_PATH="$SETTINGS" GSTACK_HOOK_COMMAND="$HOOK_COMMAND" bun --no-env-file --config=/dev/null -e "
+  elif GSTACK_SETTINGS_PATH="$SETTINGS" GSTACK_HOOK_COMMAND="$HOOK_COMMAND" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
       const fs = require('fs');
       const settingsPath = process.env.GSTACK_SETTINGS_PATH;
       const handler = { type: 'command', command: process.env.GSTACK_HOOK_COMMAND, onFailure: 'block' };
