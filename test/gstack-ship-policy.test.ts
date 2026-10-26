@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { DEFAULT_POLICY, POLICY_KEYS, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
+import { fillDue } from '../lib/ship-queue-train';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -71,6 +72,18 @@ describe("gstack's own .gstack/ship-policy.json", () => {
     expect(validatePolicy(raw)).toEqual([]);
     expect(raw.train).toMatchObject({ gate_workflow: 'evals.yml', free_workflow: 'free-tests.yml', full_gate_check: 'gstack/full-gate', record_artifact: 'gstack-train-record' });
     for (const wf of [raw.train.gate_workflow, raw.train.free_workflow]) expect(fs.existsSync(path.join(root, '.github/workflows', wf))).toBe(true);
+  });
+
+  // Value: protects=the fill rule the coordinator relies on: a train dispatches at 3 READY PRs or one hour after the first READY, whichever comes first
+  // (2026-10-26: 5 PRs / 3 hours left READY PRs waiting most of a day); fails_when=the live block drifts back to a larger or slower fill; why_new=the values were unpinned; seam=the policy file; no_claim=fillDue's arithmetic (ship-queue-train-logic)
+  test('fills a train at 3 READY PRs or one hour after the first READY, whichever comes first', () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(import.meta.dir, '..', '.gstack', 'ship-policy.json'), 'utf8'));
+    expect([raw.train.max_size, raw.train.fill_hours]).toEqual([3, 1]);
+    const first = '2026-10-26T09:00:00.000Z';
+    const slots = (n: number) => Array.from({ length: n }, (_, i) => ({ pr: i + 1, ready_at: new Date(Date.parse(first) + i * 60_000).toISOString() })) as any;
+    expect(fillDue(slots(2), raw.train, '2026-10-26T09:59:00Z', false)).toBe('2026-10-26T10:00:00.000Z');
+    expect(fillDue(slots(2), raw.train, '2026-10-26T10:00:00Z', false)).toBeNull();
+    expect(fillDue(slots(3), raw.train, '2026-10-26T09:05:00Z', false)).toBeNull();
   });
 });
 
