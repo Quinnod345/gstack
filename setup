@@ -1718,7 +1718,14 @@ bun_cmd() {
 # `bun install` (CONTRIBUTING.md, bin/dev-setup, CI) survives a later ./setup.
 # Bun's --production implies a frozen lockfile, so when bun.lock is out of date
 # (a fork or a local edit) refresh it first, then install production-only again.
+# A checkout that already has the dev toolchain (node_modules/typescript) is a
+# contributor's: a production install would leave its dev packages at old
+# versions after bun.lock moves, so it gets the full install instead.
 install_runtime_deps() {
+  if [ -d node_modules/typescript ]; then
+    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install
+    return
+  fi
   bun_cmd install --production --frozen-lockfile 2>/dev/null || { bun_cmd install --lockfile-only && bun_cmd install --production --frozen-lockfile; }
 }
 
