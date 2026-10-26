@@ -442,12 +442,12 @@ describe('ready --dispatch-ci', () => {
 
 describe('train build --dry-run --stack-tests', () => {
   // Value: protects=a PR whose new tests pass on its own branch but fail once stacked behind another PR's change is caught before the train spends a gate (#3460 on #3451, 2026-10-26);
-  // fails_when=the new test files run against the PR head instead of the integrated prefix, a failing prefix still dry-runs green, or a PR without new tests is misreported; why_new=no pre-dispatch stack check existed; seam=bun test in a scratch worktree; no_claim=the repo's full suite on the prefix
-  test('runs each PR\'s new test files on its integrated prefix T<k>: a pass and a no-tests PR are reported, a failure refuses the dry run and names the prefix, and the ordinary dry run skips it', () => {
+  // fails_when=the new test files run against the PR head instead of the integrated prefix, a failing prefix still dry-runs green, or a PR without new tests (a helper under test/ included: bun exits 1 when a positional filter matches no test file) is misreported; why_new=no pre-dispatch stack check existed; seam=bun test in a scratch worktree; no_claim=the repo's full suite on the prefix
+  test('runs each PR\'s new test files on its integrated prefix T<k>: a pass and a helper-only PR are reported, a failure refuses the dry run and names the prefix, and the ordinary dry run skips it', () => {
     const fx = make();
     const h1 = openPr(fx, '1', { file: 'test/pr-1.test.ts', text: "import { expect, test } from 'bun:test';\ntest('pr-1', () => { expect(1).toBe(1); });\n" });
     const h2 = openPr(fx, '2', { file: 'test/pr-2.test.ts', text: "import { existsSync } from 'node:fs';\nimport { expect, test } from 'bun:test';\ntest('pr-2 wants no pr-1 test beside it', () => { expect(existsSync('test/pr-1.test.ts')).toBe(false); });\n" });
-    const h3 = openPr(fx, '3');
+    const h3 = openPr(fx, '3', { file: 'test/helpers/pr-3-helper.ts', text: 'export const three = 3;\n' });
     readyReceipt(fx, '1', h1);
     readyReceipt(fx, '2', h2);
     readyReceipt(fx, '3', h3);

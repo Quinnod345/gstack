@@ -20,7 +20,8 @@ import { git } from './ship-queue-gate';
 import type { TrainPrefix, TrainSlot } from './ship-queue-train-record';
 
 export const DEFAULT_STACK_TEST_COMMAND = ['bun', ...bunIsolationArgs(), 'test'];
-const TEST_FILE = /(?:^|\/)(?:tests?|__tests__|spec)\/.*\.[cm]?[jt]sx?$|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+/** Bun's own test-file rule (`.test`, `_test_`, `.spec` or `_spec_` in the name); a helper or fixture under test/ is not a test file and would make `bun test <file>` exit 1 for matching nothing. */
+const TEST_FILE = /(?:\.(?:test|spec)|_(?:test|spec)_)[^/]*\.[cm]?[jt]sx?$/;
 
 export interface StackTestResult { pr: string; prefix: number; files: string[]; ok: boolean; detail: string }
 
@@ -44,7 +45,7 @@ export function stackTests(repoRoot: string, baseSha: string, slots: TrainSlot[]
       const modules = path.join(repoRoot, 'node_modules');
       if (fs.existsSync(modules) && !fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(modules, path.join(dir, 'node_modules'), 'dir');
       const [bin, ...args] = command;
-      const run = spawnSync(bin!, [...args, ...files], { cwd: dir, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, CI: process.env.CI ?? '1' }, maxBuffer: 64 * 1024 * 1024 });
+      const run = spawnSync(bin!, [...args, ...files.map(f => `./${f}`)], { cwd: dir, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, CI: process.env.CI ?? '1' }, maxBuffer: 64 * 1024 * 1024 });
       const tail = `${run.stdout ?? ''}\n${run.stderr ?? ''}`.split('\n').filter(l => /^\(fail\)|^\s*\d+ (pass|fail)$|^error:/.test(l)).slice(-6).join('; ');
       results.push({ pr: slot.pr, prefix: prefix.index, files, ok: run.status === 0, detail: run.status === 0 ? 'pass' : run.error ? `${run.error.message}` : tail || `exit ${run.status}` });
     } finally {
