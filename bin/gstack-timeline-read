@@ -10,7 +10,7 @@
 # --branch, or an unknown argument exits 2 before any read (#1723); --help
 # prints the usage line and exits 0.
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 USAGE='Usage: gstack-timeline-read [--since "7 days ago"|7d|YYYY-MM-DD] [--limit N] [--branch NAME]'
 SINCE_FORMS='accepted: "<N> minute|hour|day|week|month[s] ago", "<N>h|d|w", or an ISO date YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

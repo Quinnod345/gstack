@@ -28,7 +28,7 @@
 # docs/designs/PLAN_TUNING_V0.md). Event file: ~/.gstack/projects/{SLUG}/
 # question-events.jsonl.
 set -euo pipefail
-GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -176,7 +176,8 @@ EOF
 # and update aggregates (signals_accumulated, resources_shown, topics).
 # Fix for #1671: the writer side of the v1.0.0.0 migration. Reader and
 # writer now share the same file.
-# Silent skip on invalid input (matches gstack-timeline-log:22-26 pattern).
+# Invalid input is skipped silently; a Bun failure is reported and returned,
+# as in gstack-timeline-log (#3415).
 # -----------------------------------------------------------------------
 do_log_session() {
   local INPUT="${1:-}"
@@ -185,12 +186,18 @@ do_log_session() {
   fi
 
   # Validate: input must be parseable JSON with required fields (date, mode).
-  if ! printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
-    const j = JSON.parse(await Bun.stdin.text());
-    if (!j.date || !j.mode) process.exit(1);
-  " 2>/dev/null; then
-    return 0
-  fi
+  # Invalid input exits 3; any other non-zero exit means Bun itself failed.
+  local VALIDATE_RC=0
+  printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
+    let j;
+    try { j = JSON.parse(await Bun.stdin.text()); } catch { process.exit(3); }
+    if (!j || !j.date || !j.mode) process.exit(3);
+  " || VALIDATE_RC=$?
+  case "$VALIDATE_RC" in
+    0) ;;
+    3) return 0 ;;
+    *) echo "gstack-developer-profile: bun exited $VALIDATE_RC before the session was validated; nothing was logged" >&2; return "$VALIDATE_RC" ;;
+  esac
 
   ensure_profile
 

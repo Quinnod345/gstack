@@ -18,7 +18,7 @@ import { bunIsolationArgs } from '../lib/bun-isolation';
 import { bashCommandInvocation } from '../lib/script-invocation';
 
 const PRINT = 'console.log("env=" + (process.env.GSTACK_LAUNCH_PROBE ?? "unset"))';
-const CONFIG_DEF = 'GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) GSTACK_BUN_CONFIG=NUL ;; esac';
+const CONFIG_DEF = 'GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac';
 const NO_PATHCONV = { MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' };
 let project = '';
 let preloadMarker = '';

@@ -1,8 +1,8 @@
 /**
  * #3415: gstack's shell bins start Bun with
  * --config="${GSTACK_BUN_CONFIG:-/dev/null}", and each defines
- * GSTACK_BUN_CONFIG as NUL when OSTYPE is msys or cygwin (Git Bash, MSYS2,
- * Cygwin). Native bun.exe cannot
+ * GSTACK_BUN_CONFIG as NUL when OSTYPE is msys or cygwin and cygpath is on PATH
+ * (Git Bash, MSYS2, Cygwin). Native bun.exe cannot
  * open /dev/null (EINVAL), so a Windows bash with MSYS path conversion off
  * (MSYS_NO_PATHCONV=1, MSYS2_ARG_CONV_EXCL=*) made the literal spelling fail:
  * the record bins wrote nothing, and gstack-timeline-log still exited 0.
@@ -10,10 +10,12 @@
  * On every platform the free lanes run, windows-latest included, the record
  * bins run through lib/script-invocation.ts with conversion off in a hostile
  * repository: each writes its record, and the repository's bunfig.toml preload
- * and .env never load. On POSIX a simulated Windows bash (OSTYPE=msys, a bun
- * that rejects /dev/null the way bun.exe does) reproduces the bug; its
- * controls, without OSTYPE=msys, show each bin fails loudly with nothing
- * written instead of exiting 0.
+ * and .env never load. On POSIX a simulated Windows bash (OSTYPE=msys, a
+ * cygpath, a bun that rejects /dev/null the way bun.exe does) reproduces the
+ * bug; its controls, without OSTYPE=msys, show each bin fails loudly with
+ * nothing written instead of exiting 0. An OSTYPE=msys inherited by a POSIX
+ * bash with no cygpath keeps /dev/null, so a file named NUL in the repository
+ * is never read as Bun's config.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -47,8 +49,8 @@ function env(pathPrefix?: string, extra: Record<string, string> = {}): NodeJS.Pr
   return { ...out, HOME: path.join(tmp, 'home'), GSTACK_STATE_ROOT: stateRoot, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*', ...extra };
 }
 
-function run(bin: string, input: string, pathPrefix?: string, extra: Record<string, string> = {}) {
-  return runScriptSync(path.join(ROOT, 'bin', bin), [input], { cwd: repo, env: env(pathPrefix, extra), encoding: 'utf8', timeout: 60_000 });
+function run(bin: string, input: string, pathPrefix?: string, extra: Record<string, string> = {}, rest: string[] = []) {
+  return runScriptSync(path.join(ROOT, 'bin', bin), [input, ...rest], { cwd: repo, env: env(pathPrefix, extra), encoding: 'utf8', timeout: 60_000 });
 }
 
 function records(log: string): string[] {
@@ -99,6 +101,7 @@ beforeAll(() => {
     `exec ${JSON.stringify(process.execPath)} "\${a[@]}"`,
     '',
   ].join('\n'));
+  writeExec(path.join(fakeBun, 'cygpath'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "${@: -1}"\n');
 });
 
 afterAll(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -135,6 +138,20 @@ describe('#3415: record bins start Bun on a Windows bash with path conversion of
 });
 
 describe.skipIf(IS_WINDOWS)('#3415: simulated Windows bash (POSIX hosts)', () => {
+  test('gstack-developer-profile --log-session reports a Bun failure instead of skipping it, and still skips invalid input silently', () => {
+    resetState();
+    const session = JSON.stringify({ date: '2026-10-25', mode: 'startup' });
+    const failed = run('gstack-developer-profile', '--log-session', fakeBun, {}, [session]);
+    expect(failed.stderr).toContain('EINVAL');
+    expect(failed.stderr).toContain('nothing was logged');
+    expect(failed.status).not.toBe(0);
+    for (const bad of ['not json', '{"date":"2026-10-25"}', 'null']) {
+      const r = run('gstack-developer-profile', '--log-session', undefined, {}, [bad]);
+      expect(r.status).toBe(0);
+      expect(r.stderr).toBe('');
+    }
+  });
+
   for (const { bin, input, log } of BINS) {
     test(`${bin} passes NUL and writes its record`, () => {
       resetState();
@@ -143,6 +160,21 @@ describe.skipIf(IS_WINDOWS)('#3415: simulated Windows bash (POSIX hosts)', () =>
       expect(r.status).toBe(0);
       expect(records(log).length).toBe(1);
       expect(fs.existsSync(preloadMarker)).toBe(false);
+    });
+
+    test(`an inherited OSTYPE=msys without cygpath keeps /dev/null: ${bin} never reads a repository file named NUL`, () => {
+      resetState();
+      const nul = path.join(repo, 'NUL');
+      fs.writeFileSync(nul, 'preload = ["./preload.ts"]\n');
+      try {
+        const r = run(bin, input, undefined, { OSTYPE: 'msys' });
+        expect(r.status).toBe(0);
+        expect(records(log).length).toBe(1);
+        expect(fs.existsSync(preloadMarker)).toBe(false);
+      } finally {
+        fs.rmSync(nul, { force: true });
+        fs.rmSync(preloadMarker, { force: true });
+      }
     });
 
     test(`control: when Bun rejects the config, ${bin} fails loudly and writes nothing`, () => {
