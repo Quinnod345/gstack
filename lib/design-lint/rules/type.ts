@@ -11,6 +11,8 @@ import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey,
 import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
+import { twMonoIsMaterial } from '../tailwind';
+import { capsRatio } from './chrome-eyebrow';
 
 /** A selector without its pseudo-classes and pseudo-elements, whitespace folded. */
 const baseSelector = (sel: string): string => sel.replace(/::?[a-z-]+(\([^)]*\))?/gi, '').replace(/\s+/g, ' ').trim();
@@ -223,15 +225,9 @@ function check55(ctx: LintContext, r: Reporter): void {
 }
 
 
-// sloplint monoIsMaterial (gate 64): a monospace face declared as the display, body or outlier is the page's material, not a costume
-function monoIsMaterial(ctx: LintContext): boolean {
-  const mono = (v: string | undefined) => !!v && MONO_FACE.test(firstFamily(resolveVars(v, ctx.tokens)));
-  return mono(ctx.tokens['--font-display']) || mono(ctx.tokens['--font-body']) || mono(ctx.tokens['--font-outlier']);
-}
-
-// sloplint check64 (gate 64)
+// sloplint check64 (gate 64); twMonoIsMaterial is sloplint's monoIsMaterial: a mono face declared as the display, body or outlier is the page's material, not a costume
 function check64(ctx: LintContext, r: Reporter): void {
-  if (monoIsMaterial(ctx)) return;
+  if (twMonoIsMaterial(ctx.tokens)) return;
   const monoFam = (v: string) => MONO_FACE.test(firstFamily(resolveVars(v, ctx.tokens)));
   const LABELISH = /label|caption|meta|eyebrow|kicker|tag\b|badge|chip|small|folio|footnote|legend|\bth\b|thead|figcaption|overline|dateline|byline|credit|note\b/i;
   const DATAISH = /code|pre\b|kbd|samp|num|figure|stat|price|value|data|tabular|counter|timer|clock|coord|amount|total|score|version|hash|\bid\b|sku|time|date|hour|utc|eta|lot\b|edition|ref\b|dimension|measure|reading|plate-?no|tag-?no|url|uri\b|path|endpoint|command|cmd|snippet|install/i;
@@ -371,10 +367,6 @@ function check67(ctx: LintContext, r: Reporter): void {
 }
 
 const CAPS_TAGS = /^(p|span|small|a|li|div|figcaption|td|th|dt|dd|label|time|cite|strong|b|em|button|summary)$/;
-const capsRatio = (s: string): number => {
-  const letters = s.replace(/[^A-Za-z]/g, '');
-  return letters ? (letters.match(/[A-Z]/g) || []).length / letters.length : 0;
-};
 
 // sloplint check67Html (gate 67), the markup half: text typed in capitals at label size or tracked
 function check67Html(ctx: LintContext, r: Reporter): void {

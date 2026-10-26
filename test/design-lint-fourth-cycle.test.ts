@@ -258,3 +258,42 @@ describe('design-lint fourth cycle: never-waivable classes refuse by class befor
     expect(applyWaivers(measured.findings, set).map((f) => [f.rule, f.grade])).toEqual([['nested-cards', 'blocks'], ['waiver', 'ask'], ['waiver', 'ask'], ['waiver', 'ask']]);
   });
 });
+
+describe('design-lint fourth cycle: the pixel pass with a readable screenshot', () => {
+  const PAGE = HEAD + '</head><body><main><h1>t</h1><p class="faint">Body.</p><a href="#">Go</a></main></body></html>';
+  const SWATCH = path.join(path.resolve(import.meta.dir, '..'), 'test', 'fixtures', 'design-lint', 'render', 'swatch.png');
+  const SETUP = 1, FIRST = 2, FOCUS = 13;
+
+  test('a contrast claim is dropped when the pixels behind it clear the threshold, rewritten when they confirm it, and a weak ring is confirmed from the pixels around it', async () => {
+    // swatch.png is 8x8, red on the left half and blue on the right; the page rects are in CSS pixels, scaled to the screenshot by its width
+    const dir = tree({ 'index.html': PAGE });
+    const file = path.join(dir, 'index.html');
+    const white = { rule: 'low-contrast', grade: 'fail', evidence: 'computed contrast 2.50:1 under the 4.5:1 threshold on h1 (2.50:1)', probe: { path: 'main>h1', fg: [1, 1, 1], threshold: 4.5 } };
+    const grey = { rule: 'low-contrast', grade: 'fail', evidence: 'computed contrast 2.50:1 under the 4.5:1 threshold on p.faint (2.50:1)', probe: { path: 'main>p', fg: [120 / 255, 120 / 255, 120 / 255], threshold: 4.5 } };
+    const ring = { key: 'a', path: 'main>a', at: { tag: 'a', text: 'Go' }, bare: false, ratio: 1.2, ring: [1, 1, 1], pad: 2 };
+    const shots: string[] = [];
+    const run: Runner = async (spec: RenderSpec): Promise<RenderResult> => {
+      const evals: Record<number, string> = {};
+      const shot = spec.steps.findIndex((s) => s.kind === 'screenshot');
+      if (shot < 0) {
+        evals[SETUP] = '{"lost":[]}';
+        for (let i = FIRST; i <= FOCUS; i++) evals[i] = '[]';
+        evals[FIRST + 5] = JSON.stringify([white, grey]);
+        evals[FOCUS] = JSON.stringify([ring]);
+        return { ok: true, engine: 'browse', outputs: [], evals, stdout: '' };
+      }
+      spec.steps.forEach((s, i) => {
+        if (s.kind !== 'screenshot') return;
+        fs.copyFileSync(SWATCH, s.out);
+        shots.push(path.basename(s.out));
+        const width = s.width ?? 0, half = width / 2;
+        evals[i - 1] = s.out.endsWith('text.png') ? JSON.stringify([{ x: 0, y: 0, w: half, h: width }, { x: half, y: 0, w: half, h: width }]) : JSON.stringify([{ x: 0, y: 0, w: half, h: width }]);
+      });
+      return { ok: true, engine: 'browse', outputs: [], evals, stdout: '' };
+    };
+    const r = await lintRender([file], { cwd: dir, run });
+    expect(shots.sort()).toEqual(['ring.png', 'text.png']);
+    expect(only(r.findings, 'low-contrast').map((f) => f.evidence)).toEqual(['[1280px] contrast 2.29:1 against the pixels behind, under the 4.5:1 threshold on p.faint (2.29:1)']);
+    expect(only(r.findings, 'missing-focus-visible')).toEqual([]);
+  });
+});

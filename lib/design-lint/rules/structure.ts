@@ -74,9 +74,7 @@ function sideStripes(ctx: LintContext, r: Reporter): void {
       const parsed = col ? parseColor(col[0]) : null;
       const ok = parsed ? oklchOf(parsed) : null;
       if (parsed && ok && (parsed.alpha <= 0.05 || (ok.C < 0.04 && ok.L > 0.6))) continue;
-      {
-        r.report('template-cards', rule.file, d.line, `a ${m[1]}px coloured side stripe (${d.prop}: ${trunc(d.value, 32)}) on ${rule.selector}`, { fix: 'a hairline all round, no border, or an accent square' });
-      }
+      r.report('template-cards', rule.file, d.line, `a ${m[1]}px coloured side stripe (${d.prop}: ${trunc(d.value, 32)}) on ${rule.selector}`, { fix: 'a hairline all round, no border, or an accent square' });
     }
   }
 }
@@ -109,13 +107,9 @@ function heroClasses(ctx: LintContext): Set<string> {
   const out = new Set<string>();
   for (const doc of ctx.docs) {
     const h1 = doc.tags.findIndex((t) => !t.close && t.name === 'h1');
-    if (h1 < 0) continue;
-    for (let i = h1 - 1; i >= 0; i--) {
-      const t = doc.tags[i];
-      if (t.close || !/^(section|header)$/.test(t.name)) continue;
-      for (const c of (getAttr(t.attrs, 'class') || '').split(/\s+/)) if (c) out.add(c);
-      break;
-    }
+    const hero = h1 < 0 ? -1 : heroIndexOf(doc, h1);
+    if (hero < 0) continue;
+    for (const c of (getAttr(doc.tags[hero].attrs, 'class') || '').split(/\s+/)) if (c) out.add(c);
   }
   return out;
 }
