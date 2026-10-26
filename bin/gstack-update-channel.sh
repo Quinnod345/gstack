@@ -18,12 +18,10 @@
 # Functions (never fail; a broken config means main, the behaviour before
 # channels existed):
 #   gstack_update_channel <install dir>          prints stable | main
-#   gstack_update_channel_ref <channel>          prints the remote-tracking ref:
-#                                                refs/remotes/origin/stable, or
-#                                                "" for main (callers keep their
-#                                                @{upstream} / default-branch path)
 #   gstack_update_channel_refspec <channel>      prints the fetch refspec for
-#                                                stable, "" for main
+#                                                stable, "" for main (callers
+#                                                keep their @{upstream} /
+#                                                default-branch path)
 #   gstack_update_channel_missing <git stderr>   true when a fetch failed only
 #                                                because origin has no such ref
 #                                                (no release cut yet): callers
@@ -32,7 +30,10 @@
 # CLI (the /gstack-upgrade skill): `bash bin/gstack-update-channel.sh [--fetch-ref] [<install dir>]`
 #   prints the channel; --fetch-ref fetches the channel ref from origin and
 #   prints the revision to fast-forward to (origin/stable or origin/main),
-#   falling back to origin/main when origin has no stable yet.
+#   falling back to origin/main only when origin has no stable yet. Any other
+#   fetch failure keeps origin/stable (the fast-forward then stops or finds
+#   nothing new); a team install never moves to main because the network
+#   blinked.
 
 gstack_update_channel() {
   _uc_dir=${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
@@ -46,10 +47,6 @@ gstack_update_channel() {
   _uc_team=""
   [ -x "$_uc_dir/bin/gstack-config" ] && { _uc_team=$("$_uc_dir/bin/gstack-config" get team_mode 2>/dev/null) || _uc_team=""; }
   if [ "$_uc_team" = true ]; then printf 'stable\n'; else printf 'main\n'; fi
-}
-
-gstack_update_channel_ref() {
-  case "${1:-}" in stable) printf 'refs/remotes/origin/stable\n' ;; *) printf '\n' ;; esac
 }
 
 gstack_update_channel_refspec() {
@@ -82,7 +79,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     if gstack_update_channel_missing "$_uc_err"; then
       echo "gstack-update-channel: origin has no stable release yet; following origin/main until the first weekly release is cut" >&2
     else
-      echo "gstack-update-channel: fetching origin/stable failed ($(printf '%s' "$_uc_err" | head -1 | head -c 200)); following origin/main for this run" >&2
+      echo "gstack-update-channel: fetching origin/stable failed ($(printf '%s' "$_uc_err" | head -1 | head -c 200)); staying on origin/stable as last fetched" >&2
+      printf 'origin/stable\n'; exit 0
     fi
   fi
   _receipted_git open gstack-upgrade "${_uc_host:-unknown}" gstack-self-update-pull "user ran /gstack-upgrade" git -C "$_uc_root" fetch -q origin 2>/dev/null || true

@@ -21,14 +21,24 @@ commit on main's first-parent history, moved only by this workflow, only
 forward.
 
 **Green** means, on that exact commit: the `free-tests` check run succeeded
-(the status main requires), no completed check run failed, the Main backstop
-gate run for that push completed with conclusion success (a green train record
-covers the tree, or the backstop gated it green), and `refs/notes/gstack-trains`
-holds no active freeze. A commit whose gate is still running is skipped and the
-next older one is considered, back through 7 days or 200 first-parent commits.
-The workflow runs no tests and no paid evals of its own; it only reads what the
+(the status main requires), the `main-backstop` check run succeeded, every
+check run on it has completed and none failed, and `refs/notes/gstack-trains`
+holds no active freeze. The Main backstop gate workflow publishes
+`main-backstop` on each push to main from a job of its own: success when a
+green train record covers the tree or the backstop gated it green, neutral
+when main moved past the push before it was gated (superseded) or a freeze's
+own backstop run owns it (deferred), failure when it froze the queue or could
+not finish. Neutral is never green: a commit whose own tree was never gated is
+not released. A commit with a check run still going is skipped and the next
+older one is considered, back through 7 days or 200 first-parent commits. The
+workflow runs no tests and no paid evals of its own; it only reads what the
 trains and the backstop already recorded. With nothing green in the window it
 fails and lists why each commit was skipped.
+
+A cut that stopped half-way (tag and `stable` pushed, release not created) is
+finished by the next run, by cron or by hand: `stable` itself stays a
+candidate until its release exists, and its notes compare against the release
+tag before it.
 
 ## Channels
 
@@ -88,8 +98,9 @@ workflow by hand with the merge commit's SHA:
 gh workflow run weekly-release.yml -f ref=<full sha on main> -f dry_run=false
 ```
 
-or Actions → **Weekly release** → Run workflow. The same green checks apply.
-The commit is tagged with its VERSION, the release notes say "hotfix release"
+or Actions → **Weekly release** → Run workflow, on main (the cut job runs
+only from `refs/heads/main`, with main's tooling; `ref` must be the full
+40-hex SHA). The same green checks apply. The commit is tagged with its VERSION, the release notes say "hotfix release"
 and list every version since the previous release (everything merged in
 between ships with it), and stable fast-forwards. Team installs pick it up at
 their next hourly check.
@@ -123,9 +134,9 @@ is exercised against real check runs before it merges.
 | Line | Meaning |
 |---|---|
 | `CANDIDATE: <sha> (<date>)` | the commit that will be (or was) released |
-| `NOTHING_NEW: origin/main <sha> is already stable` | nothing merged since the last release; exit 0 |
-| `NO_GREEN_COMMIT: ...` with `SKIPPED:` lines | nothing in the window passed the gate; exit 1 |
+| `NOTHING_NEW: origin/main <sha> is already released as v<X>` | nothing merged since the last release; exit 0 |
+| `NO_GREEN_COMMIT: ...` with `SKIPPED:` lines | nothing in the window passed the gate; exit 1 (a dry run exits 0: the skips are its answer) |
 | `REFUSED: non-fast-forward: ...` | the candidate is behind stable; stable only moves forward |
 | `REFUSED: queue frozen since train ...` | the main backstop froze the queue; clear it first (docs/ship-policy.md) |
 | `REFUSED: tag v<X> already names <other sha>` | a version was stamped twice; needs a look before anything is cut |
-| `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done |
+| `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |

@@ -14,8 +14,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { runBin } from './helpers/run-bin';
+
 const ROOT = path.resolve(import.meta.dir, '..');
 const HELPER = path.join(ROOT, 'bin', 'gstack-update-channel.sh');
+const CONFIG_BIN = path.join(ROOT, 'bin', 'gstack-config');
 const SESSION_UPDATE = path.join(ROOT, 'bin', 'gstack-session-update');
 const bases: string[] = [];
 afterEach(() => { for (const b of bases.splice(0)) fs.rmSync(b, { recursive: true, force: true }); });
@@ -56,10 +59,36 @@ describe.skipIf(process.platform === 'win32')('gstack-update-channel.sh: resolut
     expect(f.resolve('true', 'stable', { GSTACK_UPDATE_CHANNEL: 'main' })).toBe('main');
   });
 
-  test('the refspec and ref name stable only; a missing gstack-config means main', () => {
-    const r = spawnSync('bash', ['-c', '. "$1" && gstack_update_channel_refspec stable && gstack_update_channel_ref stable && gstack_update_channel_refspec main | wc -c && gstack_update_channel /nonexistent', '_', HELPER], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, GSTACK_UPDATE_CHANNEL: '' } });
-    expect(r.stdout.split('\n').map(l => l.trim())).toEqual(['+refs/heads/stable:refs/remotes/origin/stable', 'refs/remotes/origin/stable', '1', 'main', '']);
+  test('the refspec names stable only; a missing gstack-config means main', () => {
+    const r = spawnSync('bash', ['-c', '. "$1" && gstack_update_channel_refspec stable && gstack_update_channel_refspec main | wc -c && gstack_update_channel /nonexistent', '_', HELPER], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, GSTACK_UPDATE_CHANNEL: '' } });
+    expect(r.stdout.split('\n').map(l => l.trim())).toEqual(['+refs/heads/stable:refs/remotes/origin/stable', '1', 'main', '']);
     expect(spawnSync('bash', ['-c', '. "$1" && gstack_update_channel_missing "fatal: couldn\'t find remote ref refs/heads/stable" && ! gstack_update_channel_missing "fatal: unable to access"', '_', HELPER], { encoding: 'utf8', timeout: 10_000 }).status).toBe(0);
+  });
+});
+
+describe('gstack-config update_channel', () => {
+  // Value: protects=update_channel defaults to auto in get, list and defaults, accepts exactly auto|stable|main, and rejects anything else with exit 1 and the
+  // stored value unchanged; fails_when=the default arm, the closed-domain guard or the list/defaults rows are dropped, or a typo is stored and silently read as auto;
+  // why_new=the resolution tests stub gstack-config, so the real key's contract (the one docs/releases.md documents) has no test; seam=none;
+  // no_claim=none beyond protects
+  test('defaults to auto, accepts auto|stable|main, and refuses anything else without changing the stored value', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-channel-config-'));
+    bases.push(home);
+    const run = (args: string[]) => runBin(CONFIG_BIN, args, { gstackHome: home, cwd: ROOT, trim: true });
+    expect(run(['get', 'update_channel']).stdout).toBe('auto');
+    expect(run(['defaults']).stdout).toMatch(/update_channel:\s+auto$/m);
+    expect(run(['list']).stdout).toMatch(/update_channel:\s+auto \(default\)$/m);
+    for (const v of ['stable', 'main', 'auto']) {
+      expect(run(['set', 'update_channel', v]).status).toBe(0);
+      expect(run(['get', 'update_channel']).stdout).toBe(v);
+    }
+    expect(run(['set', 'update_channel', 'stable']).status).toBe(0);
+    const junk = run(['set', 'update_channel', 'weekly']);
+    expect(junk.status).toBe(1);
+    expect(junk.stderr).toContain("update_channel 'weekly' not recognized. Valid values: auto, stable, main. Existing value left unchanged.");
+    expect(run(['get', 'update_channel']).stdout).toBe('stable');
+    expect(run(['list']).stdout).toMatch(/update_channel:\s+stable \(set\)$/m);
+    expect(fs.readFileSync(path.join(home, 'config.yaml'), 'utf8')).toContain('# update_channel: auto      # auto   = stable when team_mode is true, else main');
   });
 });
 
@@ -166,6 +195,52 @@ describe.skipIf(process.platform === 'win32')('gstack-session-update on the stab
   });
 });
 
+describe.skipIf(process.platform === 'win32')('gstack-update-channel.sh as the /gstack-upgrade skill runs it', () => {
+  const cli = (w: World, ...args: string[]) => spawnSync('bash', [path.join(w.install, 'bin', 'gstack-update-channel.sh'), ...args, w.install], { cwd: w.base, encoding: 'utf8', env: w.env, timeout: 30_000 });
+
+  // Value: protects=the CLI the upgrade skill substitutes into UPSTREAM_REF: it prints the channel, --fetch-ref fetches and names origin/stable for a team install,
+  // and names origin/main (with the note) when origin has no stable or the channel is main; fails_when=argument parsing or the fallback breaks so the skill
+  // resets a team install to origin/main, or --fetch-ref prints a ref it never fetched; why_new=the function-level tests source the helper and never run its
+  // __main__ block; seam=none; no_claim=the skill's own fence (the template is pinned by upgrade-template-pins.test.ts; this runs the helper alone)
+  test('prints the channel; --fetch-ref names origin/stable after fetching it, and origin/main when there is no release yet or the channel is main', () => {
+    const w = world();
+    expect(cli(w).stdout.trim()).toBe('stable');
+    const stable = cli(w, '--fetch-ref');
+    expect(stable.status, stable.stdout + stable.stderr).toBe(0);
+    expect(stable.stdout.trim()).toBe('origin/stable');
+    expect(stable.stderr).toBe('');
+    expect(git(w.install, 'rev-parse', 'refs/remotes/origin/stable')).toBe(w.shas.B);
+    expect(w.head()).toBe(w.shas.A);
+
+    fs.writeFileSync(w.channel, 'main');
+    expect(cli(w).stdout.trim()).toBe('main');
+    const onMain = cli(w, '--fetch-ref');
+    expect(onMain.status).toBe(0);
+    expect(onMain.stdout.trim()).toBe('origin/main');
+    expect(onMain.stderr).toBe('');
+    expect(git(w.install, 'rev-parse', 'refs/remotes/origin/main')).toBe(w.shas.C);
+
+    const early = world({ stable: false });
+    const fallback = cli(early, '--fetch-ref');
+    expect(fallback.status).toBe(0);
+    expect(fallback.stdout.trim()).toBe('origin/main');
+    expect(fallback.stderr).toContain('origin has no stable release yet; following origin/main until the first weekly release is cut');
+    expect(git(early.install, 'rev-parse', 'refs/remotes/origin/main')).toBe(early.shas.C);
+    expect(early.head()).toBe(early.shas.A);
+
+    // A fetch that fails for any other reason (origin unreachable) keeps the
+    // team install on origin/stable; the fast-forward then stops or finds
+    // nothing new, and nobody is moved to main by a network blink.
+    const offline = world();
+    git(offline.install, 'remote', 'set-url', 'origin', path.join(offline.base, 'gone.git'));
+    const kept = cli(offline, '--fetch-ref');
+    expect(kept.status).toBe(0);
+    expect(kept.stdout.trim()).toBe('origin/stable');
+    expect(kept.stderr).toContain('fetching origin/stable failed');
+    expect(kept.stderr).toContain('staying on origin/stable as last fetched');
+  });
+});
+
 describe.skipIf(process.platform === 'win32')('gstack-upgrade on the stable channel', () => {
   const run = (w: World, args: string[] = []) => spawnSync('bash', [path.join(w.install, 'bin', 'gstack-upgrade'), ...args], { cwd: w.base, encoding: 'utf8', env: w.env, timeout: 60_000 });
 
@@ -238,5 +313,17 @@ describe.skipIf(process.platform === 'win32')('gstack-update-check on the stable
     const onMain = run({ GSTACK_UPDATE_CHANNEL: 'main' });
     expect(onMain.stdout.trim()).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1');
     expect(fs.readFileSync(gitLog, 'utf8')).toContain('refs/heads/main');
+
+    // Before the first release origin has no stable: the check follows main for
+    // that run (as session-update and gstack-upgrade do) instead of caching
+    // CHECK_FAILED from a 404 on stable/VERSION until Monday.
+    git(clone, 'push', '-q', 'origin', ':stable');
+    fs.rmSync(path.join(state, 'last-update-check'), { force: true });
+    fs.writeFileSync(gitLog, '');
+    const noRelease = run({ GSTACK_UPDATE_CHANNEL: 'stable' });
+    expect(noRelease.stdout.trim()).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1');
+    expect(fs.readFileSync(gitLog, 'utf8')).toContain('refs/heads/stable');
+    expect(fs.readFileSync(gitLog, 'utf8')).toContain('refs/heads/main');
+    expect(fs.readFileSync(path.join(state, 'last-update-check'), 'utf8')).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1\nIDENTITY head=' + local + ' remote=' + main + ' upstream=' + origin + '\n');
   });
 });

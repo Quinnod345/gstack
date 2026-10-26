@@ -10,16 +10,20 @@
  *
  * The checkout needs origin's full history (fetch-depth 0). Green, for a
  * commit on main's first-parent history, means: its free-tests check run
- * succeeded (the status main requires), no completed check run on it failed,
- * its "Main backstop gate" run completed with conclusion success (a green train
- * record covers the tree, or the backstop gated it green), and
- * refs/notes/gstack-trains holds no active freeze. The newest such commit in
- * the window (7 days, 200 first-parent commits) is the candidate; a commit
- * whose gate is still running is skipped, not waited for.
+ * succeeded (the status main requires), its main-backstop check run succeeded
+ * (evals-main-backstop.yml publishes it: success only when a green train
+ * record covers the tree or the backstop gated it green; a push main moved
+ * past before it was gated is neutral, never green), every check run on it
+ * has completed and none failed, and refs/notes/gstack-trains holds no active
+ * freeze. The newest such commit in the window (7 days, 200 first-parent
+ * commits) is the candidate; a commit with a check run still going is
+ * skipped, not waited for.
  *
  * stable moves only forward: a candidate behind the current stable is refused
  * (REFUSED non-fast-forward), as is a tag v<VERSION> that already names another
- * commit. Re-running a completed cut reports it and exits 0.
+ * commit. A cut that stopped half-way (tag and stable pushed, release not
+ * created) is finished by the next run; a completed cut reports NOTHING_NEW
+ * and exits 0.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -29,8 +33,8 @@ import { spawnSync } from 'node:child_process';
 export type Gh = (args: string[]) => { status: number | null; stdout: string; stderr: string };
 export type Git = (args: string[]) => { ok: boolean; out: string };
 
-export const BACKSTOP_WORKFLOW = 'evals-main-backstop.yml';
 export const REQUIRED_CHECK = 'free-tests';
+export const BACKSTOP_CHECK = 'main-backstop';
 export const NOTES_REF = 'refs/notes/gstack-trains';
 const NOTES_LOCAL = 'refs/notes/gstack-trains-release';
 const RED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure', 'stale']);
@@ -65,25 +69,22 @@ export function compareVersions(a: string, b: string): number {
 export type Verdict = { green: true } | { green: false; why: string; pending: boolean };
 interface CheckRun { name: string; status: string; conclusion: string | null }
 
-/** Why a commit is not releasable, or green. Pending means a required run is still going. */
+/** Why a commit is not releasable, or green. Pending means a check run on it is still going. */
 export function gateVerdict(gh: Gh, repo: string, sha: string): Verdict {
   const paged = parseJson<unknown>(gh(['api', '--paginate', '--slurp', `repos/${repo}/commits/${sha}/check-runs?per_page=100`]));
   if (!paged) return { green: false, why: 'cannot read its check runs', pending: false };
   const pages = (Array.isArray(paged) ? paged : [paged]) as Array<{ check_runs?: CheckRun[] }>;
   const runs = pages.flatMap(p => p.check_runs ?? []);
-  const required = runs.filter(c => c.name === REQUIRED_CHECK);
-  if (required.length === 0) return { green: false, why: `no ${REQUIRED_CHECK} check run`, pending: false };
-  if (required.some(c => c.status !== 'completed')) return { green: false, why: `${REQUIRED_CHECK} is still running`, pending: true };
-  if (!required.some(c => c.conclusion === 'success')) return { green: false, why: `${REQUIRED_CHECK} concluded ${required.map(c => c.conclusion).join(',')}`, pending: false };
+  for (const name of [REQUIRED_CHECK, BACKSTOP_CHECK]) {
+    const named = runs.filter(c => c.name === name);
+    if (named.length === 0) return { green: false, why: `no ${name} check run`, pending: false };
+    if (named.some(c => c.status !== 'completed')) return { green: false, why: `${name} is still running`, pending: true };
+    if (!named.some(c => c.conclusion === 'success')) return { green: false, why: `${name} concluded ${named.map(c => c.conclusion).join(',')}`, pending: false };
+  }
   const red = runs.filter(c => c.status === 'completed' && RED.has(c.conclusion ?? ''));
   if (red.length > 0) return { green: false, why: `red check runs: ${[...new Set(red.map(c => c.name))].join(', ')}`, pending: false };
-  const backstop = parseJson<{ workflow_runs?: Array<{ status: string; conclusion: string | null; created_at: string }> }>(
-    gh(['api', `repos/${repo}/actions/workflows/${BACKSTOP_WORKFLOW}/runs?head_sha=${sha}&per_page=10`]));
-  if (!backstop) return { green: false, why: 'cannot read its backstop runs', pending: false };
-  const newest = (backstop.workflow_runs ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-  if (!newest) return { green: false, why: 'no Main backstop gate run', pending: false };
-  if (newest.status !== 'completed') return { green: false, why: 'Main backstop gate is still running', pending: true };
-  if (newest.conclusion !== 'success') return { green: false, why: `Main backstop gate concluded ${newest.conclusion}`, pending: false };
+  const running = runs.filter(c => c.status !== 'completed');
+  if (running.length > 0) return { green: false, why: `check runs still going: ${[...new Set(running.map(c => c.name))].join(', ')}`, pending: true };
   return { green: true };
 }
 
@@ -188,15 +189,16 @@ export function planRelease(o: PlanOptions): PlanResult {
     const list = git(['rev-list', '--first-parent', '--max-count=' + (o.windowCommits ?? WINDOW_COMMITS), '--since=' + since, 'refs/remotes/origin/main']);
     candidates = list.ok && list.out ? list.out.split('\n') : [];
     if (candidates.length === 0) return { ok: false, code: 'NOTHING_NEW', message: 'no commit on origin/main in the last ' + windowDays + ' days' };
-    if (prevStable && candidates[0] === prevStable) return { ok: false, code: 'NOTHING_NEW', message: 'origin/main ' + prevStable.slice(0, 12) + ' is already stable' };
   }
 
+  // stable itself stays a candidate so a cut that stopped half-way (tag and
+  // stable pushed, release missing) is finished; nothing older is looked at.
   let sha: string | null = null;
   for (const c of candidates) {
-    if (prevStable && c === prevStable) { skipped.push(c.slice(0, 12) + ': already stable; nothing newer is green'); break; }
     const v = gateVerdict(gh, repo, c);
     if (v.green) { sha = c; break; }
     skipped.push(c.slice(0, 12) + ': ' + v.why);
+    if (prevStable && c === prevStable) { skipped.push(c.slice(0, 12) + ': already stable; nothing newer is green'); break; }
   }
   if (!sha) {
     if (o.ref) return { ok: false, code: 'REFUSED', message: '--ref ' + candidates[0]!.slice(0, 12) + ' is not green: ' + (skipped[0] ?? '').split(': ').slice(1).join(': '), skipped };
@@ -212,10 +214,20 @@ export function planRelease(o: PlanOptions): PlanResult {
   const existing = git(['rev-parse', '--verify', '-q', 'refs/tags/' + tag + '^{commit}']);
   const tagExists: Plan['tagExists'] = !existing.ok ? 'no' : existing.out === sha ? 'same' : 'other';
   if (tagExists === 'other') return { ok: false, code: 'REFUSED', message: 'tag ' + tag + ' already names ' + existing.out.slice(0, 12) + ', not ' + sha.slice(0, 12) + '; a version is stamped once per merge, so this needs a look' };
+  if (prevStable === sha && tagExists === 'same' && gh(['release', 'view', tag, '--repo', repo, '--json', 'tagName']).status === 0) {
+    return { ok: false, code: 'NOTHING_NEW', message: 'origin/main ' + sha.slice(0, 12) + ' is already released as ' + tag + '; nothing newer is green' };
+  }
 
+  // The release this one follows: stable, or when stable already sits here
+  // (a cut that stopped half-way), the newest release tag behind it.
+  let before = prevStable;
+  if (prevStable === sha) {
+    const prior = git(['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', '--first-parent', sha + '^']);
+    before = prior.ok && prior.out ? git(['rev-parse', '--verify', '-q', prior.out + '^{commit}']).out || null : null;
+  }
   let prevVersion: string | null = null, prevTag: string | null = null;
-  if (prevStable) {
-    prevVersion = git(['show', prevStable + ':VERSION']).out.trim() || null;
+  if (before) {
+    prevVersion = git(['show', before + ':VERSION']).out.trim() || null;
     if (prevVersion && git(['rev-parse', '--verify', '-q', 'refs/tags/v' + prevVersion + '^{commit}']).ok) prevTag = 'v' + prevVersion;
   } else {
     const date = git(['show', '-s', '--format=%cI', sha]).out;
@@ -225,7 +237,7 @@ export function planRelease(o: PlanOptions): PlanResult {
   }
   const changelog = git(['show', sha + ':CHANGELOG.md']);
   const date = git(['show', '-s', '--format=%cs', sha]).out;
-  const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !prevStable });
+  const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !before });
   return { ok: true, plan: { sha, version, tag, date, hotfix: Boolean(o.ref), prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped } };
 }
 
@@ -271,7 +283,7 @@ export function describePlan(p: Plan, dryRun: boolean): string[] {
   const lines = [
     'CANDIDATE: ' + p.sha + ' (' + p.date + ')' + (p.hotfix ? ' [hotfix: --ref]' : ''),
     'VERSION: ' + p.version + ' -> tag ' + p.tag + (p.tagExists === 'same' ? ' (exists at this commit)' : ''),
-    'STABLE: ' + (p.prevStable ? p.prevStable.slice(0, 12) + ' (v' + (p.prevVersion ?? '?') + ')' : 'none yet') + ' -> ' + p.sha.slice(0, 12) + (p.stableAt ? ' (already there)' : ''),
+    'STABLE: ' + (p.stableAt ? 'already at ' + p.sha.slice(0, 12) + ' (finishing an earlier cut)' : (p.prevStable ? p.prevStable.slice(0, 12) + ' (v' + (p.prevVersion ?? '?') + ')' : 'none yet') + ' -> ' + p.sha.slice(0, 12)),
     'NOTES: ' + p.notes.split('\n').filter(l => l.startsWith('- ')).length + ' version lines, ' + p.notes.length + ' chars',
   ];
   for (const s of p.skipped) lines.push('SKIPPED: ' + s);
@@ -302,7 +314,9 @@ if (import.meta.main) {
   const planned = planRelease({ repo, ref: arg('--ref'), git, gh: runGh });
   if (!planned.ok) {
     emit([planned.code + ': ' + planned.message, ...(planned.skipped ?? []).map(s => 'SKIPPED: ' + s)]);
-    process.exit(planned.code === 'NOTHING_NEW' ? 0 : 1);
+    // A dry run that finds nothing green has done its job (the skips say why);
+    // the real cut goes red so someone looks.
+    process.exit(planned.code === 'NOTHING_NEW' || (dryRun && planned.code === 'NO_GREEN_COMMIT') ? 0 : 1);
   }
   emit(describePlan(planned.plan, dryRun));
   if (summary) fs.appendFileSync(summary, '\n<details><summary>Release notes</summary>\n\n' + planned.plan.notes + '\n</details>\n');

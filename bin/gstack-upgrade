@@ -90,7 +90,7 @@ if [ "$CHANNEL" = stable ]; then
   if _receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" fetch --quiet origin stable 2>/dev/null; then
     FOLLOW=stable
     echo "gstack-upgrade: channel stable (the weekly release; gstack-config set update_channel main follows every merge)" >&2
-  elif [ -z "$(_receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" ls-remote origin refs/heads/stable 2>/dev/null)" ]; then
+  elif _LSR=$(_receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" ls-remote origin refs/heads/stable 2>/dev/null) && [ -z "$_LSR" ]; then
     echo "gstack-upgrade: channel stable has no release on origin yet; following $DEFAULT until the first weekly release is cut" >&2
   else
     fetch_failed "git fetch origin stable failed"
