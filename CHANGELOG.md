@@ -2,15 +2,19 @@
 
 ## [Unreleased]
 
-**The weekly OSV scan on main is green again, so the weekly release cut can run.** The 2026-10-26 scan ([run 40288353843](https://github.com/garrytan/gstack/actions/runs/40288353843), #3462) found 14 fixable vulnerabilities in six packages across both lockfiles, and the release workflow skips any main commit with a red check run. Every one is bumped to its fixed release; no code changed, because gstack imports none of these packages directly (the MCP SDK and zod arrive through `@anthropic-ai/claude-agent-sdk`, body-parser through its express, fast-uri through ajv, ip-address through socks and express-rate-limit, dompurify through mermaid).
+**The weekly OSV scan on main is green again, so the weekly release cut can run.** The 2026-10-26 scan ([run 40288353843](https://github.com/garrytan/gstack/actions/runs/40288353843), #3462) found 14 fixable vulnerabilities in six packages across both lockfiles, and the release workflow skips any main commit with a red check run. Every one is bumped to its fixed release; no application code changed, because gstack imports none of these packages directly (the MCP SDK and zod arrive through `@anthropic-ai/claude-agent-sdk`, body-parser through its express, fast-uri through ajv, ip-address through socks and express-rate-limit, dompurify through mermaid).
 
 ### Fixed
-- **dompurify 3.4.16 → 3.4.17 in `lib/diagram-render`** (GHSA-cg2g-xh64-v4q7, CVSS 9.2; GHSA-mrv2-3pqr-j5jr; GHSA-c6gr-qvv4-5v3f). The override moves and the committed bundle is rebuilt with Bun 1.4.2 (deterministic: two builds, one sha256 `4d1c10a0…`), so the shipped page runs the fixed sanitizer instead of a bundled copy of the old one. Mermaid, excalidraw and React pins are unchanged.
+- **dompurify 3.4.16 → 3.4.17 in `lib/diagram-render`** (GHSA-cg2g-xh64-v4q7, CVSS 9.2; GHSA-mrv2-3pqr-j5jr; GHSA-c6gr-qvv4-5v3f). The override moves and the committed bundle is rebuilt with Bun 1.4.2 (two builds, one sha256 `c2d37f9f…`), so the shipped page runs the fixed sanitizer instead of a bundled copy of the old one. Mermaid, excalidraw and React pins are unchanged.
 - **@modelcontextprotocol/sdk 1.31.0 → 1.32.0** (GHSA-22jm-h49p-29qw, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq, GHSA-6prh-2h8m-c8cw), **fast-uri 3.1.8 → 3.1.9** (GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-333x-w4r6-6crp, GHSA-xhq7-xmqj-769h) and **ip-address 10.7.3 → 10.7.4** (GHSA-rxp7-6hxx-x8q5) through the existing `overrides` pins.
 - **zod 4.5.4 → 4.6.7** (GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6) and **body-parser 2.3.0 → 2.4.0** (GHSA-27r3-jxmh-p828) through the lockfile alone; both sit inside their consumers' ranges, so no override was added. body-parser 2.4.0 brings a nested qs 6.16.1.
 
+### Changed
+- **`lib/diagram-render/scripts/build.ts`** empties the one `VITE_APP_FIREBASE_CONFIG` literal that `@excalidraw/excalidraw`'s npm bundle carries (excalidraw.com's public Firebase client key, which nothing in the package reads and the offline render page never uses). The build fails if the literal is not matched exactly once or any `AIza…` key survives, so an excalidraw bump that changes its shape cannot put the key back silently. Without this, every rebuild of the committed bundle failed the pre-gate secret scan.
+
 ### Tests
-- `test/deps-smoke.test.ts` names the new ip-address pin. OSV-Scanner 2.3.8 with the workflow's own arguments (`--config=.osv-scanner.toml --include-git-root --recursive ./`) reports no issues on this tree; the katex ignore is the only filtered advisory.
+- `test/diagram-render-drift.test.ts` asserts the bundle's DOMPurify is the `package.json` override and no other version, and that it carries no Google API key; its path constants are repo-relative segment runs so the pre-gate's import graph selects it for the bundle, `BUILD_INFO.json` and the build script.
+- `test/deps-smoke.test.ts` refuses `ip-address` below 10.7.4 and checks every resolved version of the six packages against its OSV-fixed floor in both lockfiles (all six fail on main's lockfiles). OSV-Scanner 2.3.8 with the workflow's own arguments (`--config=.osv-scanner.toml --include-git-root --recursive ./`) reports no issues on this tree; the katex ignore is the only filtered advisory.
 
 ## [1.91.235.0] - 2026-10-26
 

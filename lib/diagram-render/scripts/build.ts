@@ -55,6 +55,10 @@ if (firebaseHits !== 1) {
   process.exit(1);
 }
 const strippedJs = js.replace(FIREBASE_CONFIG, "VITE_APP_FIREBASE_CONFIG:'{}'");
+if (/AIza[0-9A-Za-z_-]{35}/.test(strippedJs)) {
+  console.error("a Google API key literal survived the strip; update the strip rule in scripts/build.ts");
+  process.exit(1);
+}
 
 // Escape inline-script terminators (see header note).
 const inlineJs = strippedJs.replaceAll("</scri", "<\\/scri");

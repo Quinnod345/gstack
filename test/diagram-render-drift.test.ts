@@ -40,6 +40,20 @@ describe("diagram-render bundle drift", () => {
     expect(info.deps).toEqual(pkg.dependencies);
   });
 
+  test("the bundled DOMPurify is the package.json override, and no other version", async () => {
+    const html = await Bun.file(DIST_HTML).text();
+    const pkg = await Bun.file(path.join(ROOT, "package.json")).json();
+    const versions = [...html.matchAll(/@license DOMPurify (\d+\.\d+\.\d+)/g)].map(m => m[1]);
+    expect(versions).toEqual([pkg.overrides.dompurify]);
+    expect(html).toContain(`version="${pkg.overrides.dompurify}"`);
+  });
+
+  test("the bundle carries no Google API key: excalidraw's Firebase config literal is emptied", async () => {
+    const html = await Bun.file(DIST_HTML).text();
+    expect(html).not.toMatch(/AIza[0-9A-Za-z_-]{35}/);
+    expect(html).toContain("VITE_APP_FIREBASE_CONFIG:'{}'");
+  });
+
   test("BUILD_INFO srcSha256 matches src on disk (edited-src-forgot-rebuild guard)", async () => {
     // The deep rebuild check below needs node_modules, which CI doesn't
     // install for this nested package — this tier-1.5 fingerprint catches a
