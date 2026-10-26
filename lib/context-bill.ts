@@ -276,6 +276,9 @@ export interface WalkedFile {
   /** The file's identity, taken without following links when it was walked; --exact reads only that same file. */
   dev: number;
   ino: number;
+  /** Its size and mtime when it was walked; a measurement is reused only for a file that still has them. */
+  size: number;
+  mtimeMs: number;
 }
 
 /**
@@ -364,7 +367,7 @@ export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNested
         }
         if (!st.isFile()) continue;
         seen.add(real);
-        out.push({ path: p, real, dev: st.dev, ino: st.ino });
+        out.push({ path: p, real, dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs });
         continue;
       }
       if (encloses(real, rootReal) || encloses(real, billedReal)) continue;
@@ -909,7 +912,7 @@ export function exactSendSet(root: string): ExactSendSet {
  * walk can be sent. The open does not block, so a file swapped for a FIFO is
  * refused as not a regular file instead of hanging the run.
  */
-function readWalkedFile(real: string, dev: number, ino: number, file: string, root: string): string {
+function readWalkedFile({ path: file, real, dev, ino, size, mtimeMs }: WalkedFile, root: string): string {
   const changed = () => new Error(`${file} changed after it was walked; nothing from ${root} was sent. Run again.`);
   let fd: number;
   try {
@@ -919,11 +922,24 @@ function readWalkedFile(real: string, dev: number, ino: number, file: string, ro
   }
   try {
     const st = fs.fstatSync(fd);
-    if (!st.isFile() || st.dev !== dev || st.ino !== ino || fs.realpathSync(real) !== real) throw changed();
+    if (
+      !st.isFile() ||
+      st.dev !== dev ||
+      st.ino !== ino ||
+      st.size !== size ||
+      st.mtimeMs !== mtimeMs ||
+      fs.realpathSync(real) !== real
+    ) {
+      throw changed();
+    }
     return fs.readFileSync(fd, "utf8");
   } finally {
     fs.closeSync(fd);
   }
+}
+
+function fileIdentity(real: string, { size, mtimeMs }: { size: number; mtimeMs: number }): string {
+  return `${real}\0${size}\0${mtimeMs}`;
 }
 
 export interface ExactMeasurement {
@@ -972,15 +988,17 @@ export async function measureExactTokens(
 
   const texts = new Map<string, string>();
   // The send set holds each real file once, so each is sent once. The bill keys
-  // the same file by every lexical path it is billed under; lexicalOf maps a
-  // real file back to the one key that was measured.
-  const lexicalOf = new Map<string, string>();
+  // the same file by every lexical path it is billed under; measuredAs maps a
+  // real file, at the size and mtime it was walked with, back to the one key
+  // that was measured.
+  const measuredAs = new Map<string, string>();
   const realOf = new Map<string, string>();
   const { files, frontmatter } = sendSet ?? exactSendSet(root);
-  for (const { path: file, real, dev, ino } of files) {
-    const text = readWalkedFile(real, dev, ino, file, root);
+  for (const walked of files) {
+    const { path: file, real } = walked;
+    const text = readWalkedFile(walked, root);
     texts.set(file, text);
-    lexicalOf.set(real, file);
+    measuredAs.set(fileIdentity(real, walked), file);
     realOf.set(file, real);
     if (!frontmatter.has(real)) continue;
     const fm = parseFrontmatter(text);
@@ -1026,23 +1044,27 @@ export async function measureExactTokens(
 
   // A key the send set does not hold (a non-.md foreign-host file, or a file
   // refused as outside the root and the checkout) falls back to the
-  // estimate rather than billing zero. Misses are counted, not swallowed: a bill
-  // that is part-measured and part-estimated must not present itself as measured.
+  // estimate rather than billing zero. So does a key whose file is no longer
+  // the one measured (a link retargeted, or the file rewritten, since the walk).
+  // Misses are counted, not swallowed: a bill that is part-measured and
+  // part-estimated must not present itself as measured.
   const missed = new Set<string>();
   const fmSuffix = frontmatterKey("");
   const measuredKey = (key: string): string | undefined => {
     const isFm = key.endsWith(fmSuffix);
     let real: string;
+    let st: fs.Stats;
     try {
       real = realpathStepwise(isFm ? key.slice(0, -fmSuffix.length) : key);
+      st = fs.lstatSync(real);
     } catch {
       return undefined;
     }
-    const lexical = lexicalOf.get(real);
+    const lexical = measuredAs.get(fileIdentity(real, st));
     return lexical === undefined ? undefined : isFm ? frontmatterKey(lexical) : lexical;
   };
   const tokensOf: TokensOf = (key, bytes) => {
-    const alias = counts.has(key) ? key : measuredKey(key);
+    const alias = measuredKey(key);
     const exact = alias === undefined ? undefined : counts.get(alias);
     if (exact !== undefined) return exact;
     missed.add(key);

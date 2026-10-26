@@ -1195,6 +1195,29 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(sameFileMoved.err).toContain("changed after it was walked");
   });
 
+  it("never reuses a measurement for a file retargeted or rewritten after it was measured", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-stale-"));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "small.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.writeFileSync(path.join(tmp, "big.md"), "---\nname: qa\ndescription: d\n---\n" + "z".repeat(60_000));
+    fs.symlinkSync(path.join(tmp, "small.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.writeFileSync(path.join(skills, "qa", "ref.md"), "r");
+    const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(), egressHome });
+    fs.unlinkSync(path.join(skills, "qa", "SKILL.md"));
+    fs.symlinkSync(path.join(tmp, "big.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.writeFileSync(path.join(skills, "qa", "ref.md"), "r".repeat(9_000));
+    const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    const skillMd = path.join(skills, "qa", "SKILL.md");
+    const ref = path.join(skills, "qa", "ref.md");
+    expect(measured.missedKeys.has(skillMd)).toBe(true);
+    expect(measured.missedKeys.has(ref)).toBe(true);
+    expect(bill.skills[0].skillMdTokens).toBeGreaterThan(10_000);
+    expect(bill.skills[0].totalMdTokens).toBeGreaterThan(12_000);
+  });
+
   it("refuses a walked file swapped for a FIFO instead of hanging", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fifo-"));
