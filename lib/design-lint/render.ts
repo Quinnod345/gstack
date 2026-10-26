@@ -29,6 +29,8 @@ export interface RenderOptions {
   timeoutMs?: number;
   /** Replaces the engine choice (tests inject one); defaults to lib/aside-render's pickEngine. */
   engine?: () => EngineChoice;
+  /** Replaces the page runner itself, so every answer the browser could give (none, null, malformed, a probe error) can be settled without a browser. */
+  run?: Runner;
 }
 
 export interface RenderResult {
@@ -41,13 +43,16 @@ const WIDTHS = [320, 375, 414, 768, 1024, 1280, 1920];
 const LAPTOP = { width: 1440, height: 900 };
 const RING_FLOOR = 2.95;
 
-type Runner = (spec: RenderSpec) => Promise<EngineResult>;
+export type Runner = (spec: RenderSpec) => Promise<EngineResult>;
 
 export async function lintRender(targets: string[], opts: RenderOptions = {}): Promise<RenderResult> {
   if (!targets.length) return { findings: [], status: 'skipped: no HTML page to render' };
-  const choice = (opts.engine ?? pickEngine)();
-  if (!choice.engine) return { findings: [], status: `skipped: ${choice.error}` };
-  const run: Runner = (spec) => (choice.engine === 'browse' ? renderWithBrowse(spec, choice.bin) : render(spec));
+  let run = opts.run;
+  if (!run) {
+    const choice = (opts.engine ?? pickEngine)();
+    if (!choice.engine) return { findings: [], status: `skipped: ${choice.error}` };
+    run = (spec) => (choice.engine === 'browse' ? renderWithBrowse(spec, choice.bin) : render(spec));
+  }
   const r = new Reporter(opts.scope ?? 'page', opts.cwd ?? process.cwd());
   for (const target of targets) {
     try { await lintPage(target, r, run, opts.timeoutMs ?? 120_000); } catch (e) {
@@ -163,8 +168,10 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   });
   const scrolls = found.filter((f) => f.rule === 'horizontal-scroll' && !f.at);
   if (scrolls.length > 1) {
-    scrolls[0].evidence += ` (also at ${scrolls.slice(1).map((f) => f.label.replace(/px$/, '')).join(', ')}px)`;
-    for (const f of scrolls.slice(1)) found.splice(found.indexOf(f), 1);
+    const keep = scrolls.find((f) => f.grade === 'fail') ?? scrolls[0];
+    const rest = scrolls.filter((f) => f !== keep);
+    keep.evidence += ` (also at ${rest.map((f) => f.label.replace(/px$/, '')).join(', ')}px)`;
+    for (const f of rest) found.splice(found.indexOf(f), 1);
   }
   const bare = rings.filter((x) => x.bare);
   if (bare.length) report({ rule: 'missing-focus-visible', grade: 'fail', evidence: `[1440px] nothing shows keyboard focus on ${bare.slice(0, 4).map((x) => x.key).join(', ')}`, fix: 'give every control a :focus-visible ring; never remove an outline without putting one back', at: bare[0].at }, src);

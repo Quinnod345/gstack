@@ -14,7 +14,6 @@ import { trunc, type Reporter } from '../report';
 
 const EMOJI = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
 const GLYPH = /(?![©®™‼⁉←-⇿✓-✖])(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)/u;
-const lineAt = (text: string, pos: number): number => text.slice(0, pos).split('\n').length;
 
 // sloplint check30 (gate 30a)
 function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
@@ -48,9 +47,9 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
     }
     const raw = doc.raw;
     const body = doc.kind === 'html' ? doc.masked : raw;
-    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)[^<>{}\n]{0,40})/gu)) flag(lineAt(body, m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
-    for (const m of raw.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(lineAt(raw, m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"');
-    if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️?)‍?){1,3})\s*\1/gu)) flag(lineAt(raw, m.index!), 'an emoji passed as an icon: ' + m[2]);
+    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
+    for (const m of raw.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(doc.lineOf(m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"');
+    if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️?)‍?){1,3})\s*\1/gu)) flag(doc.lineOf(m.index!), 'an emoji passed as an icon: ' + m[2]);
   }
 }
 
@@ -65,9 +64,27 @@ const ICON_LIBS = new Map<string, RegExp>([
   ['bootstrap-icons', /bootstrap-icons|\bbi-[a-z]/i],
 ]);
 
+/** The class attributes, stylesheet and script references, and @import and url() targets of a context: where an icon library shows, prose left out. */
+function iconSurfaces(ctx: LintContext): string {
+  const out: string[] = [];
+  for (const doc of ctx.docs) {
+    for (const t of [...doc.tags, ...doc.comps]) {
+      if (t.close) continue;
+      const cls = getAttr(t.attrs, 'class') ?? getAttr(t.attrs, 'className');
+      if (cls) out.push(cls);
+      if (t.name === 'link' || t.name === 'script' || t.name === 'use') out.push(getAttr(t.attrs, 'href') ?? getAttr(t.attrs, 'src') ?? '');
+    }
+    for (const call of doc.virtuals) out.push(call.toks.join(' '));
+    for (const toks of doc.classAt.values()) out.push(toks.join(' '));
+    for (const m of doc.scripts.matchAll(/\b(?:import|require|from)\b[^\n;]*['"]([^'"]+)['"]/g)) out.push(m[1]);
+  }
+  for (const f of ctx.cssFiles) for (const m of f.raw.matchAll(/@import\s+(?:url\()?['"]?([^'")\s;]+)|url\(\s*['"]?([^'")]+)/g)) out.push(m[1] ?? m[2]);
+  return out.join('\n');
+}
+
 // sloplint check30 (gate 30b)
 function checkIconLibraries(ctx: LintContext, r: Reporter): void {
-  const hay = ctx.docs.map((d) => d.src).join('\n') + ctx.cssFiles.map((f) => f.raw).join('\n');
+  const hay = iconSurfaces(ctx);
   const found = [...ICON_LIBS].filter(([, re]) => re.test(hay)).map(([name]) => name);
   if (found.length < 2) return;
   const file = ctx.docs[0]?.file || ctx.cssFiles[0]?.file;

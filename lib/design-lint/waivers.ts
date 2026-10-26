@@ -35,9 +35,15 @@ export interface WaiverClaim {
   raw: string;
 }
 
+export interface Waiver {
+  reason: string;
+  /** The stylesheet (as printed) a claim written in a stylesheet answers for; null for a claim in the page, which answers for the whole page. */
+  sheet: string | null;
+}
+
 export interface WaiverSet {
   /** Rule ids the page waived, each with its recorded reason. */
-  accepted: Map<string, string>;
+  accepted: Map<string, Waiver>;
   /** Refused waivers, already shaped as findings. */
   refused: Finding[];
 }
@@ -45,7 +51,8 @@ export interface WaiverSet {
 export const WAIVER_MIN_REASON = 24;
 export const WAIVER_MAX = 3;
 
-const WAIVER_RE = /(?:gstack-lint-disable|impeccable-disable)\s+([a-z][a-z0-9-]*)\s*:\s*([^\r\n]*)/g;
+/** The reason runs to the end of its comment or line, so two waivers on one line are both read. */
+const WAIVER_RE = /(?:gstack-lint-disable|impeccable-disable)\s+([a-z][a-z0-9-]*)\s*:\s*([^\r\n]*?)(?=-->|\*\/|[\r\n]|$)/g;
 const WAIVER_REASON_MAX = 300;
 
 const WAIVER_FILLER = /\b(a|an|the|is|it|this|that|was|are|and|but|so|very|just|really|here|quite|more|most)\b/gi;
@@ -68,7 +75,7 @@ export function findWaivers(file: string, source: string): WaiverClaim[] {
   const out: WaiverClaim[] = [];
   const lineOf = lineIndex(source);
   for (const m of source.matchAll(WAIVER_RE)) {
-    const reason = m[2].replace(/(?:-->|\*\/).*$/, '').trim().slice(0, WAIVER_REASON_MAX);
+    const reason = m[2].trim().slice(0, WAIVER_REASON_MAX);
     out.push({ rule: m[1], reason, file, line: lineOf(m.index!), raw: m[0] });
   }
   return out;
@@ -78,6 +85,7 @@ const pageWordsOf = (text: string): Set<string> =>
   new Set((text.toLowerCase().replace(WAIVER_RE, ' ').match(/[a-z]{4,}/g) || []));
 
 export const FLOOR_REFUSAL = 'it blocks; the Floor is never waivable';
+export const OWN_RULE_REFUSAL = "the lint's own rule, never waivable";
 
 /** The `waiver` finding for a claim the lint refused. */
 function refusal(c: WaiverClaim, why: string, cwd = process.cwd()): Finding {
@@ -107,7 +115,7 @@ export function suspectedRules(findings: Finding[]): Set<string> {
  * blocking rule, measured or not found, is refused.
  */
 export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = process.cwd(), suspected: ReadonlySet<string> = new Set()): WaiverSet {
-  const accepted = new Map<string, string>();
+  const accepted = new Map<string, Waiver>();
   const refused: Finding[] = [];
   const pageWords = pageWordsOf(pageText);
   const reasons = new Map<string, number>();
@@ -115,15 +123,17 @@ export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = pr
   const refuse = (c: WaiverClaim, why: string) => refused.push(refusal(c, why, cwd));
   for (const c of claims) {
     const meta = ruleMeta(c.rule);
-    if (!meta || meta.gate === 'waiver' || meta.gate === 'render' || meta.gate === 'lint') { refuse(c, 'no such rule'); continue; }
+    if (!meta) { refuse(c, 'no such rule'); continue; }
+    if (meta.gate === 'waiver' || meta.gate === 'render' || meta.gate === 'lint') { refuse(c, OWN_RULE_REFUSAL); continue; }
     if (meta.tier === 'blocks' && !suspected.has(c.rule)) { refuse(c, FLOOR_REFUSAL); continue; }
     if (accepted.has(c.rule)) { refuse(c, 'one waiver per rule'); continue; }
     if (c.reason.length < WAIVER_MIN_REASON) { refuse(c, `reason under ${WAIVER_MIN_REASON} characters`); continue; }
     if (reasonIsBoilerplate(c.reason)) { refuse(c, 'boilerplate reason'); continue; }
     if ((reasons.get(c.reason.toLowerCase()) || 0) > 1) { refuse(c, 'reason reused on another waiver'); continue; }
     const words = c.reason.toLowerCase().match(/[a-z]{4,}/g) || [];
-    if (pageWords.size && !/\.css$/i.test(c.file) && !words.some((w) => pageWords.has(w))) { refuse(c, 'reason shares no word with the page'); continue; }
-    accepted.set(c.rule, c.reason);
+    const sheet = /\.css$/i.test(c.file);
+    if (pageWords.size && !sheet && !words.some((w) => pageWords.has(w))) { refuse(c, 'reason shares no word with the page'); continue; }
+    accepted.set(c.rule, { reason: c.reason, sheet: sheet ? relPath(c.file, cwd) : null });
   }
   if (accepted.size > WAIVER_MAX) {
     const first = claims[0];
@@ -137,11 +147,12 @@ export function resolveWaivers(claims: WaiverClaim[], pageText: string, cwd = pr
   return { accepted, refused };
 }
 
-/** Mark waived ask and polish findings; blocking findings never change. Returns the findings plus the refusals. */
+/** Mark waived ask and polish findings; blocking findings never change, and a stylesheet's claim reaches only findings in that stylesheet. Returns the findings plus the refusals. */
 export function applyWaivers(findings: Finding[], set: WaiverSet): Finding[] {
   const out = findings.map((f) => {
-    if (f.tier === 'blocks' || !set.accepted.has(f.rule)) return f;
-    return { ...f, grade: 'waived' as const, waiver: oneLine(set.accepted.get(f.rule) ?? '') };
+    const w = set.accepted.get(f.rule);
+    if (f.tier === 'blocks' || !w || (w.sheet && f.file !== w.sheet)) return f;
+    return { ...f, grade: 'waived' as const, waiver: oneLine(w.reason) };
   });
   return [...out, ...set.refused];
 }

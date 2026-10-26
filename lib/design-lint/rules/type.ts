@@ -135,8 +135,11 @@ function check38a(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     for (const m of doc.src.matchAll(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi)) {
       const classes = ((/class\s*=\s*["']([^"']*)["']/i.exec(m[2]) || [])[1] || '').split(/\s+/).filter(Boolean);
-      const tag = /<(em|i)\b/i.exec(m[3]);
-      if (tag && !normalised(m[1], classes)) r.report('italic-word-in-heading', doc.file, doc.lineOf(m.index!), `an <${tag[1].toLowerCase()}> inside an otherwise roman <h${m[1]}>`);
+      const tag = /<(em|i)\b[^>]*>([\s\S]*?)<\/\1\s*>/i.exec(m[3]);
+      if (!tag || normalised(m[1], classes)) continue;
+      const italic = plainText(tag[2]);
+      if (!italic || italic.length >= 0.8 * plainText(m[3]).length) continue;
+      r.report('italic-word-in-heading', doc.file, doc.lineOf(m.index!), `an <${tag[1].toLowerCase()}> inside an otherwise roman <h${m[1]}>`);
     }
   }
 }

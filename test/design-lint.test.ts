@@ -238,9 +238,9 @@ describe('design-lint: the static tier\'s files and contexts', () => {
 
     const { contexts } = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: (l) => { throw new Error(l); } });
     expect(contexts).toHaveLength(1);
-    expect(contexts[0].cssFiles.map((c) => [path.relative(dir, c.file), c.attached ?? false])).toEqual([['site/local.css', false], ['shared/theme.css', true]]);
+    expect(contexts[0].cssFiles.map((c) => path.relative(dir, c.file))).toEqual(['site/local.css', 'shared/theme.css']);
     const set = contextWaivers(contexts[0], dir);
-    expect([...set.accepted.entries()]).toEqual([['section-gap', 'the ledger separates its rows with rules'], ['template-nav', 'the ledger keeps three links for its three modes']]);
+    expect([...set.accepted.entries()]).toEqual([['section-gap', { reason: 'the ledger separates its rows with rules', sheet: 'site/local.css' }], ['template-nav', { reason: 'the ledger keeps three links for its three modes', sheet: 'shared/theme.css' }]]);
     expect(set.refused).toEqual([]);
   });
 
@@ -365,7 +365,7 @@ describe('design-lint: hardening (ship review)', () => {
     });
     const { contexts, findings } = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: () => {} });
     const page = contexts.find((c) => c.key.endsWith('index.html'))!;
-    expect(page.cssFiles.map((c) => [path.relative(dir, c.file), c.attached ?? false])).toEqual([['site/css/theme.css', true]]);
+    expect(page.cssFiles.map((c) => path.relative(dir, c.file))).toEqual(['site/css/theme.css']);
     expect(findings.filter((f) => f.rule === 'overflow-x-unclipped')).toEqual([]);
   });
 
@@ -374,7 +374,7 @@ describe('design-lint: hardening (ship review)', () => {
     for (let i = 0; i < 12; i++) files[`pages/p${i}.html`] = `<!doctype html><html lang="en"><head><title>P${i}</title><link rel="stylesheet" href="../css/site.css"></head><body><main><h1>Page ${i}</h1><p>Hello there.</p></main></body></html>`;
     const dir = tmpTree(files);
     const r = lintStatic([dir], { cwd: dir, warn: () => {} });
-    expect(r.contexts.filter((c) => c.cssFiles.some((f) => f.file.endsWith('site.css') && f.attached))).toHaveLength(12);
+    expect(r.contexts.filter((c) => c.cssFiles.some((f) => f.file.endsWith('site.css')))).toHaveLength(12);
     expect(r.contexts.filter((c) => c.key.endsWith('css'))).toEqual([]);
     const rulesOf = (c: LintContext) => c.rules.filter((x) => x.file.endsWith('site.css'));
     expect(rulesOf(r.contexts[0])[0]).toBe(rulesOf(r.contexts[1])[0]);
@@ -464,7 +464,11 @@ describe('design-lint: hardening (ship review)', () => {
     for (const rule of ['internal-error', 'waiver', 'house-style', 'render']) {
       const set = resolveWaivers([{ rule, reason: 'the manifesto sets long declarative lines', file: 'a.html', line: 1, raw: '' }], page);
       expect([...set.accepted.keys()]).toEqual([]);
-      expect(set.refused.map((f) => f.evidence)).toEqual([`waiver on ${rule} refused: no such rule`]);
+      expect(set.refused.map((f) => f.evidence)).toEqual([`waiver on ${rule} refused: the lint's own rule, never waivable`]);
+    }
+    const unknown = resolveWaivers([{ rule: 'no-such-thing', reason: 'the manifesto sets long declarative lines', file: 'a.html', line: 1, raw: '' }], page);
+    expect(unknown.refused.map((f) => f.evidence)).toEqual(['waiver on no-such-thing refused: no such rule']);
+    {
     }
   });
 

@@ -5,8 +5,9 @@
  * double-sticky, screen-word-budget. Gate 59 (section-gap) has no static check: the render tier owns it (render-probe-space.ts glGaps), as it owns
  * the render halves of 34 (horizontal-scroll) and 44d.
  */
-import { isTokenRule, pxOf, resolveVars } from '../css';
-import { mergedRules, type LintContext } from '../context';
+import { COLOR_LITERAL, oklchOf, parseColor } from '../color';
+import { isTokenRule, pxOf, resolveVars, type MergedRule } from '../css';
+import { memo, mergedRules, type LintContext } from '../context';
 import { getAttr, innerOf, plainText, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
@@ -20,18 +21,27 @@ const stripVariants = (cls: string): string => cls.replace(/^(?:[\w-]+:)+/, '');
 
 /** The inner HTML of every open element in the context whose class attribute carries one of the classes. */
 function innerHtmlWithClass(ctx: LintContext, classes: string[]): string[] {
-  const out: string[] = [];
-  if (!classes.length) return out;
-  for (const doc of ctx.docs) {
-    for (let i = 0; i < doc.tags.length; i++) {
-      const t = doc.tags[i];
-      if (t.close || t.selfClosing) continue;
-      const have = (getAttr(t.attrs, 'class') || '').split(/\s+/);
-      if (!classes.some((c) => have.includes(c))) continue;
-      const inner = innerOf(doc, i);
-      if (inner) out.push(inner.inner);
+  if (!classes.length) return [];
+  const byClass = memo(ctx, 'innerByClass', () => {
+    const index = new Map<string, string[]>();
+    for (const doc of ctx.docs) {
+      for (let i = 0; i < doc.tags.length; i++) {
+        const t = doc.tags[i];
+        if (t.close || t.selfClosing) continue;
+        const inner = innerOf(doc, i);
+        if (!inner) continue;
+        for (const c of new Set((getAttr(t.attrs, 'class') || '').split(/\s+/).filter(Boolean))) {
+          let list = index.get(c);
+          if (!list) index.set(c, list = []);
+          list.push(inner.inner);
+        }
+      }
     }
-  }
+    return index;
+  });
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const c of classes) for (const inner of byClass.get(c) ?? []) if (!seen.has(inner)) { seen.add(inner); out.push(inner); }
   return out;
 }
 
@@ -59,7 +69,12 @@ function sideStripes(ctx: LintContext, r: Reporter): void {
     for (const d of rule.decls) {
       if (!/^border-(left|right|inline-start|inline-end)$/.test(d.prop)) continue;
       const m = /(\d+(?:\.\d+)?)px/.exec(d.value);
-      if (m && parseFloat(m[1]) >= 3 && !/transparent|none/i.test(d.value)) {
+      if (!m || parseFloat(m[1]) < 3 || /transparent|none/i.test(d.value)) continue;
+      const col = COLOR_LITERAL.exec(resolveVars(d.value, ctx.tokens));
+      const parsed = col ? parseColor(col[0]) : null;
+      const ok = parsed ? oklchOf(parsed) : null;
+      if (parsed && ok && (parsed.alpha <= 0.05 || (ok.C < 0.04 && ok.L > 0.6))) continue;
+      {
         r.report('template-cards', rule.file, d.line, `a ${m[1]}px coloured side stripe (${d.prop}: ${trunc(d.value, 32)}) on ${rule.selector}`, { fix: 'a hairline all round, no border, or an accent square' });
       }
     }
@@ -270,9 +285,12 @@ function radioTabJump(ctx: LintContext, r: Reporter): void {
 
 // sloplint check56 (gate 56)
 function doubleSticky(ctx: LintContext, r: Reporter): void {
-  const sticky = mergedRules(ctx).filter((m) =>
-    m.decls.some((d) => d.prop === 'position' && /sticky/.test(d.value))
-    && m.decls.some((d) => d.prop === 'top' && /^(0|0px|0rem|-1px)$/.test(resolveVars(d.value, ctx.tokens).trim())));
+  const bySelector = new Map<string, MergedRule>();
+  for (const m of mergedRules(ctx)) {
+    if (m.decls.some((d) => d.prop === 'position' && /sticky/.test(d.value))
+      && m.decls.some((d) => d.prop === 'top' && /^(0|0px|0rem|-1px)$/.test(resolveVars(d.value, ctx.tokens).trim())) && !bySelector.has(m.selector)) bySelector.set(m.selector, m);
+  }
+  const sticky = [...bySelector.values()];
   if (sticky.length < 2) return;
   const sels = sticky.map((m) => m.selector).join(' and ');
   r.report('double-sticky', sticky[1].file, sticky[1].line, `two elements stick at top: 0 (${trunc(sels, 52)}): the second slides under the first`);

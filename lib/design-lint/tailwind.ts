@@ -11,7 +11,7 @@
  */
 import type { LintContext } from './context';
 import { memo } from './context';
-import { COLOR_LITERAL, hueIn, oklchOf, parseColor, type Color } from './color';
+import { bannedGradient, COLOR_LITERAL, oklchOf, parseColor, type Color } from './color';
 import { GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
 import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, type Doc, type Tag } from './html';
 import { trunc } from './report';
@@ -194,8 +194,6 @@ export interface TwInfo {
   animate: string | null;
   transform: boolean;
   transition: boolean;
-  caret: boolean;
-  scrollbar: boolean;
   hero: boolean;
   padded: boolean;
 }
@@ -309,8 +307,7 @@ function twReadSurface(ctx: LintContext, b: string, tok: string, p: TwParsed, f:
   if (/^rounded(?:-|$)/.test(b)) { if (b !== 'rounded-none') f.rounded = true; return; }
   if (b === 'grid-cols-3') { f.cols3 = true; return; }
   if (/^p[xytrblse]?-/.test(b)) { f.padded = true; return; }
-  if (b.startsWith('caret-')) { f.caret = true; return; }
-  if (b.startsWith('scrollbar') || b.startsWith('[scrollbar-')) f.scrollbar = true;
+  if (b.startsWith('caret-')) return;
 }
 
 /** Read one class string into its facts; the variants it uses land in the shared set as well as on the info. */
@@ -319,7 +316,7 @@ export function twInfo(ctx: LintContext, toks: string[], variants: Set<string>):
     classes: toks, bg: null, text: null, stops: [], gradientText: false, sizePx: null, trackingEm: null, upper: false, smallCaps: false, mono: false, variants: new Set<string>(),
     normalCase: false, accent: null, tAll: null, bounce: null, overshoot: null, hScale: null, hRotate: null, grad: false, clip: false, clear: false,
     bblur: null, glass: null, blur: 0, blurTok: null, pos: null, fill: false, shadows: [], shadowCol: null, vh: null, oxHidden: null, oxClip: false,
-    colours: [], font: null, pal: [], rounded: false, cols3: false, animate: null, transform: false, transition: false, caret: false, scrollbar: false, hero: false, padded: false,
+    colours: [], font: null, pal: [], rounded: false, cols3: false, animate: null, transform: false, transition: false, hero: false, padded: false,
   };
   const acc: TwAcc = { sizeV: null, tracks: [] };
   for (const tok of toks) {
@@ -447,31 +444,23 @@ export interface TwItem {
 export interface TwGroup {
   items: TwItem[];
   variants: Set<string>;
-  caret: boolean;
-  scrollbar: boolean;
-  /** The first element that animates or transitions a transform. */
-  motion: TwItem | null;
   /** An h1 or h2 set uppercase, which excuses uppercase controls. */
   upperDisplay: boolean;
 }
 
-/** Every class-bearing element, component tag and helper call in the context, parsed. */
 /** Give a component context the project's tokens and drop the Tailwind facts read before they were known. */
 export function setTwTokens(ctx: LintContext, tokens: Tokens): void {
   ctx.twTokens = tokens;
   delete ctx.cache.tw;
 }
 
+/** Every class-bearing element, component tag and helper call in the context, parsed. */
 export function twGroup(ctx: LintContext): TwGroup {
   return memo(ctx, 'tw', () => {
-    const tw: TwGroup = { items: [], variants: new Set<string>(), caret: false, scrollbar: false, motion: null, upperDisplay: false };
+    const tw: TwGroup = { items: [], variants: new Set<string>(), upperDisplay: false };
     const add = (it: TwItem) => {
-      const f = it.info;
       tw.items.push(it);
-      if (f.caret) tw.caret = true;
-      if (f.scrollbar) tw.scrollbar = true;
-      if (!tw.motion && (f.animate || (f.transition && f.transform))) tw.motion = it;
-      if (/^h[12]$/.test(it.tag) && f.upper) tw.upperDisplay = true;
+      if (/^h[12]$/.test(it.tag) && it.info.upper) tw.upperDisplay = true;
     };
     for (const doc of ctx.docs) {
       const stack: TwFrame[] = [];
@@ -544,23 +533,6 @@ export function twText(it: TwItem): string {
   return it.text;
 }
 
-const paperIsDark = (tokens: Tokens): boolean => {
-  const p = parseColor(resolveVars(tokens['--color-paper'] || '', tokens));
-  return !!p && oklchOf(p).L < 0.4;
-};
-
-/** The banned ramp among a set of stop hues: purple to blue, purple to pink, or cyan on a dark paper. */
-export function twBannedHues(hues: number[], tokens: Tokens): string | null {
-  const purple = hues.some((h) => hueIn(h, 265, 330));
-  const blue = hues.some((h) => hueIn(h, 200, 264));
-  const pink = hues.some((h) => hueIn(h, 331, 25));
-  const cyan = hues.some((h) => hueIn(h, 170, 230));
-  if (purple && blue) return 'purple-to-blue';
-  if (purple && pink) return 'purple-to-pink';
-  if (cyan && paperIsDark(tokens)) return 'cyan-on-dark';
-  return null;
-}
-
 export interface TwGradient { banned: string | null; text: boolean; list: string }
 
 /** The gradient an element's stops describe: its banned pairing if any, whether it is text, and the stop classes. */
@@ -573,7 +545,7 @@ export function twGradient(ctx: LintContext, f: TwInfo): TwGradient | null {
     if (names.some((x) => x !== a && TW_BLUE.test(x))) { banned = 'purple-to-blue'; break; }
     if (names.some((x) => x !== a && TW_PINK.test(x))) { banned = 'purple-to-pink'; break; }
   }
-  if (!banned) banned = twBannedHues(f.stops.map((s) => s.hue).filter((h): h is number => h != null), twTokens(ctx));
+  if (!banned) banned = bannedGradient(f.stops.map((s) => s.hue).filter((h): h is number => h != null), twTokens(ctx));
   return { banned, text: f.clip && f.clear, list: f.stops.map((s) => s.tok).join(' ') };
 }
 

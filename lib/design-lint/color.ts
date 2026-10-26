@@ -7,6 +7,8 @@
  * srgbToOklch, contrastRatio; MIT, see NOTICE.md).
  */
 
+import { resolveVars, type Tokens } from './css';
+
 export interface Rgb { r: number; g: number; b: number }
 export interface Oklch { L: number; C: number; H: number }
 export interface Color extends Rgb { alpha: number; okl?: Oklch }
@@ -134,3 +136,32 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
 export const hueIn = (h: number, lo: number, hi: number): boolean => (lo <= hi ? h >= lo && h <= hi : h >= lo || h <= hi);
 
 export const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([^)]*\)|color-mix\((?:[^()]|\([^()]*\))*\)|\b(white|black|transparent)\b/i;
+
+/** Whether the page's paper token resolves to a dark colour (OKLCH lightness under 0.4). */
+// sloplint paperIsDark (gate 2)
+export function paperIsDark(tokens: Tokens): boolean {
+  const p = parseColor(resolveVars(tokens['--color-paper'] || '', tokens));
+  return !!p && oklchOf(p).L < 0.4;
+}
+
+/** Two indigo-to-violet stops this many degrees apart read as a ramp; closer is one hue shaded. */
+const INDIGO_VIOLET_SPAN = 12;
+
+/**
+ * The banned ramp among a gradient's stop hues: purple to blue, purple to
+ * pink, indigo to violet, or cyan on a dark paper. One classifier for a
+ * stylesheet gradient and for Tailwind stops, so both tiers give one answer.
+ */
+// sloplint bannedGradient (gate 2a)
+export function bannedGradient(hues: number[], tokens: Tokens): string | null {
+  const purple = hues.some((h) => hueIn(h, 265, 330));
+  const blue = hues.some((h) => hueIn(h, 200, 264));
+  const pink = hues.some((h) => hueIn(h, 331, 25));
+  const cyan = hues.some((h) => hueIn(h, 170, 230));
+  if (purple && blue) return 'purple-to-blue';
+  if (purple && pink) return 'purple-to-pink';
+  const band = hues.filter((h) => hueIn(h, 250, 330));
+  if (band.length >= 2 && Math.max(...band) - Math.min(...band) >= INDIGO_VIOLET_SPAN) return 'indigo-to-violet';
+  if (cyan && paperIsDark(tokens)) return 'cyan-on-dark';
+  return null;
+}

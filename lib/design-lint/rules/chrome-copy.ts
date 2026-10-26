@@ -9,7 +9,7 @@
  */
 import { styleFor, type LintContext } from '../context';
 import { resolveVars } from '../css';
-import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, type Doc, type Tag } from '../html';
+import { ancestorsOf, getAttr, innerOf, maskedProse, plainText, treeOf, type Doc, type Tag } from '../html';
 import { trunc, type Reporter } from '../report';
 
 
@@ -40,9 +40,16 @@ function checkHeroCopy(ctx: LintContext, r: Reporter): void {
       lines.add(line);
       r.report(rule, doc.file, line, `${what}: "${trunc(text, 40)}"`);
     };
+    const hero = heroRange(doc);
     for (const [re, what] of HERO_TELLS) {
-      const m = re.exec(prose);
-      if (m) tell('generic-hero-copy', m.index, what, m[0]);
+      const all = [...prose.matchAll(new RegExp(re.source, re.flags + 'g'))];
+      const inHero = all.find((m) => hero && m.index! >= hero[0] && m.index! < hero[1]);
+      const m = inHero ?? all[0];
+      if (!m) continue;
+      const line = doc.lineOf(m.index!);
+      if (lines.has(line)) continue;
+      lines.add(line);
+      r.report('generic-hero-copy', doc.file, line, `${what}: "${trunc(m[0], 40)}"`, inHero ? {} : { suspected: true, fix: 'a line in the product\'s own voice; in body copy this is a suspicion, so a waiver can answer it' });
     }
     const footer = FOOTER_LINE.exec(prose);
     if (footer) tell('template-footer-line', footer.index, 'a stock footer line', footer[0]);
@@ -91,6 +98,17 @@ const SECOND_CTA = /^(learn more|see how it works|watch (the )?demo|get started|
 
 /** The <section> or <header> that holds the h1, by tag index; -1 when none does. */
 // sloplint heroIndexOf
+/** The source range the hero copy lives in: the section or header holding the h1, else the h1's parent; null without an h1. A tell here is the Floor, elsewhere it is suspected. */
+function heroRange(doc: Doc): [number, number] | null {
+  const h1 = doc.tags.findIndex((t) => !t.close && t.name === 'h1');
+  if (h1 < 0) return null;
+  const heroIdx = heroIndexOf(doc, h1);
+  const holder = heroIdx >= 0 ? heroIdx : treeOf(doc).parent[h1];
+  if (holder < 0) return null;
+  const inner = innerOf(doc, holder);
+  return inner ? [doc.tags[holder].end, inner.endPos] : null;
+}
+
 export function heroIndexOf(doc: Doc, h1Idx: number): number {
   for (let i = h1Idx - 1; i >= 0; i--) {
     const t = doc.tags[i];

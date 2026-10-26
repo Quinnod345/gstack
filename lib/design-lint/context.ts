@@ -9,8 +9,6 @@ import type { Doc } from './html';
 export interface CssFile {
   file: string;
   raw: string;
-  /** Reached through @import or <link>, not named on the command line. */
-  attached?: boolean;
 }
 
 /** Project-wide facts shared across a directory of components, so a focus ring in globals.css counts for Hero.tsx. */

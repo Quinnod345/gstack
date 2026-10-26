@@ -6,7 +6,7 @@
  * genre exempts a page, no theme is pinned by name, so every check here runs
  * in its strict form.
  */
-import { COLOR_LITERAL, hueIn, oklchOf, parseColor } from '../color';
+import { bannedGradient, COLOR_LITERAL, hueIn, oklchOf, parseColor } from '../color';
 import type { LintContext } from '../context';
 import { mergedRules } from '../context';
 import { firstFamily, GENERIC_FAMILIES, isTokenRule, pxOf, resolveVars, splitTop, type CssDecl, type MergedRule, type Tokens } from '../css';
@@ -25,25 +25,6 @@ function gradientHues(value: string, tokens: Tokens): number[] {
     if (ok.C > 0.04) hues.push(ok.H);
   }
   return hues;
-}
-
-// sloplint paperIsDark (gate 2)
-function paperIsDark(tokens: Tokens): boolean {
-  const p = parseColor(resolveVars(tokens['--color-paper'] || '', tokens));
-  return !!p && oklchOf(p).L < 0.4;
-}
-
-// sloplint bannedGradient (gate 2a)
-function bannedGradient(hues: number[], tokens: Tokens): string | null {
-  const purple = hues.some((h) => hueIn(h, 265, 330));
-  const blue = hues.some((h) => hueIn(h, 200, 264));
-  const pink = hues.some((h) => hueIn(h, 331, 25));
-  const cyan = hues.some((h) => hueIn(h, 170, 230));
-  if (purple && blue) return 'purple-to-blue';
-  if (purple && pink) return 'purple-to-pink';
-  if (new Set(hues.filter((h) => hueIn(h, 250, 330)).map((h) => Math.round(h / 4))).size >= 2) return 'indigo-to-violet';
-  if (cyan && paperIsDark(tokens)) return 'cyan-on-dark';
-  return null;
 }
 
 interface GradientText { r: MergedRule; clip: CssDecl; grad: CssDecl | undefined }

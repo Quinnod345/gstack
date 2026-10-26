@@ -177,6 +177,9 @@ function autorotate(ctx: LintContext, r: Reporter): void {
 }
 
 // sloplint check26 (gates 26a, 26b); ctx.shared carries a project's global state styles
+/** An outline value that takes the ring away: none, or a zero width; `0.25rem solid` is a ring. */
+const OUTLINE_REMOVED = /^(?:none|0(?:px|rem|em)?)(?![\w.%])/i;
+
 function focusAndStates(ctx: LintContext, r: Reporter): void {
   const hasInteractive = ctx.docs.some((doc) => /<(a|button|input|select|textarea)\b|role\s*=\s*["']button/i.test(doc.src))
     || ctx.rules.some((rule) => selectorIsInteractive(rule.selector));
@@ -188,10 +191,10 @@ function focusAndStates(ctx: LintContext, r: Reporter): void {
   if (!has(':focus-visible') && !has(':focus') && !shared?.focus && ![...tv].some((v) => /^focus(?:-visible|-within)?$/.test(v)) && once(ctx, '26a')) {
     r.report('missing-focus-visible', file, 1, 'no :focus-visible style anywhere: keyboard users cannot see where they are');
   }
-  const ringDecl = (d: { prop: string; value: string }) => (/^outline(-style|-width|-color)?$/.test(d.prop) && !/^(none|0|0px)\b/i.test(d.value.trim())) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim()));
+  const ringDecl = (d: { prop: string; value: string }) => (/^outline(-style|-width|-color)?$/.test(d.prop) && !OUTLINE_REMOVED.test(d.value.trim())) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim()));
   const ringAnywhere = ctx.rules.some((rule) => /:focus/.test(rule.selector) && rule.decls.some(ringDecl)) || !!shared?.focus || [...tv].some((v) => /^focus(?:-visible|-within)?$/.test(v));
   if (!ringAnywhere) {
-    const removed = ctx.rules.find((rule) => /:focus/.test(rule.selector) && rule.decls.some((d) => /^outline(-style)?$/.test(d.prop) && /^(none|0|0px)\b/i.test(d.value.trim())));
+    const removed = ctx.rules.find((rule) => /:focus/.test(rule.selector) && rule.decls.some((d) => /^outline(-style)?$/.test(d.prop) && OUTLINE_REMOVED.test(d.value.trim())));
     const outlineD = removed?.decls.find((d) => /^outline(-style)?$/.test(d.prop));
     if (removed && outlineD && once(ctx, '26a:removed')) r.report('missing-focus-visible', removed.file, outlineD.line, `${outlineD.prop}: ${outlineD.value.trim()} on ${trunc(removed.selector, 40)} with nothing in its place: keyboard users cannot see where they are`, { fix: 'a :focus-visible ring at 3:1 or better, instant; never remove an outline without putting one back' });
   }

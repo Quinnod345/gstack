@@ -40,22 +40,29 @@ export interface RawStaticResult {
 
 const BUILD_DIRS = new Set(['dist', 'build', 'coverage']);
 
-/** Every .css page and component file under the paths; node_modules, dot folders and (below the top) build output are skipped. */
+/** A source file past this size is a bundle or a generated artefact, not a page to read; it is skipped with a warning so the lint answers in bounded time. */
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+/** Every .css page and component file under the paths; node_modules, dot folders and (below the top) build output are skipped, a link cycle is walked once, and a file over MAX_FILE_BYTES is skipped with a warning. */
 export function collectFiles(paths: string[], warn: (l: string) => void = () => {}): string[] {
   const files: string[] = [];
   const seen = new Set<string>();
   const visit = (p: string, top: boolean) => {
-    const abs = path.resolve(p);
-    if (seen.has(abs)) return;
+    let abs = path.resolve(p);
     let st: fs.Stats;
-    try { st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); return; }
+    try { abs = fs.realpathSync(abs); st = fs.statSync(abs); } catch { warn(`design-lint: cannot read ${p}`); return; }
+    if (seen.has(abs)) return;
     if (st.isDirectory()) {
+      seen.add(abs);
       const base = path.basename(abs);
       if (base === 'node_modules' || base.startsWith('.') || (!top && BUILD_DIRS.has(base))) return;
       for (const e of fs.readdirSync(abs).sort()) visit(path.join(abs, e), false);
       return;
     }
-    if (path.extname(abs).toLowerCase() === '.css' || docKindOf(abs)) { seen.add(abs); files.push(abs); }
+    if (path.extname(abs).toLowerCase() !== '.css' && !docKindOf(abs)) return;
+    seen.add(abs);
+    if (st.size > MAX_FILE_BYTES) { warn(`design-lint: skipped ${p} (${Math.round(st.size / 1024 / 1024)} MB, over the ${MAX_FILE_BYTES / 1024 / 1024} MB limit)`); return; }
+    files.push(abs);
   };
   for (const p of paths) visit(p, true);
   return files;
@@ -130,7 +137,7 @@ function attachStylesheets(cssFiles: CssFile[], rules: CssRule[], pending: strin
     inGroup.add(p);
     const got = cache.read(p);
     if (!got) continue;
-    cssFiles.push({ file: p, raw: got.raw, attached: true });
+    cssFiles.push({ file: p, raw: got.raw });
     rules.push(...got.rules);
     pending.push(...got.imports);
   }
@@ -222,13 +229,11 @@ export function groupContexts(files: string[], opts: StaticOptions, warn: (l: st
   return contexts;
 }
 
-const projectRoots = new Map<string, string | null>();
 function projectRoot(dir: string): string | null {
-  if (projectRoots.has(dir)) return projectRoots.get(dir)!;
-  const up = path.dirname(dir);
-  const root = fs.existsSync(path.join(dir, 'package.json')) ? dir : up === dir ? null : projectRoot(up);
-  projectRoots.set(dir, root);
-  return root;
+  for (let d = dir; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, 'package.json'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
 }
 
 /**
