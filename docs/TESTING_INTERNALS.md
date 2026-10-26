@@ -1530,12 +1530,17 @@ word list: `test/fixtures/arm-benchmark/` and its four children, `browse-judge/`
 `cso-eval/`, `eval-history/`, `judge-calibration/` and its children, two shard
 names under `paid-report-census/` and the `test/` subdirectories of
 `state-matrix-6792/`. All of these are runner-side: no candidate's working
-directory is one of them. Two candidate-visible gaps are in the temporary roots
+directory is one of them. Candidate-visible gaps are in the temporary roots
 the harnesses create: `test/helpers/arm-benchmark-harness.ts` copies each fixture
 into `os.tmpdir()/arm-<fixture>-<arm>-*`, so the candidate's working directory is
-named after the arm rather than after a project, and `test/skill-e2e-deploy.test.ts`
+named after the arm rather than after a project; `test/skill-e2e-deploy.test.ts`
 runs the /benchmark case in `skill-e2e-benchmark-*`, a root that carries a listed
-word; the other `skill-e2e-<case>-*` roots do not. The audit matched whole
+word; `test/skill-e2e-test-value.test.ts` creates `skill-e2e-<id>-*` roots as the
+candidate's working directory, and two of its ids (`review-test-value`,
+`test-audit-report-only`) carry the word `test`; and `test/skill-e2e-health.test.ts`
+creates `gstack-health-eval-*`. That list comes from a scan of the `mkdtemp`
+prefixes in the e2e tests, not from a proof that no other root carries a listed
+word. The audit matched whole
 lower-case words in path components under `test/fixtures/`; a substring match
 (`factory-scorecard/`, `ios-qa/FixtureApp/Tests/`) was not counted. Renaming is a
 separate change with its own touchfile updates; the list is here so that change

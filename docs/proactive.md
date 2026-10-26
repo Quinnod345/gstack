@@ -66,9 +66,11 @@ two renders differ, whether an endpoint accepts a payload, whether a test still
 fails: each of those is settled by running the thing (time it, render both,
 call it, run the test) and reporting the result, not by a prompt. That holds
 for observations that are local, read-only and free; a call that changes state,
-reaches a live or third-party system or spends money is still yours to approve,
-as the one-way-door rule in `/plan-tune` already says. The only questions that
-come to you are product and preference calls (what the product should do, what
-you want, what you are willing to spend or risk), and they arrive with the
-observation already in hand so the choice is between measured options. `/plan-tune` applies the same rule when it audits the question log: an
+reaches a live or third-party system or spends money is still yours to approve.
+That extends the one-way-door rule in `/plan-tune`, which covers destructive,
+architectural and security questions, to spend and third-party reach. The only
+questions that come to you are product and preference calls (what the product
+should do, what you want, what you are willing to spend or risk), and they
+arrive with the observation already in hand so the choice is between measured
+options. `/plan-tune` applies the same rule when it audits the question log: an
 observable question is a defect in the asking skill, not a preference to tune.
