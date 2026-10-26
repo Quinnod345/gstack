@@ -104,7 +104,7 @@ Tell these apart:
    - If it was present and **errored** (not absent), retry the SAME call **once** — only if no answer could have surfaced (a missing-result error can arrive after the user saw the question; retrying would double-prompt, so if it may have reached them, treat it as pending and don't retry).
    - Then branch on `SESSION_KIND` (echoed by the preamble; empty/absent ⇒ `interactive`):
      - `spawned` → defer to the **Spawned session** block: auto-choose the recommended option. Never prose, never BLOCKED.
-     - `unattended` → auto-choose the recommended option; a consent, unrecommended question or approval gate becomes a pending gate item.
+     - `unattended` → auto-choose the recommended option; a consent, destructive or irreversible option, unrecommended question or approval gate becomes a pending gate item.
      - `headless` → `BLOCKED — AskUserQuestion unavailable`; stop and wait (no human can answer).
      - `interactive` → **prose fallback** (below).
 

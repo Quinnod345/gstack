@@ -208,6 +208,19 @@ describe('generateAskUserFormat — runtime-failure prose fallback', () => {
     expect(out).toMatch(/empty\/absent[\s\S]{0,40}interactive/i);
   });
 
+  test('unattended branch keeps destructive or irreversible options pending, like the printed block', () => {
+    for (const skillName of ['test-skill', 'plan-eng-review']) {
+      const fallback = generateAskUserFormat({ ...makeCtx(), skillName })
+        .split('### When AskUserQuestion is unavailable or a call fails')[1] ?? '';
+      const unattended = fallback.split('\n').find(line => line.trim().startsWith('- `unattended`')) ?? '';
+      expect(unattended, `${skillName}: failure fallback must branch on unattended`).not.toBe('');
+      expectMentions(unattended, [
+        ['destructive', 'irreversible', 'pending gate item'],
+        ['consent', 'unrecommended question', 'approval gate', 'pending gate item'],
+      ], `${skillName} unattended fallback branch`);
+    }
+  });
+
   // The mandatory triad the user explicitly required for the plain-text output.
   test('prose fallback mandates the triad: issue ELI10', () => {
     expect(out).toContain('ELI10');
