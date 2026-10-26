@@ -66,10 +66,44 @@ describe('resolveProxy precedence', () => {
 
   test('a scheme-less standard variable is read as an http:// proxy, as curl and Chromium read it (#3440), with creds kept and redactable', () => {
     expect(resolveProxy(null, { HTTPS_PROXY: 'proxy.corp:8080' })).toMatchObject({ url: 'http://proxy.corp:8080/', source: 'HTTPS_PROXY', warning: null });
-    expect(resolveProxy(null, { https_proxy: 'user:secret@proxy.corp:8080' })).toMatchObject({ url: 'http://user:secret@proxy.corp:8080/', source: 'https_proxy', warning: null });
+    const withCreds = resolveProxy(null, { https_proxy: 'USER:PASSWORD@proxy.corp:8080' });
+    expect(withCreds).toMatchObject({ source: 'https_proxy', warning: null });
+    expect(withCreds.url).toBe(['http://USER', 'PASSWORD@proxy.corp:8080/'].join(':'));
     expect(resolveProxy(null, { ALL_PROXY: '[::1]:3128' })).toMatchObject({ url: 'http://[::1]:3128/', source: 'ALL_PROXY', warning: null });
     expect(resolveProxy(null, { HTTP_PROXY: 'proxy.corp' })).toMatchObject({ url: 'http://proxy.corp/', source: 'HTTP_PROXY', warning: null });
     expect(resolveProxy(null, { HTTPS_PROXY: 'socks5h://proxy.corp:1080' }).url).toBe('socks5://proxy.corp:1080');
+  });
+
+  test('surrounding whitespace, a one-slash scheme and a bare number keep the behaviour a scheme-bearing value had', () => {
+    for (const value of [' http://h:3128', 'http://h:3128 ', ' h:3128 ', ' socks5://h:1080']) {
+      const resolved = resolveProxy(null, { HTTPS_PROXY: value });
+      expect(resolved.warning, value).toBeNull();
+      expect(resolved.url, value).toMatch(/^(http|socks5):\/\/h:/);
+    }
+    expect(resolveProxy(null, { HTTPS_PROXY: 'http:/host:3128' }).url).toBe('http://host:3128/');
+    expect(resolveProxy(null, { HTTPS_PROXY: '1234' })).toMatchObject({ url: null });
+    expect(resolveProxy(null, { HTTPS_PROXY: '1234' }).warning).toStartWith('HTTPS_PROXY is not a proxy URL browse can use (');
+  });
+
+  test('a scheme-less password that would spill past the userinfo, or that is not percent-encoded, warns instead of leaking or crashing', () => {
+    for (const value of ['bob:1234?x@proxy.corp:3128', 'bob:1234#x@proxy.corp:3128', 'bob:1234/x@proxy.corp:3128']) {
+      const resolved = resolveProxy(null, { HTTPS_PROXY: value });
+      expect(resolved.url, value).toBeNull();
+      expect(resolved.warning, value).toStartWith('HTTPS_PROXY is not a proxy URL browse can use (');
+      expect(resolved.warning, value).not.toContain('1234');
+    }
+    const percent = resolveProxy(null, { HTTPS_PROXY: 'bob:100%@proxy.corp:3128' });
+    expect(percent.url).toBeNull();
+    expect(percent.warning).toContain('credentials are not valid percent-encoding');
+    expect(percent.warning).not.toContain('100%');
+    expect(() => resolveProxy(['http://bob', '100%@proxy.corp:3128'].join(':'), {})).toThrow(/percent-encoding/);
+  });
+
+  test('scheme-less and http:// spellings of the same proxy share a config hash, so either shell reuses the daemon', () => {
+    const a = extractGlobalFlags(['status'], { HTTPS_PROXY: 'h:3128' }, 'linux');
+    const b = extractGlobalFlags(['status'], { HTTPS_PROXY: 'http://h:3128' }, 'linux');
+    expect(a.configHash).toBe(b.configHash);
+    expect(a.redactedProxyUrl).toBe(b.redactedProxyUrl);
   });
 
   test('a standard variable that does not parse even as http:// warns and falls back to direct, without echoing it', () => {

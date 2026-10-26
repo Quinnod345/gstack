@@ -534,10 +534,13 @@ function proxyServerEnv(flags: Partial<Pick<GlobalFlags, 'proxyUrl' | 'proxySour
 }
 
 /**
- * Build the env for an auto-restart after a crash. headed/proxy/configHash are
+ * Build the env for an auto-restart after a crash. headed and configHash are
  * reapplied from THIS invocation OR the persisted server state, so a restart
  * triggered by a plain command (goto/status, no --headed flag) never silently
- * downgrades a headed session to headless (#1781). Pure + exported for tests.
+ * downgrades a headed session to headless (#1781). The proxy settings,
+ * including the explicit direct opt-out, come only from this invocation's
+ * flags, which the config-hash gate already matched against that daemon.
+ * Pure + exported for tests.
  */
 export function buildRestartEnv(
   globalFlags: GlobalFlags | null | undefined,

@@ -36,11 +36,21 @@ export class ProxyConfigError extends Error {
   }
 }
 
+function percentDecodable(part: string): boolean {
+  try {
+    decodeURIComponent(part);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Parse the BROWSE_PROXY_URL string and merge env-supplied creds.
  *
- * @throws ProxyConfigError on malformed URL, unsupported scheme, or
- *   ambiguous credentials (set in both URL and env).
+ * @throws ProxyConfigError on malformed URL, unsupported scheme, bad
+ *   credential percent-encoding, or ambiguous credentials (set in both URL
+ *   and env).
  */
 export function parseProxyConfig(opts: {
   proxyUrl: string;
@@ -104,6 +114,12 @@ export function parseProxyConfig(opts: {
 
   let userId: string | undefined;
   let password: string | undefined;
+  if (urlHasCreds && ![url.username, url.password].every(percentDecodable)) {
+    throw new ProxyConfigError(
+      'percent-encode the credentials (a literal % is %25)',
+      `invalid proxy URL — credentials are not valid percent-encoding`,
+    );
+  }
   if (urlHasCreds) {
     userId = decodeURIComponent(url.username);
     password = url.password ? decodeURIComponent(url.password) : undefined;
@@ -297,19 +313,27 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
   return `[browse] [proxy] none: direct connection (${DIRECT_PROXY_ARG}${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
 }
 
-/** A proxy URL with a scheme (`http://`, `socks5h://`); anything else is read as curl and Chromium read it, as an HTTP proxy. */
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+/**
+ * The scheme-less proxy shapes curl and Chromium's environment reader take as
+ * an HTTP proxy: `[user:pass@]host[:port]` with a name, dotted address or
+ * bracketed IPv6 host. Anything else (a scheme, a path, query or fragment
+ * character, whitespace inside, a bare number) goes to the URL parser as
+ * written, so a typo such as `http:/host:3128` keeps the diagnostic it had
+ * and no part of a password can land outside the redacted userinfo.
+ */
+const SCHEMELESS_PROXY_RE = /^(?:[^/?#@\s]+@)?(?:\[[0-9a-f:.]+\]|(?=[^:]*[a-z.])[^/?#@\s:[\]]+)(?::\d+)?$/i;
 
 /**
  * Resolve the proxy for this invocation (#915). Env URLs go through
- * parseProxyConfig, so the cred policy applies. A standard variable without a
- * scheme (curl-style `host:port` or `user:pass@host:port`) is read as an
- * `http://` proxy, the way curl and Chromium's own environment reader take
- * it, so a session that worked through Chromium reading the variable keeps
- * working now that the launch is explicit (#3440). One that still does not
- * parse (an unsupported scheme, a bad port, a missing host) is ignored with a
- * warning instead of failing every command; --proxy and BROWSE_PROXY_URL are
- * explicit browse settings and still fail closed, scheme required.
+ * parseProxyConfig, so the cred policy applies. A standard variable in a
+ * scheme-less shape (curl-style `host:port` or `user:pass@host:port`,
+ * SCHEMELESS_PROXY_RE) is read as an `http://` proxy, the way curl and
+ * Chromium's own environment reader take it, so a session that worked through
+ * Chromium reading the variable keeps working now that the launch is explicit
+ * (#3440). One that still does not parse (an unsupported scheme, a bad port,
+ * a missing host) is ignored with a warning instead of failing every command;
+ * --proxy and BROWSE_PROXY_URL are explicit browse settings and still fail
+ * closed, scheme required.
  */
 export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): ResolvedProxy {
   const direct = (warning: string | null = null): ResolvedProxy => ({ url: null, source: null, noProxyRules: null, bypass: null, warning });
@@ -323,7 +347,8 @@ export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): Re
   } else {
     const name = STANDARD_PROXY_VARS.find(key => env[key]);
     if (!name) return direct();
-    [source, raw] = [name, SCHEME_RE.test(env[name]!) ? env[name]! : `http://${env[name]!}`];
+    const value = env[name]!.trim();
+    [source, raw] = [name, SCHEMELESS_PROXY_RE.test(value) ? `http://${value}` : value];
     try {
       parseProxyConfig({ proxyUrl: raw });
     } catch (err) {
