@@ -2179,7 +2179,12 @@ case with `bun run eval:pass-rates --headroom --case <id>`.
 ### `cost unknown (no billing captured for any of <N> trial(s))` / `cost $<x> known + <N> of <M> trial(s) cost unknown`
 
 **Meaning.** PTY and Codex sessions record no billing, so their cost is
-unknown. Only the known sum is shown.
+unknown. So is a trial in a multi-case shard whose result records are named by
+a display label rather than the case id, because no record can be attributed
+to it (a one-case shard's records are its case's). Only the known sum is
+shown. A train verdict's `ATTEMPT:` line reports the same as `cost=$<x> known
++ <n> of <m> case(s) cost unknown`, and a bare `cost=$<x>` only when every case
+in the train record is priced.
 
 **Fix.** None needed; this is informational.
 

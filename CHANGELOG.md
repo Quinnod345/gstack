@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-**Merge trains fill at 3 READY PRs or one hour after the first READY, and a train verdict's cost line no longer hides the trials it could not price.** On 2026-10-26 the 5-PR / 3-hour fill left READY PRs waiting most of a day, and `train verdict` printed `cost=$24.41` for a train whose slice report said `cost $32.92 known + 54 of 136 trial(s) cost unknown`. The slice report was right: 54 E2E trials had no cost attributed because their result records are named by a display label ("/benchmark workflow") while the case is named by its id (`benchmark-workflow`), so the per-case sum the train record carries was short by $8.51.
+**Merge trains fill at 3 READY PRs or one hour after the first READY, and a train verdict's cost line no longer hides the trials it could not price.** On 2026-10-26 the 5-PR / 3-hour fill left READY PRs waiting most of a day, and `train verdict` printed `cost=$24.41` for a train whose slice report said `cost $32.92 known + 54 of 136 trial(s) cost unknown`. The slice report was right: 54 E2E trials had no cost attributed because their result records are named by a display label ("/benchmark workflow") while the case is named by its id (`benchmark-workflow`), so the per-case sum the train record carries was short by $8.51. Every train cost the coordinator reported until this fix was that undercounted verdict figure (about $24 per train against about $33 real).
 
 ### Changed
 - **`.gstack/ship-policy.json`**: `train.max_size` 5 → 3 and `train.fill_hours` 3 → 1. `fillDue` already dispatches at either bound, whichever comes first; a fourth READY PR is `HELD:` for the next train. docs/ship-policy.md says so in the fill paragraph and its example block.
