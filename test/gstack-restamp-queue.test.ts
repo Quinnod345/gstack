@@ -89,7 +89,13 @@ describe('three PRs, reordered twice, zero manual edits', () => {
     expect(a.status).toBe(EXIT.ok);
     expect(a.out).toContain('ship, next in queue at 1.2.4.0');
     expect(a.out).toContain('claims: ignored (stamp-at-merge)');
-    expect(a.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; .*CHANGELOG entry text only.*expected head [0-9a-f]{40}/m);
+    // Under a train the stamp commit may hold only restamp's own output: the next: line must not ask the lane
+    // to edit the CHANGELOG by hand (a lane that did was refused by the train's verify, freezing the queue).
+    // Value: protects=restamp's stamp-at-merge handoff never instructs a hand edit of CHANGELOG; fails_when=the
+    // claim-at-open wording ("write the CHANGELOG entry text") leaks into the train path; why_new=the earlier
+    // assertion pinned that wording as the contract; seam=none; no_claim=nothing about the lane obeying it.
+    expect(a.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; commit and push only the stamp diff above \(FILES\), with no edit of your own: .*expected head [0-9a-f]{40}/m);
+    expect(a.out).not.toMatch(/write the CHANGELOG|entry text|release summary/i);
     expect(stages(a.out)).toMatchObject({ version: 'done', release_tool: 'done', changelog: 'done', stamp_paths: 'skipped', apply: 'done' });
     expect(readFile(repo, 'VERSION')).toBe('1.2.4.0\n');
     expect(readFile(repo, 'generated/digest.md')).toBe('# digest v1.2.4.0\nbody\n');
@@ -180,6 +186,10 @@ describe('three PRs, reordered twice, zero manual edits', () => {
     expect(r.out).not.toContain('ship, next in queue at');
     const forced = restamp(repo, ['--next', '--dry-run', '--queue-mode', 'stamp-at-merge']);
     expect(forced.out).toContain('claims: ignored (stamp-at-merge)');
+    // claim-at-open's bump still writes the entry text at /ship's CHANGELOG step; only the train path drops the ask.
+    const stamped = restamp(repo, ['--next']);
+    expect(stamped.status).toBe(EXIT.ok);
+    expect(stamped.out).toMatch(/^next: NEW_VERSION=1\.2\.4\.0; record the release decision, then write the CHANGELOG entry text only/m);
   });
 
   test('claim-at-open with an unknown claim says incomplete, names the PR and never says read', () => {
