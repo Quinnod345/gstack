@@ -203,6 +203,7 @@ function cmdRead(rest: string[], json: boolean): number {
 function cmdResult(rest: string[], json: boolean): number {
   const bodyFile = flag(rest, '--body');
   const pr = flag(rest, '--pr');
+  if (pr !== undefined && !/^\d+$/.test(pr)) { process.stderr.write(`gstack-ship-receipt result: --pr must be a PR number, got ${JSON.stringify(pr.slice(0, 40))}\n`); return EXIT.usage; }
   const repoRoot = git(['rev-parse', '--show-toplevel']);
   const head = flag(rest, '--head') ?? (repoRoot ? git(['rev-parse', 'HEAD'], repoRoot) : undefined);
   const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'QUEUE_RECEIPT_STALE', message: string) => {
@@ -211,7 +212,7 @@ function cmdResult(rest: string[], json: boolean): number {
     return EXIT.refused;
   };
   if (!head) { process.stderr.write('gstack-ship-receipt result: --head <sha> is required outside a git repository\n'); return EXIT.usage; }
-  if (!/^[0-9a-f]{12,64}$/i.test(head)) { process.stderr.write(`gstack-ship-receipt result: --head must be a hex commit id of at least 12 characters, got ${JSON.stringify(head.slice(0, 40))}\n`); return EXIT.usage; }
+  if (!/^[0-9a-f]{40,64}$/i.test(head)) { process.stderr.write(`gstack-ship-receipt result: --head must be a full hex commit id, got ${JSON.stringify(head.slice(0, 40))}\n`); return EXIT.usage; }
   const incomplete = (why: string) => {
     process.stderr.write(`gstack-ship-receipt result: ${why}\n`);
     process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'incomplete', run: '-', message: why }) + '\n' : 'GSTACK_RESULT: skill=ship status=incomplete run=-\n');
@@ -229,7 +230,8 @@ function cmdResult(rest: string[], json: boolean): number {
     if (!r.ok) return incomplete(`gh pr view failed: ${r.err.trim()}`);
     let pushed: unknown;
     try { const v = JSON.parse(r.out); body = v.body ?? ''; pushed = v.headRefOid; } catch { return incomplete('gh returned no JSON body'); }
-    if (typeof pushed === 'string' && /^[0-9a-f]{12,64}$/i.test(pushed) && !pushed.toLowerCase().startsWith(head.toLowerCase())) {
+    if (typeof pushed !== 'string' || !/^[0-9a-f]{12,64}$/i.test(pushed)) return incomplete(`gh pr view returned no headRefOid for PR #${pr}`);
+    if (!pushed.toLowerCase().startsWith(head.toLowerCase())) {
       return refused('QUEUE_RECEIPT_STALE', `HEAD ${head.slice(0, 12)} is not PR #${pr}'s pushed head ${pushed.slice(0, 12)}; push it, then rerun gstack-ship-receipt result`);
     }
     source = `PR #${pr}${repo ? ` (${repo})` : ''}`;

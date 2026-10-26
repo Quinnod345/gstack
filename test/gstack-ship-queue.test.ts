@@ -330,6 +330,11 @@ describe('ready', () => {
     const bare = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, bareMerge)], shim(bareMerge, shippedBody('1', pin)));
     expect(bare.status).toBe(EXIT.refused);
     expect(bare.err).toMatch(staleRe(bareMerge));
+    repo.git('commit', '-q', '--allow-empty', '-m', 'empty commit is not a stamp');
+    const emptyOnMerge = repo.git('rev-parse', 'HEAD');
+    const empty = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, emptyOnMerge)], shim(emptyOnMerge, shippedBody('1', pin)));
+    expect(empty.status).toBe(EXIT.refused);
+    expect(empty.err).toMatch(staleRe(emptyOnMerge));
     repo.git('reset', '-q', '--hard', pin);
     fs.appendFileSync(path.join(repo.work, 'pr-s.txt'), 'real change before the merge\n');
     repo.git('commit', '-qam', 'edit on the pin side');

@@ -82,7 +82,8 @@ function acceptedReceiptHeads(ctx: QueueContext, policy: LoadedPolicy, head: str
   const baseSha = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
   const onBase = (sha: string) => !!sha && git(root, ['merge-base', '--is-ancestor', sha, baseSha]).ok;
   const merge = git(root, ['rev-parse', '--verify', '--quiet', `${head}^1`]).out;
-  if (!merge || !stampOnly(merge, head)) return [head];
+  const stamp = merge && merge !== head ? treeReceipt(ctx, policy, merge, head) : null;
+  if (!stamp || 'message' in stamp || stamp.tree !== 'same-modulo-stamps' || stamp.files.length === 0) return [head];
   const parents = git(root, ['rev-list', '--parents', '-n', '1', merge]).out.split(' ').slice(1);
   if (parents.length !== 2) return [head];
   const pinSide = onBase(parents[0]!) ? parents[1]! : onBase(parents[1]!) ? parents[0]! : '';

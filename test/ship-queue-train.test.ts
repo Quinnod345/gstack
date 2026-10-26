@@ -12,6 +12,7 @@
  * prune, ready's screen choice, and the policy gate.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
@@ -215,6 +216,16 @@ describe('ready under a train policy: the screen choice', () => {
     const missing = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
     expect(missing.status).toBe(EXIT.refused);
     expect(missing.err).toMatch(/has no refs\/pull\/1\/merge.*\(QUEUE_SCREEN_STALE_REF\)/);
+    const tree = repo.git('rev-parse', `${moved}^{tree}`);
+    const main = repo.git('rev-parse', 'origin/main');
+    const badMerge = spawnSync('git', ['-C', repo.origin, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { input: `tree ${tree}\nparent ${main}\nparent ${moved}\nauthor A <a@example.com> 1700000000 +0000\ncommitter B 1700000000 +0000\n\nmerge without a committer email\n`, encoding: 'utf8' }).stdout.trim();
+    spawnSync('git', ['-C', repo.origin, 'update-ref', 'refs/pull/1/merge', badMerge]);
+    repo.git('config', 'fetch.fsckObjects', 'true');
+    const unfetchable = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
+    expect(unfetchable.status).toBe(EXIT.refused);
+    expect(unfetchable.err).toMatch(/could not fetch refs\/pull\/1\/merge from origin: .*\(QUEUE_SCREEN_STALE_REF\)/);
+    expect(line(unfetchable.out, 'NEXT:')).toBe('NEXT: check the remote, then gstack-ship-queue ready --pr 1 --screen');
+    repo.git('config', '--unset', 'fetch.fsckObjects');
     expect(dispatches(fx)).toEqual([]);
     expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
     repo.git('push', '-q', '-f', 'origin', `${mergeRefCommit(fx, moved)}:refs/pull/1/merge`);
@@ -247,6 +258,11 @@ describe('ready under a train policy: the screen choice', () => {
     expect(followed.status).toBe(EXIT.ok);
     expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 102 (same merge SHA, base and policy; no duplicate)');
     expect(dispatches(fx, 'evals.yml').length).toBe(3);
+    const liveBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([liveBuild.status, line(liveBuild.out, 'ORDER:'), line(liveBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });
+    const runningBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([runningBuild.status, line(runningBuild.out, 'ORDER:'), line(runningBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
   }, 120_000);
 });
 
