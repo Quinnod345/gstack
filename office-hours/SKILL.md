@@ -49,7 +49,7 @@ gbrain:
 
 ## Shared preamble (load first)
 
-This skill follows gstack shared preamble `3724f69a07a3` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/office-hours/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
+This skill follows gstack shared preamble `4e82fa4c839f` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/office-hours/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
 
 ## Preamble (run first)
 
@@ -93,7 +93,7 @@ Tell these apart:
    - If it was present and **errored** (not absent), retry the SAME call **once** — only if no answer could have surfaced (a missing-result error can arrive after the user saw the question; retrying would double-prompt, so if it may have reached them, treat it as pending and don't retry).
    - Then branch on `SESSION_KIND` (echoed by the preamble; empty/absent ⇒ `interactive`):
      - `spawned` → defer to the **Spawned session** block: auto-choose the recommended option. Never prose, never BLOCKED.
-     - `unattended` → auto-choose the recommended option; a consent, unrecommended question or approval gate becomes a pending gate item (Unattended session block).
+     - `unattended` → auto-choose the recommended option; a consent, destructive or irreversible option, unrecommended question or approval gate stays pending.
      - `headless` → `BLOCKED — AskUserQuestion unavailable`; stop and wait (no human can answer).
      - `interactive` → **prose fallback** (below).
 
