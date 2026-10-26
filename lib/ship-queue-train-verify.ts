@@ -17,7 +17,8 @@ import { randomBytes } from 'node:crypto';
 import { DISPATCH_INPUTS, awaitNonceRun, dispatchWorkflow, makeNonce } from '../scripts/eval-bg';
 import type { QueueContext } from './ship-queue';
 import { git } from './ship-queue-gate';
-import { checkRun, execFor, repoSlug } from './ship-queue-train-github';
+import { bindReceipt } from './ship-receipt';
+import { checkRun, execFor, prInfo, repoSlug } from './ship-queue-train-github';
 import { activeFreeze, attemptsOf, nowIso, persist, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
 import {
   effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
@@ -132,7 +133,11 @@ export async function verifyTrain(ctx: QueueContext, o: { pr: string; train: str
   const pinned = head === t.slots[i]!.head ? { same: true, detail: 'the pinned head' } : sameModuloStamps(env, t.slots[i]!.head, head);
   const stampOnly = pinned.same ? pinned : mergedIn(env, t, i, head, main);
   if (!stampOnly.same) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr} moved past its pinned head ${t.slots[i]!.head.slice(0, 12)} and is not T${after.index} modulo stamps (${head.slice(0, 12)}: ${stampOnly.detail}; against the pin it ${pinned.detail})`, main, lines);
-  return outOk([...lines, `main: ${main} = T${before.index} (${pre.detail})`, `head: ${head} (${stampOnly.detail})`,
+  const info = prInfo(ctx, o.pr);
+  if ('error' in info) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: info.error }, lines, `${Q} verify --pr ${o.pr} --train ${t.nonce}`, run);
+  const shipped = bindReceipt(info.body, o.pr, [t.slots[i]!.head, head]);
+  if (!shipped.ok) return outRefused({ code: shipped.code, message: shipped.message }, [...lines, shipped.line], `#${o.pr}'s lane runs /ship and READYs again; then ${Q} train build --prs <pins>`, run);
+  return outOk([...lines, `main: ${main} = T${before.index} (${pre.detail})`, `head: ${head} (${stampOnly.detail})`, `${shipped.line} (binds ${shipped.head === t.slots[i]!.head ? 'the pinned head' : 'the current head'})`,
     `VERIFY_TRAIN: #${o.pr} may merge as slot ${i + 1} of train ${t.nonce} (green run ${gate.run?.id ?? '-'}, ${env.train.full_gate_check} success)`, `MERGE_CONDITION: sha=${head}`],
   `merge #${o.pr} with expected head ${head.slice(0, 12)} (gstack-restamp stamps at merge), then ${Q} verify --pr ${o.pr} --train ${t.nonce}`, run);
 }

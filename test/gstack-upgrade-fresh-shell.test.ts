@@ -183,7 +183,7 @@ describe.skipIf(IS_WINDOWS)('C9: destructive upgrade/spec fences refuse bad path
   const UNUSABLE: Kind[] = ['unset', 'empty', 'nonexistent', 'unreadable'];
   const cases: Array<{ name: string; doc: 'upgrade' | 'spec'; marker: string; target: string; kinds?: Kind[]; others: (wd: ReturnType<typeof world>, h: HostRender) => Record<string, string> }> = [
     { name: 'ff-only upgrade', doc: 'upgrade', marker: 'bash bin/gstack-ff-update', target: 'INSTALL_DIR', others: () => ({}) },
-    { name: 'reset fallback', doc: 'upgrade', marker: 'git reset --hard origin/main', target: 'INSTALL_DIR', others: () => ({}) },
+    { name: 'reset fallback', doc: 'upgrade', marker: 'git reset --hard "${UPSTREAM_REF:?UPSTREAM_REF is not set: substitute the value Step 4 printed}"', target: 'INSTALL_DIR', others: () => ({}) },
     { name: 'vendored swap', doc: 'upgrade', marker: 'git clone --depth 1', target: 'INSTALL_DIR', others: () => ({}) },
     { name: 'local copy detection', doc: 'upgrade', marker: '_RESOLVED_PRIMARY=', target: 'INSTALL_DIR', kinds: UNUSABLE, others: () => ({}) },
     { name: 'team-mode removal', doc: 'upgrade', marker: 'git rm -r --cached', target: 'LOCAL_GSTACK', others: () => ({}) },

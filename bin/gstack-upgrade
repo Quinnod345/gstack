@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# gstack-upgrade — move this gstack checkout to the tip of its remote default
-# branch, unattended and fast-forward only. The deterministic twin of the
-# /gstack-upgrade skill's git fast path, for parent agents and fix lines.
+# gstack-upgrade — move this gstack checkout to the tip of its update channel
+# (the remote default branch, or refs/heads/stable, the weekly release, for a
+# team install: bin/gstack-update-channel.sh), unattended and fast-forward
+# only. The deterministic twin of the /gstack-upgrade skill's git fast path,
+# for parent agents and fix lines.
 #
 # Usage:
 #   gstack-upgrade --check   fetch (refs only) and print `gstack-upgrade: current <ver>`
@@ -76,7 +78,25 @@ BRANCH=$(git -C "$ROOT" symbolic-ref -q --short HEAD) \
 DEFAULT=$(_receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$|\1|p' | head -1)
 [ -n "$DEFAULT" ] || fetch_failed "git ls-remote origin HEAD failed"
 [ "$BRANCH" = "$DEFAULT" ] || refuse "on branch $BRANCH, not the remote default branch $DEFAULT (a pin)" "git -C $ROOT checkout $DEFAULT, then re-run"
-_receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" fetch --quiet origin "$DEFAULT" 2>/dev/null || fetch_failed "git fetch origin $DEFAULT failed"
+# Channel (bin/gstack-update-channel.sh, docs/releases.md): a team install
+# follows refs/heads/stable, the weekly release, which is always a commit on
+# the default branch's history, so the fast-forward rules below are unchanged.
+# Before the first release is cut origin has no stable, and main is followed.
+# shellcheck source=bin/gstack-update-channel.sh
+. "$ROOT/bin/gstack-update-channel.sh" 2>/dev/null || gstack_update_channel() { echo main; }
+CHANNEL=$(gstack_update_channel "$ROOT" 2>/dev/null) || CHANNEL=main
+FOLLOW=$DEFAULT
+if [ "$CHANNEL" = stable ]; then
+  if _receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" fetch --quiet origin stable 2>/dev/null; then
+    FOLLOW=stable
+    echo "gstack-upgrade: channel stable (the weekly release; gstack-config set update_channel main follows every merge)" >&2
+  elif _LSR=$(_receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" ls-remote origin refs/heads/stable 2>/dev/null) && [ -z "$_LSR" ]; then
+    echo "gstack-upgrade: channel stable has no release on origin yet; following $DEFAULT until the first weekly release is cut" >&2
+  else
+    fetch_failed "git fetch origin stable failed"
+  fi
+fi
+[ "$FOLLOW" = stable ] || _receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" bounded git -C "$ROOT" fetch --quiet origin "$DEFAULT" 2>/dev/null || fetch_failed "git fetch origin $DEFAULT failed"
 INCOMING=$(git -C "$ROOT" rev-parse FETCH_HEAD)
 REMOTE_VER=$(git -C "$ROOT" show FETCH_HEAD:VERSION 2>/dev/null | head -1)
 PENDING="$(git -C "$ROOT" rev-parse --absolute-git-dir)/gstack-upgrade.pending"
@@ -148,7 +168,23 @@ reinstall() { # FROM — run the install step; a pending marker survives a failu
   echo "gstack-upgrade: the checkout is at $(head -1 "$ROOT/VERSION") but its reinstall failed (exit $_rc); fix: re-run $ROOT/bin/gstack-upgrade (it completes the pending reinstall)" >&2
   exit 1
 }
-if [ "$INCOMING" = "$(git -C "$ROOT" rev-parse HEAD)" ] || git -C "$ROOT" merge-base --is-ancestor FETCH_HEAD HEAD 2>/dev/null; then
+# ver_le A B — version A is not higher than B (numeric, part by part). A
+# depth-1 clone cannot see that an older release is its ancestor; main stamps
+# a higher VERSION at every merge and stable is always a main commit, so a
+# release whose VERSION is not higher is at or behind this install.
+ver_le() {
+  _vl_i=1
+  while :; do
+    _vl_a=$(printf '%s' "$1" | cut -d. -f"$_vl_i"); _vl_b=$(printf '%s' "$2" | cut -d. -f"$_vl_i")
+    [ -z "$_vl_a" ] && [ -z "$_vl_b" ] && return 0
+    case "${_vl_a:-0}${_vl_b:-0}" in *[!0-9]*) return 1 ;; esac
+    [ "${_vl_a:-0}" -lt "${_vl_b:-0}" ] && return 0
+    [ "${_vl_a:-0}" -gt "${_vl_b:-0}" ] && return 1
+    _vl_i=$((_vl_i + 1))
+  done
+}
+if [ "$INCOMING" = "$(git -C "$ROOT" rev-parse HEAD)" ] || git -C "$ROOT" merge-base --is-ancestor FETCH_HEAD HEAD 2>/dev/null \
+  || { [ "$FOLLOW" = stable ] && ! git -C "$ROOT" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null && [ -n "$REMOTE_VER" ] && ver_le "$REMOTE_VER" "$INSTALLED"; }; then
   if [ -f "$PENDING" ]; then
     echo "gstack-upgrade: current $INSTALLED; reinstall pending from $(head -1 "$PENDING")"
     [ "$CHECK" -eq 1 ] && exit 1
@@ -166,9 +202,9 @@ fi
 DIRTY=$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null | cut -c4- | tr '\n' ' ' | sed 's/ $//')
 [ -z "$DIRTY" ] || refuse "tracked files changed: $DIRTY" "commit or move those changes (git -C $ROOT status --short), then re-run"
 if ! git -C "$ROOT" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
-  _receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" git -C "$ROOT" fetch --quiet --unshallow origin "$DEFAULT" 2>/dev/null || true
+  _receipted_git open gstack-upgrade "${HOST:-unknown}" gstack-self-update-pull "$R" git -C "$ROOT" fetch --quiet --unshallow origin "$FOLLOW" 2>/dev/null || true
   git -C "$ROOT" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null \
-    || refuse "diverged: $(git -C "$ROOT" rev-list --count FETCH_HEAD..HEAD 2>/dev/null || echo '?') local commits are not on origin/$DEFAULT" "git -C $ROOT log --oneline FETCH_HEAD..HEAD shows them; move them to another branch, then re-run"
+    || refuse "diverged: $(git -C "$ROOT" rev-list --count FETCH_HEAD..HEAD 2>/dev/null || echo '?') local commits are not on origin/$FOLLOW" "git -C $ROOT log --oneline FETCH_HEAD..HEAD shows them; move them to another branch, then re-run"
 fi
 # Workflow leases (bin/gstack-lease): sessions sharing this installation that
 # are alive and not this process's own chain. Moving the checkout under them

@@ -49,7 +49,7 @@ import { isProcessAlive } from './error-handling';
 import { allowedExtensionOrigin } from './extension-id';
 import { sanitizeBody, stripLoneSurrogates } from './sanitize';
 import { startSocksBridge, testUpstream, type BridgeHandle } from './socks-bridge';
-import { parseProxyConfig, toUpstreamConfig, ProxyConfigError, serverProxyEnv } from './proxy-config';
+import { parseProxyConfig, toUpstreamConfig, ProxyConfigError, serverProxyEnv, directProxyLogLine } from './proxy-config';
 import { writeReceipt } from '../../lib/egress-receipt';
 import { redactProxyUrl } from './proxy-redact';
 import { type XvfbHandle } from './xvfb';
@@ -1888,7 +1888,7 @@ export async function start() {
   // local 127.0.0.1 bridge to the authenticated upstream (Chromium can't do
   // SOCKS5 auth itself); HTTP/HTTPS or unauthenticated SOCKS5 pass through.
   let proxyBridge: BridgeHandle | null = null;
-  const { url: proxyUrl, source: proxySource, bypass: proxyBypass } = serverProxyEnv(process.env);
+  const { url: proxyUrl, source: proxySource, bypass: proxyBypass, direct: proxyDirect } = serverProxyEnv(process.env);
   if (proxyUrl) {
     let parsed;
     try {
@@ -1943,7 +1943,7 @@ export async function start() {
         proxyBridge.close().catch(() => { /* shutting down anyway */ });
       }
     });
-  }
+  } else console.log(directProxyLogLine(process.env));
 
   process.on('exit', () => { browserManager.closeOwnedDisplay(); });
 
@@ -2019,7 +2019,7 @@ export async function start() {
     // D2 daemon-mismatch detection: CLI computes the same hash from its
     // resolved flags and refuses if it differs from this stored value.
     ...(process.env.BROWSE_CONFIG_HASH ? { configHash: process.env.BROWSE_CONFIG_HASH } : {}),
-    ...(proxyUrl ? { proxy: redactProxyUrl(proxyUrl), proxySource, proxyBypass } : {}), // #915 refusal detail
+    ...(proxyUrl ? { proxy: redactProxyUrl(proxyUrl), proxySource, proxyBypass } : proxyDirect ? { proxyDirect } : {}), // #915/#3440 refusal detail
     // Xvfb child PID + start-time + display so disconnect (or a future
     // daemon launch on this state file) can validate-then-cleanup orphans
     // without clobbering a recycled PID.

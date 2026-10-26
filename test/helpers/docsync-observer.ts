@@ -422,7 +422,12 @@ function docsPrivateArtifact(file: string, fixture: ReturnType<typeof fixtureDoc
     path.basename(file) !== 'actor-state.json' && path.basename(actual) !== 'actor-state.json';
 }
 
-/** A candidate call at a wrong binary path that does not exist exited 127 before anything ran; it is ignored only when the same command at the declared path follows and runs. */
+/**
+ * A candidate call at a wrong binary path that does not exist exited 127 before anything ran; it is ignored only when
+ * the same command at the declared path runs: after the slip for snapshot and compare, whose recovery the lifecycle
+ * needs, and anywhere in the transcript for --help, which reads nothing the agent still has to recover (gate
+ * 40323989742: the parent read the usage at the declared path, mistyped the path on a second --help, then went on).
+ */
 function candidateNotFound(calls: SkillTestResult['toolCalls'], index: number, fixture: ReturnType<typeof fixtureDocs>, scripts: string[]): boolean {
   const command = String(calls[index].input?.command ?? '').trim();
   const binary = command.split(' ')[0]!;
@@ -436,7 +441,8 @@ function candidateNotFound(calls: SkillTestResult['toolCalls'], index: number, f
     if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
   }
   const retry = candidate + command.slice(binary.length);
-  return docsCommandAllowed(retry, fixture, scripts) && calls.slice(index + 1).some(call =>
+  const candidates = retry === `${candidate} --help` ? calls.filter((_, position) => position !== index) : calls.slice(index + 1);
+  return docsCommandAllowed(retry, fixture, scripts) && candidates.some(call =>
     call.tool === 'Bash' && String(call.input?.command ?? '').trim() === retry && !call.output.startsWith('Exit code'));
 }
 

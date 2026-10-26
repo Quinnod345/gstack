@@ -269,8 +269,8 @@ through the `bun` shim beside it.
 - `GSTACK_BUN_SHIM=0` at install time writes no shim.
 - Removing it: delete `~/.local/bin/bun` and `~/.local/bin/bunx`. gstack
   replaces only a missing file or a file carrying the marker; a foreign file
-  or a dangling link there is left untouched with a note, and the
-  `GSTACK_LAUNCH` prefix stays the way to reach the certified Bun.
+  or a dangling link there is left untouched with a note, and sourcing the
+  launch file (`. <GSTACK_LAUNCH_FILE>`) stays the way to reach the certified Bun.
 - The doctor's `runtime` row notes the shim; the resolver never treats a
   shim-marked file as a Bun candidate.
 
@@ -345,7 +345,36 @@ Every successful run, `--check` included, prints before the trailer:
 ```
 GSTACK_LAUNCH: PATH=<dir>:$PATH GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=<path> GSTACK_EPHEMERAL=1 GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=<file>
 GSTACK_LAUNCH_PATH: <dir>
+GSTACK_LAUNCH_FILE: <verdict file without .json>.env
 ```
+
+`GSTACK_LAUNCH_FILE` names the same assignments as a sourceable script (mode
+0600, beside the verdict under the state root; the PATH prepend is idempotent).
+The file is part of the ok verdict: a passing run that cannot write it exits 1
+with `gstack: fail launch-file — could not write the launch file <path>; fix:
+make <dir> writable, or set GSTACK_STATE_ROOT to a writable directory
+(LAUNCH_FILE_UNWRITABLE)`, and a failing run prints no `GSTACK_LAUNCH_FILE` line
+and removes the file an earlier passing run left beside the verdict it rewrites
+(a profile check that keeps a fuller ok verdict leaves that verdict's file).
+`. <that file>` at the start of a shell applies them without ever printing them,
+which is the only way to hand them to a child agent: pass the path, never the
+values. None of the assignments is a secret, but during GSTA-96's unattended
+/ship a docs-audit child re-typed them as `export $(...)`; the substitution came
+back empty, the bare `export` printed the whole environment, and three API key
+values landed in its tool output. Never `export $(...)`, `env`, `printenv`, a
+bare `set` or a bare `export` in a tool fence (`test/launch-env-echo-ratchet.test.ts`
+keeps them out of every skill fence and shell helper), and the redaction
+engine now refuses the VALUE of any `*_KEY`, `*_TOKEN`, `*_SECRET`,
+`*_PASSWORD`, `*_PASSWD`, `*_PASS`, `*_PAT`, `*_APIKEY` or `*_PWD` variable
+in the writer's environment (any case; names carrying a `PUBLIC` word are
+framework-public and exempt, gstack's own `GSTACK_BRAIN_LOCK_TOKEN` is not a
+secret) (`env.value`, HIGH), so a leaked value cannot reach a PR body, receipt,
+report or Drive file. There is no path exemption: a path-valued `SSL_KEY` that
+must appear in a text goes through `bin/gstack-redact --allowlist` or the
+pre-push hook's committed `.gstack-redact-allowlist`; the other writers
+(`gstack-post`, receipts, reports) take no allowlist, so for one of those
+commands set the variable empty for that command alone
+(`SSL_KEY= gstack-post …`): an empty value is below the length floor.
 
 `PATH=<dir>:$PATH` and `GSTACK_LAUNCH_PATH` appear only when the certified Bun,
 or the project's resolved Node, is not first on PATH (older Capy images ship
@@ -358,8 +387,8 @@ directory holding only `bun`, `bunx` and, when needed, `node`, `npm`, `npx` and
 never puts that directory's other tools (the image's node) in front of PATH.
 The pregate's lanes launch through the same directory. A child shell's `export` cannot
 configure the parent's later commands, so the parent supplies these
-assignments to every gstack command it launches (prefix the command, or
-export them once in the shell that runs it). A fresh shell without them keeps
+assignments to every gstack command it launches by sourcing the launch file
+(`. <GSTACK_LAUNCH_FILE>`) at the start of the shell that runs it. A fresh shell without them keeps
 reporting the Bun it would really run: `FAIL runtime — bun 1.3.14 at
 /usr/local/bin/bun ...; verified bun 1.4.2 found at ~/.bun/bin (not on PATH);
 fix: export PATH="$HOME/.bun/bin:$PATH" or prefix commands with the
@@ -434,6 +463,6 @@ Wrapper 2 only adds optional exports (the trailer's `latest:` note and the
 | Exit | Meaning |
 |-----:|---------|
 | 0 | `gstack: ok` — every required component passed |
-| 1 | `gstack: fail <ids>` — a required component failed; each row has a fix |
+| 1 | `gstack: fail <ids>` — a required component failed; each row has a fix. Also `gstack: fail launch-file …` when a passing run could not write its launch file ([LAUNCH_FILE_UNWRITABLE](troubleshooting.md#capy-install-launch-file-unwritable)) |
 | 2 | usage error |
 | 3 | preflight stopped before `./setup` (`INSTALL_PREFLIGHT_FAILED`, `RUNTIME_PIN_CONFLICT`); nothing was installed |

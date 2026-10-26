@@ -141,7 +141,11 @@ export function verdictProblem(skill: string, gstackRoot: string, env: Env, bunP
   const file = findInstallVerdict(src, project, env);
   const v = readInstallVerdict(file);
   const problem = (detail: string): VerdictProblem => ({ detail, code: 'INSTALL_UNVERIFIED' });
-  if (!v) return problem(`no install verdict at ${file} for ${src}`);
+  if (!v && fs.existsSync(file)) return problem(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
+  if (!v) {
+    return { ...problem(`no install verdict at ${file} for ${src}`),
+      fix: `run the Capy skill installer (scripts/install.sh --for ${skill}) from ${project ?? 'this directory'}: the verdict is keyed by the project directory the installer runs in, so a run from the skill's own folder does not cover ${project ?? 'it'}; then launch with the GSTACK_LAUNCH line it prints` };
+  }
   if (!v.ok) return problem(`the install verdict says: ${v.trailer}`);
   if (v.checkout !== src) return problem(`the install verdict is for checkout ${v.checkout}, not ${src}`);
   const head = spawnSync('git', ['-C', src, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).stdout?.trim() ?? '';
