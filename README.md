@@ -238,7 +238,7 @@ On Windows without Developer Mode (MSYS2 / Git Bash), `setup` falls back to file
 | [Install details](docs/install.md) | Setup timing, requirements in detail, team mode, the hooks setup registers |
 | [Other agents](docs/hosts.md) | OpenClaw and ClawHub, per-host notes, the Codex profile and model tiers, outside-review providers, the design binary's models |
 | [QA without a webpage](docs/qa-without-a-webpage.md) | `/qa` and `/qa-only` on CLIs, APIs, jobs, workers and webhooks |
-| [Standalone binaries](docs/standalone-binaries.md) | Every `gstack-*` CLI, and the CSO evaluation producer contract |
+| [Standalone binaries](docs/standalone-binaries.md) | The standalone `gstack-*` CLIs (egress auditor, context bill, model benchmark, the review and evidence ledgers, the iOS QA daemon), and the CSO evaluation producer contract |
 | [Privacy & Telemetry](docs/privacy.md) | What is sent, what never is, the update check, outside reviews, egress receipts |
 | [Uninstall](docs/uninstall.md) | The uninstall script and manual removal |
 | [Diagrams & Document Formats](docs/howto-diagrams-and-formats.md) | Mermaid/excalidraw fences in PDFs, image sizing and safety defaults, `--to html\|docx`, `/diagram` triplets |
