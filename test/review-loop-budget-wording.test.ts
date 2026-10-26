@@ -8,12 +8,16 @@
 import { describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { generateReviewArmy } from '../scripts/resolvers/review-army';
+import { HOST_PATHS } from '../scripts/resolvers/types';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\s+/g, ' ');
 
 describe('review-loop budget wording', () => {
   test('ship Step 9.4 budgets by blocker / should / nit and the repeat decisions carry the two stop rules', () => {
+    const authored = read('ship/sections/review-army.md.tmpl');
+    expect(authored).toContain('a **blocker** is the intended case gone wrong');
     const army = read('ship/sections/review-army.md');
     expect(army).toContain('a **blocker** is the intended case gone wrong');
     expect(army).toContain('a **should** is a real bug a caller will hit, in the intended case');
@@ -34,8 +38,9 @@ describe('review-loop budget wording', () => {
   });
 
   test('both review armies apply lead judgment before a merged finding counts, and every specialist prompt offers the cause anchor', () => {
-    for (const p of ['ship/sections/review-army.md', 'review/sections/review-army.md']) {
-      const text = read(p);
+    const rendered = (['ship', 'review'] as const).map(skillName =>
+      generateReviewArmy({ skillName, tmplPath: '', host: 'claude', paths: HOST_PATHS.claude }).replace(/\s+/g, ' '));
+    for (const text of [...rendered, read('ship/sections/review-army.md'), read('review/sections/review-army.md')]) {
       const judgment = text.slice(text.indexOf('#### 4. Lead judgment'), text.indexOf('#### 5. Apply specialist confidence gates'));
       expect(judgment.length).toBeGreaterThan(200);
       for (const filter of ['Nit gravity', 'Hypothetical, not actual', 'Structure for a case that does not exist', 'A different design is not a defect', 'Missing context']) expect(judgment).toContain(filter);

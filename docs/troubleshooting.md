@@ -4237,12 +4237,18 @@ output again.
 **Meaning.** `gstack-review-scope` (the finding scope of /ship's review loop,
 [ship-policy.md#review-scope](ship-policy.md#review-scope)) was given input it
 cannot classify: the findings were not a JSON array of objects, `--pass` or
-`--policy` was outside its values, or a pass 2+ call came without
-`--range-base`. Nothing was classified, deferred or summarized.
+`--policy` was outside its values, a pass 2+ call came without
+`--range-base`, `--range-base` was not a commit id (7 to 64 hex digits), or
+`summary --since` matched no review-log row of this branch written via /ship
+(so no `REVIEW_LOOP:` line could be derived, and the ship receipt's
+`--review-loop` input was not written). Nothing was classified, deferred or
+summarized.
 
 **Fix.** Pass the Step 9.3 findings as a JSON array (`--findings <file>` or
 stdin), `--pass <n>` from the invocation record, and from pass 2 on
-`--range-base <sha>`, the HEAD the previous pass saved when it started.
+`--range-base <sha>`, the HEAD the previous pass saved when it started, as a
+hex commit id. For `summary`, check `REVIEW_SINCE` against the invocation
+record's start time and that each pass was finished with `via:"ship"`.
 
 <a id="review-scope-range"></a>
 ### `REVIEW_SCOPE_RANGE`
@@ -4261,12 +4267,15 @@ rebased; /ship's own rule is to merge the base in, never rebase a reviewed head.
 
 **Meaning.** `gstack-ship-receipt carry` could not carry the PR's /ship receipt
 to HEAD: the PR body has no valid receipt, the receipt's head is not an ancestor
-of HEAD (a rebase or force-push dropped it), or git could not compare the two
-product diffs. The receipt in the body is unchanged and still names the old
-head, so `gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
+of HEAD (a rebase or force-push dropped it), the working tree has uncommitted
+or untracked changes (a carry certifies a commit, never a tree that differs from
+it), or git could not compare the two product diffs or read the working tree's
+status. The receipt in the body is unchanged and still names the old head, so
+`gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
 
 **Fix.** Keep the reviewed head in HEAD's history (merge the base in instead of
-rebasing), then rerun `gstack-ship-receipt carry --pr <n>`. When the history is
+rebasing), commit or stash every working-tree change, then rerun
+`gstack-ship-receipt carry --pr <n>` at the new head. When the history is
 already rewritten, run /ship on the new head.
 
 <a id="receipt-carry-product-changed"></a>

@@ -43,7 +43,8 @@ const HELP = `gstack-review-scope — finding scope for /ship's review loop (doc
   summary --since <iso> [--out <file>] the invocation's passes from this branch's review log: REVIEW_LOOP: passes=…
                                       blocking_found=… deferred=… noted=… (the ship receipt's --review-loop input)
 
-Defaults: --policy from .gstack/ship-policy.json review_scope (frozen); --findings - reads stdin; --branch the current branch.
+Defaults: --policy from the base branch's .gstack/ship-policy.json review_scope (frozen); an unresolvable base refuses
+  (POLICY_SOURCE_UNAVAILABLE) unless --policy is passed; --findings - reads stdin; --branch the current branch.
 ${exitTableHelp()}`;
 
 function flag(args: string[], name: string): string | undefined {
