@@ -2,6 +2,8 @@
 
 The short version of [USING_GBRAIN_WITH_GSTACK.md](../USING_GBRAIN_WITH_GSTACK.md), which has every scenario, flag, helper bin and troubleshooting step. This page is what the README used to say.
 
+```bash
+/setup-gbrain
 ```
 
 Four paths, pick one:
