@@ -1,6 +1,6 @@
 # Uninstall
 
-### Option 1: Run the uninstall script
+## Option 1: Run the uninstall script
 
 If gstack is installed on your machine:
 
@@ -10,7 +10,7 @@ If gstack is installed on your machine:
 
 This handles skills, symlinks, global state (`~/.gstack/`), project-local state, browse daemons, and temp files. Use `--keep-state` to preserve config and analytics. Use `--force` to skip confirmation.
 
-### Option 2: Manual removal (no local repo)
+## Option 2: Manual removal (no local repo)
 
 If you don't have the repo cloned (e.g. you installed via a Claude Code paste and later deleted the clone):
 
@@ -70,14 +70,14 @@ hook, the AskUserQuestion PreToolUse/PostToolUse hooks, and the Stop hooks
 (session timeline, plus verify-gate if you opted in). Left in place, they error
 on every matching event once the install directory is gone.
 
-### Clean up CLAUDE.md
+## Clean up CLAUDE.md
 
 The uninstall script does not edit CLAUDE.md. In each project where gstack was added, remove the `## gstack` and `## Skill routing` sections.
 
-### Playwright
+## Playwright
 
 `~/Library/Caches/ms-playwright/` (macOS) is left in place because other tools may share it. Remove it if nothing else needs it.
 
-### Aside
+## Aside
 
 gstack never installed Aside, so it never uninstalls it. Keep it or remove it like any other app.
