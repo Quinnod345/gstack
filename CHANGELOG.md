@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.256.0] - 2026-10-26
 
 **The /ship review loop converges, and a receipt survives a base merge.** Five Captains' /ship runs hit the review cap on the same PR shape: every pass re-reviewed the whole diff, reviewers answered an empty range with an invented advisory, and each advisory earned another full pass; four more re-ran /ship on product code they had not changed because a conflict-only main merge or a test fix moved the head the receipt named. The loop now fixes blocking findings in the diff on pass 1, reads only the range since the previous pass afterwards, caps at three passes, and counts `passes=<n> blocking_found=<k> deferred=<m>` in the ship receipt; the receipt carries to the new head when the product patch-id is unchanged. The blocking floor is the owner's call (Garry, 2026-10-26: "Ok set it at that"), and the policy lives in gstack rather than in any one team's rules (Garry, 2026-10-26: "Gstack should be the actual holder of how to do things not one off Capy files"): `docs/review-policy.md` is the canonical statement, the skills carry it as their written policy, and a crew rule can be one line pointing at it.
 
