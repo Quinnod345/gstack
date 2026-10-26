@@ -1707,46 +1707,6 @@ so there is nothing to import. Exit 3.
 **Fix.** Answer the gate (`gstack-autoplan answer ... --by human|agent:<id>`), then
 import again. Imports are idempotent, so a retry never records an answer twice.
 
-<a id="standing-approval-absent"></a>
-### `gstack-autoplan answer: ... (STANDING_APPROVAL_ABSENT)`
-
-**Meaning.** `answer --owner-standing rec` looked for a standing approval covering autoplan
-recommendations in this project's records (local and mirror, every branch) and found none that
-applies. The grammar fails closed: the newest standing row that mentions autoplan anywhere
-(ask, scope or words) decides, and it grants only when its scope is the canonical
-`autoplan gates: take the recommendations` and its words, the owner's own, name the
-recommendations without a negation. Any other newest row about autoplan is a refusal
-(`never take the recommendations`, `Permission ... is revoked`, `all reviews other than
-autoplan`, `No, ask me each time`): the line quotes it, and only a later grant supersedes it.
-Other causes: the run's plan is not inside a git repository (the project is the repository
-the plan's physical path was in at init, recorded as `project_root` and `project_slug`), or a
-restored run whose checkout is not on this machine recorded no slug. A row whose id or date is
-not the recorded shape is never cited. The gate stays pending; nothing was applied. Exit 3.
-
-**Fix.** Relay the gate to the owner (or Captain) and answer with their reply through
-`--reply` and `--owner-reply`. For the next gate, the Captain records the owner's standing
-words once: `gstack-approvals add --outcome standing --ask "autoplan gates" --words "<the
-owner's exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"`
-(that scope, exactly; a standing row recorded later about autoplan with any other scope
-revokes it); on Capy the row lands in the crew-readable mirror, so every lane's
-`--owner-standing rec` finds it.
-
-<a id="standing-approval-inapplicable"></a>
-### `gstack-autoplan answer: ... (STANDING_APPROVAL_INAPPLICABLE)`
-
-**Meaning.** The gate is outside what standing words that say "take the recommendations"
-cover: it carries an urgent or outside-plan finding (`findings.jsonl` rows with `urgent` or
-`outside_plan`), which is news beyond the plan; or `gstack-autoplan recommend` changed a
-recommendation (`rec_rev` > 0 or an item with `recommended_by`), so `rec` would take an
-option the relaying agent chose rather than the reviewers'; or `findings.jsonl` is missing or
-has an unreadable line, so the urgent check cannot run. The line says which. Nothing was
-applied. Exit 3.
-
-**Fix.** Relay the gate render (the `RELAY:` line) to the owner, including the
-`## URGENT, outside this plan` block, and answer with their reply through `--reply`,
-`--owner-reply` and, after a `recommend`, `--rec-hash` from the render they saw. The standing
-row still applies to later gates the reviewers alone recommended.
-
 <a id="captain-brief-incomplete"></a>
 ### `gstack-owner-brief render --captain: ... (CAPTAIN_BRIEF_INCOMPLETE)`
 

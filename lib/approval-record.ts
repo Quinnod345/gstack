@@ -64,7 +64,7 @@ function contained(root: string, file: string): boolean {
 }
 
 /** Where this branch's record lives, and its mirror. */
-export function locate(o: { cwd: string; env: Env; branch?: string; slug?: string }): StoreLocation | RecordError {
+export function locate(o: { cwd: string; env: Env; branch?: string }): StoreLocation | RecordError {
   let branch = o.branch?.trim();
   if (!branch) {
     const r = git(o.cwd, ['symbolic-ref', '--short', '-q', 'HEAD']);
@@ -72,8 +72,7 @@ export function locate(o: { cwd: string; env: Env; branch?: string; slug?: strin
   }
   if (!branch) return { code: 'APPROVAL_RECORD_NO_BRANCH', message: `no branch at ${o.cwd} (detached HEAD or not a git repository)` };
   const stateRoot = resolveStateRoot(o.env);
-  // `slug` is the project identity a run recorded at init (project_slug): a checkout that no longer exists on this machine still names its record.
-  const slug = o.slug || slugFromEnvironment(stateRoot, o.cwd) || 'unknown';
+  const slug = slugFromEnvironment(stateRoot, o.cwd) || 'unknown';
   const dir = path.join(stateRoot, 'projects', slug, 'approvals');
   const file = path.join(dir, `${branchKey(branch)}.jsonl`);
   if (!contained(stateRoot, file)) return { code: 'APPROVAL_RECORD_INVALID', message: `record path escapes the state root: ${file}` };
@@ -110,54 +109,6 @@ export function captainApprovalsDir(env: Env): string | undefined {
     found = fs.readdirSync(drive).filter(d => d.startsWith('captain-')).map(d => path.join(drive, d, 'approvals')).filter(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
   } catch { return undefined; }
   return found.length === 1 ? found[0] : undefined;
-}
-
-/**
- * A standing approval an agent may cite to answer an autoplan gate with `rec` (plan E21). The
- * grammar fails closed: a grant is a standing row whose scope is the canonical form the Captain
- * records (`autoplan gates: take the recommendations`, case and spacing aside) and whose words,
- * the owner's own, name the recommendations without a negation. Every other standing row that
- * mentions autoplan anywhere (ask, scope or words) is a refusal when it is the newest: `never take
- * the recommendations`, `all reviews other than autoplan`, `No, ask me each time`. Free text is
- * never parsed for permission; only the canonical scope grants.
- */
-export const CANONICAL_AUTOPLAN_SCOPE = 'autoplan gates: take the recommendations';
-const NEGATION_RE = /\b(never|not|no|don[’']?t|do not|without|except|excluding|unless|reject(?:ed|s)?|refuse[ds]?|decline[ds]?|stop|revoke[ds]?|withdraw[ns]?|withdrew|rescind(?:ed|s)?|cancel(?:led|ed|s)?|other than|ask me)\b/i;
-const canonicalScope = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/\s*:\s*/, ': ') === CANONICAL_AUTOPLAN_SCOPE;
-/** A standing row about autoplan at all: a grant or a refusal, so the newest one decides. */
-export const mentionsAutoplan = (r: ApprovalRow): boolean =>
-  r.outcome === 'standing' && /\bautoplan\b/i.test(`${r.ask} ${r.scope} ${r.words}`);
-export const coversAutoplanRec = (r: ApprovalRow): boolean =>
-  mentionsAutoplan(r) && canonicalScope(r.scope) && /\b(rec|recommendations?|recommended)\b/i.test(r.words) && !NEGATION_RE.test(r.words);
-
-/** A row an agent may cite: the generated id shape, a real calendar date and plain string fields, so no stored row can forge an output line or throw mid-answer. */
-const STANDING_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
-export const citableRow = (r: ApprovalRow): boolean =>
-  typeof r.id === 'string' && STANDING_ID_RE.test(r.id) && typeof r.date === 'string' && validDate(r.date)
-  && ['ask', 'words', 'by', 'scope', 'source', 'branch', 'recorded_at'].every(k => typeof r[k as keyof ApprovalRow] === 'string');
-
-export interface StandingLookup { grant?: ApprovalRow; refusal?: ApprovalRow }
-/**
- * The newest standing instruction about autoplan, from this branch's record and every other
- * branch's record of the same project (local, mirror and the other mirror roots): a Captain
- * records the owner's standing words once, on whatever branch it had checked out, and every lane
- * cites it. The newest citable row decides (date, then recorded_at; two copies of one id keep the
- * newest recorded): a grant only when `coversAutoplanRec`, otherwise a refusal that blocks every
- * older grant until a newer grant supersedes it.
- */
-export function standingRecApproval(loc: StoreLocation): StandingLookup {
-  const rows: ApprovalRow[] = [];
-  for (const dir of [loc.file, loc.mirror, ...(loc.read_also ?? [])].flatMap(f => f ? [path.dirname(f)] : [])) {
-    let names: string[] = [];
-    try { names = fs.readdirSync(dir).filter(n => n.endsWith('.jsonl')); } catch { continue; }
-    for (const n of names) rows.push(...readRows(path.join(dir, n)));
-  }
-  const seen = new Set<string>();
-  const newest = rows.filter(r => citableRow(r) && mentionsAutoplan(r))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.recorded_at.localeCompare(a.recorded_at))
-    .filter(r => !seen.has(r.id) && seen.add(r.id))[0];
-  if (!newest) return {};
-  return coversAutoplanRec(newest) ? { grant: newest } : { refusal: newest };
 }
 
 function readRows(file: string | undefined): ApprovalRow[] {
@@ -275,7 +226,7 @@ export function renderRecord(read: ReadResult, loc: StoreLocation, o: { heading?
   return [...head, ...lines, '', `Source: gstack-approvals record for ${cell(loc.branch)} (display only; not an approval citation).`, ''].join('\n');
 }
 
-interface DecisionLike { id?: string; title?: string; status?: string; chosen?: string | null; recommended?: string | null; gate_rev?: number; answered_at?: string; answered_by?: string; reply?: string; owner_reply?: string; standing?: string; carried_from?: string; label?: string; chosen_text?: string }
+interface DecisionLike { id?: string; title?: string; status?: string; chosen?: string | null; recommended?: string | null; gate_rev?: number; answered_at?: string; answered_by?: string; reply?: string; owner_reply?: string; carried_from?: string; label?: string; chosen_text?: string }
 
 const stripRef = (t: string) => t.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
 
@@ -314,7 +265,7 @@ export function importAutoplan(runDir: string, branch: string, by?: string): App
     const changed = items.filter(r => r.chosen && r.recommended && r.chosen !== r.recommended);
     const stillPending = rows.filter(r => r.gate_rev === rev && r.status === 'pending');
     const answerer = first.answered_by ?? 'unknown';
-    const who = answerer === 'human' ? (by ? `${by}, typed at the gate` : 'the owner, typed at the gate') : first.standing ? `${by ?? 'the owner'}, standing approval ${first.standing} cited by ${answerer}` : `${by ?? 'the owner'}, relayed by ${answerer}`;
+    const who = answerer === 'human' ? (by ? `${by}, typed at the gate` : 'the owner, typed at the gate') : `${by ?? 'the owner'}, relayed by ${answerer}`;
     const scope = `the reviewed plan (sha256 ${planSha}), ${changed.length ? `${changed.length} recommendation(s) changed: ${changed.map(r => stripRef(r.title ?? '')).join('; ')}` : 'every recommendation taken'}`;
     const built = buildRow({
       ask: `Approve the plan "${planTitle}" (autoplan run ${runId}, ${items.length + (p1 ? 1 : 0)} decisions)`.slice(0, CAPS.ask),
@@ -324,7 +275,7 @@ export function importAutoplan(runDir: string, branch: string, by?: string): App
       pending: (stillPending.length ? `${stillPending.length} decision(s) unanswered: ${stillPending.map(r => stripRef(r.title ?? '')).join('; ')}` : outcome === 'pending' ? 'the plan approval itself' : 'none').slice(0, CAPS.pending),
       outcome,
       date: first.answered_at!.slice(0, 10),
-      source: `autoplan:${runId}@gate_rev=${rev}${first.standing ? ` standing=${first.standing}` : ''}`,
+      source: `autoplan:${runId}@gate_rev=${rev}`,
     }, branch, new Date(first.answered_at!));
     if ('code' in built) return built;
     out.push(built);

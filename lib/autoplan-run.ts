@@ -21,7 +21,7 @@ import * as path from 'node:path';
 import { canonicalRows, parseReceipt, parseRecordFindings, parseReviewResult, type CanonicalFinding } from './autoplan-reconcile';
 import { amendmentSteps, applyGuidance, closeDeferred, closePhase, finishGate } from './autoplan-gate';
 import { GSTACK_VERSION } from './autoplan-migrate';
-import { driftLine, normalizeFindingFile, repoRoot, reviewHash, scaffold } from './autoplan-plan-text';
+import { driftLine, normalizeFindingFile, reviewHash, scaffold } from './autoplan-plan-text';
 import { PHASES, SNAPSHOT_TOOL, attemptFile, bindPromptResult, detectScope, driverFile, extractHeading, phaseOrder, reviewSkillFile, scopeLines, scopeSourceLabel, sectionLoadFor, snapshotTool, writePrompts, type Phase, type Scope, type ScopeFlags } from './autoplan-prompts';
 import { recoverRevise } from './autoplan-revise';
 import { FILES, RunError, journal, now, pendingAmendments, readDecisions, readJournal, readState, voiceTerminal, writeState, type AttemptState, type PhaseState, type RunState, type Voice, type VoiceState } from './autoplan-state';
@@ -33,8 +33,6 @@ import { familyConflict, modelFamily } from './outside-voice-runner';
 import { renderSpend, reserve, settle, summarize, readLedger } from './spend-ledger';
 import { DEFAULT_MAX_ROUNDS, attemptEstimate, overCap, resumeStop, roundCap, roundOf, roundsLine, stopForBudget, stopLines } from './autoplan-budget';
 import { annotateConfirm, confirmBlock } from './autoplan-confirm';
-import { slugFromEnvironment } from './bin-context';
-import { resolveStateRoot } from './state-root';
 
 /** An unreadable run.lock younger than this is a lock some other gstack is still writing, never a stale one. */
 const LOCK_WRITE_GRACE_MS = 30_000;
@@ -81,8 +79,6 @@ export function initRun(o: InitOptions, lines: string[] = []): RunState {
   const input = path.resolve(o.plan);
   let source = input;
   if (!fs.existsSync(source)) throw new Error(`plan not found: ${source}`);
-  // The plan's physical directory names the project: a symlinked plans/ folder must not borrow the link's repository.
-  const projectRoot = repoRoot(path.dirname(fs.realpathSync(input)));
   let scaffolded = false;
   if (o.planHeading) {
     const section = extractHeading(fs.readFileSync(source, 'utf8'), o.planHeading);
@@ -123,7 +119,7 @@ export function initRun(o: InitOptions, lines: string[] = []): RunState {
     deviations: ['autoplan guard: not enforced by this host; publication order is unverified (GUARD_NOT_INSTALLED)'],
     ...(o.deadlineMin ? { deadline_at: new Date(Date.now() + o.deadlineMin * 60_000).toISOString() } : {}),
     ...(o.light ? { light: true } : {}),
-    gstack_version: GSTACK_VERSION, plan_input: input, scope_flags: { ...(o.scope ?? {}) }, ...(projectRoot ? { project_root: projectRoot, project_slug: slugFromEnvironment(resolveStateRoot(process.env), projectRoot) } : {}),
+    gstack_version: GSTACK_VERSION, plan_input: input, scope_flags: { ...(o.scope ?? {}) },
     ...(o.planHeading ? { plan_heading: o.planHeading } : {}), ...(scaffolded ? { scaffolded: true } : {}),
   };
   fs.writeFileSync(path.join(out, 'timing.json'), JSON.stringify({ schema_version: 1, run, phases: [], started_at: now(), session_kind: state.session_kind }, null, 2) + '\n');

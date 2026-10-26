@@ -29,9 +29,8 @@ line yourself; gstack never writes the plan.
 2. Submit each voice exactly once (`BOUND:`). Both voices in closes the phase (`PHASE_CLOSED:`).
 3. Repeat `next` until `status=gate_pending` (`GATE: gate_rev=<n>`); render it with `gstack-gate render <dir>/gate.json --all` and relay every page with the two cost lines printed under `GATE:`: `GATE_SPEND:` (spent, worst case, cap, headroom, attempts; host-subagent attempts are priced unknown and counted at their reservation, so quote their real figure from the host's cost view) and `GATE_REC_COST:` (the phases `rec` can reopen and the estimate for them, an upper bound; `gate_cost` in `--json`).
    You never approve the gate for the owner. Offer `rec` (every recommendation, plan changes included) as the default.
-4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an unattended run refuses (`ANSWER_BY_REQUIRED`).
-   When the owner's standing words for autoplan gates are on record (a `gstack-approvals` row with `--outcome standing` whose scope names autoplan and whose words name the recommendations, recorded once by the Captain on any branch of the project), `answer --gate-rev <n> --owner-standing rec --by agent:<id>` takes every recommendation citing that row (`STANDING:` line, `standing=<id>` on every decision row) with no round trip; still relay the render as information.
-   It refuses with `STANDING_APPROVAL_ABSENT` when no such row exists and with `STANDING_APPROVAL_INAPPLICABLE` when the gate carries an urgent or outside-plan finding or a `recommend` changed it, which standing words do not cover. `APPLY: <id> <title> -> <change>` lines are
+4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an
+   unattended run refuses (`ANSWER_BY_REQUIRED`). `APPLY: <id> <title> -> <change>` lines are
    accepted plan changes (status `amend_pending`): edit the plan, then `revise` (the printed
    `NEXT:` names it), or `revise --settle <id>` when the line says no plan edit is needed. Until
    then `next` refuses with `PLAN_AMEND_PENDING` and `export` will not mark the run complete.

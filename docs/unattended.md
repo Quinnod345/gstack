@@ -293,7 +293,9 @@ the plan.
    so a gate an agent closed is distinguishable from one the owner closed.
    `gstack-autoplan recommend` changes one recommendation before relay; it
    bumps the gate's `rec_rev`, and a later `rec` needs the `--rec-hash` from
-   the render the owner saw (`GATE_REC_STALE`).
+   the render the owner saw (`GATE_REC_STALE`). Every `GATE:` line is followed
+   by `GATE_SPEND:` and `GATE_REC_COST:` (also `gate_cost` in `--json`; see
+   `autoplan/DRIVER.md`).
    A user challenge both voices raised on a confirmed finding (a title match,
    not file:line proximity alone, which is `unverified`) with the same
    `changes` value is recommended as `b` only with one shared proposal: a
@@ -425,7 +427,9 @@ replaces the generated sentence with the run's own), then the numbered
 decisions through the gate list: seven per page (`--page N`), stable ids,
 each `auto` item annotated with the default taken if unanswered, each
 `approval` item `pending until you answer` or `decided <id><letter> on <date>`.
-The last line names `review-record.md`, where the full review lives, and the
+It carries a `Cost so far:` sentence (spent, worst case, cap, and the estimate for
+the phases `rec` can reopen); `render --captain` puts it in a `### Cost` section above
+the relaying-agent trailer. The last line names `review-record.md`, where the full review lives, and the
 `gstack-autoplan answer` call that answers the page. `--write` also saves
 `brief.md` in the run directory. `/autoplan` Phase 4 presents this output
 verbatim and writes the former long report to `review-record.md`.

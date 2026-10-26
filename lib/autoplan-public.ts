@@ -31,7 +31,7 @@ export interface RecordedRoot { label: string; root: string }
 interface Provenance { private_run: string; private_manifest_sha256: string; exported_at: string; roots: string[]; files: Record<string, { private_sha256: string; public_sha256: string }> }
 
 /** The machine roots a run recorded on this machine, longest first; the worktree root is labelled for the repo-relative rewrite. */
-export function recordedRoots(state: Pick<RunState, 'out' | 'plan_input' | 'plan_source' | 'project_root'>, env: NodeJS.ProcessEnv = process.env): RecordedRoot[] {
+export function recordedRoots(state: Pick<RunState, 'out' | 'plan_input' | 'plan_source'>, env: NodeJS.ProcessEnv = process.env): RecordedRoot[] {
   const input = state.plan_input ?? state.plan_source;
   const worktree = input ? repoRoot(path.dirname(input)) : undefined;
   const candidates: RecordedRoot[] = [
@@ -39,7 +39,6 @@ export function recordedRoots(state: Pick<RunState, 'out' | 'plan_input' | 'plan
     ...(input ? [{ label: 'plan_input', root: path.dirname(input) }] : []),
     ...(checkpointRoot(env) ? [{ label: 'checkpoint', root: checkpointRoot(env)! }] : []),
     ...(worktree ? [{ label: 'worktree', root: worktree }] : []),
-    ...(state.project_root ? [{ label: 'project_root', root: state.project_root }] : []),
   ];
   const seen = new Set<string>();
   return candidates.map(c => ({ ...c, root: path.resolve(c.root) })).filter(c => c.root !== path.parse(c.root).root && !seen.has(c.root) && seen.add(c.root))

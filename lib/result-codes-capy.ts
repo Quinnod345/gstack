@@ -39,16 +39,6 @@ export const CAPY_RESULT_CODES = {
     summary: 'the autoplan run has no answered gate to import',
     fix: 'answer the gate first (gstack-autoplan answer ... --by human|agent:<id>), then rerun the import; it is idempotent, so a retry imports nothing twice',
   },
-  STANDING_APPROVAL_ABSENT: {
-    anchor: 'standing-approval-absent',
-    summary: 'gstack-autoplan answer --owner-standing rec found no standing approval covering autoplan recommendations for this project, so the gate stays pending',
-    fix: 'relay the gate to the owner (or Captain) as usual, or have the Captain record the owner\'s standing words once with gstack-approvals add --outcome standing --ask "autoplan gates" --words "<the owner\'s exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"',
-  },
-  STANDING_APPROVAL_INAPPLICABLE: {
-    anchor: 'standing-approval-inapplicable',
-    summary: 'the gate is outside what a standing "take the recommendations" approval covers (an urgent or outside-plan finding, a recommendation set by `recommend`, or an unreadable findings.jsonl), so nothing was applied',
-    fix: 'relay the gate render (the RELAY line) to the owner and answer with their reply through --reply, --owner-reply and --rec-hash; the standing row still applies to later gates the reviewers alone recommended',
-  },
   CAPTAIN_BRIEF_INCOMPLETE: {
     anchor: 'captain-brief-incomplete',
     summary: 'the plan lacks one or more of the sections the Captain brief needs (Before → after, Why it matters, What caused this work, Big decisions), so the brief is not ready for approval',

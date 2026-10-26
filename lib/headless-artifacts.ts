@@ -41,8 +41,6 @@ export interface DecisionRow {
   recommended_basis?: string; changes?: string; origin?: string; carried_from?: string; chosen_text?: string;
   /** An agent-relayed answer: the owner's verbatim words, and whether they parsed under the gate grammar. */
   owner_reply?: string; owner_reply_parsed?: boolean; recommended_by?: string;
-  /** The standing approval row (`gstack-approvals`, outcome standing) an agent cited to answer `rec` without a round trip. */
-  standing?: string;
 }
 export interface TaskRow {
   schema_version: 2; run: string; id: string; title: string; status: TaskStatus; depends_on: string[];
