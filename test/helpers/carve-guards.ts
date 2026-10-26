@@ -191,7 +191,7 @@ export const CARVE_GUARDS: Record<string, CarveGuard> = {
     mustContain: ['SCOPE EXPANSION', 'SELECTIVE EXPANSION', 'HOLD SCOPE', 'SCOPE REDUCTION'],
     // Default-on Codex outside-voice (codexPreflight block + CODEX_MODE branch
     // prose replacing the smaller opt-in question) lands this ~5.2% over baseline.
-    maxSizeRatio: 1.0999, // + the Aside probe's failure reason; measured 1.0803 + Oct 10 multi-agent wave PR D1 (reality rows): 0A/0B block in the skeleton, the Reality rows required output, the Completion Summary row and the checklist row; measured 165,042 / 151,747 = 1.0876 (2026-10-10). + GSTA-96 shared-preamble hoist (owner-approved raise, Garry 2026-10-25: "do it"): the union now holds sections/preamble.md, so a fresh invocation reads the pointer plus the shared file; measured 166,899 / 151,747 = 1.0999 (2026-10-25). Before: 1.088.
+    maxSizeRatio: 1.1006, // + the Aside probe's failure reason; measured 1.0803 + Oct 10 multi-agent wave PR D1 (reality rows): 0A/0B block in the skeleton, the Reality rows required output, the Completion Summary row and the checklist row; measured 165,042 / 151,747 = 1.0876 (2026-10-10). + GSTA-96 shared-preamble hoist (owner-approved raise, Garry 2026-10-25: "do it"): the union now holds sections/preamble.md, so a fresh invocation reads the pointer plus the shared file; measured 166,899 / 151,747 = 1.0999 (2026-10-25). + GSTA-96 completeness rewording (#3425, Garry 2026-10-25: "1/ yes fix this") merged into the hoist (#3434): the COMPLETENESS IS COVERAGE bullet replaces COMPLETENESS IS CHEAP, +106 bytes under the same "do it" (parity caps to measured size); measured 167,012 / 151,747 = 1.1006 (2026-10-26). Before: 1.088.
   },
   'plan-eng-review': {
     skill: 'plan-eng-review',

@@ -37,8 +37,8 @@ The last 10% of completeness that teams used to skip? It costs seconds now.
 "Don't boil the ocean" was the right advice when engineering time was the
 bottleneck. That era is over. AI-assisted coding makes the marginal cost of
 completeness near-zero, so the old caution has quietly turned into an excuse.
-When the complete implementation costs minutes more than the shortcut — do the
-complete thing. Every time.
+When covering the whole requirement costs minutes more than the shortcut, cover
+it. Every time. Complete means complete coverage, not more code.
 
 **Ocean, lakes first:** The ocean is the destination — 100% test coverage for a
 module, full feature implementation, all edge cases, complete error paths. You
@@ -179,7 +179,7 @@ against, and gstack's countermeasure for each, lives in
 
 ## How They Work Together
 
-Boil the Ocean says: **do the complete thing.**
+Boil the Ocean says: **cover the whole requirement with the least code.**
 Search Before Building says: **know what exists before you decide what to build.**
 Honest Work says: **the proof is the work, and a report is a claim until re-executed.**
 
