@@ -984,12 +984,14 @@ connection could still route through a proxy. Chromium on macOS and Windows
 never reads those variables; it follows the system proxy settings (PAC and
 WPAD included), and step 6 leaves it to them, so GStack Browser.app behind a
 corporate proxy keeps working. `BROWSE_PROXY_URL=direct` bypasses the system
-settings too, on every platform. The daemon log (`browse-daemon.log` next
-to the state file) records the effective mode on every launch, as `[proxy]
-using <url> from <source>`, `[proxy] none: direct connection
-(--proxy-server=direct://; ignoring HTTPS_PROXY)` (on macOS and Windows,
-`ignoring the system proxy settings`), or `[proxy] none: system proxy
-settings`.
+settings too, on every platform; on macOS and Windows it is part of the
+daemon's settings, so a running daemon started without it is not reused (the
+refusal below names `BROWSE_PROXY_URL`) and a crash restart keeps it. The
+daemon log (`browse-daemon.log` next to the state file) records the
+effective mode each time the daemon starts, as `[proxy] using <url> from
+<source>`, `[proxy] none: direct connection (--proxy-server=direct://;
+ignoring HTTPS_PROXY)` (on macOS and Windows, `ignoring the system proxy
+settings`), or `[proxy] none: system proxy settings`.
 
 Values from the environment follow the same credential policy as `--proxy`.
 `socks5h://` is treated as `socks5://`, because Chromium's SOCKS5 already

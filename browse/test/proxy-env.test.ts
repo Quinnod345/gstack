@@ -114,6 +114,21 @@ describe('config hash', () => {
     expect(extractGlobalFlags(['text'], { NO_PROXY: 'corp.internal' }).configHash).toBe(computeConfigHash({ proxyUrl: null, headed: false }));
   });
 
+  test('BROWSE_PROXY_URL=direct is part of the hash only where it bypasses the system proxy settings (#3440)', () => {
+    for (const platform of ['darwin', 'win32'] as const) {
+      const plain = extractGlobalFlags(['text'], {}, platform);
+      const direct = extractGlobalFlags(['text'], { BROWSE_PROXY_URL: 'direct' }, platform);
+      expect(plain.explicitDirect).toBe(false);
+      expect(direct.explicitDirect).toBe(true);
+      expect(direct.configHash).not.toBe(plain.configHash);
+      expect(plain.configHash).toBe(computeConfigHash({ proxyUrl: null, headed: false }));
+    }
+    const linux = extractGlobalFlags(['text'], { BROWSE_PROXY_URL: 'direct' }, 'linux');
+    expect(linux.explicitDirect).toBe(false);
+    expect(linux.configHash).toBe(computeConfigHash({ proxyUrl: null, headed: false }));
+    expect(extractGlobalFlags(['--proxy', 'http://p:1', 'text'], { BROWSE_PROXY_URL: 'direct' }, 'darwin').explicitDirect).toBe(false);
+  });
+
   test('the env-resolved proxy is part of the hash', () => {
     expect(extractGlobalFlags(['text'], base).configHash).not.toBe(extractGlobalFlags(['text'], {}).configHash);
     expect(extractGlobalFlags(['text'], base).configHash).toBe(extractGlobalFlags(['--proxy', 'http://proxy.example:3128', 'text'], {}).configHash);
@@ -139,7 +154,7 @@ describe('serverProxyEnv (the daemon side)', () => {
   test('direct means no proxy, and a launch without the CLI still keeps loopback and NO_PROXY', () => {
     expect(serverProxyEnv({ BROWSE_PROXY_URL: 'direct' }).url).toBeUndefined();
     expect(serverProxyEnv({ BROWSE_PROXY_URL: 'http://p:1', NO_PROXY: 'corp.internal' })).toEqual({
-      url: 'http://p:1', source: 'BROWSE_PROXY_URL', bypass: '*.corp.internal,corp.internal,localhost,127.0.0.1,[::1]',
+      url: 'http://p:1', source: 'BROWSE_PROXY_URL', bypass: '*.corp.internal,corp.internal,localhost,127.0.0.1,[::1]', direct: false,
     });
     expect(serverProxyEnv({ BROWSE_PROXY_URL: 'http://p:1', BROWSE_PROXY_SOURCE: 'ALL_PROXY', BROWSE_PROXY_BYPASS: 'x,localhost' })).toMatchObject({ source: 'ALL_PROXY', bypass: 'x,localhost' });
   });
@@ -163,6 +178,23 @@ describe('proxyMismatchLines', () => {
     expect(lines[0]).toContain('(HTTPS_PROXY differs)');
     expect(lines[2]).toBe('  session: no proxy');
     expect(lines[3]).toContain("or run this session with the daemon's HTTPS_PROXY");
+  });
+
+  test('an explicit direct session meeting a system-proxy daemon (macOS/Windows) names BROWSE_PROXY_URL and offers stop or unset (#3440)', () => {
+    const env = { BROWSE_PROXY_URL: 'direct' };
+    const lines = proxyMismatchLines(extractGlobalFlags(['text'], env, 'darwin'), state(), env)!;
+    expect(lines[0]).toContain('(BROWSE_PROXY_URL differs)');
+    expect(lines[1]).toBe('  daemon:  no proxy');
+    expect(lines[2]).toBe('  session: no proxy (BROWSE_PROXY_URL=direct)');
+    expect(lines[3]).toBe("fix: run 'browse stop' to restart the daemon with this session's proxy settings, or unset BROWSE_PROXY_URL to use the running daemon with the system proxy settings.");
+  });
+
+  test('a default session meeting an explicit-direct daemon (macOS/Windows) shows the daemon opt-out and offers stop or direct (#3440)', () => {
+    const lines = proxyMismatchLines(extractGlobalFlags(['text'], {}, 'darwin'), state({ proxyDirect: true }), {})!;
+    expect(lines[0]).toContain('(BROWSE_PROXY_URL differs)');
+    expect(lines[1]).toBe('  daemon:  no proxy (BROWSE_PROXY_URL=direct)');
+    expect(lines[2]).toBe('  session: no proxy');
+    expect(lines[3]).toContain('or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy');
   });
 
   test('a credentialed proxy is redacted on both sides', () => {

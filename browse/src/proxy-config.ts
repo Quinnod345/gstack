@@ -145,12 +145,15 @@ export function computeConfigHash(opts: {
   headed: boolean;
   /** Bypass rules derived from NO_PROXY (resolveProxy's noProxyRules). */
   noProxyRules?: string | null;
+  /** explicitDirect(): BROWSE_PROXY_URL=direct where it bypasses the system proxy settings. */
+  explicitDirect?: boolean;
 }): string {
   const proxyKey = canonicalizeProxyUrl(opts.proxyUrl);
   const input = JSON.stringify({
     proxy: proxyKey,
     headed: opts.headed,
     ...(proxyKey && opts.noProxyRules ? { noProxy: opts.noProxyRules } : {}),
+    ...(!proxyKey && opts.explicitDirect ? { direct: true } : {}),
   });
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
@@ -228,14 +231,16 @@ export function withLoopbackBypass(rules: string[]): string {
 
 /**
  * The daemon's view of the proxy the CLI resolved: BROWSE_PROXY_URL ('direct'
- * means none), its source, and the bypass rules (computed from NO_PROXY when
- * a caller other than the CLI set only BROWSE_PROXY_URL).
+ * means none), its source, the bypass rules (computed from NO_PROXY when a
+ * caller other than the CLI set only BROWSE_PROXY_URL), and whether an
+ * explicit direct bypasses the system proxy settings here (explicitDirect).
  */
-export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefined; source: string; bypass: string } {
+export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefined; source: string; bypass: string; direct: boolean } {
   return {
     url: env.BROWSE_PROXY_URL === 'direct' ? undefined : env.BROWSE_PROXY_URL || undefined,
     source: env.BROWSE_PROXY_SOURCE || 'BROWSE_PROXY_URL',
     bypass: env.BROWSE_PROXY_BYPASS || withLoopbackBypass(noProxyToChromiumRules(env.NO_PROXY || env.no_proxy)),
+    direct: explicitDirect(env),
   };
 }
 
@@ -259,7 +264,20 @@ export const DIRECT_PROXY_ARG = '--proxy-server=direct://';
  * asked for a direct connection with BROWSE_PROXY_URL=direct.
  */
 export function forcesDirect(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
-  return platform === 'linux' || env.BROWSE_PROXY_URL === 'direct';
+  return platform === 'linux' || explicitDirect(env, platform);
+}
+
+/**
+ * Whether BROWSE_PROXY_URL=direct changes what Chromium does on this
+ * platform. On macOS and Windows it is the only thing that makes the daemon
+ * bypass the system proxy settings, so it is part of the daemon's config hash
+ * (a reused daemon started without it would keep the system proxy while the
+ * CLI reports direct), is recorded in the daemon state and is re-emitted on an
+ * auto-restart. On Linux every direct connection already carries
+ * DIRECT_PROXY_ARG, so the opt-out changes nothing and hashes like no proxy.
+ */
+export function explicitDirect(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
+  return platform !== 'linux' && env.BROWSE_PROXY_URL === 'direct';
 }
 
 /**
