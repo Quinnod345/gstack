@@ -4,13 +4,17 @@
 # freshness test is test/doctor-components.test.ts. Sourced by
 # bin/gstack-doctor-check.sh; Bash 3.2 builtins only.
 
-GSTACK_DOCTOR_COMPONENTS="claude codex patch codex-cli browse-bundle browser cso helpers runtime pins state-root privacy cores revision wrapper"
-GSTACK_DOCTOR_CORE="runtime pins state-root privacy cores revision wrapper"
+GSTACK_DOCTOR_COMPONENTS="claude codex patch codex-cli browse-bundle browser cso helpers runtime pins state-root privacy cores revision floor wrapper"
+GSTACK_DOCTOR_CORE="runtime pins state-root privacy cores revision floor wrapper"
 GSTACK_DOCTOR_HOSTS="claude codex"
 GSTACK_DOCTOR_OPTIONAL="codex-cli cso"
 GSTACK_DOCTOR_SKILLS="autoplan plan-ceo-review plan-eng-review plan-design-review plan-devex-review plan-tune office-hours spec review ship investigate codex cso browse qa qa-only design-review design-consultation design-html devex-review scrape skillify canary benchmark make-pdf diagram pair-agent open-gstack-browser setup-browser-cookies connect-chrome land-and-deploy benchmark-models careful claude-code context-restore context-save design-shotgun deslop-shared-libs document-generate document-release eval-plan freeze gstack-upgrade guard health ios-clean ios-design-review ios-fix ios-qa ios-sync landing-report learn retro setup-deploy setup-gbrain sync-gbrain test-audit unfreeze review-voice"
 GSTACK_BROWSER_LAZY_REASON="lazy; gstack-browser-ensure installs on first use"
 GSTACK_DOCTOR_HELPERS="gstack-pregate gstack-plan-reality gstack-artifact gstack-autoplan"
+GSTACK_DOCTOR_NOT_NEEDED="none"
+GSTACK_DOCTOR_NOT_NEEDED_REVISION="not-needed"
+GSTACK_PROJECT_FLOOR_FILE=".gstack/ship-policy.json"
+GSTACK_PROJECT_FLOOR_KEY="min_gstack_version"
 
 # gstack_doctor_component_title ID — the human title; returns 1 for an unknown id.
 gstack_doctor_component_title() {
@@ -29,6 +33,7 @@ gstack_doctor_component_title() {
     privacy) printf '%s' 'privacy' ;;
     cores) printf '%s' 'cores' ;;
     revision) printf '%s' 'revision' ;;
+    floor) printf '%s' 'the project'\''s gstack floor (min_gstack_version in .gstack/ship-policy.json)' ;;
     wrapper) printf '%s' 'Capy skill copy (bootstrapper revision)' ;;
     *) return 1 ;;
   esac
@@ -51,6 +56,7 @@ gstack_doctor_component_kind() {
     privacy) printf '%s' 'core' ;;
     cores) printf '%s' 'core' ;;
     revision) printf '%s' 'core' ;;
+    floor) printf '%s' 'core' ;;
     wrapper) printf '%s' 'core' ;;
     *) return 1 ;;
   esac
@@ -301,6 +307,9 @@ gstack_result_anchor() {
     PR_SHOTS_IDENTICAL) printf '%s' 'pr-shots-identical' ;;
     PR_SHOTS_RENDER_FAILED) printf '%s' 'pr-shots-render-failed' ;;
     LAUNCH_FILE_UNWRITABLE) printf '%s' 'capy-install-launch-file-unwritable' ;;
+    PROJECT_FLOOR_UNMET) printf '%s' 'project-floor-unmet' ;;
+    PROJECT_NODE_PIN_UNMET) printf '%s' 'project-node-pin-unmet' ;;
+    UPGRADE_SKIPPED) printf '%s' 'upgrade-skipped' ;;
     *) return 1 ;;
   esac
 }

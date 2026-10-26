@@ -69,4 +69,19 @@ export const CAPY_RESULT_CODES = {
     summary: 'the install passed but its launch file (the sourceable GSTACK_LAUNCH_FILE beside the verdict) could not be written, so the run is a fail: no caller is handed only the launch line to re-type',
     fix: 'make the verdict directory under the state root writable, or set GSTACK_STATE_ROOT to a writable directory, then re-run bin/gstack-capy-install',
   },
+  PROJECT_FLOOR_UNMET: {
+    anchor: 'project-floor-unmet',
+    summary: 'the installed gstack is below the floor the project declares (min_gstack_version in its .gstack/ship-policy.json); the row is a WARN and the trailer stays ok, because a floor is a project rule, not a security minimum',
+    fix: 'run the install command the row names (the Capy skill installer fast-forwards a clean checkout to origin in one step; gstack-upgrade elsewhere) before the first workflow, or lower the floor in the project',
+  },
+  PROJECT_NODE_PIN_UNMET: {
+    anchor: 'project-node-pin-unmet',
+    summary: "the Node on PATH does not satisfy the project's Node pin while every Bun pin is met; the pins row is a WARN and the trailer stays ok, because gstack runs on Bun and the project's own tests may select their Node (nvm, CI)",
+    fix: "put a Node that satisfies the pin first on PATH (the Capy skill installer installs an exact pin into gstack's runtime store and launches it through the GSTACK_LAUNCH PATH), or change the pin in the project",
+  },
+  UPGRADE_SKIPPED: {
+    anchor: 'upgrade-skipped',
+    summary: 'the install-mode session was behind origin and its session-start fast-forward was skipped (dirty, diverged or pinned checkout, a live lease, or gstack-upgrade missing); the row is a WARN with the reason and the trailer stays ok with a behind= note, because a gap above the supported minimum is never a hard fail',
+    fix: 'run the fix the row names (bin/gstack-upgrade after clearing its refusal, or the Capy skill installer) when the lane needs the newer gstack; below the supported minimum the bootstrapper fails revision instead',
+  },
 } satisfies Record<string, ResultCode>;
