@@ -1,9 +1,9 @@
 # Third-Party Notices
 
-gstack is MIT. The files below contain material derived from Apache-2.0 works,
-rewritten in gstack's voice and modified. Rewriting is not an exemption: the
-license text is in `licenses/Apache-2.0.txt`, and each derived file carries a
-notice that it was changed. Unmodified copies (the rule-registry fixture, the
+gstack is MIT. The files below contain material derived from Apache-2.0 and MIT
+works, rewritten in gstack's voice and modified. Rewriting is not an exemption:
+the license texts are in `licenses/`, and each file derived from an Apache-2.0
+work carries a notice that it was changed. Unmodified copies (the rule-registry fixture, the
 license text) carry no header and are listed here instead.
 
 ## impeccable — Copyright Paul Bakaus — Apache License 2.0
@@ -28,6 +28,27 @@ impeccable's own GitHub release into `~/.impeccable/bin/<version>/`, verified
 against the checksum pinned in `lib/design-detect-contract.ts`, and recorded in
 the egress ledger first. gstack does not audit the engine's network behavior; the
 wrapper refuses URL targets so gstack never asks it to touch the network.
+
+## ai-design-skills and redesign-skill — Copyright (c) 2026 Elaya — MIT License
+
+https://github.com/elayadesign/ai-design-skills (`skills/landing-page-design`,
+`skills/design-to-motion`, at 38bbe576) and
+https://github.com/elayadesign/redesign-skill (`skills/redesign-existing-projects`,
+at 64627f6e). License text: `licenses/MIT-elaya.txt`.
+
+Derived, modified (rules rewritten in gstack's voice and reconciled with its
+design rules; Elaya's fixed fonts, colors, spacing values, icon sets and
+signature components are not carried over):
+
+- `design-html/sections/craft.md.tmpl`: the Persuade intake, page archetypes,
+  page structure, conversion and copy rules, indexing and build order from
+  landing-page-design Part A; the content-realism, ship-floor, scale-snapping,
+  line-break and motion rules from landing-page-design Part B, the website
+  context of design-to-motion and the redesign-skill audit; and the generated
+  `design-html/SKILL.md` / `sections/craft.md`.
+- `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
+  ship-floor tells, turned into a free check.
+- `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
 
 ## DESIGN.md specification — Copyright Google LLC — Apache License 2.0
 
