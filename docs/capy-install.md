@@ -131,7 +131,7 @@ and unchanged while checked, which keeps a taker between its two steps safe.
 A claim that records no start identity is abandoned after 2 minutes, so a
 reused pid cannot keep an orphan forever; an owner that names no valid pid
 counts as a dead holder, and an owner file that cannot be read keeps the
-lock. A live holder that never lets go bounds the wait at 300 tries or 30 s. The lock is broken only when its holder is dead or
+lock. A live holder that never lets go bounds the wait at 300 tries or 30 s. A lock that names a holder is broken only when that holder is dead or
 its pid was reused, never by age, and breakers serialize on a second lock and
 reread the lock before removing it. A symlink `.lock` left by an older gstack
 is honored the same way. Three known limits remain. An older gstack's `ln -s`
