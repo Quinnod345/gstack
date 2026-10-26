@@ -100,14 +100,28 @@ describe('resolveProxy precedence', () => {
   });
 
   test('a proxy URL with a path, query or fragment is refused for every source, so a DOMAIN\\user login never prints its password', () => {
-    for (const value of [['http://CORP\\jdoe', '1234@proxy.corp:3128'].join(':'), 'http://proxy.corp:3128/path', 'http://proxy.corp:3128?x=1', 'socks5://proxy.corp:1080#f']) {
+    for (const value of [['http://CORP\\jdoe', '1234@proxy.corp:3128'].join(':'), 'http://proxy.corp:3128/path', 'http://proxy.corp:3128?x=1', 'socks5://proxy.corp:1080#f', 'http://proxy.corp:3128?', 'http://proxy.corp:3128#']) {
       expect(() => resolveProxy(value, {}), value).toThrow(/unexpected path, query or fragment/);
       const resolved = resolveProxy(null, { HTTPS_PROXY: value });
       expect(resolved.url, value).toBeNull();
       expect(resolved.warning, value).not.toContain('1234');
     }
     expect(resolveProxy('http://proxy.corp:3128/', {}).url).toBe('http://proxy.corp:3128/');
+    expect(resolveProxy(null, { HTTPS_PROXY: 'http://proxy.corp:3128/' })).toMatchObject({ url: 'http://proxy.corp:3128/', warning: null });
     expect(resolveProxy('socks5://proxy.corp:1080', {}).url).toBe('socks5://proxy.corp:1080');
+  });
+
+  test('a userinfo that opens with a scheme is a slash-less URL, not scheme-less credentials, so the protocol it names is kept', () => {
+    expect(resolveProxy(null, { HTTPS_PROXY: ['https:bob', 'pw@proxy.corp:3128'].join(':') }).url).toBe(['https://bob', 'pw@proxy.corp:3128/'].join(':'));
+    const socks = resolveProxy(null, { HTTPS_PROXY: 'socks5:bob@proxy.corp:1080' });
+    expect(socks.url).toBeNull();
+    expect(socks.warning).toContain('missing host');
+  });
+
+  test('a scheme-less standard variable with credentials beside BROWSE_PROXY_USER is refused like its http:// spelling: mixed credential sources stay a hard error', () => {
+    for (const value of ['bob:pw@proxy.corp:3128', ['http://bob', 'pw@proxy.corp:3128'].join(':')]) {
+      expect(() => resolveProxy(null, { HTTPS_PROXY: value, BROWSE_PROXY_USER: 'alice' }), value).toThrow(/pick one source/);
+    }
   });
 
   test('scheme-less and http:// spellings of the same proxy share a config hash, so either shell reuses the daemon', () => {
@@ -118,15 +132,15 @@ describe('resolveProxy precedence', () => {
   });
 
   test('a standard variable that does not parse even as http:// warns and falls back to direct, without echoing it', () => {
-    for (const value of ['ftp://proxy.corp:21', 'http://proxy.corp:99999', 'proxy.corp:notaport', 'http://:8080']) {
+    const cred = ['user', 'secret@'].join(':');
+    for (const value of [`ftp://${cred}proxy.corp:21`, `http://${cred}proxy.corp:99999`, `${cred}proxy.corp:notaport`, `http://${cred}:8080`]) {
       const resolved = resolveProxy(null, { https_proxy: value });
       expect(resolved).toMatchObject({ url: null, source: null, bypass: null });
       expect(resolved.warning).toStartWith('https_proxy is not a proxy URL browse can use (');
       expect(resolved.warning).toContain('fix: export https_proxy=http://host:port (or socks5://), or set BROWSE_PROXY_URL=direct');
       expect(resolved.warning).toContain('BROWSER.md#proxy-from-environment');
-      expect(resolved.warning).not.toContain('secret');
+      expect(resolved.warning, value).not.toContain('secret');
     }
-    expect(resolveProxy(null, { https_proxy: 'user:secret@proxy.corp:notaport' }).warning).not.toContain('secret');
   });
 
   test('--proxy and BROWSE_PROXY_URL are explicit and still fail closed, scheme required', () => {

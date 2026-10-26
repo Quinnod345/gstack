@@ -993,7 +993,9 @@ daemon log (`browse-daemon.log` next to the state file) records the
 effective mode each time the daemon starts, as `[proxy] using <url> from
 <source>`, `[proxy] none: direct connection (--proxy-server=direct://;
 ignoring HTTPS_PROXY)` (on macOS and Windows, `ignoring the system proxy
-settings`), or `[proxy] none: system proxy settings`. A managed Chromium
+settings`), or `[proxy] none: system proxy settings` (an authenticated
+`socks5://` upstream logs its `[proxy] upstream test ok` and `[proxy] bridge
+listening on 127.0.0.1:<port>` lines instead). A managed Chromium
 proxy policy (`ProxyMode`/`ProxySettings`) still overrides the switch; `$B`
 cannot see it, so on a managed machine the log line describes what `$B`
 asked for, not what the policy enforces.
@@ -1015,11 +1017,12 @@ where it came from, with credentials redacted.
 
 - **`warning: HTTPS_PROXY is not a proxy URL browse can use (...)`.** The
   variable doesn't parse even as `http://` plus the value: an unsupported
-  scheme (`ftp://`), a bad port, a missing host, a path, query or fragment
-  (where a `DOMAIN\user` login or a `/` in a password ends up after URL
-  parsing, so such values are refused for every source rather than printed
-  unredacted; percent-encode `/ \ ? # @` in credentials), or credentials
-  that are not valid percent-encoding. `$B` connects directly (on Linux,
+  scheme (`ftp://`), a bad port, a missing host, a path other than a bare
+  `/`, a query or a fragment (where a `DOMAIN\user` login or a `/` in a
+  password ends up after URL parsing, so such values are refused for every
+  source rather than printed unredacted; percent-encode `/ \ ? # @` in
+  `http://` and `https://` credentials), or credentials that are not valid
+  percent-encoding. `$B` connects directly (on Linux,
   Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
   or set `BROWSE_PROXY_URL=direct` to silence the warning (on macOS and

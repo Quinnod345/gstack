@@ -48,9 +48,9 @@ function percentDecodable(part: string): boolean {
 /**
  * Parse the BROWSE_PROXY_URL string and merge env-supplied creds.
  *
- * @throws ProxyConfigError on malformed URL, unsupported scheme, bad
- *   credential percent-encoding, or ambiguous credentials (set in both URL
- *   and env).
+ * @throws ProxyConfigError on malformed URL, unsupported scheme, a path
+ *   (other than a bare `/`), query or fragment, bad credential
+ *   percent-encoding, or ambiguous credentials (set in both URL and env).
  */
 export function parseProxyConfig(opts: {
   proxyUrl: string;
@@ -89,7 +89,7 @@ export function parseProxyConfig(opts: {
   // put there came from a value that was not a proxy URL (a backslash in a
   // DOMAIN\user login, a '/' in a password) and would otherwise be printed
   // in the clear, because only the userinfo is redacted.
-  if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) {
+  if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash || /[?#]/.test(opts.proxyUrl)) {
     throw new ProxyConfigError(
       'expected scheme://[user:pass@]host:port with no path; percent-encode any / \\ ? # @ in the credentials',
       `invalid proxy URL — unexpected path, query or fragment`,
@@ -332,8 +332,12 @@ export function directProxyLogLine(env: NodeJS.ProcessEnv, platform: NodeJS.Plat
  * parser as written, so a typo such as `http:/host:3128` keeps the
  * diagnostic it had; parseProxyConfig then rejects any path, query or
  * fragment, so no part of a password can land outside the redacted userinfo.
+ * A userinfo that opens with a known scheme (`https:bob:pw@host:3128`, the
+ * slash-less spelling the URL parser reads as `https://bob:pw@host:3128`)
+ * is a scheme, not credentials, so it is excluded too.
  */
 const SCHEMELESS_PROXY_RE = /^(?:[^/\\?#@\s]+@)?(?:\[[0-9a-f:.]+\]|(?=[^:]*[a-z.])[^/\\?#@\s:[\]]+)(?::\d+)?$/i;
+const LEADING_SCHEME_RE = /^(?:https?|socks5h?):/i;
 
 /**
  * Resolve the proxy for this invocation (#915). Env URLs go through
@@ -360,7 +364,7 @@ export function resolveProxy(flagUrl: string | null, env: NodeJS.ProcessEnv): Re
     const name = STANDARD_PROXY_VARS.find(key => env[key]);
     if (!name) return direct();
     const value = env[name]!.trim();
-    [source, raw] = [name, SCHEMELESS_PROXY_RE.test(value) ? `http://${value}` : value];
+    [source, raw] = [name, SCHEMELESS_PROXY_RE.test(value) && !LEADING_SCHEME_RE.test(value) ? `http://${value}` : value];
     try {
       parseProxyConfig({ proxyUrl: raw });
     } catch (err) {
