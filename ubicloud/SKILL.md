@@ -367,7 +367,7 @@ definition rather than a wrapper per lane.
 ```bash
 U=~/.claude/skills/gstack/bin/gstack-ubi
 [ -n "${UBICLOUD_API_KEY:-}" ] && echo "UBICLOUD_API_KEY: set" || echo "UBICLOUD_API_KEY: unset"
-export UBI_OWNER="<thread or session code>"   # lowercase letters and digits; it names your VMs
+export UBI_OWNER=gsta114   # your thread or session code: lowercase letters and digits; it names your VMs
 $U owner
 ```
 
