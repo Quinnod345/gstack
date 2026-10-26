@@ -229,7 +229,8 @@ test('review finalization ownership: initialize invocation state and capture the
   expect(flat).toMatch(/REVIEW_START for this core candidate before reading its diff/i);
   expectMentions(flat, [['never', 'reading', 'before']], 'flat');
   expect(flat).toMatch(/separate PASS_START tokens, not REVIEW_START/);
-  expectMentions(flat, [['only', 'finishes', 'final']], 'flat');
+  expect(flat).toContain('After an edited pass, start the next with `--start review --fix-range`');
+  expect(flat).toContain('On refusal, start a full pass.');
 });
 
 test('review finalization ownership: late findings use Fix-First before the bounded parent transition', () => {
@@ -240,7 +241,7 @@ test('review finalization ownership: late findings use Fix-First before the boun
     'Structured approval does not waive advisory/test_stub ASK gates',
     '## Step 5.8: Persist Eng Review result',
     'Edited: increment CYCLES once',
-    'No edits: fill the record below',
+    'No edits: after a full pass, fill the record below',
     '### 2. Fill the record',
     '--finish REVIEW_START',
   ];
@@ -248,7 +249,7 @@ test('review finalization ownership: late findings use Fix-First before the boun
   expect(positions.every(position => position >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
   expect(flat).toContain('at most 3 fix cycles');
-  expect(flat).toContain('At 3, persist `converged:false`');
+  expect(flat).toContain('Edited: increment CYCLES once, then fill and save the record below with `converged:false`.');
   const limit = flat.slice(flat.indexOf('At 3,'), flat.indexOf('No edits:'));
   expect(limit).toMatch(/then stop this invocation/i);
   expectMentions(limit, [['without', 'summary', 'fourth']], 'limit');
@@ -276,14 +277,14 @@ test('review finalization ownership: required native completion and optional out
   expect(flat).toContain('`CONVERGED`: true only for a completed zero-edit pass');
 });
 
-test('review finalization ownership: finish only the final core token without log-time capture', () => {
+test('review finalization ownership: each logged pass finishes its own core token without log-time capture', () => {
   const step = skill.slice(skill.indexOf('## Step 5.8: Persist Eng Review result'));
   const flat = step.replace(/\s+/g, ' ');
   expect(step.match(/--finish REVIEW_START/g)).toHaveLength(1);
   expect(step).not.toContain('--start review');
   expect(step).not.toContain('--finish PASS_START');
   expect(flat).toMatch(/never invent a binding or replace REVIEW_START at log time/i);
-  expectMentions(flat, [['only', 'finish', 'final']], 'flat');
+  expect(flat).toContain("finish only this pass's own token");
   expect(step).toContain('"completed":COMPLETED,"converged":CONVERGED,"cycles":CYCLES');
 });
 

@@ -35,6 +35,7 @@
 # --check already ignores those prefs; storing them made --stats lie.
 # always-ask on a one-way id is fine (it agrees with the safety override).
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -105,7 +106,7 @@ do_check() {
   fi
   ensure_file
   cd "$ROOT_DIR"
-  PREF_FILE_PATH="$PREF_FILE" GLOBAL_PREF_FILE_PATH="$GLOBAL_PREF_FILE" QID="$QID" QSUMMARY="$QSUMMARY" bun --no-env-file --config=/dev/null -e "
+  PREF_FILE_PATH="$PREF_FILE" GLOBAL_PREF_FILE_PATH="$GLOBAL_PREF_FILE" QID="$QID" QSUMMARY="$QSUMMARY" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     import('./scripts/one-way-doors.ts').then((oneway) => {
       const fs = require('fs');
       const qid = process.env.QID;
@@ -201,7 +202,7 @@ do_write() {
 
   set +e
   local RESULT
-  RESULT=$(cd "$ROOT_DIR" && printf '%s' "$INPUT" | PREF_FILE_PATH="$PREF_FILE" EVENT_FILE_PATH="$EVENT_FILE" FREE_TEXT="$FREE_TEXT" HAS_FREE_TEXT="$HAS_FREE_TEXT" bun --no-env-file --config=/dev/null -e "
+  RESULT=$(cd "$ROOT_DIR" && printf '%s' "$INPUT" | PREF_FILE_PATH="$PREF_FILE" EVENT_FILE_PATH="$EVENT_FILE" FREE_TEXT="$FREE_TEXT" HAS_FREE_TEXT="$HAS_FREE_TEXT" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const fs = require('fs');
     const raw = await Bun.stdin.text();
     let j;
@@ -320,7 +321,7 @@ do_clear() {
     echo '{}' > "$PREF_FILE"
     echo "OK: cleared all preferences"
   else
-    PREF_FILE_PATH="$PREF_FILE" QID="$QID" bun --no-env-file --config=/dev/null -e "
+    PREF_FILE_PATH="$PREF_FILE" QID="$QID" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
       const fs = require('fs');
       const prefs = JSON.parse(fs.readFileSync(process.env.PREF_FILE_PATH, 'utf-8'));
       if (prefs[process.env.QID] !== undefined) {
@@ -339,7 +340,7 @@ do_clear() {
 # -----------------------------------------------------------------------
 do_stats() {
   ensure_file
-  (cd "$ROOT_DIR" && PREF_FILE_PATH="$PREF_FILE" bun --no-env-file --config=/dev/null -e "
+  (cd "$ROOT_DIR" && PREF_FILE_PATH="$PREF_FILE" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     import('./scripts/one-way-doors.ts').then((oneway) => {
       const fs = require('fs');
       const prefs = JSON.parse(fs.readFileSync(process.env.PREF_FILE_PATH, 'utf-8'));

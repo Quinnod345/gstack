@@ -172,7 +172,7 @@ export function makeFixture(): Fixture {
   mkdirSync(home, { recursive: true });
   put(join(commands, 'bun'), `#!/usr/bin/env bash
 case "$*" in
-  'install --frozen-lockfile') exit 0 ;;
+  'install --production --frozen-lockfile') exit 0 ;;
   'run build') echo 'Unexpected build in an install fixture' >&2; exit 90 ;;
   *) exec ${quote(process.execPath)} "$@" ;;
 esac
@@ -248,7 +248,7 @@ export function fixture(layout: string) {
   };
   write(join(commands, 'bun'), `#!/usr/bin/env bash
 case "$*" in
-  'install --frozen-lockfile') exit 0 ;;
+  'install --production --frozen-lockfile') exit 0 ;;
   'build --help') echo 'Fixture Bun has no CSO compile flags'; exit 0 ;;
   'run build') echo 'Unexpected build in registration fixture' >&2; exit 90 ;;
   *) exec ${quote(process.execPath)} "$@" ;;

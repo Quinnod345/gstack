@@ -53,9 +53,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 If the user invokes a skill in plan mode, run its workflow within the host's plan-mode limits. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; any AskUserQuestion the skill fires is the workflow operating within plan mode, not a violation of it — and a skill whose instructions resolve a question themselves (e.g. a plan-mode auto-select) may legitimately not ask it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" run only where the host permits them. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
 
-If `PROACTIVE` is `false`, do not auto-invoke or suggest skills, including by asking whether to run one. Only run skills the user explicitly invokes.
+If `PROACTIVE` is `off`: suggest no skills unasked, nor ask. `core`: only /office-hours, /review, /qa, /ship. `all`: any. Skills the user names or this one invokes run.
 
-If `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
 
 ## AskUserQuestion Format
 
@@ -366,6 +366,7 @@ sections. Read a section in full before doing its step; do not work from memory.
 |------|-------------------|
 | analyzing the design or making any layout/visual decision (Step 1 onward) — the UX-principles doctrine governs every design choice | `sections/doctrine.md` |
 | writing the finalized HTML in Step 3 — the Pretext wiring patterns and API cheatsheet are the required reference for all text-layout code | `sections/pretext-patterns.md` |
+| writing the Step 1 implementation spec — the Persuade intake and archetype, and the craft floor every page ships with | `sections/craft.md` |
 | the Setup probe printed DESIGN_DETECTOR_INSTALL_OFFER — ask the user once whether gstack may download impeccable's engine (checksum-pinned, receipted) before any other step | `sections/detector-install-offer.md` |
 
 ---
@@ -461,7 +462,8 @@ Now route based on what was found. Check these cases in order:
 
 ### Case A: approved.json exists (design-shotgun ran)
 
-If `APPROVED` was found, read it for user feedback and screen name, and resolve the
+If `APPROVED` was found, read it for user feedback, screen name, and any `archetype`
+and `sections` (the craft section takes them as given), and resolve the
 approved PNG (never guess it from a letter or the newest variant):
 
 ```bash
@@ -534,6 +536,9 @@ After routing, output a brief context summary:
 ---
 
 ## Step 1: Design Analysis
+
+> **STOP.** Before writing the Step 1 implementation spec — the Persuade intake and archetype, and the craft floor every page ships with, Read `~/.claude/skills/gstack/design-html/sections/craft.md` and execute it
+> in full. Do not work from memory — that section is the source of truth for this step.
 
 1. If `$D` is available (`DESIGN_READY`), extract a structured implementation spec:
 ```bash
@@ -658,6 +663,7 @@ For framework output, save to:
 - `prefers-color-scheme` media query for dark mode
 - `prefers-reduced-motion` for animation respect
 - Real content extracted from the mockup (never lorem ipsum)
+- The craft section's ship floor, scale-snapped values and motion rules
 
 **Never include by default (AI slop blacklist):** an approved mockup that carries one, a DESIGN.md blessing, or an explicit user ask overrides it; say the tradeoff once.
 - Purple/blue gradients as default <!-- ai-color-palette -->
@@ -725,6 +731,8 @@ _DJ=$(mktemp "${TMPDIR:-/tmp}/gstack-detect.XXXXXX"); bun --no-env-file --config
 ```
 
 Exit 2 → one surgical fix pass over the non-advisory rules in the `DETECT_TOP` block, then scan once more. Whatever remains, present the page with those findings listed as accepted-with-reason: a pattern the approved mockup contains, a value DESIGN.md's tokens bless or a pattern its Decisions Log or Do's and Don'ts records as intentional, or an inline `<!-- impeccable-disable <rule>: <reason> -->` the user agreed to. One pass, not a loop. Any other first line from the probe: skip, no ceremony.
+
+Then, always: the craft section's check, `~/.claude/skills/gstack/bin/gstack-design-craft <path-to-finalized.html>` (plus `--accepted` per the section), one fix pass and one rerun, as above.
 
 ### Verification Screenshots
 
@@ -825,6 +833,7 @@ Write `finalized.json` alongside the HTML:
   "pretext_tier": "<selected tier>",
   "framework": "<vanilla|react|svelte|vue>",
   "iterations": <number of refinement iterations>,
+  "craft_exceptions": [{"id": "<craft id>", "count": <n>, "reason": "<why accepted>"}],
   "date": "<ISO 8601>",
   "screen": "<screen name>",
   "branch": "<current branch>"

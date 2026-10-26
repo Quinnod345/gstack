@@ -1,6 +1,6 @@
 {
   "name": "gstack",
-  "version": "1.91.221",
+  "version": "1.91.241",
   "description": "Garry's Stack — Claude Code skills + fast headless browser. One repo, one install, entire AI engineering workflow.",
   "license": "MIT",
   "type": "module",
@@ -69,6 +69,7 @@
     "eval:bg:release": "bun run scripts/eval-bg.ts release"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@huggingface/transformers": "^4.3.1",
     "@ngrok/ngrok": "^1.7.0",
     "cross-spawn": "^7.0.6",
@@ -78,7 +79,9 @@
     "marked": "^18.1.1",
     "playwright": "^1.62.1",
     "sharp": "^0.35.4",
-    "socks": "^2.8.10"
+    "socks": "^2.8.10",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "engines": {
     "bun": ">=1.4.2"
@@ -95,20 +98,17 @@
   ],
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.141",
-    "@anthropic-ai/sdk": "^0.78.0",
     "@types/bun": "1.4.3",
     "prettier": "3.9.10",
-    "typescript": "7.0.2",
-    "xterm": "^5.3.0",
-    "xterm-addon-fit": "^0.8.0"
+    "typescript": "7.0.2"
   },
   "overrides": {
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "adm-zip": "^0.6.1",
-    "fast-uri": "3.1.8",
+    "fast-uri": "3.1.9",
     "hono": "4.13.13",
     "image-size": "2.0.4",
-    "ip-address": "10.7.3",
+    "ip-address": "10.7.4",
     "proxy-addr": "2.0.8",
     "sharp": "0.35.5"
   },
