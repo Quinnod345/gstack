@@ -111,8 +111,11 @@ read fixture trees, so this check is yours:
 1. **Nothing the candidate sees carries an eval word.** No `eval`, `test`,
    `judge`, `experiment`, `rubric`, `score`, `compare`, `benchmark`,
    `candidate` or `arena` in any directory name, file name, prompt, commit
-   message or environment variable the candidate can read. A project's own test
-   directory is the one exception, and only when the task is about those tests.
+   message or environment variable the preregistration controls and the candidate
+   can read. Two things are outside the rule: a project's own test directory, when
+   the task is about those tests, and the skill text an arm loads as its own
+   instructions (a gstack SKILL.md uses these words freely); the rule is about the
+   fixture and the task, which the eval builds.
 2. **The directory looks like a project.** Name the fixture root the way the
    project it imitates would (`billing-service/`, `docs-site/`), with the files
    that project would plausibly hold, never `fixture-a/`, `case-7/` or the

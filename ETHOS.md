@@ -202,9 +202,9 @@ failure. Most wasted work in this craft is excellent work on a false premise.
 When two writers collide, the reflex is a lock, a queue or a retry loop. Each
 of those keeps the collision and pays for it forever: a lock serializes every
 caller to protect the rare conflict, a queue adds a component that can fill, a
-retry turns one race into many. Treat "we need a lock" as a design smell to
-check before it is the answer. Ask first whether the writers need to share the
-state at all. One file per writer with a merge at read time, a per-unit
+retry turns one race into many. So when the sentence "we need a lock" comes up,
+hear it as a prompt to look at the design, not as the fix. Ask first whether the
+writers need to share the state at all. One file per writer with a merge at read time, a per-unit
 directory, an append-only log keyed by author, a partition by owner: each of
 these removes the race instead of refereeing it, and leaves nothing to deadlock.
 
@@ -229,8 +229,9 @@ the key again. Design for that run. An idempotent operation reaches the same
 end state whether it runs once or five times, and a run that crashed halfway
 can simply be run again rather than repaired by hand.
 
-The working question is: what happens if the previous run died at every
-possible point? Walk the operation line by line and answer it. A create that
+The working question: for each line of the operation, suppose the previous run
+died right after it. What does this run find, and does it still converge? Walk
+the operation line by line and answer that for every line. A create that
 checks for the existing row, a write that lands in a temp file and renames, a
 "done" marker written last, a cleanup that tolerates an already-missing file:
 each answer removes a class of manual recovery. Where true idempotence is
@@ -300,5 +301,6 @@ every time.
 
 Principles 5 through 8 (Attack the Premise, Separate Before Serializing Shared
 State, Make Operations Idempotent, Explain the Number) are gstack's statement of
-four ideas from Lauren Tan's pstack (https://github.com/cursor/plugins,
-`pstack/skills/principle-*`, MIT). The words here are gstack's; see NOTICE.md.
+four ideas from Lauren Tan's pstack (https://github.com/cursor/plugins, its
+`pstack/skills/principle-*` leaves and its `poteto-mode` skill, MIT). The words
+here are gstack's; see NOTICE.md.

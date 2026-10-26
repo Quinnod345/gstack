@@ -1511,9 +1511,11 @@ fixtures.
   (its working directory, file names, the task prompt, commit messages, the
   environment) says `eval`, `test`, `judge`, `experiment`, `rubric`, `score`,
   `compare`, `benchmark`, `candidate` or `arena`. The project's own `test/`
-  directory is exempt when the task is about those tests. The hermetic home a
-  case builds (`test/helpers/hermetic-env.ts`) is the boundary: what is copied
-  in is visible, what stays in the runner is not.
+  directory is exempt when the task is about those tests, and so is the skill
+  text an arm loads as its own instructions (a gstack SKILL.md and the ETHOS.md it
+  points at use these words freely); the rule governs what the case builds. The
+  hermetic home a case builds (`test/helpers/hermetic-env.ts`) is the boundary:
+  what is copied in is visible, what stays in the runner is not.
 - **Fixture roots are project-shaped.** A fixture the candidate works in is
   named like the project it imitates, with the files that project would hold.
   Runner-side fixtures (captured transcripts, judge calibration sets, census
@@ -1528,12 +1530,16 @@ word list: `test/fixtures/arm-benchmark/` and its four children, `browse-judge/`
 `cso-eval/`, `eval-history/`, `judge-calibration/` and its children, two shard
 names under `paid-report-census/` and the `test/` subdirectories of
 `state-matrix-6792/`. All of these are runner-side: no candidate's working
-directory is one of them. The one candidate-visible gap is the other rule:
-`test/helpers/arm-benchmark-harness.ts` copies each fixture into
-`os.tmpdir()/arm-<fixture>-<arm>-*`, so the candidate's working directory is named
-after the arm rather than after a project. The e2e hermetic roots
-(`skill-e2e-<case>-*`) carry no listed word. Renaming is a separate change with
-its own touchfile updates; the list is here so that change can be scoped.
+directory is one of them. Two candidate-visible gaps are in the temporary roots
+the harnesses create: `test/helpers/arm-benchmark-harness.ts` copies each fixture
+into `os.tmpdir()/arm-<fixture>-<arm>-*`, so the candidate's working directory is
+named after the arm rather than after a project, and `test/skill-e2e-deploy.test.ts`
+runs the /benchmark case in `skill-e2e-benchmark-*`, a root that carries a listed
+word; the other `skill-e2e-<case>-*` roots do not. The audit matched whole
+lower-case words in path components under `test/fixtures/`; a substring match
+(`factory-scorecard/`, `ios-qa/FixtureApp/Tests/`) was not counted. Renaming is a
+separate change with its own touchfile updates; the list is here so that change
+can be scoped.
 
 ## Running evals as an agent: detach
 
