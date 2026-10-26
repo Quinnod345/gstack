@@ -216,7 +216,7 @@ export function renderDeferredSection(deferred: readonly DeferredRecord[], noted
   if (deferred.length) {
     out.push('## Deferred findings', '', 'Blocking findings in code this PR did not change (review scope: frozen); filed as issues and not closed by this PR.', '');
     for (const d of deferred) {
-      const ref = d.issue ? `#${d.issue}` : `unfiled${d.reason ? ` (${oneLine(d.reason)})` : ''}`;
+      const ref = d.issue ? `#${d.issue}${d.reason && d.reason !== 'already filed' ? ` (${oneLine(d.reason)})` : ''}` : `unfiled${d.reason ? ` (${oneLine(d.reason)})` : ''}`;
       out.push(`- Deferred: ${ref} — ${oneLine(d.severity)} \`${oneLine(d.path)}\` ${oneLine(d.summary)}`);
     }
     out.push('');
@@ -249,16 +249,24 @@ function rowTime(row: Record<string, any>): number {
   return NaN;
 }
 
+/**
+ * A Step 11 late defer (a queued adversarial finding scoped `defer` after the
+ * last Step 9 pass) is logged as a `review` row with this phase: its deferred
+ * findings count, but it is not a pass.
+ */
+export const LATE_DEFER_PHASE = 'late-defer';
+
 export function summarizeReviewLoop(rows: readonly Record<string, any>[], since: string): ReviewLoopSummary {
   const sinceMs = Date.parse(since);
-  const passes = rows.filter(r => r && r.skill === 'review' && r.via === 'ship' && Number.isFinite(rowTime(r))
+  const loopRows = rows.filter(r => r && r.skill === 'review' && r.via === 'ship' && Number.isFinite(rowTime(r))
     && (!Number.isFinite(sinceMs) || rowTime(r) >= sinceMs));
+  const passes = loopRows.filter(r => r.phase !== LATE_DEFER_PHASE);
   const blocking = new Set<string>();
   const deferred = new Set<string>();
   const noted = new Set<string>();
   const fixed = new Set<string>();
   let scope: ReviewLoopSummary['scope'] = 'unknown';
-  for (const row of passes) {
+  for (const row of loopRows) {
     if (REVIEW_SCOPE_POLICIES.includes(row.review_scope)) scope = row.review_scope;
     for (const f of Array.isArray(row.findings) ? row.findings : []) {
       if (!f || typeof f !== 'object') continue;
