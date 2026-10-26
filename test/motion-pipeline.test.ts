@@ -129,13 +129,23 @@ describe.skipIf(!READY)('design-motion pipeline on real Chromium and ffmpeg', ()
   // Value: protects=a page without window.__start/__tick stops with MOTION_CONTRACT_MISSING and exit 1 before writing capture.json;
   //   fails_when=the contract probe is dropped and frames of an unanimated page are recorded as a capture; why_new=no test loads a page in the capture bin; seam=none;
   //   no_claim=only the missing-contract case; a contract that throws mid-capture is not exercised
+  //   The same capture dir, pre-filled first with a foreign still.png and then with a previous capture's files, checks that
+  //   a capture refuses a dir that is not a previous capture and clears a previous capture's manifest before it can fail.
   test('a page without the capture contract is refused', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-pipeline-'));
     try {
+      const cap = path.join(dir, 'cap');
+      fs.mkdirSync(cap);
+      fs.writeFileSync(path.join(cap, 'still.png'), 'not ours');
+      const foreign = capture(dir, page({ loops: true, contract: false }));
+      expect(foreign.code).toBe(2);
+      expect(foreign.err).toContain('already holds still.png but no capture.json');
+      expect(fs.readFileSync(path.join(cap, 'still.png'), 'utf-8')).toBe('not ours');
+      fs.writeFileSync(path.join(cap, 'capture.json'), '{}');
       const c = capture(dir, page({ loops: true, contract: false }));
       expect(c.code).toBe(1);
       expect(c.err).toContain('MOTION_CONTRACT_MISSING');
-      expect(fs.existsSync(path.join(dir, 'cap', 'capture.json'))).toBe(false);
+      expect(fs.existsSync(path.join(cap, 'capture.json')) || fs.existsSync(path.join(cap, 'still.png'))).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

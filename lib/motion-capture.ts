@@ -116,8 +116,8 @@ export function parseCaptureArgs(argv: string[]): CaptureOptions | { error: stri
   if (still && out) return { error: 'use --still or --out, not both' };
   if (!still && !out) return { error: '--out <dir> is required for a capture (or --still <out.png> for one still frame)' };
   if (out && nums['--cycle'] === undefined) return { error: '--cycle <seconds> is required for a capture' };
-  if (nums['--cycle'] !== undefined && Math.abs(nums['--cycle'] * FPS - Math.round(nums['--cycle'] * FPS)) > 1e-6) {
-    return { error: `--cycle must be a whole number of ${FPS} fps frames, got '${nums['--cycle']}' (nearest: ${Number((Math.round(nums['--cycle'] * FPS) / FPS).toFixed(4))})` };
+  if (nums['--cycle'] !== undefined && Math.abs(nums['--cycle'] * 20 - Math.round(nums['--cycle'] * 20)) > 1e-6) {
+    return { error: `--cycle must be a multiple of 0.05 s (three ${FPS} fps frames, so the seam lands exactly one cycle later), got '${nums['--cycle']}' (nearest: ${Math.max(1, Math.round(nums['--cycle'] * 20)) / 20})` };
   }
   if (still && !/\.png$/i.test(still)) return { error: '--still must name a .png file' };
   if (still && flags.has('--mask')) return { error: '--mask belongs to a capture (--out), not a single still' };

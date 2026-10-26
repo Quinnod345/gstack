@@ -128,7 +128,7 @@ Aim above 35 dB for the frame (`--crop w:h:x:y` per container: above 30 dB; text
 
 ## Step 5: Capture
 
-The page must expose the capture contract (fidelity section): `?capture` turns off `requestAnimationFrame` and exposes `window.__start()`, `window.__tick(dt)` and `window.__lt`.
+The page must expose the capture contract (fidelity section): `?capture` stops `requestAnimationFrame`, exposes `window.__start()`, `window.__tick(dt)` and `window.__lt`, and sets `window.__mark` on state changes.
 
 ```bash
 {{BIN_DIR}}/gstack-motion-capture.ts "<motion-dir>/page.html" --size <frame-size> --cycle <cycle-seconds> --out "<motion-dir>/cap" --mask '[data-motion-clip]'
@@ -149,11 +149,11 @@ The phase defaults follow the cycle: dissolve at cycle − 1.0 s, empty beat fro
 - **rest**: the last frame before the dissolve equals `still.png`: every story came back to the design. A story that leaves an inline `translate(0)` on an element fails this; clear the inline style at rest.
 - **overflow**: outside the mask, nothing moves. App frame: every frame equals the empty first frame. Cards: every story frame equals the still. `--mask-grow <px>` covers shadows.
 
-Read `cap/contact-sheet.png` and look for ghosting, pops, content moving ahead of its card, and stories too timid to see. Fix, recapture and recheck, at most three rounds; then report what still fails instead of exporting. `FFMPEG_MISSING`: relay its install line and stop.
+Read `cap/contact-sheet.png` for ghosting, pops, content moving ahead of its card, and stories too timid to see. Fix, recapture and recheck, at most three rounds; then report what still fails, unexported. `FFMPEG_MISSING`: relay its install line and stop.
 
 ## Step 7: Export and report
 
-On the first design of a session, show the contact sheet before exporting so the direction can be corrected cheaply.
+On a session's first design, show the contact sheet before exporting so the direction is cheap to correct.
 
 ```bash
 {{BIN_DIR}}/gstack-motion-encode export "<motion-dir>/cap" --name <name> --pad '<hex-color>'

@@ -85,11 +85,16 @@ describe('capture arguments', () => {
     expect(err(['p.html', '--size', '10x10', '--still', 's.png'])).toContain('--size 10x10 is too small');
     expect(err(['p.html', '--size', '640x400', '--cycle', '0', '--out', 'c'])).toContain("--cycle must be a positive number, got '0'");
     expect(err(['p.html', '--size', '640x400', '--cycle', '4', '--out', 'c', '--tail', '2.5'])).toContain('--tail must be a whole number');
-    // Value: protects=a cycle that is not a whole number of 60 fps frames is refused with the nearest valid cycle;
-    //   fails_when=the guard is dropped and the seam frame lands off one cycle, failing the seam check spuriously; why_new=new guard;
-    //   seam=none; no_claim=parser only
-    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('--cycle must be a whole number of 60 fps frames');
-    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('nearest: 6.0167');
+    // Value: protects=a cycle that is not a multiple of 0.05 s is refused with a nearest cycle the same guard accepts;
+    //   fails_when=the guard is dropped or loosened to whole frames, where the seam frame's clock depends on PRE; why_new=new guard;
+    //   seam=none; no_claim=parser and clock math only
+    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('--cycle must be a multiple of 0.05 s');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('nearest: 6)');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '0.5167', '--out', 'c'])).toContain('nearest: 0.5)');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '0.01', '--out', 'c'])).toContain('nearest: 0.05)');
+    expect(parseCaptureArgs(['p.html', '--size', '640x400', '--cycle', '0.55', '--out', 'c'])).not.toHaveProperty('error');
+    expect(new Set([14, 15, 16, 17].map(pre => clockMs(pre - 1 + 31, pre)))).toEqual(new Set([516, 517]));
+    for (const pre of [14, 15, 16, 17]) expect(clockMs(pre - 1 + 33, pre)).toBe(550);
   });
 
   test('modes keep the existing query and fragment', () => {

@@ -12,7 +12,8 @@
 // the overflow check when the capture has a mask, through ffmpeg's psnr
 // filter; it prints one "MOTION_CHECK: <id> pass|fail ..." line each, writes
 // contact-sheet.png, prints "MOTION_SETTINGS: ..." naming any threshold or
-// phase override, and ends with "MOTION_RESULT: clean" (exit 0) or
+// phase override, and ends with "MOTION_RESULT: clean" (exit 0; "clean
+// (overflow not checked)" for a capture without a mask) or
 // "MOTION_RESULT: <n> failed" (exit 1). Defaults follow the 12 s cycle:
 // dissolve at cycle - 1.0, empty beat from cycle - 0.4, intro landed at 2.4.
 // export writes <name>-x.mp4, <name>-loop.gif and <name>-800x500.gif into the
@@ -127,13 +128,12 @@ if (cmd === 'check') {
   console.log(s.status === 0 ? `CONTACT_SHEET ${sheet}` : `CONTACT_SHEET unavailable: ${String(s.stderr).trim().split('\n').pop()}`);
   const overrides = KNOWN.check!.filter(f => f !== '--layout' && flags.has(f)).map(f => `${f} ${flags.get(f)}`);
   if (overrides.length > 0) console.log(`MOTION_SETTINGS: ${overrides.join(', ')}; defaults otherwise`);
-  console.log(failed === 0 ? 'MOTION_RESULT: clean' : `MOTION_RESULT: ${failed} failed`);
+  console.log(failed > 0 ? `MOTION_RESULT: ${failed} failed` : manifest.mask === undefined ? 'MOTION_RESULT: clean (overflow not checked)' : 'MOTION_RESULT: clean');
   process.exit(failed === 0 ? 0 : 1);
 }
 
 const name = flags.get('--name');
 if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) die(2, '--name <kebab-case-name> is required for export');
-const crop = cropFlag;
 const pad = flags.get('--pad');
 if (pad) {
   const err = padError(pad);
@@ -148,7 +148,7 @@ const jobs: Array<[string, string[]]> = [];
 if (formats.includes('mp4')) jobs.push([`${name}-x.mp4`, mp4Args(manifest, dir, path.join(dir, `${name}-x.mp4`))]);
 if (formats.includes('loop')) jobs.push([`${name}-loop.gif`, loopGifArgs(manifest, dir, path.join(dir, `${name}-loop.gif`), { fps: num('--gif-fps', 20) })]);
 if (formats.includes('800')) {
-  jobs.push([`${name}-800x500.gif`, smallGifArgs(manifest, dir, path.join(dir, `${name}-800x500.gif`), { fps: num('--small-fps', 20), crop, pad })]);
+  jobs.push([`${name}-800x500.gif`, smallGifArgs(manifest, dir, path.join(dir, `${name}-800x500.gif`), { fps: num('--small-fps', 20), crop: cropFlag, pad })]);
 }
 let failed = 0;
 for (const [file, args] of jobs) {

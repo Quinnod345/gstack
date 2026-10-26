@@ -79,9 +79,12 @@ try {
     const out = path.resolve(opts.out!);
     const scale = captureScale(opts.width, opts.height);
     const plan = planCapture({ cycleSeconds: opts.cycle!, pre: opts.pre, tail: opts.tail });
-    for (const stale of ['frames', 'capture.json', 'still.png', 'mask.png', 'contact-sheet.png']) {
-      fs.rmSync(path.join(out, stale), { recursive: true, force: true });
+    const stale = ['frames', 'capture.json', 'still.png', 'mask.png', 'contact-sheet.png'];
+    const present = stale.filter(f => fs.existsSync(path.join(out, f)));
+    if (present.length > 0 && !present.includes('capture.json')) {
+      die(2, `gstack-motion-capture: ${out} already holds ${present.join(', ')} but no capture.json, so it is not a previous capture; pick an empty --out`);
     }
+    for (const f of present) fs.rmSync(path.join(out, f), { recursive: true, force: true });
     fs.mkdirSync(path.join(out, 'frames'), { recursive: true });
     const page = await openPage('capture', scale);
     const contract = await page.evaluate(() => typeof (window as any).__start === 'function' && typeof (window as any).__tick === 'function');
