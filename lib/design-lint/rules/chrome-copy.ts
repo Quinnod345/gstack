@@ -97,8 +97,6 @@ function checkCadenceAndDashes(ctx: LintContext, r: Reporter): void {
 
 const SECOND_CTA = /^(learn more|see how it works|watch (the )?demo|get started|book a demo)$/i;
 
-/** The <section> or <header> that holds the h1, by tag index; -1 when none does. */
-// sloplint heroIndexOf
 /** The source range the hero copy lives in: the section or header holding the h1, else the h1's parent; null without an h1. A tell here is the Floor, elsewhere it is suspected. */
 function heroRange(doc: Doc): [number, number] | null {
   const h1 = doc.tags.findIndex((t) => !t.close && t.name === 'h1');
@@ -110,6 +108,8 @@ function heroRange(doc: Doc): [number, number] | null {
   return inner ? [doc.tags[holder].end, inner.endPos] : null;
 }
 
+/** The <section> or <header> that holds the h1, by tag index; -1 when none does. */
+// sloplint heroIndexOf
 export function heroIndexOf(doc: Doc, h1Idx: number): number {
   for (let i = h1Idx - 1; i >= 0; i--) {
     const t = doc.tags[i];
