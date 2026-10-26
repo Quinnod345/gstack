@@ -206,6 +206,17 @@ describe("gstack-worktree-audit", () => {
     expect(after).toBe(before);
   });
 
+  test("status.showUntrackedFiles=no in the user's config does not hide untracked files", () => {
+    const r = spawnSync("bash", [BIN, "--no-fetch"], {
+      cwd: repo, encoding: "utf8", timeout: 60_000,
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, CLAUDE_CONFIG_DIR: claudeDir, HOME: tmp, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "status.showUntrackedFiles", GIT_CONFIG_VALUE_0: "no" },
+    });
+    expect(r.status).toBe(0);
+    const row = r.stdout.split("\n").find(l => l.endsWith("\t" + wts.fresh))!;
+    expect(row.split("\t").slice(3, 4)).toEqual(["scratch:1"]);
+    expect(row.split("\t")[7]).toBe("review");
+  });
+
   test("an unpushed commit on a branch with a closed PR is review, an open PR on the same name wins and holds it, and -b picks the base", () => {
     git(wts.closed, "commit", "-q", "--allow-empty", "-m", "one more");
     const r1 = audit("-b", "origin/main", "--no-fetch", repo);

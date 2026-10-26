@@ -154,7 +154,9 @@ git worktree list --porcelain | awk 'BEGIN { RS=""; FS="\n" } {
   # Tracked edits are work in progress; untracked files alone are scratch. A
   # clean tree still names its ignored entries (.env, build output): they do
   # not change the bucket, but they are what removing the worktree would lose.
-  if porcelain=$(git -C "$wt" status --porcelain 2>/dev/null); then
+  # The flags pin what status reports: a status.showUntrackedFiles=no config
+  # would otherwise hide untracked files and let a worktree holding them read clean.
+  if porcelain=$(git -C "$wt" status --porcelain --untracked-files=normal --ignore-submodules=none 2>/dev/null); then
     if [ -z "$porcelain" ]; then
       ignored=$(git -C "$wt" ls-files --others --ignored --exclude-standard --directory 2>/dev/null | grep -c .)
       [ "$ignored" -gt 0 ] && dirty="clean,ignored:$ignored" || dirty=clean
