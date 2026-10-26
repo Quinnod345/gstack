@@ -241,6 +241,40 @@ describe.skipIf(process.platform === 'win32')('gstack-update-channel.sh as the /
   });
 });
 
+describe.skipIf(process.platform === 'win32')('the /gstack-upgrade Step 4 fence on the stable channel', () => {
+  const fence = (() => {
+    const tmpl = fs.readFileSync(path.join(ROOT, 'gstack-upgrade', 'SKILL.md.tmpl'), 'utf8');
+    const hits = [...tmpl.matchAll(/```bash\n([\s\S]*?)```/g)].map(m => m[1]!).filter(f => f.includes('bash bin/gstack-ff-update . "$UPSTREAM_REF"'));
+    if (hits.length !== 1) throw new Error('expected one Step 4 fence, found ' + hits.length);
+    return hits[0]!.replace(/\{\{SETUP_COMMAND\}\}/g, './setup');
+  })();
+  const run = (w: World) => spawnSync('bash', ['-c', fence], { cwd: w.base, encoding: 'utf8', timeout: 60_000, env: { ...w.env, INSTALL_DIR: w.install } });
+
+  // Value: protects=a team install past the release stops with AHEAD_OF_STABLE and moves nothing, including the README's depth-1 clone where stable's history
+  // never connects to HEAD (ancestry says nothing; the VERSION order decides), and an install behind the release does not take that exit; fails_when=the shortcut
+  // tests ancestry alone (depth-1 installs made since the last cut get FF_REFUSED and an offer to reset backwards) or fires for an install stable is ahead of;
+  // why_new=the template is covered by string pins only; seam=none; no_claim=the FF_OK arm (bin/gstack-ff-update and setup are not part of this world)
+  test('a depth-1 team install past the release prints AHEAD_OF_STABLE and exits 0 untouched; one behind the release goes on to the fast-forward', () => {
+    const ahead = world({ installAt: 'C' });
+    const r = run(ahead);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toContain('UPSTREAM_REF=origin/stable');
+    expect(r.stdout.trim().split('\n').at(-1)).toBe('AHEAD_OF_STABLE');
+    expect(ahead.head()).toBe(ahead.shas.C);
+    expect(git(ahead.install, 'rev-parse', 'refs/remotes/origin/stable')).toBe(ahead.shas.B);
+    // The depth-1 histories never connect, so ancestry said nothing and the VERSION order decided.
+    expect(spawnSync('git', ['-C', ahead.install, 'merge-base', '--is-ancestor', 'origin/stable', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).status).toBe(1);
+    expect(fs.existsSync(path.join(ahead.base, 'setup-calls'))).toBe(false);
+
+    const behind = world({ installAt: 'A' });
+    const b = run(behind);
+    expect(b.stdout).toContain('UPSTREAM_REF=origin/stable');
+    expect(b.stdout).not.toContain('AHEAD_OF_STABLE');
+    expect(b.status).not.toBe(0);
+    expect(behind.head()).toBe(behind.shas.A);
+  });
+});
+
 describe.skipIf(process.platform === 'win32')('gstack-upgrade on the stable channel', () => {
   const run = (w: World, args: string[] = []) => spawnSync('bash', [path.join(w.install, 'bin', 'gstack-upgrade'), ...args], { cwd: w.base, encoding: 'utf8', env: w.env, timeout: 60_000 });
 
@@ -324,6 +358,17 @@ describe.skipIf(process.platform === 'win32')('gstack-update-check on the stable
     expect(noRelease.stdout.trim()).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1');
     expect(fs.readFileSync(gitLog, 'utf8')).toContain('refs/heads/stable');
     expect(fs.readFileSync(gitLog, 'utf8')).toContain('refs/heads/main');
-    expect(fs.readFileSync(path.join(state, 'last-update-check'), 'utf8')).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1\nIDENTITY head=' + local + ' remote=' + main + ' upstream=' + origin + '\n');
+    expect(fs.readFileSync(path.join(state, 'last-update-check'), 'utf8')).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1\nIDENTITY head=' + local + ' remote=' + main + ' upstream=' + origin + '#stable\n');
+    // The outcome replays from the cache within its TTL: no second pair of ls-remote calls per skill start.
+    fs.writeFileSync(gitLog, '');
+    expect(run({ GSTACK_UPDATE_CHANNEL: 'stable' }).stdout.trim()).toBe('UPGRADE_AVAILABLE 1.0.0 1.0.1');
+    expect(fs.readFileSync(gitLog, 'utf8')).toBe('');
+    // A failed ls-remote (origin unreachable) is not "no stable yet": the check does not flip to main.
+    fs.writeFileSync(gitLog, '');
+    fs.rmSync(path.join(state, 'last-update-check'), { force: true });
+    const unreachable = run({ GSTACK_UPDATE_CHANNEL: 'stable', GSTACK_REMOTE_REPO: path.join(base, 'gone.git') });
+    expect(unreachable.stdout.trim()).toBe('');
+    expect(fs.readFileSync(gitLog, 'utf8')).not.toContain('refs/heads/main');
+    expect(fs.readFileSync(path.join(state, 'last-update-check'), 'utf8')).toMatch(/^CHECK_FAILED 1\.0\.0 /);
   });
 });

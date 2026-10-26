@@ -157,6 +157,10 @@ describe('release-cut: planning', () => {
     expect(gateVerdict(paged, 'o/r', 'a'.repeat(40))).toEqual({ green: true });
     const pagedRed = checks([{ check_runs: GREEN }, { check_runs: [{ name: 'windows-free-tests', status: 'completed', conclusion: 'timed_out' }] }]);
     expect(gateVerdict(pagedRed, 'o/r', 'a'.repeat(40))).toEqual({ green: false, why: 'red check runs: windows-free-tests', pending: false });
+    const cancelled = checks([{ check_runs: [...GREEN, { name: 'quality', status: 'completed', conclusion: 'cancelled' }, { name: 'docs', status: 'completed', conclusion: 'skipped' }] }]);
+    expect(gateVerdict(cancelled, 'o/r', 'a'.repeat(40))).toEqual({ green: false, why: 'red check runs: quality', pending: false });
+    const skipped = checks([{ check_runs: [...GREEN, { name: 'docs', status: 'completed', conclusion: 'skipped' }] }]);
+    expect(gateVerdict(skipped, 'o/r', 'a'.repeat(40))).toEqual({ green: true });
   });
 
   test('an active freeze in refs/notes/gstack-trains refuses the cut; a cleared one does not', () => {

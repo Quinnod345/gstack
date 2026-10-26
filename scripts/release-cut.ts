@@ -37,7 +37,7 @@ export const REQUIRED_CHECK = 'free-tests';
 export const BACKSTOP_CHECK = 'main-backstop';
 export const NOTES_REF = 'refs/notes/gstack-trains';
 const NOTES_LOCAL = 'refs/notes/gstack-trains-release';
-const RED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure', 'stale']);
+const RED = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale']);
 export const WINDOW_DAYS = 7;
 export const WINDOW_COMMITS = 200;
 export const NOTES_CAP = 60_000;
@@ -223,11 +223,13 @@ export function planRelease(o: PlanOptions): PlanResult {
   let before = prevStable;
   if (prevStable === sha) {
     const prior = git(['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', '--first-parent', sha + '^']);
-    before = prior.ok && prior.out ? git(['rev-parse', '--verify', '-q', prior.out + '^{commit}']).out || null : null;
+    const resolved = prior.ok && prior.out ? git(['rev-parse', '--verify', '-q', prior.out + '^{commit}']) : null;
+    before = resolved?.ok ? resolved.out : null;
   }
   let prevVersion: string | null = null, prevTag: string | null = null;
   if (before) {
-    prevVersion = git(['show', before + ':VERSION']).out.trim() || null;
+    const shown = git(['show', before + ':VERSION']);
+    prevVersion = shown.ok ? shown.out.trim() || null : null;
     if (prevVersion && git(['rev-parse', '--verify', '-q', 'refs/tags/v' + prevVersion + '^{commit}']).ok) prevTag = 'v' + prevVersion;
   } else {
     const date = git(['show', '-s', '--format=%cI', sha]).out;

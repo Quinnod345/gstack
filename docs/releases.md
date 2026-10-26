@@ -29,7 +29,9 @@ green train record covers the tree or the backstop gated it green, neutral
 when main moved past the push before it was gated (superseded) or a freeze's
 own backstop run owns it (deferred), failure when it froze the queue or could
 not finish. Neutral is never green: a commit whose own tree was never gated is
-not released. A commit with a check run still going is skipped and the next
+not released. A push that gets no backstop run at all (a dependabot push, a
+policy without a train block) has no `main-backstop` check run and is not
+green either; a cancelled check run counts as red. A commit with a check run still going is skipped and the next
 older one is considered, back through 7 days or 200 first-parent commits. The
 workflow runs no tests and no paid evals of its own; it only reads what the
 trains and the backstop already recorded. With nothing green in the window it
