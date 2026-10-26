@@ -23,10 +23,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT, exitTableHelp } from '../lib/headless-artifacts';
 import { resultLineWithDocs } from '../lib/result-codes';
-import { isUnavailable, loadPolicyFromBase, loadPolicyFromHead, resolveBaseBranch } from '../lib/ship-policy';
+import { isUnavailable, loadPolicyFromBase, policyUnavailableLine, resolveBaseBranch } from '../lib/ship-policy';
 import {
   parseHunks, renderDeferredIssue, renderDeferredSection, reviewLoopLine, scopeFindings, scopeLine, summarizeReviewLoop,
-  findingIdentity, findingWhere, REVIEW_SCOPE_POLICIES, type DeferredRecord, type ReviewScopePolicy, type ScopeFinding, type ScopedFinding,
+  DEFERRED_MARKER, findingIdentity, findingWhere, REVIEW_SCOPE_POLICIES, type DeferredRecord, type ReviewScopePolicy, type ScopeFinding, type ScopedFinding,
 } from '../lib/review-scope';
 
 const HELP = `gstack-review-scope — finding scope for /ship's review loop (docs/ship-policy.md#review-scope)
@@ -51,7 +51,8 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 function git(args: string[], cwd: string): { ok: boolean; out: string; err: string } {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+  // quotePath off: a non-ASCII path must come back as itself, not as "caf\303\251.ts", or the hunk map never matches the finding.
+  const r = spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '').trim() };
 }
 function gh(args: string[], cwd: string): { ok: boolean; out: string; err: string } {
@@ -83,7 +84,9 @@ function cmdClassify(rest: string[], json: boolean): number {
     policy = policyFlag;
   } else {
     const load = loadPolicyFromBase(repoRoot, base);
-    policy = (isUnavailable(load) ? loadPolicyFromHead(repoRoot) : load).policy.review_scope;
+    // The reviewed policy is the base's; the working tree's copy is never read silently (pass --policy to override).
+    if (isUnavailable(load)) { process.stderr.write(policyUnavailableLine('gstack-review-scope classify', base, `${load.detail}; pass --policy to classify without the base`) + '\n'); return EXIT.refused; }
+    policy = load.policy.review_scope;
   }
   let findings: ScopeFinding[];
   try { findings = readFindings(flag(rest, '--findings'), 'findings'); } catch (e: any) { return refuse('classify', 'REVIEW_SCOPE_INPUT', e.message); }
@@ -96,6 +99,7 @@ function cmdClassify(rest: string[], json: boolean): number {
   const diffHunks = parseHunks(diff.out, untracked);
   let rangeHunks = null;
   const rangeBase = flag(rest, '--range-base');
+  if (rangeBase !== undefined && !/^[0-9a-f]{7,64}$/i.test(rangeBase)) return refuse('classify', 'REVIEW_SCOPE_INPUT', `--range-base must be a commit id, got ${JSON.stringify(rangeBase.slice(0, 40))}`);
   if (pass > 1) {
     if (!rangeBase) return refuse('classify', 'REVIEW_SCOPE_INPUT', '--range-base <sha> (HEAD at the start of the previous pass) is required from pass 2 on');
     const ancestor = git(['merge-base', '--is-ancestor', rangeBase, 'HEAD'], repoRoot);
@@ -107,7 +111,7 @@ function cmdClassify(rest: string[], json: boolean): number {
   const scoped = scopeFindings(findings, { policy, pass, diffHunks, rangeHunks });
   const line = scopeLine(policy, pass, scoped);
   process.stderr.write(line + '\n');
-  process.stdout.write(json ? JSON.stringify({ policy, pass, range_base: rangeBase ?? null, findings: scoped }) + '\n' : line + '\n' + JSON.stringify(scoped, null, 2) + '\n');
+  process.stdout.write(json ? JSON.stringify({ policy, pass, range_base: pass > 1 ? rangeBase : null, findings: scoped }) + '\n' : line + '\n' + JSON.stringify(scoped, null, 2) + '\n');
   return EXIT.ok;
 }
 
@@ -126,18 +130,24 @@ function cmdDefer(rest: string[], json: boolean): number {
     head: git(['rev-parse', 'HEAD'], repoRoot).out.trim() || undefined,
   };
   const dryRun = rest.includes('--dry-run');
+  // One search for every marker, before any create: a failed search files nothing, so a rate-limited rerun cannot duplicate issues.
+  let filed: Array<{ number: number; url: string; body: string }> | null = null;
+  let searchError = '';
+  if (!dryRun && toDefer.length) {
+    const existing = gh(['issue', 'list', ...repoArgs, '--state', 'open', '--search', `"${DEFERRED_MARKER}" in:body`, '--json', 'number,url,body', '--limit', '200'], repoRoot);
+    if (existing.ok) { try { filed = JSON.parse(existing.out); } catch { searchError = 'gh issue list returned no JSON'; } }
+    else searchError = `gh issue list failed: ${(existing.err || 'unknown').split('\n')[0]!.slice(0, 160)}`;
+    if (!Array.isArray(filed)) filed = null;
+  }
   const records: DeferredRecord[] = [];
   for (const f of toDefer) {
     const { title, body, marker } = renderDeferredIssue(f, ctx);
     const record: DeferredRecord = { fingerprint: findingIdentity(f), path: findingWhere(f), severity: String(f.severity ?? 'unrated'), summary: String(f.summary ?? f.problem ?? f.category ?? ''), issue: null };
-    if (dryRun) { record.reason = 'dry run'; records.push(record); continue; }
-    const existing = gh(['issue', 'list', ...repoArgs, '--state', 'open', '--search', `"${marker.replace(/<!--\s*|\s*-->/g, '').trim()}" in:body`, '--json', 'number,url,body', '--limit', '20'], repoRoot);
-    if (existing.ok) {
-      try {
-        const hit = (JSON.parse(existing.out) as Array<{ number: number; url: string; body: string }>).find(i => typeof i.body === 'string' && i.body.includes(marker));
-        if (hit) { record.issue = hit.number; record.url = hit.url; record.reason = 'already filed'; records.push(record); continue; }
-      } catch { /* fall through to create */ }
-    }
+    records.push(record);
+    if (dryRun) { record.reason = 'dry run'; continue; }
+    if (!filed) { record.reason = searchError; continue; }
+    const hit = filed.find(i => typeof i.body === 'string' && i.body.includes(marker));
+    if (hit) { record.issue = hit.number; record.url = hit.url; record.reason = 'already filed'; continue; }
     const bodyFile = path.join(fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'gstack-deferred-')), 'issue.md');
     fs.writeFileSync(bodyFile, body, { mode: 0o600 });
     const created = gh(['issue', 'create', ...repoArgs, '--title', title, '--body-file', bodyFile], repoRoot);
@@ -146,15 +156,15 @@ function cmdDefer(rest: string[], json: boolean): number {
       const url = created.out.trim().split('\n').pop() ?? '';
       const n = Number(/\/issues\/(\d+)\s*$/.exec(url)?.[1]);
       if (Number.isInteger(n)) { record.issue = n; record.url = url; } else record.reason = `gh returned no issue url: ${url.slice(0, 120)}`;
-    } else record.reason = `gh issue create failed: ${(created.err || existing.err || 'unknown').split('\n')[0]!.slice(0, 160)}`;
-    records.push(record);
+    } else record.reason = `gh issue create failed: ${(created.err || 'unknown').split('\n')[0]!.slice(0, 160)}`;
   }
+  // Unfiled is the documented degraded path, not a failure: the finding stays deferred and the PR body names the reason.
   for (const r of records) process.stderr.write(`DEFERRED: ${r.issue ? `#${r.issue}` : `unfiled (${r.reason ?? 'no gh'})`} ${r.severity} ${r.path}\n`);
   if (!records.length) process.stderr.write('DEFERRED: none\n');
   const out = flag(rest, '--out');
   if (out) fs.writeFileSync(out, JSON.stringify(records, null, 2) + '\n');
-  process.stdout.write(json ? JSON.stringify(records) + '\n' : renderDeferredSection(records, [], 'frozen'));
-  return records.some(r => r.issue === null && r.reason !== 'dry run') ? EXIT.refused : EXIT.ok;
+  process.stdout.write(json ? JSON.stringify(records) + '\n' : renderDeferredSection(records));
+  return EXIT.ok;
 }
 
 function cmdRender(rest: string[]): number {
@@ -183,6 +193,8 @@ function cmdSummary(rest: string[], json: boolean): number {
   }
   const summary = summarizeReviewLoop(rows, since);
   const line = reviewLoopLine(summary);
+  // A /ship invocation always runs Step 9 once; zero matching rows means the wrong --since or a review log written elsewhere, never a loop to record.
+  if (summary.passes === 0) return refuse('summary', 'REVIEW_SCOPE_INPUT', `no review-log row of this branch is a via:ship review at or after ${since}; check REVIEW_SINCE (${line})`);
   process.stderr.write(line + '\n');
   const out = flag(rest, '--out');
   if (out) fs.writeFileSync(out, JSON.stringify(summary) + '\n');

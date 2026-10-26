@@ -38,9 +38,9 @@ import { readPregateFile, verifyPregate } from '../lib/pregate/index';
 import { isUnavailable, loadPolicyFromBase, resolveBaseBranch } from '../lib/ship-policy';
 import { approvalForReceipt } from '../lib/approval-citations';
 import {
-  CARRY_METADATA_GLOBS as CARRY_METADATA_GLOBS_EXPORT, CARRY_TEST_GLOBS as CARRY_TEST_GLOBS_EXPORT,
+  CARRY_METADATA_GLOBS, CARRY_TEST_GLOBS,
   bindReceipt, carryReceipt, classifyCarryPath, computeCensus, extractReceipt, missingIssueLines, orderReceipt, parseReviewLoop, placeReceiptFirst, planCarry,
-  receiptIssuesFrom, receiptSummaryLine, renderCensus, renderReceiptBlock, validateReceipt, type CarryClass, type CensusPr,
+  receiptIssuesFrom, receiptSummaryLine, renderCensus, renderReceiptBlock, validateReceipt, type CensusPr,
 } from '../lib/ship-receipt';
 import { resolveStateRoot } from '../lib/state-root';
 
@@ -281,12 +281,17 @@ function writeRunRecord(a: { receipt: ShipReceipt; head: string; pr: string | un
   return EXIT.ok;
 }
 
-/** One diff's stable patch-id over a pathspec; empty when the diff is empty. */
+/**
+ * One diff's patch-id over a pathspec; empty when the diff is empty. `--verbatim`
+ * keeps whitespace in the hash (the default and `--stable` strip it, so a space
+ * moved in a shell line would read as the same patch) while still ignoring the
+ * hunk line numbers a base merge shifts.
+ */
 function patchId(repoRoot: string, from: string, to: string, pathspec: string[]): string | undefined {
   const diff = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', '--full-index', from, to, '--', ...pathspec], { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
   if (diff.status !== 0) return undefined;
   if (!diff.stdout.trim()) return '';
-  const id = spawnSync('git', ['patch-id', '--stable'], { cwd: repoRoot, input: diff.stdout, encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
+  const id = spawnSync('git', ['patch-id', '--verbatim'], { cwd: repoRoot, input: diff.stdout, encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
   if (id.status !== 0) return undefined;
   return id.stdout.trim().split(/\s+/)[0] ?? '';
 }
@@ -349,6 +354,11 @@ function cmdCarry(rest: string[], json: boolean): number {
   }
   const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', from, head], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 });
   if (ancestor.status !== 0) return refused('RECEIPT_CARRY_REFUSED', `the receipt's head ${from.slice(0, 12)} is not an ancestor of HEAD ${head.slice(0, 12)} (rebased or force-pushed); merge the base in next time, and run /ship now`);
+  // The carry binds HEAD alone: pending edits are not in the commits it compares, and a parent that stops at CARRY: carried would report them shipped.
+  const status = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+  if (status.status !== 0) return refused('RECEIPT_CARRY_REFUSED', 'git status failed; the carry needs a readable working tree');
+  const dirty = status.stdout.split('\n').filter(Boolean).map(l => l.slice(3).replace(/^.* -> /, ''));
+  if (dirty.length) return refused('RECEIPT_CARRY_REFUSED', `the working tree has uncommitted changes (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ` +${dirty.length - 5} more` : ''}); commit them and carry at the new head, or run /ship`);
   const base = flag(rest, '--base') ?? receipt.base ?? resolveBaseBranch(repoRoot);
   const baseRef = `origin/${base.replace(/^origin\//, '')}`;
   const fromBase = git(['merge-base', baseRef, from], repoRoot);
@@ -359,24 +369,34 @@ function cmdCarry(rest: string[], json: boolean): number {
   const extra = { metadata: [...(policy?.stamp_files ?? []), ...(policy?.stamp_paths ?? []), ...(policy?.release_outputs ?? []), ...(policy?.changelog ? [policy.changelog] : [])] };
   const changedRaw = git(['diff', '--name-only', from, head], repoRoot);
   if (changedRaw === undefined) return refused('RECEIPT_CARRY_REFUSED', `git diff ${from.slice(0, 12)} ${head.slice(0, 12)} failed`);
-  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra) as CarryClass }));
+  // A default-metadata manifest is read at both heads: only a version stamp keeps it out of the product patch.
+  const blobAt = (ref: string, p: string): string | null => { const r = spawnSync('git', ['show', `${ref}:${p}`], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }); return r.status === 0 ? r.stdout : null; };
+  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra, CARRY_METADATA_GLOBS.includes(p) ? { before: blobAt(from, p), after: blobAt(head, p) } : undefined) }));
   // Pathspecs by class: tests and metadata are excluded from the product patch; the test patch is the tests alone.
   const excludeGlobs = (globs: readonly string[]) => globs.map(g => `:(exclude,glob)${g}`);
-  const metadataGlobs = [...CARRY_METADATA_GLOBS_EXPORT, ...extra.metadata];
-  const productSpec = ['.', ...excludeGlobs(CARRY_TEST_GLOBS_EXPORT), ...excludeGlobs(metadataGlobs)];
-  const testSpec = [...CARRY_TEST_GLOBS_EXPORT.map(g => `:(glob)${g}`), ...excludeGlobs(metadataGlobs)];
+  const demoted = new Set(changed.filter(c => c.class === 'product' && CARRY_METADATA_GLOBS.includes(c.path)).map(c => c.path));
+  const metadataGlobs = [...CARRY_METADATA_GLOBS.filter(g => !demoted.has(g)), ...extra.metadata];
+  const productSpec = ['.', ...excludeGlobs(CARRY_TEST_GLOBS), ...excludeGlobs(metadataGlobs)];
+  const testSpec = [...CARRY_TEST_GLOBS.map(g => `:(glob)${g}`), ...excludeGlobs(metadataGlobs)];
   const productFrom = patchId(repoRoot, fromBase, from, productSpec);
   const productHead = patchId(repoRoot, headBase, head, productSpec);
   const testFrom = patchId(repoRoot, fromBase, from, testSpec) ?? '';
   const testHead = patchId(repoRoot, headBase, head, testSpec) ?? '';
   if (productFrom === undefined || productHead === undefined) return refused('RECEIPT_CARRY_REFUSED', 'git could not compute the product patch-id at one of the heads');
-  const changedProduct = productFrom === productHead ? [] : changed.filter(c => c.class === 'product').map(c => c.path)
-    .filter(p => patchId(repoRoot, fromBase, from, [p]) !== patchId(repoRoot, headBase, head, [p]));
-  if (productFrom !== productHead && !changedProduct.length) changedProduct.push('(a product path outside the from..head file list; compare the two base diffs)');
+  // planCarry names at most 20 differing paths, so the per-path comparison (two patch-ids each) stops there.
+  const changedProduct: string[] = [];
+  if (productFrom !== productHead) {
+    for (const p of changed.filter(c => c.class === 'product').map(c => c.path)) {
+      if (changedProduct.length >= 20) break;
+      if (patchId(repoRoot, fromBase, from, [p]) !== patchId(repoRoot, headBase, head, [p])) changedProduct.push(p);
+    }
+    if (!changedProduct.length) changedProduct.push('(a product path outside the from..head file list; compare the two base diffs)');
+  }
   const mergeCommits = (git(['rev-list', '--merges', '--count', `${from}..${head}`], repoRoot) ?? '0').trim();
-  const rangeRaw = spawnSync('git', ['range-diff', '--no-color', `${fromBase}..${from}`, `${headBase}..${head}`], { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
-  const rangeDiff = rangeRaw.status === 0 ? (rangeRaw.stdout.trim().split('\n').slice(0, 20).join('\n') || '(empty: identical ranges)') : `unavailable: ${(rangeRaw.stderr ?? '').trim().split('\n')[0] ?? 'range-diff failed'}`;
-  const plan = planCarry({ from, head, fromBase, headBase, changed, productPatchId: { from: productFrom, head: productHead }, testPatchId: { from: testFrom, head: testHead }, changedProduct, mergeCommits: Number(mergeCommits) || 0, rangeDiff });
+  // Evidence for the record, never the decision: a slow range-diff is reported unavailable rather than waited for.
+  const rangeRaw = spawnSync('git', ['range-diff', '--no-color', `${fromBase}..${from}`, `${headBase}..${head}`], { cwd: repoRoot, encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 * 1024 });
+  const rangeDiff = rangeRaw.status === 0 ? (rangeRaw.stdout.trim().split('\n').slice(0, 20).join('\n') || '(empty: identical ranges)') : `unavailable: ${(rangeRaw.stderr ?? '').trim().split('\n')[0] || (rangeRaw.signal ? `range-diff killed by ${rangeRaw.signal} after 15 s` : 'range-diff failed')}`;
+  const plan = planCarry({ from, head, changed, productPatchId: { from: productFrom, head: productHead }, testPatchId: { from: testFrom, head: testHead }, changedProduct, mergeCommits: Number(mergeCommits) || 0, rangeDiff });
   if (!plan.ok) return refused(plan.code, plan.message);
   const carried = carryReceipt(receipt, head, plan.carry);
   const errors = validateReceipt(carried);
@@ -397,7 +417,7 @@ function cmdCarry(rest: string[], json: boolean): number {
     if (!edit.ok) return incomplete(`gh pr edit failed: ${edit.err}; the receipt was not carried`);
   }
   process.stdout.write(`CARRY: carried from ${from.slice(0, 12)} to ${head.slice(0, 12)} (${plan.carry.reason})\n`);
-  return writeRunRecord({ receipt: carried, head, pr, source, repoRoot, out: flag(rest, '--out'), json, line, incomplete, extra: { carried_from: from, carry_reason: plan.carry.reason } });
+  return writeRunRecord({ receipt: carried, head, pr, source, repoRoot, out: flag(rest, '--out'), json, line, incomplete, extra: { carried_from: carried.carry!.from, carry_reason: carried.carry!.reason } });
 }
 
 function sinceDate(repo: string, since: string): string | undefined {

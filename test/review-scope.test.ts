@@ -16,6 +16,8 @@ import {
 } from '../lib/review-scope';
 import { cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
+const ROOT = path.resolve(import.meta.dir, '..');
+
 const repos: FixtureRepo[] = [];
 const fixture = () => { const r = makeFixtureRepo({ prefix: 'review-scope-' }); repos.push(r); return r; };
 afterEach(() => { while (repos.length) cleanup(repos.pop()!); });
@@ -47,6 +49,11 @@ describe('hunk parsing and locus', () => {
     expect(locusOf({ path: 'lib/other.ts', line: 1 }, diff, null)).toBe('outside');
     expect(locusOf({ fingerprint: 'src/auth.ts:11:security' }, diff, null)).toBe('diff');
     expect(locusOf({ fingerprint: 'shared-libs:abc' }, diff, null)).toBe('outside');
+    expect(locusOf({ severity: 'CRITICAL', summary: 'somewhere' }, diff, null)).toBe('outside');
+    // a defect the diff causes in an unchanged caller names the changed line in `cause`; the locus follows it
+    expect(locusOf({ path: 'lib/caller.ts', line: 80, cause: { path: 'src/auth.ts', line: 11 } }, diff, null)).toBe('diff');
+    expect(locusOf({ path: 'lib/caller.ts', line: 80, cause: { path: 'src/auth.ts', line: 300 } }, diff, null)).toBe('outside');
+    expect(locusOf({ path: 'lib/caller.ts', line: 80, cause: { path: 'src/new.ts' } }, diff, null)).toBe('diff');
     const range = parseHunks('diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -11 +11 @@\n-x\n+y\n');
     expect(locusOf({ path: 'src/auth.ts', line: 11 }, diff, range)).toBe('fix-range');
     expect(locusOf({ path: 'src/auth.ts', line: 42 }, diff, range)).toBe('diff');
@@ -55,6 +62,11 @@ describe('hunk parsing and locus', () => {
   test('kind and the blocking floor: CRITICAL defects block; advisories, test gaps and INFORMATIONAL items never do', () => {
     expect(kindOf({ advisory: true, severity: 'INFORMATIONAL' })).toBe('advisory');
     expect(kindOf({ category: 'test-gap', severity: 'CRITICAL' })).toBe('test-gap');
+    // the Testing specialist's schema (review/specialists/testing.md) emits category "testing" for every finding it returns
+    const real = { severity: 'CRITICAL', confidence: 7, path: 'src/auth.ts', line: 42, category: 'testing', summary: 'denied path has no test', fingerprint: 'src/auth.ts:42:testing', specialist: 'testing' };
+    expect(kindOf(real)).toBe('test-gap');
+    expect(isBlocking(real)).toBe(false);
+    expect(fs.readFileSync(path.join(ROOT, 'review/specialists/testing.md'), 'utf8')).toContain('\"category\":\"testing\"');
     expect(kindOf({ category: 'security', severity: 'CRITICAL' })).toBe('defect');
     expect(isBlocking({ category: 'security', severity: 'CRITICAL' })).toBe(true);
     expect(isBlocking({ category: 'security', severity: 'critical' })).toBe(true);
@@ -94,6 +106,9 @@ describe('scope decisions', () => {
       'shared-libs:deadbeef': 'outside/advisory/below/note',
     });
     expect(scopeLine('frozen', 1, scoped)).toBe('REVIEW_SCOPE: policy=frozen pass=1 findings=6 fix=3 defer=1 note=2 blocking=3');
+    // a blocking finding nobody could place is fixed now, never filed against '(no path)'
+    const unplaced = scopeFindings([{ severity: 'CRITICAL', category: 'logic', summary: 'somewhere' }], { policy: 'frozen', pass: 2, diffHunks: diff, rangeHunks: range });
+    expect(by(unplaced)['undefined']).toBe('outside/defect/blocking/fix');
   });
 
   test('diff-plus-blocking (the documented fallback, not the default): a blocking finding outside the diff is fixed here instead of filed; everything else is as frozen', () => {
@@ -208,13 +223,49 @@ describe('gstack-review-scope (bin)', () => {
     const badRange = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', '--pass', '2', '--range-base', 'f'.repeat(40), '--findings', f]);
     expect(badRange.status).toBe(EXIT.fail);
     expect(badRange.err).toContain('(REVIEW_SCOPE_RANGE;');
+    // a --range-base on pass 1 is not applied, so the envelope does not claim it
+    const p1Range = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', '--pass', '1', '--range-base', pass1Head, '--findings', f, '--json']);
+    expect(JSON.parse(p1Range.out).range_base).toBeNull();
+    for (const args of [['--pass', '0'], ['--pass', '1', '--policy', 'loose'], ['--pass', '2', '--range-base', '--output=/tmp/x']]) {
+      const r = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', ...args, '--findings', f]);
+      expect(r.status).toBe(EXIT.fail);
+      expect(r.err).toContain('(REVIEW_SCOPE_INPUT;');
+    }
+    // the reviewed policy is the base's; an unresolvable base is refused by name, never read from the working tree
+    const noBase = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'nonesuch', '--pass', '1', '--findings', f]);
+    expect(noBase.status).toBe(EXIT.refused);
+    expect(noBase.err).toContain('(POLICY_SOURCE_UNAVAILABLE)');
+    expect(noBase.err).toContain('pass --policy to classify without the base');
     fs.writeFileSync(f, '{"not":"an array"}');
     const bad = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', '--pass', '1', '--findings', f]);
     expect(bad.status).toBe(EXIT.fail);
     expect(bad.err).toContain('(REVIEW_SCOPE_INPUT;');
+    const d = path.join(repo.root, 'deferred.json'); fs.writeFileSync(d, '{}');
+    const badRender = runBin(repo, 'gstack-review-scope', ['render', '--deferred', d]);
+    expect(badRender.status).toBe(EXIT.fail);
+    expect(badRender.err).toContain('expected the JSON array defer --out writes');
   });
 
-  test('defer without gh keeps the finding deferred as unfiled (exit 3) and renders the PR-body sections; --dry-run files nothing', () => {
+  test('classify sees a non-ASCII changed path under its own name, so a CRITICAL finding there is fixed, not deferred to an issue', () => {
+    const repo = fixture();
+    fs.mkdirSync(path.join(repo.work, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'src', 'café.ts'), 'export const a = 1;\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'src', 'café.ts'), 'export const a = 2;\n');
+    repo.git('commit', '-qam', 'change');
+    fs.writeFileSync(path.join(repo.work, 'src', 'naïve.ts'), 'export const n = 1;\n');
+    const f = path.join(repo.root, 'findings.json');
+    fs.writeFileSync(f, JSON.stringify([
+      { path: 'src/café.ts', line: 1, severity: 'CRITICAL', category: 'logic', summary: 'wrong' },
+      { path: 'src/naïve.ts', line: 1, severity: 'CRITICAL', category: 'logic', summary: 'untracked' },
+    ]));
+    const r = runBin(repo, 'gstack-review-scope', ['classify', '--base', 'main', '--pass', '1', '--findings', f, '--json']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(JSON.parse(r.out).findings.map((x: ScopedFinding) => `${x.path}=${x.locus}/${x.scope}`)).toEqual(['src/café.ts=diff/fix', 'src/naïve.ts=diff/fix']);
+  });
+
+  test('defer without gh keeps the finding deferred as unfiled and still exits 0 (the PR body carries the reason), searches once before creating, and files nothing when the search fails; --dry-run files nothing', () => {
     const repo = fixture();
     const classified = path.join(repo.root, 'classified.json');
     fs.writeFileSync(classified, JSON.stringify([
@@ -230,9 +281,18 @@ describe('gstack-review-scope (bin)', () => {
     fs.writeFileSync(path.join(noGh, 'gh'), '#!/bin/sh\necho "gh: not logged in" >&2; exit 4\n', { mode: 0o755 });
     const out = path.join(repo.root, 'deferred.json');
     const unfiled = runBin(repo, 'gstack-review-scope', ['defer', '--findings', classified, '--pr', '42', '--out', out], { PATH: `${noGh}:${process.env.PATH}` });
-    expect(unfiled.status).toBe(EXIT.refused);
-    expect(unfiled.err).toMatch(/^DEFERRED: unfiled \(gh issue create failed: gh: not logged in\) CRITICAL lib\/legacy\.ts:7$/m);
-    expect(unfiled.out).toContain('- Deferred: unfiled (gh issue create failed: gh: not logged in) — CRITICAL `lib/legacy.ts:7` Unbounded delete');
+    expect(unfiled.status).toBe(EXIT.ok);
+    expect(unfiled.err).toMatch(/^DEFERRED: unfiled \(gh issue list failed: gh: not logged in\) CRITICAL lib\/legacy\.ts:7$/m);
+    expect(unfiled.out).toContain('- Deferred: unfiled (gh issue list failed: gh: not logged in) — CRITICAL `lib/legacy.ts:7` Unbounded delete');
+    // the search failed, so nothing was created: a rate-limited rerun cannot duplicate the issue the marker exists to find
+    const listFails = path.join(repo.root, 'listfails');
+    fs.mkdirSync(listFails);
+    const created = path.join(listFails, 'created');
+    fs.writeFileSync(path.join(listFails, 'gh'), `#!/bin/sh\nif [ "$1" = issue ] && [ "$2" = list ]; then echo "gh: HTTP 403 rate limit" >&2; exit 1; fi\nif [ "$1" = issue ] && [ "$2" = create ]; then touch "${created}"; echo https://example.test/o/r/issues/1; exit 0; fi\nexit 1\n`, { mode: 0o755 });
+    const rateLimited = runBin(repo, 'gstack-review-scope', ['defer', '--findings', classified, '--pr', '42', '--json'], { PATH: `${listFails}:${process.env.PATH}` });
+    expect(rateLimited.status).toBe(EXIT.ok);
+    expect(JSON.parse(rateLimited.out)[0]).toMatchObject({ issue: null, reason: 'gh issue list failed: gh: HTTP 403 rate limit' });
+    expect(fs.existsSync(created)).toBe(false);
     const rendered = runBin(repo, 'gstack-review-scope', ['render', '--deferred', out, '--findings', classified]);
     expect(rendered.status).toBe(EXIT.ok);
     expect(rendered.out).toContain('## Deferred findings');
@@ -249,7 +309,7 @@ describe('gstack-review-scope (bin)', () => {
     fs.writeFileSync(path.join(shim, 'gh'), [
       '#!/bin/sh', `echo "$*" >> "${log}"`,
       'if [ "$1" = issue ] && [ "$2" = list ]; then',
-      `  case "$*" in *"lib/legacy.ts:7:data-loss"*) echo '[{"number":9,"url":"https://example.test/acme/app/issues/9","body":"x <!-- gstack-deferred-finding: lib/legacy.ts:7:data-loss --> y"}]' ;; *) echo '[]' ;; esac; exit 0; fi`,
+      `  echo '[{"number":9,"url":"https://example.test/acme/app/issues/9","body":"x <!-- gstack-deferred-finding: lib/legacy.ts:7:data-loss --> y"},{"number":3,"url":"https://example.test/acme/app/issues/3","body":"<!-- gstack-deferred-finding: other:1:x -->"}]'; exit 0; fi`,
       'if [ "$1" = issue ] && [ "$2" = create ]; then echo "https://example.test/acme/app/issues/10"; exit 0; fi',
       'echo "unsupported $*" >&2; exit 1', '',
     ].join('\n'), { mode: 0o755 });
@@ -268,6 +328,63 @@ describe('gstack-review-scope (bin)', () => {
     expect(r.err).toContain('DEFERRED: #10 CRITICAL lib/old.ts:1');
     const calls = fs.readFileSync(log, 'utf8');
     expect(calls.match(/^issue create /gm)?.length).toBe(1);
+    expect(calls.match(/^issue list /gm)?.length).toBe(1);
+    expect(calls).toContain('--search "gstack-deferred-finding" in:body');
     expect(calls).toContain('issue create --repo acme/app --title Deferred review finding: lib/old.ts:1 — Missing owner check --body-file');
+  });
+
+  // Generated by /ship Step 7 (coverage audit of the harness lane E diff).
+  // Value: protects=summary reads this branch's review log through gstack-review-read and prints the REVIEW_LOOP counters that
+  // `gstack-ship-receipt write --review-loop` consumes, counting only this invocation's ship-via review passes and tolerating a
+  // malformed row and a branch with no log; fails_when=the row filter, the ---CONFIG--- split, the --since guard or the --out
+  // write breaks, or a missing log is treated as an error instead of zero passes; why_new=only the pure summarizeReviewLoop is
+  // tested, never the bin against a review log on disk; seam=none; no_claim=review-log writing (rows are written directly, not
+  // through gstack-review-log)
+  test('summary reads the branch review log through gstack-review-read, counts this invocation\'s passes, writes --out, and refuses a missing --since', () => {
+    const repo = fixture();
+    repo.git('checkout', '-qb', 'feat');
+    const slug = runBin(repo, 'gstack-slug', ['--get', 'SLUG']).out.trim();
+    const branch = runBin(repo, 'gstack-slug', ['--get', 'BRANCH']).out.trim();
+    expect(slug).not.toBe('');
+    expect(branch).toBe('feat');
+    const logDir = path.join(repo.home, 'projects', slug);
+    fs.mkdirSync(logDir, { recursive: true });
+    const rows = [
+      { skill: 'review', via: 'ship', timestamp: '2026-10-26T09:00:00Z', status: 'clean', review_scope: 'frozen', findings: [{ fingerprint: 'old:1:q', blocking: true, action: 'fixed' }] },
+      { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:00:00Z', status: 'issues_found', review_scope: 'frozen', findings: [
+        { fingerprint: 'a:1:x', blocking: true, action: 'auto-fixed' }, { fingerprint: 'b:1:y', blocking: true, action: 'deferred', issue: 5 }, { fingerprint: 'c:1:z', action: 'noted' }] },
+      { skill: 'adversarial-review', via: 'ship', timestamp: '2026-10-26T10:15:00Z', findings: [{ fingerprint: 'd:1:w', blocking: true }] },
+      { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:30:00Z', status: 'clean', review_scope: 'frozen', findings: [
+        { fingerprint: 'b:1:y', blocking: true, action: 'deferred', issue: 5 }, { fingerprint: 'c:1:z', action: 'noted' }] },
+      { skill: 'review', timestamp: '2026-10-26T10:40:00Z', findings: [{ fingerprint: 'e:1:v', blocking: true, action: 'fixed' }] },
+    ];
+    fs.writeFileSync(path.join(logDir, `${branch}-reviews.jsonl`), rows.map(r => JSON.stringify(r)).join('\n') + '\n{not json\n');
+    const expected = { passes: 2, blocking_found: 2, deferred: 1, noted: 1, fixed: 1, scope: 'frozen' };
+    const out = path.join(repo.root, 'review-loop.json');
+    const r = runBin(repo, 'gstack-review-scope', ['summary', '--since', '2026-10-26T09:30:00Z', '--out', out, '--json']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(r.err).toContain('REVIEW_LOOP: passes=2 blocking_found=2 deferred=1 noted=1 fixed=1 scope=frozen');
+    expect(JSON.parse(r.out)).toEqual(expected);
+    expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual(expected);
+    const plain = runBin(repo, 'gstack-review-scope', ['summary', '--since', '2026-10-26T08:00:00Z']);
+    expect(plain.status).toBe(EXIT.ok);
+    expect(plain.out.trim()).toBe('REVIEW_LOOP: passes=3 blocking_found=3 deferred=1 noted=1 fixed=2 scope=frozen');
+    const noSince = runBin(repo, 'gstack-review-scope', ['summary', '--json']);
+    expect(noSince.status).toBe(EXIT.fail);
+    expect(noSince.err).toContain('(REVIEW_SCOPE_INPUT;');
+    expect(noSince.out).toBe('');
+    const badSince = runBin(repo, 'gstack-review-scope', ['summary', '--since', 'yesterday']);
+    expect(badSince.status).toBe(EXIT.fail);
+    expect(badSince.err).toContain('(REVIEW_SCOPE_INPUT;');
+    // zero matching passes is a wrong --since or a log written elsewhere, never a loop to record: refused, nothing written
+    const bare = fixture();
+    const noneOut = path.join(bare.root, 'review-loop.json');
+    const none = runBin(bare, 'gstack-review-scope', ['summary', '--since', '2026-10-26T09:30:00Z', '--out', noneOut, '--json']);
+    expect(none.status).toBe(EXIT.fail);
+    expect(none.err).toContain('(REVIEW_SCOPE_INPUT;');
+    expect(none.err).toContain('REVIEW_LOOP: passes=0');
+    expect(fs.existsSync(noneOut)).toBe(false);
+    const late = runBin(repo, 'gstack-review-scope', ['summary', '--since', '2026-10-27T00:00:00Z']);
+    expect(late.status).toBe(EXIT.fail);
   });
 });

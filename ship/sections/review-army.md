@@ -13,10 +13,12 @@ Steps 10–11 queue findings without editing; include those findings in this pas
 Every repeat starts before the checklist read and captures a fresh REVIEW_START.
 Finish the complete review and QA before applying any fix in Step 9.4.
 
-**Pass 2+ reads the range, not the tree** (`review_scope frozen`): wherever this
-step or its dispatched prompts run `DIFF_BASE=$(git merge-base origin/<base> HEAD)`,
-use `DIFF_BASE=$RANGE_BASE` instead, so reviewers read what changed since the
-previous pass. `NO FINDINGS` is the expected result for a clean range. Under
+**Pass 2+ reads the range, not the tree** (`review_scope frozen`): the core read
+in item 2 becomes `git diff $RANGE_BASE`, and wherever this step or its dispatched
+prompts run `DIFF_BASE=$(git merge-base origin/<base> HEAD)`, use `DIFF_BASE=$RANGE_BASE`
+instead, so every reviewer reads what changed since the previous pass. The gate
+scan (2.5) and the QA probes keep the whole candidate: they are tools, not
+reviewers. `NO FINDINGS` is the expected result for a clean range. Under
 `review_scope all`, every pass reads the full diff.
 
 ## Confidence Calibration
@@ -80,7 +82,7 @@ This pass is static; defer product probes to Step 9.2.1.
 
 1. Read `~/.claude/skills/gstack/review/checklist.md`. If the file cannot be read, **STOP** and report the error.
 
-2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>`. Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
+2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>` (`git diff $RANGE_BASE` from pass 2 on). Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
 
    Every pass captures a full token (no `--fix-range`), so the record binds the
    whole tree even when reviewers read only the range.
@@ -373,8 +375,9 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 {\"severity\":\"CRITICAL|INFORMATIONAL\",\"confidence\":N,\"path\":\"file\",\"line\":N,\"category\":\"category\",\"summary\":\"description\",\"fix\":\"recommended fix\",\"fingerprint\":\"path:line:category\",\"specialist\":\"name\"}
 
 Required fields: severity, confidence, path, category, summary, specialist.
-Optional: line, fix, fingerprint, evidence, test_stub, advisory, evidence_paths, helper_target.
+Optional: line, fix, fingerprint, evidence, test_stub, advisory, evidence_paths, helper_target, cause.
 CRITICAL means a test that would fail, a production break, or a security or data-loss defect; everything else is INFORMATIONAL.
+A defect the diff causes but that shows elsewhere (a caller broken by a changed signature, a consumer of a removed export) keeps the victim as `path` and names the changed line in `cause`: {\"cause\":{\"path\":\"file\",\"line\":N}}. Without it the finding reads as pre-existing code.
 
 Leave extraction advice to the core shared-code check; report real defects in duplicated code independently, keep advisory metadata on structural advice, and never call a demonstrated defect advisory because a shared helper could fix it.
 
@@ -438,7 +441,25 @@ the highest confidence and all source names. Confirmation by distinct specialist
 Core findings never earn a specialist confidence boost. Preserve `advisory`,
 `evidence_paths` and `helper_target` through every merge.
 
-#### 4. Apply specialist confidence gates
+#### 4. Lead judgment
+
+Reviewers fill the space they are given. Before any merged finding counts, the
+parent reads each one and drops or downgrades it on these grounds, saying so:
+- **Nit gravity.** When a reviewer's whole return is style, naming and preference,
+  the code is probably fine; write that down and count nothing from it as a defect.
+- **Hypothetical, not actual.** A defect names the call site or input that reaches
+  it. One that does not is a note until someone traces it.
+- **Structure for a case that does not exist.** Advice to abstract, generalize or
+  guard a path nothing takes is advisory, never a defect.
+- **A different design is not a defect.** "I would have done it differently" with
+  no failing case behind it is dropped.
+- **Missing context.** A finding that assumes a rule the repository documents
+  otherwise is dropped with the pointer.
+Agreement between reviewers that did not see each other's output is the strongest
+signal; the `MULTI-SPECIALIST CONFIRMED` boost above records it. A reviewer that
+returned `NO FINDINGS` was right until a traced defect says otherwise.
+
+#### 5. Apply specialist confidence gates
 
 - Confidence 7+: show normally in the findings output
 - Confidence 5-6: show with caveat "Medium confidence — verify this is actually an issue"
@@ -447,14 +468,14 @@ Core findings never earn a specialist confidence boost. Preserve `advisory`,
 
 Core findings keep the core Confidence Calibration gates.
 
-#### 5. Score and present specialists
+#### 6. Score and present specialists
 
 Only specialist findings enter this header and `quality_score`; core findings do not.
 Use the merged NON-advisory specialist findings for both counts and score;
 the header's N is X + Y, so advisory findings never add to it:
 `quality_score = max(0, 10 - (critical_count * 2 + informational_count * 0.5))`
 Cap at 10 and retain for the review-log persist. These are not final unresolved-defect totals.
-Print only this block: the stage 6 activity object and `test_stub` bodies are log and Fix-First data.
+Print only this block: the stage 7 activity object and `test_stub` bodies are log and Fix-First data.
 Validated `"advisory": true` findings from any source are excluded from score,
 header, unresolved-defect totals and clean-status blockers. Show them separately;
 they remain ASK-only, never auto-applied. Real defects follow normal Fix-First.
@@ -481,7 +502,7 @@ PR Quality Score: X/10
 
 Core shared-code savings never enter this footer; explain any overlap once in the core proposal.
 
-#### 6. Save specialist activity
+#### 7. Save specialist activity
 
 Compile a `specialists` object for the review-log persist.
 For each specialist (testing, maintainability, security, performance, data-migration, api-contract, design, simplification, state-machines, red-team):
@@ -495,7 +516,7 @@ Advisory findings COUNT in the stats `findings` field, not its defect counts.
 Include Design despite its different checklist. Preserve dispatch/failure status:
 zero returned findings from a failed attempt is not a clean review.
 
-#### 7. Hand off to Fix-First
+#### 8. Hand off to Fix-First
 
 Send these findings to Step 9.3 dedup, then Step 9.4 Fix-First alongside the checklist pass (Step 9).
 Consolidate equivalent shared-code advice under the core proposal, retaining all
@@ -525,7 +546,7 @@ concerns, integration boundary issues, and failure modes that specialist checkli
 don't cover."
 
 Tag Red Team findings `"specialist":"red-team"`.
-Add them to the original specialist outputs and rerun stages 1–7 of Step 9.2
+Add them to the original specialist outputs and rerun stages 1–8 of Step 9.2
 before Step 9.3 dedup, then Step 9.4 Fix-First; do not boost or count the earlier findings twice.
 
 If the Red Team returns NO FINDINGS, note: "Red Team review: no additional issues found."
@@ -634,6 +655,11 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    triggers a pass. Under `diff-plus-blocking` a blocking finding in unchanged
    code is `fix`, never `defer`; under `all` everything is `fix`. Save the `REVIEW_SCOPE:` line.
    A `REVIEW_SCOPE_INPUT` or `REVIEW_SCOPE_RANGE` refusal is a STOP until repaired.
+   Three words cover every finding: a **blocker** is the intended case gone wrong
+   (at or above the floor: fixed on every pass, or named to the owner at the cap);
+   a **should** is a real bug a caller will hit, in the intended case (fixed when it
+   is in the diff on pass 1, deferred when it is not); a **nit** is the rest (a named
+   note, never a pass).
 
 1. **Classify only unmatched or reopened findings as AUTO-FIX or ASK** when the
    classified output marks them `scope: fix`, per the Fix-First Heuristic in
@@ -668,7 +694,8 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    `~/.claude/skills/gstack/bin/gstack-review-scope defer --findings <classified> --pr <pr-number> --out <deferred.json>`
    (omit `--pr` before a PR exists). It files one issue per `scope: defer` finding,
    reusing an open issue that carries the finding's marker, and prints `DEFERRED:`
-   lines; `unfiled (<reason>)` keeps the finding deferred when gh cannot file it.
+   lines; `unfiled (<reason>)` keeps the finding deferred when gh cannot file it,
+   and the command still exits 0: the PR body carries the reason.
    Then `gstack-review-scope render --deferred <deferred.json> --findings <classified>`
    prints the `## Deferred findings` and `## Review notes` sections: save them for
    Step 19's PR body. Deferred and noted findings are never edited.
@@ -746,9 +773,12 @@ Apply these decisions in order:
    here too, unfixed. Name each blocking finding (path, severity, problem) for the
    owner. Deferred and noted items are never recurring findings, so a capped pass
    whose remaining findings are all below the floor applies no edits and continues
-   at decision 4: the loop ships below the floor.
+   at decision 4: the loop ships below the floor. The cap is a stop, not an
+   approval: a blocker it leaves standing is reported, never waved through.
 3. **Fixes applied below the cap:** Insert Step 5, affected Steps 6–8 and all of
-   Step 9 before the pending Step 10 in the work list. Tests must pass or retain approval for the same verified pre-existing
+   Step 9 before the pending Step 10 in the work list. If the fixes grew the diff
+   past what the request needs (a helper, a guard, a case nothing takes), cut that
+   growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
 4. **No edits in this pass:** Resolve the required-probe gate below. Only after it
    clears may you continue to Step 10. A pass whose only findings were deferred or

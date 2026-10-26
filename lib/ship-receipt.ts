@@ -10,6 +10,7 @@ import { ARTIFACT_SCHEMAS, checkSchema, type ShipReceipt, type ValidationError }
 import { approvalSummary } from './approval-citations';
 import { renderIssueLines } from './issue-links';
 import { matchesAny } from './ship-policy';
+import { stampFileKind, versionStampOnly } from './pregate/stamp-only';
 
 export const RECEIPT_FENCE = 'gstack-ship-receipt';
 const KEY_ORDER: Array<keyof ShipReceipt> = [
@@ -130,25 +131,25 @@ export function receiptSummaryLine(r: ShipReceipt): string {
 /**
  * Paths whose change never invalidates a /ship verdict on its own: tests (the
  * reviewed product code is what the verdict covers; CI at the new head reruns
- * them) and release metadata (stamps, lockfiles, the agents digest). A repo
- * extends the lists through its ship policy (`stamp_files`, `stamp_paths`,
- * `release_outputs`, `changelog`).
+ * them, unreviewed) and release metadata (the version stamp, the changelog, the
+ * agents digest). A repo extends the lists through its ship policy
+ * (`stamp_files`, `stamp_paths`, `release_outputs`, `changelog`); lockfiles are
+ * product unless the policy names them, because a dependency change is a
+ * product change. The test globs name code extensions only: an API contract
+ * such as `openapi.spec.yaml` is product.
  */
+const TEST_CODE_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'rb', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'dart', 'php', 'cs'];
 export const CARRY_TEST_GLOBS: readonly string[] = [
-  'test/**', 'tests/**', 'spec/**', '__tests__/**', 'e2e/**', 'cypress/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*',
+  'test/**', 'tests/**', 'spec/**', '__tests__/**', 'e2e/**', 'cypress/**', '**/__tests__/**',
+  ...TEST_CODE_EXTENSIONS.flatMap(ext => [`**/*.test.${ext}`, `**/*.spec.${ext}`]),
   '**/*_test.go', '**/test_*.py', '**/*_test.py', '**/*_spec.rb', '**/*Test.java', '**/*Tests.swift',
 ];
-export const CARRY_METADATA_GLOBS: readonly string[] = [
-  'VERSION', 'CHANGELOG.md', 'package.json', 'package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.lock', 'pnpm-lock.yaml',
-  'Cargo.lock', 'Gemfile.lock', 'agents-digest/**',
-];
+export const CARRY_METADATA_GLOBS: readonly string[] = ['VERSION', 'CHANGELOG.md', 'package.json', 'agents-digest/**'];
 
 export type CarryClass = 'product' | 'test' | 'metadata';
 export interface CarryPlanInput {
   /** The reviewed head the receipt names. */
   from: string; head: string;
-  /** Merge base of origin/<base> with `from` and with `head`. */
-  fromBase: string; headBase: string;
   /** Paths changed between from and head, classified. */
   changed: Array<{ path: string; class: CarryClass }>;
   /** Product patch-ids at both heads (empty string for no product diff). */
@@ -162,9 +163,20 @@ export interface CarryPlanInput {
 export interface CarryRecord { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[] }
 export type CarryPlan = { ok: true; carry: CarryRecord } | { ok: false; code: 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_CARRY_REFUSED'; message: string };
 
-export function classifyCarryPath(rel: string, extra: { tests?: readonly string[]; metadata?: readonly string[] } = {}): CarryClass {
-  if (matchesAny([...CARRY_METADATA_GLOBS, ...(extra.metadata ?? [])], rel)) return 'metadata';
-  if (matchesAny([...CARRY_TEST_GLOBS, ...(extra.tests ?? [])], rel)) return 'test';
+/**
+ * One changed path's carry class. A default-metadata manifest (`package.json`,
+ * `VERSION`) is metadata only while its from..head change is a version stamp
+ * and nothing else (`versionStampOnly`): a dependency, a script or a new key is
+ * product. `change` carries the file's text at both heads; without it the
+ * default lists decide (the paths a policy names are the repo's own call).
+ */
+export function classifyCarryPath(rel: string, extra: { metadata?: readonly string[] } = {}, change?: { before: string | null; after: string | null }): CarryClass {
+  if (matchesAny(extra.metadata ?? [], rel)) return 'metadata';
+  if (matchesAny(CARRY_METADATA_GLOBS, rel)) {
+    if (change && stampFileKind(rel) && !versionStampOnly(rel, change.before, change.after).stampOnly) return 'product';
+    return 'metadata';
+  }
+  if (matchesAny(CARRY_TEST_GLOBS, rel)) return 'test';
   return 'product';
 }
 
@@ -190,18 +202,29 @@ export function planCarry(input: CarryPlanInput): CarryPlan {
     carry: {
       from: input.from, reason: reasons.join(' + '), product_patch_id: input.productPatchId.head || 'none',
       changed_paths: input.changed.slice(0, 50).map(c => `${c.class}:${c.path}`), merge_commits: input.mergeCommits, range_diff: input.rangeDiff,
-      covers: ['pre-landing review', 'adversarial review', 'gate integrity', 'documentation audit'], reruns: ['CI at head (gstack-ship-queue ready requires it)'],
+      covers: ['pre-landing review', 'adversarial review', 'gate integrity', 'documentation audit'],
+      reruns: ['CI at head (gstack-ship-queue ready requires it); test and helper code changed since the reviewed head runs there unreviewed'],
     },
   };
 }
 
-/** The carried receipt: the same evidence, bound to the new head, with the carry recorded. */
+/**
+ * The carried receipt: the same evidence, bound to the new head, with the carry
+ * recorded. A receipt carried before keeps the reviewed head as `from` and adds
+ * this hop's merges and paths, so the record always names the head a review saw.
+ */
 export function carryReceipt(receipt: ShipReceipt, head: string, carry: CarryRecord): ShipReceipt {
-  return orderReceipt({ ...receipt, head, carry });
+  const prior = receipt.carry;
+  const merged: CarryRecord = !prior ? carry : {
+    ...carry, from: prior.from, reason: prior.reason === carry.reason ? carry.reason : `${prior.reason} + ${carry.reason}`,
+    merge_commits: prior.merge_commits + carry.merge_commits,
+    changed_paths: [...prior.changed_paths, ...carry.changed_paths.filter(p => !prior.changed_paths.includes(p))].slice(0, 50),
+  };
+  return orderReceipt({ ...receipt, head, carry: merged });
 }
 
 /** The loop counters the factory scorecard reads (passes, blocking_found, deferred), as `write --review-loop` records them. */
-export interface ReviewLoopReceipt { passes: number; blocking_found: number; deferred: number; noted?: number; fixed?: number; scope?: string }
+export type ReviewLoopReceipt = NonNullable<ShipReceipt['review_loop']>;
 export function parseReviewLoop(value: unknown): ReviewLoopReceipt | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;

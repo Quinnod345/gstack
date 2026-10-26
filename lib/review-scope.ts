@@ -26,6 +26,8 @@ export const HUNK_CONTEXT_LINES = 3;
 export interface ScopeFinding {
   fingerprint?: string; path?: string; line?: number; severity?: string; category?: string; summary?: string;
   problem?: string; fix?: string; specialist?: string; advisory?: boolean; test_stub?: string;
+  /** The changed line that causes a defect reported elsewhere (a broken caller, a consumer of a removed export); the locus follows it. */
+  cause?: { path?: string; line?: number };
   [key: string]: unknown;
 }
 export interface ScopedFinding extends ScopeFinding { locus: Locus; kind: Kind; blocking: boolean; scope: ScopeAction }
@@ -72,11 +74,17 @@ function inHunks(hunks: HunkMap, path: string, line: number | undefined, context
   return ranges.some(([a, b]) => line >= a - context && line <= b + context);
 }
 
-/** Where a finding sits: in the range since the previous pass, in the branch diff, or in code the PR did not change. */
+/**
+ * Where a finding sits: in the range since the previous pass, in the branch
+ * diff, or in code the PR did not change. A `cause` anchor wins over the
+ * reported path, so a defect the diff causes in an unchanged caller is the
+ * diff's.
+ */
 export function locusOf(finding: ScopeFinding, diffHunks: HunkMap, rangeHunks: HunkMap | null, context = HUNK_CONTEXT_LINES): Locus {
-  const path = typeof finding.path === 'string' ? finding.path : fingerprintPath(finding.fingerprint);
+  const anchor = finding.cause && typeof finding.cause === 'object' && typeof finding.cause.path === 'string' ? finding.cause : finding;
+  const path = typeof anchor.path === 'string' ? anchor.path : fingerprintPath(finding.fingerprint);
   if (!path) return 'outside';
-  const line = typeof finding.line === 'number' ? finding.line : fingerprintLine(finding.fingerprint);
+  const line = typeof anchor.line === 'number' ? anchor.line : anchor === finding ? fingerprintLine(finding.fingerprint) : undefined;
   if (rangeHunks && inHunks(rangeHunks, path, line, context)) return 'fix-range';
   if (inHunks(diffHunks, path, line, context)) return 'diff';
   return 'outside';
@@ -93,11 +101,13 @@ function fingerprintLine(fp: unknown): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
-/** A finding's kind: optional advice, a missing test, or a defect. */
+/** The categories a reviewer uses for a test finding; `testing` is what the Testing specialist's schema emits. */
+export const TEST_GAP_CATEGORIES: readonly string[] = ['testing', 'tests', 'test-gap', 'test-coverage', 'coverage', 'missing-test', 'untested'];
+
+/** A finding's kind: optional advice, a test finding (a gap, a weak or flaky test), or a product defect. */
 export function kindOf(finding: ScopeFinding): Kind {
   if (finding.advisory === true) return 'advisory';
-  const category = String(finding.category ?? '').toLowerCase();
-  if (/^(test-gap|test-coverage|coverage|missing-test|untested)$/.test(category)) return 'test-gap';
+  if (TEST_GAP_CATEGORIES.includes(String(finding.category ?? '').toLowerCase())) return 'test-gap';
   return 'defect';
 }
 
@@ -124,9 +134,11 @@ export function scopeFindings(findings: readonly ScopeFinding[], input: ScopeInp
     const kind = kindOf(finding);
     const blocking = isBlocking(finding, kind);
     const locus = locusOf(finding, input.diffHunks, input.pass > 1 ? input.rangeHunks : null, input.context);
+    // A blocking finding nobody could place cannot be filed against a path; the diff's author resolves it now.
+    const placed = typeof finding.path === 'string' || fingerprintPath(finding.fingerprint) !== undefined;
     let scope: ScopeAction;
     if (input.policy === 'all') scope = 'fix';
-    else if (locus === 'outside') scope = !blocking ? 'note' : input.policy === 'diff-plus-blocking' ? 'fix' : 'defer';
+    else if (locus === 'outside') scope = !blocking ? 'note' : input.policy === 'diff-plus-blocking' || !placed ? 'fix' : 'defer';
     else if (input.pass <= 1) scope = 'fix';
     else scope = blocking ? 'fix' : 'note';
     return { ...finding, locus, kind, blocking, scope };
@@ -187,11 +199,11 @@ export function renderDeferredIssue(f: ScopedFinding, ctx: DeferContext): { titl
 
 export interface DeferredRecord { fingerprint: string; path: string; severity: string; summary: string; issue: number | null; url?: string; reason?: string }
 
-/** The PR-body section for deferred findings: references, never closing keywords, so a merge closes nothing. */
-export function renderDeferredSection(deferred: readonly DeferredRecord[], noted: readonly ScopeFinding[] = [], policy: ReviewScopePolicy = 'frozen'): string {
+/** The PR-body section for deferred findings: references, never closing keywords, so a merge closes nothing. Only `frozen` defers. */
+export function renderDeferredSection(deferred: readonly DeferredRecord[], noted: readonly ScopeFinding[] = []): string {
   const out: string[] = [];
   if (deferred.length) {
-    out.push('## Deferred findings', '', `Blocking findings in code this PR did not change (review scope: ${policy}); filed as issues and not closed by this PR.`, '');
+    out.push('## Deferred findings', '', 'Blocking findings in code this PR did not change (review scope: frozen); filed as issues and not closed by this PR.', '');
     for (const d of deferred) {
       const ref = d.issue ? `#${d.issue}` : `unfiled${d.reason ? ` (${oneLine(d.reason)})` : ''}`;
       out.push(`- Deferred: ${ref} — ${oneLine(d.severity)} \`${oneLine(d.path)}\` ${oneLine(d.summary)}`);

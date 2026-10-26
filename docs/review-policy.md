@@ -12,9 +12,26 @@ instead of restating it. A one-line crew rule is enough:
 
 A finding is **blocking** when it is a CRITICAL defect: it would fail a test,
 break production, or lose data or secrets. Everything else is below the floor:
-an advisory, an informational item, a test gap, a wording or naming note, a
-style or simplification suggestion. Below-floor findings are reported, never
-fixed after pass 1 of a ship, and never earn another review pass.
+an advisory, an informational item, a test finding (category `testing`: a gap,
+a weak or flaky test), a wording or naming note, a style or simplification
+suggestion. Below-floor findings are reported, never fixed after pass 1 of a
+ship, and never earn another review pass.
+
+Three words cover every finding, and the loop budgets by them: a **blocker** is
+the intended case gone wrong (the floor above); a **should** is a real bug a
+caller will hit inside the intended case (fixed when it is in the diff on pass
+1, deferred when it is not); a **nit** is the rest (a named note). Two stop
+rules follow: if a pass's fixes grew the diff past what the request needs, cut
+that growth first; and the cap approves nothing, so a standing blocker is
+reported, never waved through.
+
+Before a merged finding counts, the parent applies lead judgment
+(`review/sections/review-army.md`, `ship/sections/review-army.md`, stage 4 of
+the merge): a reviewer whose whole return is nits found nothing; a defect names
+the call site or input that reaches it, or it is a note; structure for a case
+nothing takes is advisory; "I would have done it differently" is not a finding;
+a finding that assumes a rule the repository documents otherwise is dropped with
+the pointer. Independent agreement between reviewers is the strongest signal.
 
 Every reviewer prompt gstack dispatches (the core checklist, each specialist,
 the Red Team, the outside voice) carries this definition: CRITICAL means the
@@ -38,12 +55,15 @@ incomplete coverage, which blocks until the reviewer is rerun.
    finding in code the PR did not change is `defer`: `gstack-review-scope defer`
    files it as a GitHub issue (one per finding, reused across reruns through an
    `<!-- gstack-deferred-finding: <fingerprint> -->` marker; `unfiled (<reason>)`
-   when `gh` is unavailable) and the PR body lists it under `## Deferred findings`.
+   when `gh` is unavailable or its search fails, still exit 0) and the PR body
+   lists it under `## Deferred findings`.
    Below-floor findings outside the diff are `note`, listed under `## Review notes`.
 2. **Pass 2 and later review only the range since the previous pass.** Each pass
-   saves its head; the next pass diffs `RANGE_BASE..HEAD` for every reviewer and
-   classifies with `--range-base`. Only a blocking finding in that range or in the
-   diff is `fix`; every below-floor finding is a `note`.
+   saves its head; the next pass diffs `RANGE_BASE..HEAD` for every reviewer (the
+   gate scan and QA probes keep the whole candidate) and classifies with
+   `--range-base`. Only a blocking finding in that range or in the diff is `fix`;
+   every below-floor finding is a `note`. A finding the diff causes in code it did
+   not change names the changed line in `cause`, and the locus follows it.
 3. **Three passes is the cap.** A pass that applies no edits is the exit: the
    PR ships with its deferred and noted items named in the body. A blocking
    finding still in `fix` scope on pass 3 stops the run and names the finding
@@ -86,9 +106,10 @@ counters, because the reviewed product diff is unchanged.
 | `all` | everything | fixed in this PR | the whole diff, every finding | 3 fix cycles |
 
 `diff-plus-blocking` is the fallback for a repository where deferred issues pile
-up; `all` is the loop as it ran before 1.91.249.0. A value other than `frozen`
-needs `min_gstack_version` at 1.91.249.0 or later so an older gstack refuses the
-file by name instead of ignoring the key.
+up; `all` is the loop as it ran before the key existed. A value other than
+`frozen` needs `min_gstack_version` at or past the release that added the key
+(`REVIEW_SCOPE_KEY_VERSION` in `lib/ship-policy.ts`) so an older gstack refuses
+the file by name instead of ignoring the key.
 
 ## Where this is enforced
 

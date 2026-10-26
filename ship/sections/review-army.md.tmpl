@@ -11,10 +11,12 @@ Steps 10–11 queue findings without editing; include those findings in this pas
 Every repeat starts before the checklist read and captures a fresh REVIEW_START.
 Finish the complete review and QA before applying any fix in Step 9.4.
 
-**Pass 2+ reads the range, not the tree** (`review_scope frozen`): wherever this
-step or its dispatched prompts run `DIFF_BASE=$(git merge-base origin/<base> HEAD)`,
-use `DIFF_BASE=$RANGE_BASE` instead, so reviewers read what changed since the
-previous pass. `NO FINDINGS` is the expected result for a clean range. Under
+**Pass 2+ reads the range, not the tree** (`review_scope frozen`): the core read
+in item 2 becomes `git diff $RANGE_BASE`, and wherever this step or its dispatched
+prompts run `DIFF_BASE=$(git merge-base origin/<base> HEAD)`, use `DIFF_BASE=$RANGE_BASE`
+instead, so every reviewer reads what changed since the previous pass. The gate
+scan (2.5) and the QA probes keep the whole candidate: they are tools, not
+reviewers. `NO FINDINGS` is the expected result for a clean range. Under
 `review_scope all`, every pass reads the full diff.
 
 {{CONFIDENCE_CALIBRATION}}
@@ -25,7 +27,7 @@ This pass is static; defer product probes to Step 9.2.1.
 
 1. Read `~/.claude/skills/gstack/review/checklist.md`. If the file cannot be read, **STOP** and report the error.
 
-2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>`. Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
+2. Before reading the diff, run `~/.claude/skills/gstack/bin/gstack-review-log --start review` and save its token as REVIEW_START. Then run `git diff origin/<base>` (`git diff $RANGE_BASE` from pass 2 on). Read non-ignored untracked source files too (`git ls-files --others --exclude-standard`); the snapshot includes them.
 
    Every pass captures a full token (no `--fix-range`), so the record binds the
    whole tree even when reviewers read only the range.
@@ -80,6 +82,11 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    triggers a pass. Under `diff-plus-blocking` a blocking finding in unchanged
    code is `fix`, never `defer`; under `all` everything is `fix`. Save the `REVIEW_SCOPE:` line.
    A `REVIEW_SCOPE_INPUT` or `REVIEW_SCOPE_RANGE` refusal is a STOP until repaired.
+   Three words cover every finding: a **blocker** is the intended case gone wrong
+   (at or above the floor: fixed on every pass, or named to the owner at the cap);
+   a **should** is a real bug a caller will hit, in the intended case (fixed when it
+   is in the diff on pass 1, deferred when it is not); a **nit** is the rest (a named
+   note, never a pass).
 
 1. **Classify only unmatched or reopened findings as AUTO-FIX or ASK** when the
    classified output marks them `scope: fix`, per the Fix-First Heuristic in
@@ -114,7 +121,8 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    `~/.claude/skills/gstack/bin/gstack-review-scope defer --findings <classified> --pr <pr-number> --out <deferred.json>`
    (omit `--pr` before a PR exists). It files one issue per `scope: defer` finding,
    reusing an open issue that carries the finding's marker, and prints `DEFERRED:`
-   lines; `unfiled (<reason>)` keeps the finding deferred when gh cannot file it.
+   lines; `unfiled (<reason>)` keeps the finding deferred when gh cannot file it,
+   and the command still exits 0: the PR body carries the reason.
    Then `gstack-review-scope render --deferred <deferred.json> --findings <classified>`
    prints the `## Deferred findings` and `## Review notes` sections: save them for
    Step 19's PR body. Deferred and noted findings are never edited.
@@ -192,9 +200,12 @@ Apply these decisions in order:
    here too, unfixed. Name each blocking finding (path, severity, problem) for the
    owner. Deferred and noted items are never recurring findings, so a capped pass
    whose remaining findings are all below the floor applies no edits and continues
-   at decision 4: the loop ships below the floor.
+   at decision 4: the loop ships below the floor. The cap is a stop, not an
+   approval: a blocker it leaves standing is reported, never waved through.
 3. **Fixes applied below the cap:** Insert Step 5, affected Steps 6–8 and all of
-   Step 9 before the pending Step 10 in the work list. Tests must pass or retain approval for the same verified pre-existing
+   Step 9 before the pending Step 10 in the work list. If the fixes grew the diff
+   past what the request needs (a helper, a guard, a case nothing takes), cut that
+   growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
 4. **No edits in this pass:** Resolve the required-probe gate below. Only after it
    clears may you continue to Step 10. A pass whose only findings were deferred or

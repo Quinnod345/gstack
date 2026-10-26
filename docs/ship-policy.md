@@ -577,7 +577,8 @@ written by the pr-body section of `/ship` after the body is composed.
 <a id="review-scope"></a>
 ## `review_scope`: how the review loop converges
 
-Since 1.91.249.0. `/ship` Step 9 runs the pre-landing review in passes and fixes
+Since the release that added `review_scope` (`REVIEW_SCOPE_KEY_VERSION` in
+`lib/ship-policy.ts`). `/ship` Step 9 runs the pre-landing review in passes and fixes
 what it finds between them ([review-policy.md](review-policy.md) is the canonical
 statement). Under `review_scope: frozen` (the default) the loop converges by
 construction:
@@ -598,7 +599,8 @@ construction:
    `## Review notes` in the PR body.
 2. **Pass 2 and later review the range since the previous pass.** Each pass saves
    `PASS_HEAD`; the next pass sets `RANGE_BASE` to it, diffs `RANGE_BASE..HEAD`
-   for every reviewer (specialists, Red Team, the outside voice) and classifies
+   for every reviewer (the core checklist, specialists, Red Team, the outside
+   voice; the gate scan and QA probes keep the whole candidate) and classifies
    with `--range-base <sha>`. Only a blocking finding in that range (`locus:
    fix-range`) or in the diff is `scope: fix`; nothing below the floor earns a
    pass. `NO FINDINGS` is the expected reviewer result for a clean range, never a
@@ -631,16 +633,23 @@ line, and the codes a refusal ends with are
 <a id="receipt-carry"></a>
 ## Carrying a receipt across a base merge or a test-only fix
 
-Since 1.91.249.0. A `/ship` receipt names the head it reviewed, so a conflict-only
-merge of the base or a test-only fix used to invalidate it and cost a full
-re-run on identical product code. `gstack-ship-receipt carry --pr <n> --base <base>`
-(or `--body <file>`) moves the receipt to HEAD when the receipt's head is an
-ancestor of HEAD and `git patch-id` of the product diff against the base is the
-same at both heads. Product means every changed path that is not a test
-(`test/**`, `**/*.test.*`, `**/*.spec.*`, `spec/**`, `e2e/**` and the other
-`CARRY_TEST_GLOBS` in `lib/ship-receipt.ts`) or release metadata (`VERSION`,
-`CHANGELOG.md`, `package.json`, the lockfiles, `agents-digest/**`); a base
-merge contributes no product change of its own. The carried receipt records
+Since the release that added `review_scope`. A `/ship` receipt names the head it
+reviewed, so a conflict-only merge of the base or a test-only fix used to
+invalidate it and cost a full re-run on identical product code.
+`gstack-ship-receipt carry --pr <n> --base <base>` (or `--body <file>`) moves
+the receipt to HEAD when the working tree is clean, the receipt's head is an
+ancestor of HEAD and `git patch-id --verbatim` of the product diff against the
+base is the same at both heads (verbatim: whitespace counts, hunk line numbers
+do not). Product means every changed path that is not test code (`test/**`,
+`spec/**`, `e2e/**`, `**/*.test.<code ext>`, `**/*.spec.<code ext>` and the
+other `CARRY_TEST_GLOBS` in `lib/ship-receipt.ts`; an `openapi.spec.yaml` is
+product) or release metadata (`CHANGELOG.md`, `agents-digest/**`, the paths the
+policy's `stamp_files`, `stamp_paths`, `release_outputs` and `changelog` name,
+and `VERSION` or `package.json` only while the change is a version stamp and
+nothing else: a dependency, a script or a new key makes them product). Lockfiles
+are product unless the policy names them. A base merge contributes no product
+change of its own. A receipt carried twice keeps the reviewed head as
+`carry.from` and adds up the merges and paths. The carried receipt records
 `carry: { from, reason, product_patch_id, changed_paths, merge_commits,
 range_diff, covers, reruns }` with the `git range-diff` evidence, prints
 `CARRY: carried from <old> to <new> (<reason>)` and the `GSTACK_RESULT:
@@ -651,7 +660,7 @@ skill=ship status=complete` line, and its summary line ends with
 A changed product path, or a product patch-id that differs, is
 [`RECEIPT_CARRY_PRODUCT_CHANGED`](troubleshooting.md#receipt-carry-product-changed)
 (exit 3; the refusal names the paths), and a receipt whose head is not in HEAD's
-history (a rebase or force-push) is
+history (a rebase or force-push) or a working tree with uncommitted changes is
 [`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused): run `/ship`
 on the new head. `/ship` Step 1 runs the carry check itself when the branch has
 an open PR, and a `CARRY: carried` result ends that run with the receipt bound

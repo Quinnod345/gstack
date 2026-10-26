@@ -124,8 +124,9 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 {\\"severity\\":\\"CRITICAL|INFORMATIONAL\\",\\"confidence\\":N,\\"path\\":\\"file\\",\\"line\\":N,\\"category\\":\\"category\\",\\"summary\\":\\"description\\",\\"fix\\":\\"recommended fix\\",\\"fingerprint\\":\\"path:line:category\\",\\"specialist\\":\\"name\\"}
 
 Required fields: severity, confidence, path, category, summary, specialist.
-Optional: line, fix, fingerprint, evidence, test_stub, advisory, evidence_paths, helper_target.
+Optional: line, fix, fingerprint, evidence, test_stub, advisory, evidence_paths, helper_target, cause.
 CRITICAL means a test that would fail, a production break, or a security or data-loss defect; everything else is INFORMATIONAL.
+A defect the diff causes but that shows elsewhere (a caller broken by a changed signature, a consumer of a removed export) keeps the victim as \`path\` and names the changed line in \`cause\`: {\\"cause\\":{\\"path\\":\\"file\\",\\"line\\":N}}. Without it the finding reads as pre-existing code.
 
 Leave extraction advice to the core shared-code check; report real defects in duplicated code independently, keep advisory metadata on structural advice, and never call a demonstrated defect advisory because a shared helper could fix it.
 
@@ -194,7 +195,25 @@ the highest confidence and all source names. Confirmation by distinct specialist
 Core findings never earn a specialist confidence boost. Preserve \`advisory\`,
 \`evidence_paths\` and \`helper_target\` through every merge.
 
-#### 4. Apply specialist confidence gates
+#### 4. Lead judgment
+
+Reviewers fill the space they are given. Before any merged finding counts, the
+parent reads each one and drops or downgrades it on these grounds, saying so:
+- **Nit gravity.** When a reviewer's whole return is style, naming and preference,
+  the code is probably fine; write that down and count nothing from it as a defect.
+- **Hypothetical, not actual.** A defect names the call site or input that reaches
+  it. One that does not is a note until someone traces it.
+- **Structure for a case that does not exist.** Advice to abstract, generalize or
+  guard a path nothing takes is advisory, never a defect.
+- **A different design is not a defect.** "I would have done it differently" with
+  no failing case behind it is dropped.
+- **Missing context.** A finding that assumes a rule the repository documents
+  otherwise is dropped with the pointer.
+Agreement between reviewers that did not see each other's output is the strongest
+signal; the \`MULTI-SPECIALIST CONFIRMED\` boost above records it. A reviewer that
+returned \`NO FINDINGS\` was right until a traced defect says otherwise.
+
+#### 5. Apply specialist confidence gates
 
 - Confidence 7+: show normally in the findings output
 - Confidence 5-6: show with caveat "Medium confidence — verify this is actually an issue"
@@ -203,14 +222,14 @@ Core findings never earn a specialist confidence boost. Preserve \`advisory\`,
 
 Core findings keep the core Confidence Calibration gates.
 
-#### 5. Score and present specialists
+#### 6. Score and present specialists
 
 Only specialist findings enter this header and \`quality_score\`; core findings do not.
 Use the merged NON-advisory specialist findings for both counts and score;
 the header's N is X + Y, so advisory findings never add to it:
 \`quality_score = max(0, 10 - (critical_count * 2 + informational_count * 0.5))\`
 Cap at 10 and retain for ${persistRef}. These are not final unresolved-defect totals.
-Print only this block: the stage 6 activity object and \`test_stub\` bodies are log and Fix-First data.
+Print only this block: the stage 7 activity object and \`test_stub\` bodies are log and Fix-First data.
 Validated \`"advisory": true\` findings from any source are excluded from score,
 header, unresolved-defect totals and clean-status blockers. Show them separately;
 they remain ASK-only, never auto-applied. Real defects follow normal Fix-First.
@@ -237,7 +256,7 @@ PR Quality Score: X/10
 
 Core shared-code savings never enter this footer; explain any overlap once in the core proposal.
 
-#### 6. Save specialist activity
+#### 7. Save specialist activity
 
 Compile a \`specialists\` object for ${persistRef}.
 ${isShip ? 'For each specialist' : 'For DIFF_LINES < 50, keep `specialists: {}`; do not manufacture per-specialist scope records. Otherwise record each considered specialist'} (testing, maintainability, security, performance, data-migration, api-contract, design, simplification, state-machines, red-team):
@@ -251,7 +270,7 @@ Advisory findings COUNT in the stats \`findings\` field, not its defect counts.
 Include Design despite its different checklist. Preserve dispatch/failure status:
 zero returned findings from a failed attempt is not a clean review.
 
-#### 7. Hand off to Fix-First
+#### 8. Hand off to Fix-First
 
 Send these findings to ${fixFirstRef} alongside ${critPassRef}.
 Consolidate equivalent shared-code advice under the core proposal, retaining all
@@ -284,7 +303,7 @@ concerns, integration boundary issues, and failure modes that specialist checkli
 don't cover."
 
 Tag Red Team findings \`"specialist":"red-team"\`.
-Add them to the original specialist outputs and rerun stages 1–7 of Step ${stepMerge}
+Add them to the original specialist outputs and rerun stages 1–8 of Step ${stepMerge}
 before ${fixFirstRef}; do not boost or count the earlier findings twice.
 
 If the Red Team returns NO FINDINGS, note: "Red Team review: no additional issues found."
