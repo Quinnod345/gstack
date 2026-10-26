@@ -96,9 +96,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 Run the invoked skill within the host's plan-mode limits. **Execute the skill file** starting from the Scope gate, then follow its Startup sequence. Skill questions are valid; skip only questions the skill resolves. Any AskUserQuestion variant satisfies end-of-turn; use AskUserQuestion Format's tool resolution. If unavailable/failed: `headless` → BLOCKED; `interactive` → prose fallback (satisfies end-of-turn). At STOP, stop: no continuation or ExitPlanMode. Run "PLAN MODE EXCEPTION — ALWAYS RUN" commands only where the host permits. ExitPlanMode only after skill completion or if the user cancels the skill or tells you to leave plan mode.
 
-If `PROACTIVE` is `false` or `off`, suggest no skill, even by asking; if `core` (default), only /office-hours, /review, /qa and /ship; `all` or `true`: any.
+If `PROACTIVE` is `false`/`off`: suggest no skill unasked, nor ask to. `core`: only /office-hours, /review, /qa, /ship. `all`/`true`: any. This skill's steps still run.
 
-If `SKILL_PREFIX` is `true`, suggest `/gstack-*` names; disk paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
 
 ## AskUserQuestion Format
 

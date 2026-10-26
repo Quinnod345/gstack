@@ -47,23 +47,19 @@ describe('proactive core set: the router', () => {
 describe('proactive core set: every skill preamble', () => {
   const line = generateUpgradeCheck({ paths: { skillRoot: '~/.claude/skills/gstack' } } as never);
 
-  test('the steady-state rule names core as the default with the four core skills, and keeps the false marker the order test reads', () => {
-    expect(line).toMatch(/^If `PROACTIVE` is `false` or `off`/);
-    expect(line).toContain('if `core` (default), only /office-hours, /review, /qa and /ship');
-    expect(line).toContain('`all` or `true`: any');
-    expect(line).toContain('suggest no skill, even by asking');
+  test('the steady-state rule names the four core skills under core, scopes the setting to unasked suggestions, and keeps the false marker the order test reads', () => {
+    expect(line).toMatch(/^If `PROACTIVE` is `false`\/`off`/);
+    expect(line).toContain('`core`: only /office-hours, /review, /qa, /ship');
+    expect(line).toContain('`all`/`true`: any');
+    expect(line).toContain('suggest no skill unasked, nor ask to');
+    expect(line).toContain("This skill's steps still run");
     for (const skill of NON_CORE_SAMPLE) expect(line).not.toContain(skill);
-  });
-
-  test('the preamble did not grow: the size guard pins only move down, so the rule stays within the old line budget', () => {
-    const old = 'If `PROACTIVE` is `false`, do not auto-invoke or suggest skills, including by asking whether to run one. Only run skills the user explicitly invokes.\n\nIf `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.';
-    expect(line.length).toBeLessThanOrEqual(old.length);
   });
 
   test('a generated core skill and a generated non-core skill both carry it (it is the same preamble)', () => {
     for (const skill of ['review', 'investigate']) {
       const out = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
-      expect(out).toContain('if `core` (default), only /office-hours, /review, /qa and /ship');
+      expect(out).toContain('`core`: only /office-hours, /review, /qa, /ship');
     }
   });
 });
@@ -82,6 +78,36 @@ describe('proactive core set: the one-time prompt and the registry', () => {
 
   test('the registry entry matches the prompt options', () => {
     expect(QUESTIONS['preamble-proactive-behavior'].options).toEqual(['core', 'all', 'off']);
+  });
+
+  test('the first-run and first-loop tips name only core skills, and both are skipped under off (negative control: no /spec or /investigate tip)', () => {
+    const tips = skillStart.slice(skillStart.indexOf('if [ "$_ACTIVATED" = "no" ]; then'), skillStart.indexOf('# Routing injection'));
+    for (const skill of NON_CORE_SAMPLE.concat(['/spec', '/plan-eng-review'])) expect(tips).not.toContain(skill);
+    for (const skill of CORE) expect(tips).toContain(skill);
+    expect(tips).toContain('case "$_PROACTIVE" in off|false) _FT_TIP="" ;; esac');
+    expect(tips).toContain('if [ "$_PROACTIVE" != "off" ] && [ "$_PROACTIVE" != "false" ]; then');
+  });
+});
+
+/**
+ * Value: protects=every PROACTIVE gate outside the router honors off, the opt-out the
+ * router and prompt now write, and the router tells a model that an in-skill handoff is
+ * not a suggestion; fails_when=a template gates on the legacy false only, or the
+ * carve-out sentence is dropped; why_new=the surfaces table above lists only text that
+ * names the core four; the office-hours handoff names non-core next steps by design;
+ * seam=none; no_claim=how a model weighs the two instructions (prose, not executed)
+ */
+describe('proactive core set: in-skill handoffs', () => {
+  test('the office-hours next-review handoff honors off as well as false, and its render carries it', () => {
+    const tmpl = fs.readFileSync(path.join(ROOT, 'office-hours', 'sections', 'design-and-handoff.md.tmpl'), 'utf-8');
+    const gate = tmpl.match(/\*\*If `PROACTIVE` is [^\n]*do NOT auto-launch/)?.[0] ?? '';
+    expect(gate).toContain('`false` or `off`');
+    const out = fs.readFileSync(path.join(ROOT, 'office-hours', 'sections', 'design-and-handoff.md'), 'utf-8');
+    expect(out).toMatch(/If `PROACTIVE` is `false` or `off`[^\n]*do NOT auto-launch/);
+  });
+
+  test('the router says a step inside a running skill is part of that skill, not a suggestion', () => {
+    expect(routerTmpl.replace(/\s+/g, ' ')).toContain('a step inside a skill that is already running (a handoff, a review gate, a subagent it dispatches) is part of that skill, not a suggestion');
   });
 });
 

@@ -8,7 +8,7 @@ import type { TemplateContext } from '../types';
  * the fence prose scopes and the model follows.
  */
 export function generateUpgradeCheck(ctx: TemplateContext): string {
-  return `If \`PROACTIVE\` is \`false\` or \`off\`, suggest no skill, even by asking; if \`core\` (default), only /office-hours, /review, /qa and /ship; \`all\` or \`true\`: any.
+  return `If \`PROACTIVE\` is \`false\`/\`off\`: suggest no skill unasked, nor ask to. \`core\`: only /office-hours, /review, /qa, /ship. \`all\`/\`true\`: any. This skill's steps still run.
 
-If \`SKILL_PREFIX\` is \`true\`, suggest \`/gstack-*\` names; disk paths stay \`${ctx.paths.skillRoot}/[skill-name]/SKILL.md\`.`;
+If \`SKILL_PREFIX\` is \`true\` use \`/gstack-*\` names; paths stay \`${ctx.paths.skillRoot}/[skill-name]/SKILL.md\`.`;
 }

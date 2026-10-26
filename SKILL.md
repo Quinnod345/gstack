@@ -49,9 +49,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 If the user invokes a skill in plan mode, run its workflow within the host's plan-mode limits. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; any AskUserQuestion the skill fires is the workflow operating within plan mode, not a violation of it — and a skill whose instructions resolve a question themselves (e.g. a plan-mode auto-select) may legitimately not ask it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" run only where the host permits them. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
 
-If `PROACTIVE` is `false` or `off`, suggest no skill, even by asking; if `core` (default), only /office-hours, /review, /qa and /ship; `all` or `true`: any.
+If `PROACTIVE` is `false`/`off`: suggest no skill unasked, nor ask to. `core`: only /office-hours, /review, /qa, /ship. `all`/`true`: any. This skill's steps still run.
 
-If `SKILL_PREFIX` is `true`, suggest `/gstack-*` names; disk paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `~/.claude/skills/gstack/[skill-name]/SKILL.md`.
 
 ## Artifacts Sync (skill start)
 
@@ -178,7 +178,9 @@ Only run skills the user explicitly invokes. This preference persists across ses
 If `PROACTIVE` is `core` (default): **invoke the Skill tool** only for the four core
 skills when the user's request matches their rule below: `/office-hours`, `/review`,
 `/qa` and `/ship`. For every other rule, answer directly and do not suggest the skill;
-the user types it. A skill the user names is always invoked, whatever this setting says.
+the user types it. A skill the user names is always invoked, whatever this setting says,
+and a step inside a skill that is already running (a handoff, a review gate, a subagent it
+dispatches) is part of that skill, not a suggestion.
 
 If `PROACTIVE` is `all` (or `true`): **invoke the Skill tool** when the user's request
 matches any skill's purpose. Do NOT answer directly when a skill exists for the task.
