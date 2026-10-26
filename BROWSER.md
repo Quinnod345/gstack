@@ -1332,8 +1332,9 @@ profile, `state save` files and, with `BROWSE_PERSIST_STATE=1`, the headless
 session state), and prefer Aside for signed-in work where you have it.
 
 To check a build, run `$B stop`, then the same `goto` in the default headless
-mode with `BROWSE_EXTENSIONS_DIR` unset, `BROWSE_PROXY_URL=direct` (so no proxy
-from `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` is used) and
+mode with `BROWSE_EXTENSIONS_DIR` and `BROWSE_PROXY_URL` unset, the proxy
+variables `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` unset in both cases
+(Chromium reads those itself, even when gstack sets no proxy), and
 `GSTACK_CHROMIUM_PATH` unset (the bundled build) or set to the build you want
 to check. First confirm that a known-good HTTPS site such as
 `$B goto https://example.com/` loads in the same session, because a captive
