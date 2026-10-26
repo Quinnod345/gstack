@@ -162,8 +162,8 @@ export const TRAIN_KEYS_VERSION = '1.91.146.0';
 // Each constant is the release that first reads its key: a policy declaring the key must name at least
 // that version as min_gstack_version, so an older gstack refuses the policy by name instead of failing on
 // an unknown key. review_scope shipped in 1.91.256.0 (#3481). docs.caps is unreleased: its constant names the
-// next release after the newest CHANGELOG heading, and test/gstack-ship-policy.test.ts fails when a release that
-// does not read the key is stamped under that number (the stamper then moves the constant with the heading).
+// release expected to stamp it (test/gstack-ship-policy.test.ts holds it newer than every CHANGELOG heading the
+// checkout sees); whoever stamps that release under another number moves the constant to the stamped version.
 export const REVIEW_SCOPE_KEY_VERSION = '1.91.256.0';
 export const DOCS_CAPS_KEY_VERSION = '1.91.258.0';
 export const POLICY_KEY_INTRODUCED: Record<PolicyKey, string> = {

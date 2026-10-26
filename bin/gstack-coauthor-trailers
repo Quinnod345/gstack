@@ -80,8 +80,10 @@ function main(argv: string[]): number {
     if (appended.length) {
       // git places the lines in the message's trailer block (joining an existing block, above comment
       // lines, CRLF kept), so an existing co-author keeps GitHub's attribution; a separate paragraph would not.
+      // Placement is pinned on the command line: a `---` body line is not a divider, and the user's trailer.*
+      // config cannot replace or drop the existing lines.
       if (!fs.existsSync(message)) fs.writeFileSync(message, '');
-      const placed = git(['interpret-trailers', '--in-place', ...appended.flatMap(t => ['--trailer', t]), message]);
+      const placed = git(['-c', 'trailer.separators=:', 'interpret-trailers', '--in-place', '--no-divider', '--where', 'end', '--if-exists', 'addIfDifferentNeighbor', '--if-missing', 'add', ...appended.flatMap(t => ['--trailer', t]), '--', message]);
       if (!placed.ok) { process.stderr.write(`gstack-coauthor-trailers: cannot append to ${message}: ${placed.err.split('\n')[0] ?? ''}\n`); return EXIT.fail; }
     }
   }

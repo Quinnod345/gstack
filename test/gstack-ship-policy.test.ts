@@ -75,18 +75,20 @@ describe('validatePolicy (schema + containment, pure)', () => {
 });
 
 describe('policy key versions against the CHANGELOG', () => {
-  test('an unreleased key names the release right after the newest heading; a released key has a heading', () => {
-    // The base branch's CHANGELOG counts too: a stamp-at-merge branch carries main's headings only after the slot merge.
+  test('an unreleased key names a release newer than every heading the checkout can see', () => {
+    // The base branch's CHANGELOG counts when the checkout has it (a depth-1 CI clone does not): a stamp-at-merge
+    // branch carries main's headings only after the slot merge, and a release stamped under another number
+    // leaves the constant naming a release that never read the key, which the stamper moves by hand.
     const root = path.join(import.meta.dir, '..');
     const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
-    const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.stdout ?? '');
-    const headings = [...text.matchAll(/^## \[(\d+\.\d+\.\d+\.\d+)\]/gm)].map(m => m[1]!.split('.').map(Number));
-    const newest = headings.sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!).at(-1)!;
-    const next = `${newest[0]}.${newest[1]}.${newest[2]! + 1}.0`;
-    const released = new Set(headings.map(h => h.join('.')));
+    const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.status === 0 ? base.stdout : '');
+    const parse = (v: string) => v.split('.').map(Number);
+    const cmp = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!;
+    const headings = [...text.matchAll(/^## \[(\d+\.\d+\.\d+\.\d+)\]/gm)].map(m => m[1]!);
+    const newest = headings.map(parse).sort(cmp).at(-1)!;
     for (const [key, version] of Object.entries(POLICY_KEY_INTRODUCED)) {
-      if (released.has(version)) continue;
-      expect(version, `${key} is introduced in ${version}, which has no CHANGELOG heading; an unreleased key names the next release ${next} (move it when the stamp lands elsewhere)`).toBe(next);
+      if (headings.includes(version)) continue;
+      expect(cmp(parse(version), newest), `${key} is introduced in ${version}, which has no CHANGELOG heading and is not newer than the newest heading ${newest.join('.')}; an unreleased key names the release that will stamp it`).toBeGreaterThan(0);
     }
   });
 });
