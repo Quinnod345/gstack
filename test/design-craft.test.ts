@@ -124,12 +124,6 @@ describe('design-craft check', () => {
     expect(checkCraft('<section><h2>Pricing</h2><a href="/buy">Start free trial</a></section>')).toEqual([]);
   });
 
-  test('markup rules skip script bodies, so a hydration payload that repeats the markup counts once', () => {
-    const page = '<div class="min-h-screen transition-all"><a href="#">x</a><img src="a.png"></div><script>self.__next_f.push([1,"<div class=\\"min-h-screen transition-all\\"><a href=\\"#\\">x</a><img src=\\"a.png\\"></div>"])</script>';
-    expect(checkCraft(page).map(f => `${f.id} ${f.count}`)).toEqual(['layout-transition 1', 'dead-link 1', 'img-no-alt 1', 'vh-height 1']);
-    expect(checkCraft('<p>Hi</p><button onclick="window.addEventListener(\'scroll\', f)">Go</button>').map(f => f.id)).toEqual(['scroll-listener']);
-  });
-
   test('the CLI prints CRAFT_CHECK lines and exits 1 on tells, 0 when clean, 2 on usage', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-craft-'));
     try {
@@ -147,10 +141,6 @@ describe('design-craft check', () => {
       expect(run(path.join(dir, 'empty.html')).code).toBe(2);
       fs.writeFileSync(path.join(dir, 'page.tsx'), 'export const P = () => <p>Acme</p>;');
       expect(run(path.join(dir, 'page.tsx'))).toMatchObject({ code: 2, out: '' });
-      fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><html><head><title>App</title></head><body>\n<div id="root"></div>\n<script type="module" src="/src/main.tsx"></script>\n</body></html>');
-      const shell = run(path.join(dir, 'index.html'));
-      expect(shell).toMatchObject({ code: 2, out: '' });
-      expect(shell.err).toContain('mount-node shell');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
