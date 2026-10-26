@@ -132,8 +132,27 @@ find "$_GH/sessions" -mmin +120 -type f -exec rm {} + 2>/dev/null || true
 }
 _SESSIONS=$(find "$_GH/sessions" -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
 
-_PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "true")
+_PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "core")
+# A hand-edited config can hold anything: drop quotes and a trailing comment,
+# lowercase, read the legacy true/false and the YAML yes/no family as all/off
+# (an opt-out must never fail open), and anything else as core, so STATUS only
+# ever says core | all | off.
+_PROACTIVE=$(printf '%s' "$_PROACTIVE" | sed -e 's/[[:space:]]*#.*$//' -e "s/^[[:space:]]*[\"']*//" -e "s/[\"']*[[:space:]]*$//" | tr '[:upper:]' '[:lower:]')
+case "$_PROACTIVE" in
+  true|yes|y|on|1) _PROACTIVE="all" ;;
+  false|no|n|none|0|disabled|never) _PROACTIVE="off" ;;
+  core|all|off) ;;
+  *) _PROACTIVE="core" ;;
+esac
+# off silences every unasked surface below: the tips, the one-time prompt and
+# the CLAUDE.md routing offer. A stored off also answers the one-time prompt,
+# so the marker is written here, before STATUS reports it.
+case "$_PROACTIVE" in off) _PROACTIVE_OFF="yes" ;; *) _PROACTIVE_OFF="no" ;; esac
 _PROACTIVE_PROMPTED=$([ -f "$_GH/.proactive-prompted" ] && echo "yes" || echo "no")
+if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_PROACTIVE_OFF" = "yes" ]; then
+  touch "$_GH/.proactive-prompted" 2>/dev/null || true
+  _PROACTIVE_PROMPTED="yes"
+fi
 # Branch name is embedded in concatenated JSON below; strip anything outside
 # the gstack-slug BRANCH alphabet so a hostile ref name can't forge fields.
 _BRANCH=$(git branch --show-current 2>/dev/null | tr -cd 'a-zA-Z0-9._/-')
@@ -322,7 +341,7 @@ echo "GSTACK_PLAN_MODE: $GSTACK_PLAN_MODE"
 # GSTACK_SESSION_KIND=spawned override must light this up too.
 [ "$_SESSION_KIND" = "spawned" ] && echo "SPAWNED_SESSION: true" || true
 [ "$_SESSION_KIND" = "unattended" ] && echo "UNATTENDED_SESSION: true" || true
-[ "$_SESSION_KIND" = "unattended" ] && [ "$SKILL_NAME" = "ship" ] && echo "UNATTENDED_SHIP: no push, no PR; Step 18 takes the handoff section; receipt at .gstack/tmp/ship-receipt.md" || true
+[ "$_SESSION_KIND" = "unattended" ] && [ "$SKILL_NAME" = "ship" ] && echo "UNATTENDED_SHIP: no push, no new PR; an open PR at HEAD gets its body updated (pr-body section, receipt first), else Step 18 takes the handoff section; receipt at .gstack/tmp/ship-receipt.md; end with gstack-ship-receipt result" || true
 
 # ---------------------------------------------------------------------------
 # Artifacts sync (the former "Artifacts Sync (skill start)" fence, verbatim
@@ -544,15 +563,15 @@ Always run: \`touch "$_GH/.telemetry-prompted"\`.
 EOI
 fi
 
-# Proactive-suggestions opt-in (interactive).
+# Proactive-suggestions opt-in (interactive; a stored off answered it above).
 if [ "$_PROACTIVE_PROMPTED" = "no" ] && [ "$_TEL_PROMPTED" = "yes" ]; then
   _emit_block proactive-prompt <<EOI
 Ask once:
 
-> Let gstack proactively suggest skills, like /qa for "does this work?" or /investigate for bugs?
+> Let gstack proactively suggest skills? By default it suggests only the four core ones: /office-hours for a new idea, /review for a diff, /qa for "does this work?", /ship to land it.
 
-Options: A) Keep it on (recommended)  B) Turn it off — I'll type /commands myself
-If A: \`$_BIN/gstack-config set proactive true\`. If B: \`$_BIN/gstack-config set proactive false\`.
+Options: A) Keep the core four (recommended)  B) Suggest every matching skill  C) Turn it off — I'll type /commands myself
+If A: \`$_BIN/gstack-config set proactive core\`. If B: \`$_BIN/gstack-config set proactive all\`. If C: \`$_BIN/gstack-config set proactive off\`.
 Always run: \`touch "$_GH/.proactive-prompted"\`.
 EOI
 fi
@@ -562,12 +581,14 @@ fi
 if [ "$_ACTIVATED" = "no" ]; then
   _FT_TIP=""
   case "$_FIRST_TASK" in
-    greenfield) _FT_TIP="Fresh repo — shape it first with \`/spec\` or \`/office-hours\`." ;;
-    code_node|code_python|code_rust|code_go|code_ruby|code_ios) _FT_TIP="There's code here — \`/qa\` to see it work, or \`/investigate\` if something's off." ;;
+    greenfield) _FT_TIP="Fresh repo — shape it first with \`/office-hours\`." ;;
+    code_node|code_python|code_rust|code_go|code_ruby|code_ios) _FT_TIP="There's code here — \`/qa\` to see it work, or \`/review\` on your latest diff." ;;
     branch_ahead) _FT_TIP="Unshipped work on this branch — \`/review\` then \`/ship\`." ;;
     dirty_default) _FT_TIP="Uncommitted changes — \`/review\` before committing." ;;
-    clean_default) _FT_TIP="Pick one: \`/spec\`, \`/investigate\`, or \`/qa\`." ;;
+    clean_default) _FT_TIP="Pick one: \`/office-hours\`, \`/qa\`, or \`/review\`." ;;
   esac
+  # Under off the tips are the suggestions the user turned off.
+  [ "$_PROACTIVE_OFF" = "yes" ] && _FT_TIP=""
   if [ -n "$_FT_TIP" ]; then
     _emit_block first-run-tip <<EOI
 Show this one project-specific line as a heads-up, then CONTINUE with whatever the user actually asked — do NOT halt their task: $_FT_TIP
@@ -576,16 +597,19 @@ EOI
   fi
   touch "$_GH/.activated" 2>/dev/null || true
 elif [ "$_FIRST_LOOP_SHOWN" = "no" ]; then
-  _emit_block first-loop-tip <<EOI
-Say once as a heads-up (then continue): Tip: gstack pays off when you complete one loop — **plan → review → ship**. A common first loop: \`/office-hours\` or \`/spec\` to shape it, \`/plan-eng-review\` to lock it, then \`/ship\`.
+  if [ "$_PROACTIVE_OFF" = "no" ]; then
+    _emit_block first-loop-tip <<EOI
+Say once as a heads-up (then continue): Tip: gstack pays off when you complete one loop — **plan → review → ship**. A common first loop: \`/office-hours\` to shape it, \`/review\` to check it, then \`/ship\`.
 EOI
-  touch "$_GH/.first-loop-tip-shown" 2>/dev/null || true
+    touch "$_GH/.first-loop-tip-shown" 2>/dev/null || true
+  fi
 fi
 
 # Routing injection (interactive: AUQ + CLAUDE.md append + commit). The body
 # is a quoted heredoc (markdown backticks must stay literal), so the resolved
-# bin path is substituted via sed on the __BIN__ placeholder.
-if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ]; then
+# bin path is substituted via sed on the __BIN__ placeholder. Under off the
+# routing rules are the auto-invocation the user turned off, so no offer.
+if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_PROACTIVE_OFF" = "no" ]; then
   sed "s|__BIN__|$_BIN|g" <<'EOI' | _emit_block routing-injection
 gstack works best when the project CLAUDE.md includes skill routing rules. If no CLAUDE.md exists in the project root, create it. Use AskUserQuestion:
 
@@ -648,13 +672,13 @@ if [ "$_SESSION_KIND" = "unattended" ]; then
   case "$SKILL_NAME" in
     autoplan)  _UA_RECORD="This skill writes a run directory through gstack-autoplan (plan.md, review-record.md, tasks.jsonl, decisions.jsonl, findings.jsonl, timing.json, run.json, gate.json): append each recommended choice to decisions.jsonl with kind \"auto\" and each pending one with kind \"approval\" and status \"pending\". The final approval gate is written as a gate list (gstack-gate render) and this run ENDS there with \`GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>\`." ;;
     eval-plan) _UA_RECORD="This run ENDS at the Step 4 spend approval, left pending, with \`GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>\`, where <outdir> is the pilot's --out directory. No helper writes a gate.json for this skill yet, so the parent reads the pilot report and spend ledger in <outdir>." ;;
-    ship)      _UA_RECORD="$_UA_NONE The parent reads the ship receipt from .gstack/tmp/ship-receipt.md when nothing was pushed, and from the PR body (\`gstack-ship-receipt read --pr <n> --json\`) only once a PR exists." ;;
+    ship)      _UA_RECORD="This skill ends with \`gstack-ship-receipt result\` (Step 22), which writes <state root>/ship/runs/<utc>-<head12>/ship-run.json (a /ship record, not a run manifest) and prints \`GSTACK_RESULT: skill=ship status=complete run=<dir>\`; a run that stops earlier prints \`GSTACK_RESULT: skill=ship status=refused run=-\` itself. The one publication allowed here: when an open PR for this branch exists and HEAD is its pushed head, update that PR's body and title with the receipt through the pr-body section's existing-PR path (never pr-create, never a push, and never \`gh pr ready\`: the draft-state items there concern an early PR this run never opened); otherwise the handoff section writes the receipt to .gstack/tmp/ship-receipt.md and the parent reads it there." ;;
     review)    _UA_RECORD="$_UA_NONE The parent reads the review-log rows (\`gstack-review-read\`)." ;;
     qa)        _UA_RECORD="$_UA_NONE The parent reads the \`qa-report-*.md\` file." ;;
     *)         _UA_RECORD="$_UA_NONE The parent reads this skill's own record (docs/unattended.md)." ;;
   esac
   _emit_block unattended-session <<EOI
-You are running unattended: a parent agent started this run and reads its record, not your prose (docs/unattended.md names each skill's record). Rules: do NOT call AskUserQuestion and do NOT render prose decision briefs. At every question take the option marked (recommended). A question with no recommendation, any consent, any destructive or irreversible option, and the final approval gate stay pending: never choose them. You never approve a gate, never mark a plan APPROVED, never publish, push, sync or send data off this machine, and never record a consent. $_UA_RECORD Skip every onboarding, upgrade, telemetry, routing and lake instruction. Host adaptation: there may be no Skill tool, no slash commands and no hooks here; read the skill file with your file-reading tool, run its bash blocks as written, treat each bash block's printed STATUS lines as the only source of session facts, and write results to files the parent names rather than relying on chat text being read.
+You are running unattended: a parent agent started this run and reads its record, not your prose (docs/unattended.md names each skill's record). Rules: do NOT call AskUserQuestion and do NOT render prose decision briefs. At every question take the option marked (recommended). A question with no recommendation, any consent, any destructive or irreversible option, and the final approval gate stay pending: never choose them. You never approve a gate, never mark a plan APPROVED, never publish, push, sync or send data off this machine, and never record a consent; the only exception is the one named in your skill's record rule below. $_UA_RECORD Skip every onboarding, upgrade, telemetry, routing and lake instruction. Host adaptation: there may be no Skill tool, no slash commands and no hooks here; read the skill file with your file-reading tool, run its bash blocks as written, treat each bash block's printed STATUS lines as the only source of session facts, and write results to files the parent names rather than relying on chat text being read.
 EOI
 fi
 

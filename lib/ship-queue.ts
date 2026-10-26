@@ -5,8 +5,9 @@
  * so every step ends in a line a coordinator can act on:
  *
  *   ready       READY #<pr> <head> STAMP_VERSION=<X|unstamped> plus head, base,
- *               CI at that exact head, the PREGATE line and the gate state;
- *               refused when the tree is not the pushed PR head.
+ *               CI at that exact head, the PREGATE line, the gate state and the
+ *               /ship receipt; refused when the tree is not the pushed PR head
+ *               or the PR body carries no receipt for it (QUEUE_RECEIPT_*).
  *   stamp       preflight (gated head equals HEAD modulo stamps, base, policy,
  *               gate record under full_e2e), restamp, commit, tree receipt,
  *               each stage journaled; QUEUE_STAMP: <pr> <version> head= gated=
@@ -23,7 +24,7 @@ import * as path from 'node:path';
 import { readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
-import { extractReceipt, receiptSummaryLine } from './ship-receipt';
+import { bindReceipt, extractReceipt } from './ship-receipt';
 import { isUnavailable, loadPolicyFromBase, type LoadedPolicy } from './ship-policy';
 import {
   QUEUE_DIR_REL, applyStampPatch, commitForTree, currentAttempt, git, listAttempts, recomputeMergeTree, sha256, writeJsonAtomic,
@@ -57,6 +58,37 @@ export function receiptDigest(r: TreeReceipt): string {
 function treeReceipt(ctx: QueueContext, policy: LoadedPolicy, gated: string, current: string): TreeReceipt | QueueFailure {
   const r = buildReceipt({ repoRoot: ctx.repoRoot, gated, current, policy: policy.policy, policyLabel: policy.source.label });
   return 'error' in r ? { code: 'QUEUE_PROOF_MISSING', message: r.error } : r;
+}
+
+/**
+ * The heads a READY accepts a /ship receipt for: HEAD, plus the receipt's own
+ * head when HEAD is that commit with only stamp files changed on top (the
+ * slot's stamp commit, docs/ship-policy.md#ship-before-ready), or, from slot
+ * 2 on, the stamp over a merge of the base into it: /ship ran on the pin, the
+ * stamp changes nothing it checked, and verify --train binds the same pair
+ * against the train's own prefix. A merge with no stamp on top is a lane's
+ * own push (rule 14), so it reruns /ship like any other head. Any other
+ * receipt head stays QUEUE_RECEIPT_STALE.
+ */
+function acceptedReceiptHeads(ctx: QueueContext, policy: LoadedPolicy, head: string, body: string): string[] {
+  const ex = extractReceipt(body);
+  const r = ex.receipt;
+  if (!r || ex.errors.length || typeof r.head !== 'string' || !/^[0-9a-f]{12,64}$/i.test(r.head) || head.startsWith(r.head)) return [head];
+  const root = ctx.repoRoot;
+  const full = git(root, ['rev-parse', '--verify', '--quiet', `${r.head}^{commit}`]);
+  if (!full.ok || !git(root, ['merge-base', '--is-ancestor', full.out, head]).ok) return [head];
+  const stampOnly = (from: string, to: string) => { const t = from === to ? null : treeReceipt(ctx, policy, from, to); return !t || (!('message' in t) && t.tree === 'same-modulo-stamps'); };
+  if (stampOnly(full.out, head)) return [full.out, head];
+  const baseSha = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
+  const onBase = (sha: string) => !!sha && git(root, ['merge-base', '--is-ancestor', sha, baseSha]).ok;
+  const merge = git(root, ['rev-parse', '--verify', '--quiet', `${head}^1`]).out;
+  const stamp = merge && merge !== head ? treeReceipt(ctx, policy, merge, head) : null;
+  if (!stamp || 'message' in stamp || stamp.tree !== 'same-modulo-stamps' || stamp.files.length === 0) return [head];
+  const parents = git(root, ['rev-list', '--parents', '-n', '1', merge]).out.split(' ').slice(1);
+  if (parents.length !== 2) return [head];
+  const pinSide = onBase(parents[0]!) ? parents[1]! : onBase(parents[1]!) ? parents[0]! : '';
+  if (pinSide && git(root, ['merge-base', '--is-ancestor', full.out, pinSide]).ok && stampOnly(full.out, pinSide)) return [full.out, head];
+  return [head];
 }
 
 const CI_PAGE = 100;
@@ -141,7 +173,7 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
   }
-  const receipt = extractReceipt(info.body ?? '');
+  const receipt = bindReceipt(info.body ?? '', o.pr, acceptedReceiptHeads(ctx, policy, head, info.body ?? ''));
   const attempt = currentAttempt(ctx.repoRoot, o.pr);
   const lines = [
     `READY #${o.pr} ${head} STAMP_VERSION=${version}`,
@@ -152,13 +184,14 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
     `ci: ${ci.line}`,
     pregateLine,
     gateLine(policy, attempt),
-    receipt.found && receipt.receipt && !receipt.errors.length ? receiptSummaryLine(receipt.receipt) : `SHIP_RECEIPT: ${receipt.found ? 'invalid' : 'none'} in the PR body`,
+    receipt.line,
   ];
   const gate = policy.policy.full_e2e ? gateEvidence(ctx, o.pr, head, attempt, o.gateExit, o.gateLog) : null;
   if (gate) lines.push(gate.line);
   if (!ci.green) return fail({ code: 'QUEUE_NOT_READY', message: `CI is not green at ${head.slice(0, 12)}: ${ci.line}` }, lines, run);
   if (!pregateOk) return fail({ code: 'QUEUE_NOT_READY', message: `the pregate result is not a current pass: ${pregateLine}` }, lines, run);
   if (gate && !gate.ok) return fail({ code: 'QUEUE_GATE_MISSING', message: `full_e2e is set and no passing gate is bound to ${head.slice(0, 12)}: ${gate.line}` }, lines, run);
+  if (!receipt.ok) return fail({ code: receipt.code, message: receipt.message }, lines, run);
   return { ok: true, lines, run };
 }
 

@@ -401,8 +401,11 @@ describe('gstack-skill-start behavior', () => {
     expect(evalPlan).toContain('`GSTACK_RESULT: skill=eval-plan status=gate_pending run=<outdir>`');
     expect(evalPlan).toContain('No helper writes a gate.json');
     expect(evalPlan).not.toContain('gate list');
+    const ship = blocks.ship;
+    expect(ship).toContain('`GSTACK_RESULT: skill=ship status=complete run=<dir>`');
+    expect(ship).toContain('`GSTACK_RESULT: skill=ship status=refused run=-`');
+    expect(ship).not.toContain('writes no run directory');
     const records: Record<string, string> = {
-      ship: 'gstack-ship-receipt read --pr <n> --json',
       review: 'gstack-review-read',
       qa: 'qa-report-*.md',
       investigate: "this skill's own record (docs/unattended.md)",
@@ -418,12 +421,14 @@ describe('gstack-skill-start behavior', () => {
     }
   }, 60_000);
 
-  test('unattended /ship alone prints the UNATTENDED_SHIP status line naming the receipt file (GSTA-88)', () => {
-    const line = /^UNATTENDED_SHIP: no push, no PR; Step 18 takes the handoff section; receipt at \.gstack\/tmp\/ship-receipt\.md$/gm;
+  test('unattended /ship alone prints the UNATTENDED_SHIP status line naming the receipt file, the existing-PR body update and the result line (GSTA-88, rule 22)', () => {
+    const line = /^UNATTENDED_SHIP: no push, no new PR; an open PR at HEAD gets its body updated \(pr-body section, receipt first\), else Step 18 takes the handoff section; receipt at \.gstack\/tmp\/ship-receipt\.md; end with gstack-ship-receipt result$/gm;
     const ship = runStart(['--skill', 'ship'], { GSTACK_SESSION_KIND: 'unattended' });
     expect(ship.match(line)).toHaveLength(1);
     expect((ship.match(/^GSTACK_INSTRUCTION_BEGIN: (\S+)/gm) ?? []).map((h) => h.replace(/^GSTACK_INSTRUCTION_BEGIN: /, ''))).toEqual(['unattended-session']);
-    expect(ship).toContain('.gstack/tmp/ship-receipt.md when nothing was pushed');
+    expect(ship).toContain('`GSTACK_RESULT: skill=ship status=complete run=<dir>`');
+    expect(ship).toContain("update that PR's body and title with the receipt through the pr-body section's existing-PR path (never pr-create, never a push, and never `gh pr ready`");
+    expect(ship).toContain('the handoff section writes the receipt to .gstack/tmp/ship-receipt.md');
     for (const skill of ['review', 'qa', 'autoplan']) {
       expect(runStart(['--skill', skill], { GSTACK_SESSION_KIND: 'unattended' })).not.toContain('UNATTENDED_SHIP');
     }

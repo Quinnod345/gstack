@@ -548,8 +548,8 @@ export const QUESTIONS = {
     skill: 'preamble',
     category: 'approval',
     door_type: 'two-way',
-    options: ['on', 'off'],
-    description: "Let gstack proactively suggest skills based on conversation context?",
+    options: ['core', 'all', 'off'],
+    description: "Let gstack proactively suggest skills based on conversation context? core (the four core skills, default) / all / off",
   },
   'preamble-routing-injection': {
     id: 'preamble-routing-injection',

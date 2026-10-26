@@ -14,8 +14,8 @@ describe('gstack-upgrade template: ff-only precedes the gated reset (#2517)', ()
   const tmpl = read('gstack-upgrade/SKILL.md.tmpl');
 
   test('the fast-forward (gstack-ff-update) runs before any reset --hard', () => {
-    const ff = tmpl.indexOf('bash bin/gstack-ff-update . origin/main');
-    const reset = tmpl.indexOf('git reset --hard origin/main');
+    const ff = tmpl.indexOf('bash bin/gstack-ff-update . "$UPSTREAM_REF"');
+    const reset = tmpl.indexOf('git reset --hard "${UPSTREAM_REF:?UPSTREAM_REF is not set: substitute the value Step 4 printed}"');
     expect(ff).toBeGreaterThan(-1);
     expect(reset).toBeGreaterThan(-1);
     expect(ff).toBeLessThan(reset);
@@ -23,14 +23,14 @@ describe('gstack-upgrade template: ff-only precedes the gated reset (#2517)', ()
 
   test('the ff path carries the FF_OK success gate that skips the fallback', () => {
     expect(tmpl).toContain('FF_OK');
-    expect(tmpl.indexOf('FF_OK')).toBeLessThan(tmpl.indexOf('git reset --hard origin/main'));
+    expect(tmpl.indexOf('FF_OK')).toBeLessThan(tmpl.indexOf('git reset --hard "${UPSTREAM_REF:?UPSTREAM_REF is not set: substitute the value Step 4 printed}"'));
   });
 
   test('the destructive fallback is gated on unpushed commits, not just a clean tree', () => {
     // A clean tree with unpushed local commits is NOT safe for reset --hard.
-    expect(tmpl).toContain('git rev-list origin/main..HEAD');
-    expect(tmpl.indexOf('git rev-list origin/main..HEAD')).toBeLessThan(
-      tmpl.indexOf('git reset --hard origin/main'),
+    expect(tmpl).toContain('git rev-list "${UPSTREAM_REF:?}"..HEAD');
+    expect(tmpl.indexOf('git rev-list "${UPSTREAM_REF:?}"..HEAD')).toBeLessThan(
+      tmpl.indexOf('git reset --hard "${UPSTREAM_REF:?UPSTREAM_REF is not set: substitute the value Step 4 printed}"'),
     );
   });
 });
