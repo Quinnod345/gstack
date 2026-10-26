@@ -979,6 +979,31 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(receipts).toEqual([]);
   });
 
+  it("says the estimate was used when a tree has skills but nothing --exact can send", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-nothing-to-send-"));
+    fs.mkdirSync(path.join(tmp, "qa"));
+    fs.writeFileSync(path.join(tmp, "qa", "SKILL.txt"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(path.join(tmp, "qa", "SKILL.txt"), path.join(tmp, "qa", "SKILL.md"));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-nothing-to-send-egress-"));
+    const stderr = capture();
+    const calls: { body: string }[] = [];
+    const code = await contextBillMain([tmp, "--exact", "--json"], {
+      stdout: capture().stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome: home,
+    });
+    const receipts = fs.readdirSync(home, { recursive: true });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(stderr.text()).toContain("offline estimate");
+    expect(calls.length).toBe(0);
+    expect(receipts).toEqual([]);
+  });
+
   it("measures frontmatter only where the bill prices it", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-fm-priced-"));
     fs.mkdirSync(path.join(tmp, "qa", "references"), { recursive: true });
@@ -1034,11 +1059,13 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     const skills = path.join(tmp, "skills");
     fs.mkdirSync(path.join(skills, "aaa"), { recursive: true });
     fs.mkdirSync(path.join(skills, "zskill"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "aaa", "SKILL.md"), "---\nname: aaa\ndescription: d\n---\n# a\n");
     fs.writeFileSync(path.join(skills, "aaa", "notes.md"), "---\nname: zskill\ndescription: d\n---\n# z\n");
     fs.symlinkSync(path.join(skills, "aaa", "notes.md"), path.join(skills, "zskill", "SKILL.md"));
     const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(), egressHome });
     const bill = buildBill(skills, { tokensOf: measured.tokensOf, tokenSource: measured.tokenSource });
-    expect(bill.skills.map((s) => s.name)).toEqual(["zskill"]);
+    expect(bill.skills.map((s) => s.name)).toEqual(["aaa", "zskill"]);
+    expect(measured.counts.has(path.join(skills, "aaa", "notes.md#frontmatter"))).toBe(true);
     expect([...measured.missedKeys]).toEqual([]);
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -179,8 +179,10 @@ function sumTokens(entries: { tokens: number }[]): number {
 
 /**
  * Cache key for a .md file's frontmatter block, which is a slice, not a whole
- * file. The bill looks it up through a SKILL.md path; --exact measures it for
- * every walked file, so a SKILL.md first walked under another name still has one.
+ * file. The bill looks it up through a SKILL.md path; --exact measures it once
+ * per real SKILL.md the bill prices, keyed by the first path the send set
+ * reached that file by, so a SKILL.md first walked under another name still
+ * has one.
  */
 function frontmatterKey(mdPath: string): string {
   return `${mdPath}#frontmatter`;
@@ -1074,7 +1076,13 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
     calibration?: Calibration;
     onDone?: () => void;
   }> => {
-    if (!set || set.files.length === 0) return {};
+    if (!set) return {};
+    if (set.files.length === 0) {
+      if (findSkillDirs(path.resolve(tree)).length) {
+        stderr.write(`--exact: no markdown skill file to measure under ${tree}; nothing was sent, so the bill uses the offline estimate.\n`);
+      }
+      return {};
+    }
     const treeReal = fs.realpathSync(tree);
     const outside = set.files.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
     stderr.write(
