@@ -153,6 +153,11 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(timed(() => { nested = parseCss(amp, 'x.css'); })).toBeLessThan(2000);
     expect(nested.length).toBe(20_001);
     expect(nested.every((x) => x.selector.length <= 8192)).toBe(true);
+    const long = parseCss('.' + 'a'.repeat(50_000) + ', .b{' + '&{color:red}'.repeat(20_000) + '}', 'x.css');
+    expect(long.length).toBe(20_001);
+    expect(long.every((x) => x.selector.length <= 8192)).toBe(true);
+    expect(long.slice(1).reduce((n, x) => n + x.selector.length, 0)).toBeLessThan(10_000_000);
+    expect(timed(() => selectorNames(long.map((x) => x.selector)))).toBeLessThan(500);
   });
 
   test('a huge token value is not expanded into every reference', () => {
@@ -210,6 +215,9 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(timed(() => { for (let k = 0; k < 500; k++) stripTags(inner, false, 4); })).toBeLessThan(500);
     expect(stripTags('<b>x</b> hi', false, 4)).toBe(' x  hi');
     expect(stripTags('<b>x</b> hi there friend', false, 4).length).toBeLessThan(' x  hi there friend'.length);
+    expect(stripTags('\u00a0\u{1F680}\u00a0\u{1F680}\u00a0\u{1F680} more', false, 4)).toBe('\u00a0\u{1F680}\u00a0\u{1F680}\u00a0\u{1F680}');
+    const padded = '\u{1F680}\u00a0\u00a0\u00a0\u00a0 hello world';
+    expect(stripTags(padded, false, 4).replace(/\s+/g, ' ').trim().length > 4).toBe(stripTags(padded).replace(/\s+/g, ' ').trim().length > 4);
     const nested = tree({ 'index.html': HEAD + '</head><body>' + '<div>'.repeat(500) + '<p>' + 'lorem ipsum dolor '.repeat(60_000) + '</p>' + '</div>'.repeat(500) + '</body></html>' });
     expect(timed(() => lintStatic([nested], { cwd: nested, ...quiet })), 'nested').toBeLessThan(4000);
     const spans = Array.from({ length: 4000 }, (_, i) => '<span class="c">w' + i + '</span> ').join('');
@@ -262,7 +270,7 @@ describe('design-lint eighth cycle: rule judgements', () => {
 
   test('the probes read their viewport from the page, not a literal', () => {
     for (const fn of [glLayout, glAccent]) expect(fn.toString()).not.toMatch(/\b800\b|1280x800/);
-    for (const fn of [glHeroSpace, glWide, glWords]) expect(fn.toString()).not.toMatch(/1440x900|900px|1920x1080|at 1920/);
+    for (const fn of [glHeroSpace, glWide, glWords]) expect(fn.toString()).not.toMatch(/1440x900|\b900\b|1920x1080|at 1920/);
     expect([...selectorNames([':is(a, button)']).tags].sort()).toEqual(['a', 'button']);
     expect([...selectorNames(['nav :where(h1, h2) em']).tags].sort()).toEqual(['em', 'h1', 'h2', 'nav']);
   });
