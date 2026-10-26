@@ -5,7 +5,7 @@
  * live in the render tier; the title and description halves of F23 are the copy tier's.
  */
 import { mergedRules, type LintContext } from '../context';
-import { HEADING_SEL, isTokenRule, lineIndex, pxOf, resolveVars, type MergedRule } from '../css';
+import { HEADING_SEL, isTokenRule, lineIndex, pxOf, resolveVars, splitTop, type MergedRule } from '../css';
 import { getAttr, maskedProse, openTags, plainText } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twVariants } from '../tailwind';
@@ -305,7 +305,7 @@ function checkLang(ctx: LintContext, r: Reporter): void {
 
 // sloplint checkF24 (F24)
 function checkHairlineUnderShadow(ctx: LintContext, r: Reporter): void {
-  const wide = (value: string): boolean => resolveVars(value, ctx.tokens).split(/,(?![^(]*\))/).some((layer) => {
+  const wide = (value: string): boolean => splitTop(resolveVars(value, ctx.tokens)).some((layer) => {
     if (/\binset\b/.test(layer)) return false;
     const len = [...layer.replace(/(?:oklch|oklab|rgba?|hsla?|color|color-mix)\([^)]*\)/g, '').matchAll(/(-?\d*\.?\d+)(px|rem|em)?(?=\s|$)/g)].map((m) => parseFloat(m[1]) * (m[2] === 'rem' || m[2] === 'em' ? 16 : 1));
     return len.length >= 3 && len[2] + Math.min(0, len[3] || 0) >= 24;

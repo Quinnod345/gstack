@@ -6,7 +6,7 @@
  * emoji icons and template punctuation (30a, 63) in component text.
  */
 import type { LintContext } from '../context';
-import { relPath, trunc, type Reporter } from '../report';
+import { oneLine, relPath, trunc, type Reporter } from '../report';
 import { compInner, twEyebrow, twGlow, twGradient, twGroup, twMonoIsMaterial, twPlain, twText, twTiles, twTokens, twTrackedCaps, twWhere, twDataText, type TwItem } from '../tailwind';
 
 const EMOJI_ICON = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
@@ -20,7 +20,7 @@ function reported(r: Reporter): Set<string> {
 function reportItem(ctx: LintContext, r: Reporter, it: TwItem, monoOk: boolean, seen: Set<string>): void {
   const { doc, info: f } = it;
   const where = twWhere(it);
-  const file = relPath(doc.file, r.cwd);
+  const file = oneLine(relPath(doc.file, r.cwd));
   const had = (rule: string) => seen.has(`${rule}|${file}|${it.line}`);
   if (f.tAll) r.report('layout-transition', doc.file, it.line, `${f.tAll} on ${where}`, { fix: 'name the properties: transition-colors, transition-opacity or transition-transform' });
   if (f.bounce || f.overshoot) r.report('bounce-easing', doc.file, it.line, `${f.bounce ? 'bounce' : 'overshoot easing'} ${f.bounce || f.overshoot} on ${where}`, { fix: 'an exponential ease-out on UI state; no bounce or overshoot' });
@@ -93,7 +93,7 @@ function checkTailwind(ctx: LintContext, r: Reporter): void {
 // sloplint checkComponentText (gates 63 30a)
 function checkComponentText(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
-    const file = relPath(doc.file, r.cwd);
+    const file = oneLine(relPath(doc.file, r.cwd));
     for (let c = 0; c < doc.comps.length; c++) {
       const t = doc.comps[c];
       if (t.close || t.selfClosing) continue;

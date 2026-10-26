@@ -263,7 +263,7 @@ function checkFakeSend(ctx: LintContext, r: Reporter): void {
 }
 
 const NATIVE_LIST_JOB = /subscribe|join|attend|listen|visit|newsletter|waitlist/i;
-const ASKS = /\b(book|enquir|inquir|request|contact|walkthrough|demo|quote|reserve|apply|start|create|order|buy|download|try)/i;
+const ASKS = /\b(book|enquir|inquir|request|contact|walkthrough|demo|quote|reserve|apply|start|create|order|buy|download|try|sign ?in|log ?in|continue)/i;
 const LIST_WORDS = /newsletter|updates|subscribe|the list|mailing/i;
 
 /** Whether the form opened at idx is an email sign-up: one or two fields, one of them email, under a button that does not book, order or ask. */
@@ -279,6 +279,7 @@ function isEmailSignup(doc: Doc, idx: number): boolean {
   for (const m of html.matchAll(/<(input|textarea|select)\b([^>]*)>/gi)) {
     const type = (getAttr(m[2], 'type') || 'text').toLowerCase();
     if (m[1].toLowerCase() === 'input' && /^(hidden|submit|checkbox|radio|button|reset|image)$/.test(type)) continue;
+    if (type === 'password' || /\bpassword\b/i.test(getAttr(m[2], 'autocomplete') || '')) return false;
     fields.push(type + ' ' + [getAttr(m[2], 'name'), getAttr(m[2], 'id'), getAttr(m[2], 'placeholder'), getAttr(m[2], 'autocomplete')].filter(Boolean).join(' '));
   }
   return fields.length >= 1 && fields.length <= 2 && fields.some((f) => /^email\b/.test(f) || /e-?mail/i.test(f));

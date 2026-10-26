@@ -12,7 +12,7 @@
 import type { LintContext } from './context';
 import { memo } from './context';
 import { bannedGradient, COLOR_LITERAL, oklchOf, parseColor, type Color } from './color';
-import { GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
+import { CONTROL_TRACK_MAX_EM, GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
 import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, treeOf, type Doc, type Tag } from './html';
 import { trunc } from './report';
 import { EYEBROW_ANCESTOR_SKIP, EYEBROW_ANNOUNCE, EYEBROW_BLOCKY } from './rules/chrome-eyebrow';
@@ -397,8 +397,8 @@ export interface TwFrame {
 
 const TW_ROOT: TwFrame = { size: null, em: null, upper: false, caps: false, noLabel: false, code: false, eyeSkip: false, inOl: false, logo: false, logoSelf: false };
 
-function twFrame(parent: TwFrame, t: { name: string; attrs: string }, f: TwInfo | null, toks: string[]): TwFrame {
-  const logo = toks.some((x) => TW_LOGO.test(x)) || TW_LOGO.test(getAttr(t.attrs, 'aria-label') || '');
+function twFrame(parent: TwFrame, t: { name: string; attrs: string }, f: TwInfo | null): TwFrame {
+  const logo = (f ? f.classes : []).some((x) => TW_LOGO.test(x)) || TW_LOGO.test(getAttr(t.attrs, 'aria-label') || '');
   return {
     size: f && f.sizePx != null ? f.sizePx : parent.size,
     em: f && f.trackingEm != null ? f.trackingEm : parent.em,
@@ -427,7 +427,6 @@ export interface TwItem {
   /** A cn()/clsx()/cva() call site rather than an element. */
   virtual: boolean;
   attrs: string;
-  toks: string[];
   frame: TwFrame;
   text: string | null;
 }
@@ -461,9 +460,9 @@ export function twGroup(ctx: LintContext): TwGroup {
         if (t.close) continue;
         const toks = twTokensOf(doc, t);
         const info = toks.length ? twInfo(ctx, toks, tw.variants) : null;
-        const frame = twFrame(parent[i] >= 0 ? frames[parent[i]] : TW_ROOT, t, info, toks);
+        const frame = twFrame(parent[i] >= 0 ? frames[parent[i]] : TW_ROOT, t, info);
         frames[i] = frame;
-        if (info) add({ file: doc.file, line: t.line, idx: i, tag: t.name, info, doc, comp: null, virtual: false, attrs: t.attrs, toks, frame, text: null });
+        if (info) add({ file: doc.file, line: t.line, idx: i, tag: t.name, info, doc, comp: null, virtual: false, attrs: t.attrs, frame, text: null });
       }
       for (let c = 0; c < doc.comps.length; c++) {
         const t = doc.comps[c];
@@ -471,11 +470,11 @@ export function twGroup(ctx: LintContext): TwGroup {
         const toks = twTokensOf(doc, t);
         if (!toks.length) continue;
         const info = twInfo(ctx, toks, tw.variants);
-        add({ file: doc.file, line: t.line, idx: -1, tag: t.name, info, doc, comp: c, virtual: false, attrs: t.attrs, toks, frame: twFrame(TW_ROOT, t, info, toks), text: null });
+        add({ file: doc.file, line: t.line, idx: -1, tag: t.name, info, doc, comp: c, virtual: false, attrs: t.attrs, frame: twFrame(TW_ROOT, t, info), text: null });
       }
       for (const v of doc.virtuals) {
         const info = twInfo(ctx, v.toks, tw.variants);
-        add({ file: doc.file, line: doc.lineOf(v.pos), idx: -1, tag: v.name, info, doc, comp: null, virtual: true, attrs: '', toks: v.toks, frame: twFrame(TW_ROOT, { name: v.name, attrs: '' }, info, v.toks), text: null });
+        add({ file: doc.file, line: doc.lineOf(v.pos), idx: -1, tag: v.name, info, doc, comp: null, virtual: true, attrs: '', frame: twFrame(TW_ROOT, { name: v.name, attrs: '' }, info), text: null });
       }
     }
     return tw;
@@ -489,7 +488,7 @@ export function twVariants(ctx: LintContext): Set<string> {
 
 /** Where a finding points: the helper call, or the element with the start of its class string. */
 export function twWhere(it: TwItem): string {
-  return it.virtual ? `${it.tag}() class string` : `<${it.tag} class="${trunc(it.toks.join(' '), 32)}">`;
+  return it.virtual ? `${it.tag}() class string` : `<${it.tag} class="${trunc(it.info.classes.join(' '), 32)}">`;
 }
 
 /** The source between a component tag and its matching close. */
@@ -597,7 +596,7 @@ export function twTrackedCaps(it: TwItem, tw: TwGroup): TwTrackedCaps | null {
   const small = size != null && size <= LABEL_PX;
   const tracked = em != null && em > TRACKED_EM;
   const control = /^(?:button|input)$/.test(it.tag) || /(?:button|btn|cta)$/i.test(it.tag) || (it.tag === 'a' && f.fill && f.padded) || /role\s*=\s*["']?button/i.test(it.attrs);
-  if (tw.upperDisplay && control && (em == null || em <= 0.04)) return null;
+  if (tw.upperDisplay && control && (em == null || em <= CONTROL_TRACK_MAX_EM)) return null;
   if (!((caps && (small || tracked)) || (tracked && small))) return null;
   return { what: fr.caps ? 'small caps' : fr.upper ? 'uppercase' : 'letter-spaced', size, em: tracked && em != null ? Math.round(em * 1000) / 1000 : null };
 }

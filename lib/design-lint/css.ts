@@ -172,15 +172,41 @@ export function isTokenRule(rule: Pick<CssRule, 'selector' | 'file'>): boolean {
   return rule.selector.split(',').every((p) => { const t = p.trim(); return t && TOKEN_SEL.test(t); });
 }
 
-/** Every custom property declared in the token block, last declaration winning. */
-export function buildTokens(rules: CssRule[]): Tokens {
-  const tokens: Tokens = {};
+/** A token rule that only answers for one colour mode: under a prefers-color-scheme query, or scoped to a data-theme/mode/scheme attribute. */
+const isModeOverride = (r: Pick<CssRule, 'selector' | 'media'>): boolean => /prefers-color-scheme/i.test(r.media ?? '') || /\[data-/i.test(r.selector);
+
+export interface TokenSite { value: string; file: string; line: number }
+
+/**
+ * Every custom property declared in the token block with the declaration it
+ * is read from: the last declaration of the base block wins, and a mode
+ * override (a dark-scheme query, a data-theme scope) only supplies tokens
+ * the base block never declares, so a page with both modes is read in the
+ * mode it declares first rather than a mix of the two.
+ */
+export function tokenSites(rules: CssRule[]): Map<string, TokenSite> {
+  const sites = new Map<string, TokenSite>();
+  const overrides = new Map<string, TokenSite>();
   for (const r of rules) {
     if (!isTokenRule(r)) continue;
-    for (const d of r.decls) if (d.prop.startsWith('--')) tokens[d.prop] = d.value;
+    const into = isModeOverride(r) ? overrides : sites;
+    for (const d of r.decls) if (d.prop.startsWith('--')) into.set(d.prop, { value: d.value, file: r.file, line: d.line });
   }
+  for (const [prop, site] of overrides) if (!sites.has(prop)) sites.set(prop, site);
+  return sites;
+}
+
+export function buildTokens(rules: CssRule[]): Tokens {
+  const tokens: Tokens = {};
+  for (const [prop, site] of tokenSites(rules)) tokens[prop] = site.value;
   return tokens;
 }
+
+/** The em of tracking an uppercase control may carry where the display itself is uppercase (hallmark's Tailwind half; its CSS half allowed 0.045). */
+export const CONTROL_TRACK_MAX_EM = 0.04;
+
+/** Contrast findings allow this much under the threshold, so a ratio of 4.46:1 is not reported against 4.5:1. */
+export const CONTRAST_SLACK = 0.05;
 
 /** A resolved value longer than this is a token that refers to itself, not a stylesheet value; expansion stops there. */
 const MAX_RESOLVED = 8192;

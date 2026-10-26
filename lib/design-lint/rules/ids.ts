@@ -39,7 +39,7 @@ export const RULES: Record<string, RuleMeta> = {
   'gradient-text': { tier: 'ask', gate: '2b', title: 'gradient text', fix: 'solid ink; carry emphasis with weight or a display face' },
   'pure-black-white': { tier: 'blocks', gate: '7a', title: '#000 or #fff as a colour outside the token block', fix: 'tint toward the anchor hue: chroma 0.005 or more' },
   'absolute-surface-token': { tier: 'ask', gate: '7b', title: 'a surface token that resolves to pure black or white', fix: 'tint the paper' },
-  'zero-chroma-neutrals': { tier: 'ask', gate: '22', title: 'zero-chroma neutrals on a page with an anchor hue', fix: 'give the neutrals chroma 0.005 or more' },
+  'zero-chroma-neutrals': { tier: 'ask', gate: '22', title: 'zero-chroma oklch() neutrals', fix: 'give the neutrals chroma 0.005 or more' },
   'accent-footprint': { tier: 'ask', gate: '23', title: 'accent colour past about 5% of a viewport', fix: 'retreat the accent to actions and one signal' },
   'glow-wash': { tier: 'ask', gate: '29', title: 'glow and wash: blurred orbs, a radial halo or a zero-offset coloured glow', fix: 'a solid or grained surface; elevation by lightness, shadows with offset and blur' },
   'cream-palette': { tier: 'ask', gate: '65', title: 'the cream paper, serif display and terracotta accent look', fix: 'move one axis: the accent first, the paper second, the display last', pageOnly: true },

@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import type { LintContext, SharedStyles, CssFile } from './context';
 import { buildTokens, isTokenRule, parseCss, stripComments, type CssRule, type Tokens } from './css';
 import { docKindOf, getAttr, parseDoc, type Doc } from './html';
-import { Reporter, type Finding } from './report';
+import { oneLine, relPath, Reporter, type Finding } from './report';
 import { FAMILIES } from './rules';
 import { setTwTokens, twVariants } from './tailwind';
 import { applyWaivers, findWaivers, resolveWaivers, suspectedRules, type WaiverSet } from './waivers';
@@ -140,7 +140,7 @@ class CssCache {
       const raw = fs.readFileSync(f, 'utf8');
       out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') this.warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`);
+      this.warn((e as NodeJS.ErrnoException).code === 'ENOENT' ? `design-lint: skipped ${f}, not found` : `design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`);
     }
     this.files.set(f, out);
     return out;
@@ -293,14 +293,17 @@ export function shareProjects(contexts: LintContext[]): void {
 
 /**
  * The waiver comments of a context, in its documents and every stylesheet it reads, weighed against what its rules found.
- * A stylesheet's claims answer for that stylesheet on every page that links it. In a component directory each file's
- * claims answer for that file alone, weighed against its own text, with the house-style count per file.
+ * A stylesheet's claims answer for that stylesheet on every page that links it. In a directory of components (under
+ * either scope) each file's claims answer for that file alone, weighed against its own text and its own suspected
+ * rules, with the house-style count per file.
  */
 export function contextWaivers(ctx: LintContext, cwd: string, findings: Finding[] = []): WaiverSet {
-  const suspected = suspectedRules(findings);
   const sheets = ctx.cssFiles.flatMap((c) => findWaivers(c.file, c.raw));
-  if (ctx.scope !== 'component') return resolveWaivers([...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)), ...sheets], ctx.docs.map((d) => d.text).join(' '), cwd, suspected);
-  const sets = [...ctx.docs.map((d) => resolveWaivers(findWaivers(d.file, d.raw), d.text, cwd, suspected, true)), resolveWaivers(sheets, '', cwd, suspected)];
+  if (ctx.scope !== 'component' && ctx.docs.length <= 1) return resolveWaivers([...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)), ...sheets], ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
+  const sets = [
+    ...ctx.docs.map((d) => { const file = oneLine(relPath(d.file, cwd)); return resolveWaivers(findWaivers(d.file, d.raw), d.text, cwd, suspectedRules(findings.filter((f) => f.file === file)), true); }),
+    resolveWaivers(sheets, '', cwd, suspectedRules(findings)),
+  ];
   return { accepted: new Map(sets.flatMap((s) => [...s.accepted])), refused: sets.flatMap((s) => s.refused) };
 }
 

@@ -221,8 +221,18 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
   if (wait?.expression) {
     L.push(`{ const deadline = Date.now() + ${wait.timeoutMs ?? DEFAULT_WAIT_MS}; let ok = false; while (Date.now() < deadline) { try { ok = !!(await pg.evaluate((src) => (0, eval)(src), ${JSON.stringify(wait.expression)})); } catch (e) {} if (ok) break; await sleep(150); } if (!ok) throw new Error("waitFor expression never became truthy: " + ${JSON.stringify(wait.expression)}); }`);
   }
+  // The device override is set when a sized step's size differs from the one in force and cleared before an un-sized step, so consecutive evals at one width pay one override, not one per step.
+  let override: string | null = null;
+  const sized = (step: Exclude<RenderStep, { kind: 'pdf' }>): string | null => (step.width ? JSON.stringify({ width: step.width, height: step.height ?? Math.round(step.width * DEFAULT_ASPECT), deviceScaleFactor: step.deviceScaleFactor ?? DEFAULT_DEVICE_SCALE, mobile: step.mobile ?? step.width <= MOBILE_MAX_WIDTH }) : null);
+  const setOverride = (want: string | null) => {
+    if (want === override) return;
+    if (want) L.push(`await pg._sendToTarget("Emulation.setDeviceMetricsOverride", ${want}); await sleep(250);`);
+    else L.push(`await pg._sendToTarget("Emulation.clearDeviceMetricsOverride", {});`);
+    override = want;
+  };
   spec.steps.forEach((step, i) => {
     if (step.kind === 'pdf') {
+      setOverride(null);
       const o = step.options ?? {};
       if (o.waitForPagedJs) {
         L.push(`{ const deadline = Date.now() + 3000; let ready = false; while (Date.now() < deadline) { try { ready = await pg.evaluate(() => !!window.__pagedjsAfterFired); } catch (e) {} if (ready) break; await sleep(150); } }`);
@@ -237,9 +247,7 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
       const shot: Record<string, unknown> = { path: name, fullPage: step.fullPage !== false };
       if (step.type) shot.type = step.type;
       if (step.quality !== undefined) shot.quality = step.quality;
-      if (step.width) {
-        L.push(`await pg._sendToTarget("Emulation.setDeviceMetricsOverride", ${JSON.stringify({ width: step.width, height: step.height ?? Math.round(step.width * DEFAULT_ASPECT), deviceScaleFactor: step.deviceScaleFactor ?? DEFAULT_DEVICE_SCALE, mobile: step.mobile ?? step.width <= MOBILE_MAX_WIDTH })}); await sleep(250);`);
-      }
+      setOverride(sized(step));
       if (step.selector) {
         const sel: Record<string, unknown> = { path: name };
         if (step.type) sel.type = step.type;
@@ -247,13 +255,11 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
       } else {
         L.push(`await pg.screenshot(${JSON.stringify(shot)});`);
       }
-      if (step.width) L.push(`await pg._sendToTarget("Emulation.clearDeviceMetricsOverride", {});`);
+      setOverride(null);
       L.push(`console.log("STEP_OK ${i}");`);
     } else {
       // eval: promises are awaited by evaluate; write or inline the result
-      if (step.width) {
-        L.push(`await pg._sendToTarget("Emulation.setDeviceMetricsOverride", ${JSON.stringify({ width: step.width, height: step.height ?? Math.round(step.width * DEFAULT_ASPECT), deviceScaleFactor: step.deviceScaleFactor ?? DEFAULT_DEVICE_SCALE, mobile: step.mobile ?? step.width <= MOBILE_MAX_WIDTH })}); await sleep(250);`);
-      }
+      setOverride(sized(step));
       L.push(`{ const v = await pg.evaluate((src) => (0, eval)(src), ${JSON.stringify(step.expression)});`);
       if (step.out) {
         L.push(`  const name = ${JSON.stringify(artifactName(i, step.out))};`);
@@ -267,9 +273,9 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
         // must never be able to forge ASIDE_DIR= or the sentinel below.
         L.push(`  const s = typeof v === "string" ? v : JSON.stringify(v); console.log("EVAL ${i} " + Buffer.from(String(s ?? "").slice(0, ${max}), "utf8").toString("base64")); console.log("STEP_OK ${i}"); }`);
       }
-      if (step.width) L.push(`await pg._sendToTarget("Emulation.clearDeviceMetricsOverride", {});`);
     }
   });
+  setOverride(null);
   L.push(`console.log("PAGE_ERRORS=" + JSON.stringify(await pg.evaluate(() => window.__gstackErrs || [])));`);
   L.push(`console.log("ASIDE_DIR=" + pwd);`);
   L.push(`await closeTab(pg);`);
@@ -589,8 +595,16 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
     if (wait?.selector) await until(`document.querySelector(${JSON.stringify(wait.selector)})`, `waitFor selector never attached: ${wait.selector}`, wait.timeoutMs ?? DEFAULT_WAIT_MS);
     if (wait?.expression) await until(wait.expression, `waitFor expression never became truthy: ${wait.expression}`, wait.timeoutMs ?? DEFAULT_WAIT_MS);
 
+    // The viewport is set when a sized step's size differs from the one in force and reset to the daemon's default before an un-sized step, so consecutive evals at one width pay one `viewport` spawn, not two per step.
+    let vp: string | null = null;
+    const viewport = async (want: string | null) => {
+      if (want === vp) return;
+      await run(['viewport', want ?? '1280x720', ...T]);
+      vp = want;
+    };
     for (const [i, step] of spec.steps.entries()) {
       if (step.kind === 'pdf') {
+        await viewport(null);
         const tmp = path.join(work, artifactName(i, step.out));
         const payload = path.join(work, `pdf-${i}.json`);
         fs.writeFileSync(payload, JSON.stringify(browsePdfPayload(step.options ?? {}, tmp)));
@@ -599,20 +613,21 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
       } else if (step.kind === 'screenshot') {
         const tmp = path.join(work, screenshotName(i, step));
         if (step.width) {
-          const vp = [`${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}`];
+          const args = [`${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}`];
           // `--scale` recreates the daemon's browser context (and is refused in
           // headed mode), so it is passed only when the caller asked for it; the
           // 2x default stays Aside-only (see the header's "not mirrored" list).
-          if (step.deviceScaleFactor) vp.push('--scale', String(step.deviceScaleFactor));
-          await run(['viewport', ...vp, ...T]);
-        }
+          if (step.deviceScaleFactor) args.push('--scale', String(step.deviceScaleFactor));
+          await run(['viewport', ...args, ...T]);
+          vp = args[0];
+        } else await viewport(null);
         await run([...browseScreenshotArgs(step, tmp), ...T]);
         copyOut(tmp, step.out, i);
         // Aside clears its device override after each shot; restore the daemon's
         // default so a later un-sized screenshot is not taken at this width.
-        if (step.width) await run(['viewport', '1280x720', ...T]);
+        if (step.width) await viewport(null);
       } else {
-        if (step.width) await run(['viewport', `${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}`, ...T]);
+        await viewport(step.width ? `${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}` : null);
         if (step.out) {
           const tmp = path.join(work, artifactName(i, step.out));
           await js(step.expression, ['--out', tmp]); // the daemon decodes data: URLs to bytes itself
@@ -620,9 +635,9 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
         } else {
           evals[i] = (await js(step.expression)).slice(0, step.maxInline ?? DEFAULT_MAX_INLINE);
         }
-        if (step.width) await run(['viewport', '1280x720', ...T]);
       }
     }
+    await viewport(null);
     const errs = await bestEffortJs('JSON.stringify(window.__gstackErrs || [])', 'PAGE_ERRORS');
     if (errs !== null) log.push(`PAGE_ERRORS=${errs}`);
     return { ok: true, engine: 'browse', outputs, evals, stdout: log.join('\n') };

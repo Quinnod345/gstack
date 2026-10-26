@@ -231,6 +231,7 @@ function check48(ctx: LintContext, r: Reporter): void {
   for (const rule of ctx.rules) {
     if (isTokenRule(rule)) continue;
     for (const d of rule.decls) {
+      if (d.prop.startsWith('--')) continue;
       if (d.prop === 'font-family') {
         if (d.value.includes('var(') || GENERIC_FAMILIES.has(firstFamily(d.value))) continue;
         r.report('literal-outside-tokens', rule.file, d.line, `font-family literal "${trunc(d.value, 36)}" on ${rule.selector}`);

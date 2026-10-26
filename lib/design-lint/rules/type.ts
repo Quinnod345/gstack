@@ -7,7 +7,7 @@
 import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, memo, mergedRules, styleFor, trackingEm, valueOf } from '../context';
-import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
+import { CONTROL_TRACK_MAX_EM, GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, tokenSites, type CssDecl, type CssRule, type MergedRule } from '../css';
 import { ancestorsOf, closeIndex, getAttr, innerOf, openTags, plainText, stripTags, textOf } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
@@ -19,11 +19,10 @@ const baseSelector = (sel: string): string => sel.replace(/::?[a-z-]+(\([^)]*\))
 
 const em3 = (em: number): string => String(Math.round(em * 1000) / 1000);
 
-/** The token-block rule that declares a custom property, for the finding's file and line. */
+/** The declaration a token's value was read from (the same choice buildTokens makes), for the finding's file and line. */
 function tokenSite(ctx: LintContext, prop: string): { file: string; line: number } {
-  const tr = ctx.rules.find((r) => isTokenRule(r) && r.decls.some((d) => d.prop === prop));
-  const d = tr?.decls.find((x) => x.prop === prop);
-  return { file: tr?.file ?? ctx.rules[0]?.file ?? ctx.key, line: d?.line ?? 1 };
+  const site = memo(ctx, 'tokenSites', () => tokenSites(ctx.rules)).get(prop);
+  return site ? { file: site.file, line: site.line } : { file: ctx.rules[0]?.file ?? ctx.key, line: 1 };
 }
 
 /** gstack's own catalog of training-data display faces, plus the system stacks sloplint names. */
@@ -389,7 +388,7 @@ function check67(ctx: LintContext, r: Reporter): void {
     const tracking = tracked ? ` tracked ${em3(em)}em` : '';
     if (control && !labelish) {
       if (!upper && !smallCaps) { if (!(tracked && small)) continue; }
-      else if (upperDisplay && (em == null || em <= 0.045)) continue;
+      else if (upperDisplay && (em == null || em <= CONTROL_TRACK_MAX_EM)) continue;
       seen.add(key);
       r.report('wide-tracking', rule.file, rule.line, !upper && !smallCaps ? `${rule.selector}: a control tracked ${em3(em!)}em${at}` : upperDisplay ? `${rule.selector}: an uppercase control tracked ${em3(em!)}em` : `${rule.selector}: an uppercase control on a page whose display is not uppercase`,
         { fix: 'controls follow the display voice: sentence case here, or tracking 0.04em at most where the display itself is uppercase' });

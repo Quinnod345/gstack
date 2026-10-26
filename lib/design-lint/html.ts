@@ -35,7 +35,7 @@ export interface ClassCall { pos: number; name: string; toks: string[] }
 export interface Doc {
   file: string;
   kind: DocKind;
-  /** The text the tags were scanned from: the HTML, or the pseudo-HTML of a component, with comments blanked (positions kept), so no rule reads markup the browser never renders. */
+  /** The text the tags were scanned from: the HTML, or the pseudo-HTML of a component, with comments blanked and every stray `<` (a tag start with no `>`) spaced out, positions kept, so no rule reads markup the browser never renders and no `[^>]*>` scan over it runs past its tag. */
   src: string;
   /** The original file text. */
   raw: string;
@@ -142,7 +142,7 @@ const MAX_UNQUOTED_ATTRS = 8192;
  * tag inside unquoted attribute text starts the next tag instead, as a
  * browser reads `<a <b>`.
  */
-function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string, pos: number, end: number) => void): void {
+function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string, pos: number, end: number) => void, strays?: number[]): void {
   const n = s.length;
   const noQuoteFrom: Record<string, number> = { '"': n, "'": n };
   let i = 0;
@@ -170,10 +170,17 @@ function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string
       if (++unquoted > MAX_UNQUOTED_ATTRS) break;
       p++;
     }
-    if (gt < 0) { i = next; continue; }
+    if (gt < 0) { strays?.push(lt); i = next; continue; }
     onTag(close, s.slice(j, k), s.slice(k, gt), lt, gt + 1);
     i = gt + 1;
   }
+}
+
+/** The text with each stray `<` (a tag-shaped start the scanner found no `>` for) replaced by a space, so a `<tag\b[^>]*>` regex over it always finds its `>` within the tag and a page whose tail is ten thousand unclosed `<img ` costs its length. */
+function blankStrays(s: string, strays: number[]): string {
+  let out = '', from = 0;
+  for (const i of strays) { out += s.slice(from, i) + ' '; from = i + 1; }
+  return out + s.slice(from);
 }
 
 export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Doc {
@@ -186,24 +193,26 @@ export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Do
   const styles: StyleBlock[] = styleSpans.map((s) => ({ css: live.slice(s.bodyStart, s.bodyEnd), lineOffset: lineOf(s.start) - 1 }));
   const scripts = scriptSpans.map((s) => live.slice(s.bodyStart, s.bodyEnd) + '\n').join('');
   const bodies = [...scriptSpans, ...styleSpans].map((s): [number, number] => [s.bodyStart, s.bodyEnd]).sort((a, b) => a[0] - b[0]);
-  const masked = blankRanges(live, bodies);
+  const strays: number[] = [];
   const tags: Tag[] = [];
   const comps: Tag[] = [];
-  scanTags(masked, (close, rawName, attrs, pos, end) => {
+  scanTags(blankRanges(live, bodies), (close, rawName, attrs, pos, end) => {
     if (kind !== 'html' && !HTML_NAMES.has(rawName)) {
       comps.push({ close, name: rawName, attrs, pos, end, selfClosing: /\/\s*$/.test(attrs), line: lineOf(pos) });
       return;
     }
     const name = rawName.toLowerCase();
     tags.push({ close, name, attrs, pos, end, selfClosing: /\/\s*$/.test(attrs) || VOID_TAGS.has(name), line: lineOf(pos) });
-  });
+  }, strays);
+  const src2 = blankStrays(live, strays);
+  const masked = blankRanges(src2, bodies);
   const whole = [...scriptSpans, ...styleSpans].map((s): [number, number] => [s.start, s.end]).sort((a, b) => a[0] - b[0]);
   const text = stripTags(blankRanges(live, whole, true))
     .replace(/&quot;|&#0?34;/g, '"').replace(/&#0?39;|&apos;/g, "'")
     .replace(/&hellip;|&#8230;/g, '\u2026').replace(/&mdash;|&#8212;|&#x2014;/gi, '\u2014').replace(/&ndash;|&#8211;|&#x2013;/gi, '\u2013')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ');
-  return { file, kind, src: live, raw: src, masked, styles, scripts, tags, comps, text, lineOf, classAt: new Map(), virtuals: [], cache: {} };
+  return { file, kind, src: src2, raw: src, masked, styles, scripts, tags, comps, text, lineOf, classAt: new Map(), virtuals: [], cache: {} };
 }
 
 /** The index of the brace that closes the one at j (strings skipped), or the string's length. */
@@ -315,17 +324,18 @@ const JS_EXPR_KW = new Set(['return', 'yield', 'await', 'case', 'default', 'else
 export const CLASS_FNS = new Set(['cn', 'clsx', 'classNames', 'classnames', 'twMerge', 'twJoin', 'cva', 'cx', 'tv']);
 const CLASS_FN_CALL = new RegExp(`(?<![\\w$.])(?:${[...CLASS_FNS].join('|')})\\s*\\(`, 'g');
 
-/**
- * Turn a JSX/TSX module into pseudo-HTML of the same length: elements and
- * their class attributes survive (an expression-valued className becomes the
- * literals it holds), everything else becomes spaces. Also records where
- * class-helper calls start.
- */
 /** Failed element starts a component file may spend before the scanner stops pairing; jsScan carries the same budget. */
 const MAX_FAILED_TAGS = 500;
 /** An element whose content ran to the end of the file without any closer: no ancestor can close either, so each fails at once instead of rescanning the same text. */
 const JSX_EOF = -2;
 
+/**
+ * Turn a JSX/TSX module into pseudo-HTML of the same length: elements and
+ * their class attributes survive (an expression-valued className becomes the
+ * literals it holds), everything else becomes spaces. Also records where
+ * class-helper calls start. A close tag naming an open ancestor closes every
+ * element under it, as a browser would; one naming nothing open is text.
+ */
 class JsxScanner {
   private readonly n: number;
   private readonly out: string[];
@@ -335,6 +345,7 @@ class JsxScanner {
   private fails = 0;
   private inClass = 0;
   private depth = 0;
+  private readonly open: string[] = [];
 
   constructor(private readonly src: string) {
     this.n = src.length;
@@ -486,6 +497,12 @@ class JsxScanner {
     const name = src.slice(i, j);
     this.paint(start, j);
     i = j;
+    if (src[i] === '<') {
+      let d = 0, k = i;
+      do { if (src[k] === '<') d++; else if (src[k] === '>') d--; k++; } while (k < n && d > 0);
+      if (d) return -1;
+      this.blank(i, k); i = k;
+    }
     const cls: { v: string[] | null } = { v: null };
     for (;;) {
       i = this.gap(i);
@@ -499,7 +516,10 @@ class JsxScanner {
       if (i < 0) return -1;
     }
     if (cls.v) this.classes.push([start, cls.v]);
-    return this.kids(i, name);
+    this.open.push(name);
+    const e = this.kids(i, name);
+    this.open.pop();
+    return e;
   }
   private kids(i: number, name: string): number {
     const { src, n } = this;
@@ -512,9 +532,12 @@ class JsxScanner {
           let j = k;
           while (j < n && /[\w$.:-]/.test(src[j])) j++;
           const e = this.ws(j);
-          if (src[e] !== '>' || src.slice(k, j) !== name) return -1;
-          if (name) this.paint(i, e + 1);
-          return e + 1;
+          if (src[e] !== '>') return -1;
+          const closer = src.slice(k, j);
+          if (closer === name) { if (name) this.paint(i, e + 1); return e + 1; }
+          if (this.open.lastIndexOf(closer) >= 0 && this.open.lastIndexOf(closer) < this.open.length - 1) return i;
+          i = e + 1;
+          continue;
         }
         if (/[A-Za-z_$>]/.test(src[i + 1] || '')) { const e = this.el(i); if (e > 0) { i = e; continue; } if (e === JSX_EOF) return JSX_EOF; }
         i++;

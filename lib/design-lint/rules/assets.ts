@@ -8,7 +8,7 @@
  */
 import { contrastRatio, oklchOf, parseColor, type Color } from '../color';
 import { mergedRules, type LintContext } from '../context';
-import { isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
+import { CONTRAST_SLACK, isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
 import { ancestorsOf, getAttr, hasAttr, innerOf, textOf, treeOf } from '../html';
 import { trunc, type Reporter } from '../report';
 
@@ -144,7 +144,7 @@ function checkContrastPairs(ctx: LintContext, r: Reporter): void {
         const large = sizePx != null && (sizePx >= 24 || (sizePx >= 18 && weight >= 700));
         const threshold = large ? 3.0 : 4.5;
         const ratio = contrastRatio(fg, bg);
-        if (ratio < threshold - 0.05) {
+        if (ratio < threshold - CONTRAST_SLACK) {
           r.report('low-contrast', rule.file, colorD.line, ratio.toFixed(2) + ':1 under the ' + threshold + ':1 threshold on ' + rule.selector, { suspected: true });
         }
         if (/btn|button|cta|pill|chip/i.test(rule.selector) && withinAStep(fg, bg)) {
@@ -173,7 +173,7 @@ function checkSurfaceInk(ctx: LintContext, r: Reporter): void {
   } else if (file && accent && accentInk) {
     const a = parseColor(resolveVars(accent, ctx.tokens));
     const i = parseColor(resolveVars(accentInk, ctx.tokens));
-    if (a && i && contrastRatio(a, i) < 4.45) r.report('gray-on-color', file, 1, '--color-accent-ink against --color-accent is only ' + contrastRatio(a, i).toFixed(2) + ':1', { suspected: true, fix: 'an accent ink at 4.5:1 or better against the accent' });
+    if (a && i && contrastRatio(a, i) < 4.5 - CONTRAST_SLACK) r.report('gray-on-color', file, 1, '--color-accent-ink against --color-accent is only ' + contrastRatio(a, i).toFixed(2) + ':1', { suspected: true, fix: 'an accent ink at 4.5:1 or better against the accent' });
   }
   const sectionish = /section|panel|hero|footer|band|block|col\b|__col|card|cta|dark|invert/i;
   for (const rule of mergedRules(ctx)) {

@@ -293,7 +293,7 @@ function inputStates(ctx: LintContext, r: Reporter): void {
       const w = widthOf(d.value);
       if (w != null && baseW != null && w !== baseW) r.report('input-state-shift', rule.file, d.line, `the border goes from ${baseW}px to ${w}px on ${rule.selector}, so the field shifts`, { fix: 'keep the border width constant; move the state to outline' });
     }
-    if (/:focus/.test(rule.selector) && rule.decls.some((d) => /^border(-color)?$/.test(d.prop)) && !rule.decls.some((d) => /^outline/.test(d.prop) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim())))) {
+    if (/:focus/.test(rule.selector) && rule.decls.some((d) => /^border(-color)?$/.test(d.prop)) && !rule.decls.some((d) => (/^outline/.test(d.prop) && !OUTLINE_REMOVED.test(d.value.trim())) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim())))) {
       r.report('input-state-shift', rule.file, rule.line, `the focus state is drawn with border on ${rule.selector}`, { fix: 'a focus ring with outline, not border' });
     }
   }
@@ -310,7 +310,6 @@ const CONTROL_SKIP = /:hover|:focus|:active|:disabled|:checked|\[type=["']?(radi
 
 // gate 39b, static half (sloplint measures 39b in the render tier only): a control whose CSS fixes its height outside 44 to 52px
 function controlHeight(ctx: LintContext, r: Reporter): void {
-  if (ctx.scope !== 'page') return;
   const seen = new Set<string>();
   for (const rule of ctx.rules) {
     if (rule.keyframes || isTokenRule(rule) || !CONTROL_SEL.test(rule.selector) || CONTROL_SKIP.test(rule.selector)) continue;

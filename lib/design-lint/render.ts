@@ -17,8 +17,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pickEngine, render, renderWithBrowse, type EngineChoice, type RenderResult as EngineResult, type RenderSpec, type RenderStep } from '../aside-render';
 import { contrastRatio } from './color';
-import { lineIndex } from './css';
-import { escapeRe, plainText } from './html';
+import { CONTRAST_SLACK, lineIndex } from './css';
+import { escapeRe, parseHtml, plainText } from './html';
 import { decodePng, medianRgb, type SampleRect } from './render-png';
 import { installScript, probeScript, type PixelItem, type ProbeAt, type ProbeFinding, type RingProbe, type SetupReport } from './render-probe';
 import { Reporter, type Finding } from './report';
@@ -150,7 +150,7 @@ async function lintPage(target: string, r: Reporter, run: Runner): Promise<void>
     if (err) { report({ rule: 'render', grade: 'fail', evidence: `could not reach ${target}: ${err}` }, null); return; }
   }
   let src: string | null = null;
-  if (!isUrl(target)) { try { src = fs.readFileSync(file, 'utf8'); } catch { src = null; } }
+  if (!isUrl(target)) { try { src = parseHtml(file, fs.readFileSync(file, 'utf8')).src; } catch { src = null; } }
   if (src) lineAt = lineIndex(src);
   const plan = measures();
   const opening = openingSteps();
@@ -206,7 +206,7 @@ async function lintPage(target: string, r: Reporter, run: Runner): Promise<void>
   for (const f of textProbes) {
     const real = confirmed?.text.get(f.probe!.path);
     if (real == null) continue;
-    if (real >= f.probe!.threshold - 0.05) { dropped.add(f.probe!.path); continue; }
+    if (real >= f.probe!.threshold - CONTRAST_SLACK) { dropped.add(f.probe!.path); continue; }
     f.evidence = f.evidence.replace(/computed contrast [\d.]+:1 under/, `contrast ${real.toFixed(2)}:1 against the pixels behind, under`).replace(/\([\d.]+:1\)$/, `(${real.toFixed(2)}:1)`);
   }
   for (const f of found) if (!(f.probe && dropped.has(f.probe.path))) report(f, src);
