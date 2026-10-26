@@ -240,6 +240,16 @@ export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefine
 }
 
 /**
+ * The daemon's launch log line for a direct connection (#3440 item 8). Direct
+ * is enforced with `--proxy-server=direct://` (see BrowserManager.proxyLaunchArgs),
+ * so this names each standard variable Chromium would otherwise have read.
+ */
+export function directProxyLogLine(env: NodeJS.ProcessEnv): string {
+  const ignored = STANDARD_PROXY_VARS.filter(name => env[name]);
+  return `[browse] [proxy] none: direct connection (--proxy-server=direct://${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
+}
+
+/**
  * Resolve the proxy for this invocation (#915). Env URLs go through
  * parseProxyConfig, so the cred policy applies. A standard variable that does
  * not parse (curl-style `host:port`, an unsupported scheme) is ignored with a

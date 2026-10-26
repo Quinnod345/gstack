@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseProxyConfig, computeConfigHash, ProxyConfigError } from '../src/proxy-config';
+import { parseProxyConfig, computeConfigHash, directProxyLogLine, ProxyConfigError } from '../src/proxy-config';
 import { extractGlobalFlags } from '../src/cli';
 
 describe('parseProxyConfig', () => {
@@ -185,5 +185,16 @@ describe('extractGlobalFlags', () => {
       ENV_EMPTY,
     );
     expect(a.configHash).not.toBe(b.configHash);
+  });
+});
+
+describe('directProxyLogLine (#3440 item 8)', () => {
+  test('names the switch alone when no standard variable is set', () => {
+    expect(directProxyLogLine({})).toBe('[browse] [proxy] none: direct connection (--proxy-server=direct://)');
+  });
+
+  test('names every set standard variable in precedence order, and nothing else', () => {
+    const line = directProxyLogLine({ all_proxy: 'socks5://a:1', HTTPS_PROXY: 'http://b:2', BROWSE_PROXY_URL: 'direct', NO_PROXY: 'x', PATH: '/bin' });
+    expect(line).toBe('[browse] [proxy] none: direct connection (--proxy-server=direct://; ignoring HTTPS_PROXY, all_proxy)');
   });
 });

@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**`$B` in direct mode no longer lets Chromium pick a proxy from the environment (#3440 item 8).** `BROWSE_PROXY_URL=direct` (and an unparseable `HTTPS_PROXY`) only stopped gstack from configuring a proxy. The daemon inherits the whole environment and the launch passed no proxy switch, so Chromium read `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` itself and every `goto` still went through that proxy while `$B` reported a direct connection. That made the BROWSER.md precedence list false and any certificate check on a proxied machine unreliable. Reproduced on Linux with Playwright 1.62.1: a logging CONNECT proxy in `HTTPS_PROXY` received `CONNECT <host>:443` with `BROWSE_PROXY_URL=direct` set.
+
+### Fixed
+- **`browse/src/browser-manager.ts`**: every launch path (headless `launch`, the `BROWSE_EXTENSIONS_DIR` persistent context, `launchHeaded`, `handoff`) adds `--proxy-server=direct://` when no proxy is configured, from one `proxyLaunchArgs()`. A configured proxy was already explicit (Playwright passes it as `--proxy-server`), so the environment can no longer win silently in either mode. `--no-proxy-server` was measured and rejected: chrome-headless-shell, the default headless build, ignores it and still took `HTTPS_PROXY`; the full Chromium honors both switches, and `direct://` works on both.
+- **`browse/src/server.ts`** logs the effective proxy mode on every launch. The direct case now prints `[browse] [proxy] none: direct connection (--proxy-server=direct://; ignoring HTTPS_PROXY)`, naming each standard variable that was set and ignored, beside the existing `[proxy] using <url> from <source>` line.
+- **BROWSER.md, "Proxy from environment"**: says that whatever `$B` resolves is passed to Chromium explicitly, that a set proxy variable or the macOS/Windows system proxy is ignored in direct mode, and where the daemon log records the effective mode. The eMudhra/TLS trust section is unchanged.
+
+### Tests
+- `browse/test/proxy-direct-launch.test.ts`: two logging CONNECT proxies on loopback and a target name that does not resolve. With `HTTPS_PROXY` set and `BROWSE_PROXY_URL=direct`, the goto fails at DNS, no CONNECT reaches the proxy, the daemon log names the ignored variable and the state file has no proxy; this case fails on the unfixed tree with `ERR_TUNNEL_CONNECTION_FAILED` and a logged CONNECT. Two controls: `HTTPS_PROXY` alone is the configured proxy and receives the CONNECT; `--proxy` beside `HTTPS_PROXY` sends the CONNECT only to the configured proxy.
+
 ## [1.91.226.0] - 2026-10-26
 
 **/review can re-review just its own fixes after a fixing pass, under the same rules as /ship (#3339).** Before, every /review fix cycle reran the whole review over the whole branch, so a large branch could hit the three-cycle stop on findings in code the earlier passes had already read. Now the pass after an edited pass starts with `gstack-review-log --start review --fix-range` and its checklist, specialists and QA read only what changed since that pass. The Step 4.8 adversarial review still reads the whole branch on every pass, because its rows carry their own freshness. A narrowed pass is never the final review: when it makes no edits, /review runs one full pass before writing the final record, and a fix-range record is never CURRENT. Garry's "do it" on 2026-10-24 for a fix-range re-review with a final full pass covers it.

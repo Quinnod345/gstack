@@ -49,7 +49,7 @@ import { isProcessAlive } from './error-handling';
 import { allowedExtensionOrigin } from './extension-id';
 import { sanitizeBody, stripLoneSurrogates } from './sanitize';
 import { startSocksBridge, testUpstream, type BridgeHandle } from './socks-bridge';
-import { parseProxyConfig, toUpstreamConfig, ProxyConfigError, serverProxyEnv } from './proxy-config';
+import { parseProxyConfig, toUpstreamConfig, ProxyConfigError, serverProxyEnv, directProxyLogLine } from './proxy-config';
 import { writeReceipt } from '../../lib/egress-receipt';
 import { redactProxyUrl } from './proxy-redact';
 import { type XvfbHandle } from './xvfb';
@@ -1943,7 +1943,7 @@ export async function start() {
         proxyBridge.close().catch(() => { /* shutting down anyway */ });
       }
     });
-  }
+  } else console.log(directProxyLogLine(process.env));
 
   process.on('exit', () => { browserManager.closeOwnedDisplay(); });
 

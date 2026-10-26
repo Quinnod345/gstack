@@ -615,6 +615,23 @@ export class BrowserManager {
   }
 
   /**
+   * Chromium picks its own proxy when it is launched without --proxy-server:
+   * HTTPS_PROXY, HTTP_PROXY and ALL_PROXY on Linux, the system proxy settings
+   * on macOS and Windows. Playwright passes a configured proxy explicitly as
+   * --proxy-server, so only a session browse resolved to direct was exposed:
+   * `BROWSE_PROXY_URL=direct` on a machine with HTTPS_PROXY set still routed
+   * every `goto` through that proxy (#3440 item 8). Direct now means
+   * `--proxy-server=direct://` on every launch path (headless, headed,
+   * handoff). Not `--no-proxy-server`: chrome-headless-shell (the default
+   * headless build) only reads --proxy-server and still took HTTPS_PROXY
+   * with --no-proxy-server set, measured on Playwright 1.62.1; the full
+   * Chromium honors both.
+   */
+  private proxyLaunchArgs(): string[] {
+    return this.proxyConfig ? [] : ['--proxy-server=direct://'];
+  }
+
+  /**
    * Get the ref map for external consumers (e.g., /refs endpoint).
    */
   getRefMap(): Array<{ ref: string; role: string; name: string }> {
@@ -635,7 +652,7 @@ export class BrowserManager {
     // macOS still showed (#2281, #432).
     const extensionsDir = process.env.BROWSE_EXTENSIONS_DIR;
     const { STEALTH_LAUNCH_ARGS, buildGStackLaunchArgs, STEALTH_IGNORE_DEFAULT_ARGS } = await import('./stealth');
-    const launchArgs: string[] = [...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs()];
+    const launchArgs: string[] = [...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs(), ...this.proxyLaunchArgs()];
     // #2771/#1968: honor GSTACK_CHROMIUM_PATH headless too (NixOS, macOS 13).
     // That bundle belongs to the user, so the XProtect heal never touches it,
     // and a launch failure names it.
@@ -809,6 +826,7 @@ export class BrowserManager {
       // empty-fallback returns native), so this is safe on stock Playwright
       // Chromium too.
       ...buildGStackLaunchArgs(),
+      ...this.proxyLaunchArgs(),
     ];
     if (extensionPath) {
       // Skip --load-extension when running against a custom Chromium build
@@ -2117,7 +2135,7 @@ export class BrowserManager {
       // Same blink-level stealth flags as launch()/launchHeaded(). Without
       // STEALTH_LAUNCH_ARGS the handed-off browser kept the AutomationControlled
       // tell that the other two paths strip.
-      const launchArgs: string[] = ['--hide-crash-restore-bubble', ...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs()];
+      const launchArgs: string[] = ['--hide-crash-restore-bubble', ...STEALTH_LAUNCH_ARGS, ...buildGStackLaunchArgs(), ...this.proxyLaunchArgs()];
       if (extensionPath) {
         launchArgs.push(`--disable-extensions-except=${extensionPath}`);
         launchArgs.push(`--load-extension=${extensionPath}`);
