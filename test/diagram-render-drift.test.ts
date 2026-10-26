@@ -17,9 +17,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-const ROOT = path.resolve(import.meta.dir, "..", "lib", "diagram-render");
-const DIST_HTML = path.join(ROOT, "dist", "diagram-render.html");
-const BUILD_INFO = path.join(ROOT, "dist", "BUILD_INFO.json");
+// Repo-relative segment runs, so the pre-gate's import graph sees that this
+// test owns the committed bundle, its BUILD_INFO and the build script.
+const REPO = path.resolve(import.meta.dir, "..");
+const ROOT = path.join(REPO, "lib", "diagram-render");
+const DIST_HTML = path.join(REPO, "lib", "diagram-render", "dist", "diagram-render.html");
+const BUILD_INFO = path.join(REPO, "lib", "diagram-render", "dist", "BUILD_INFO.json");
+const BUILD_SCRIPT = path.join(REPO, "lib", "diagram-render", "scripts", "build.ts");
 
 describe("diagram-render bundle drift", () => {
   test("dist hash matches BUILD_INFO (tamper check)", async () => {
@@ -43,7 +47,7 @@ describe("diagram-render bundle drift", () => {
     const info = await Bun.file(BUILD_INFO).json();
     const srcSha = createHash("sha256")
       .update(await Bun.file(path.join(ROOT, "src", "entry.ts")).text())
-      .update(await Bun.file(path.join(ROOT, "scripts", "build.ts")).text())
+      .update(await Bun.file(BUILD_SCRIPT).text())
       .digest("hex");
     expect(srcSha).toBe(info.srcSha256);
   });
