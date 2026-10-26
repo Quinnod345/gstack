@@ -190,3 +190,24 @@ describe('design-lint type: fixtures', () => {
     expect(byRule(findings, 'monospace-costume').map((f) => [f.grade, f.line])).toEqual([['ask', lineOf(html, '.a__eyebrow {')]]);
   });
 });
+
+describe('design-lint type: third review cycle', () => {
+  test('banned-font: a banned face as the first family on a heading or in a --font-* token asks once; a fallback position, a var() and a near name are clean', () => {
+    const { html, findings } = lintPage(page('h1 { font-family: "Comic Sans MS", cursive; }\nh2 { font-family: Impact, sans-serif; }\n.quote { font-family: var(--font-body); }\n.note { font-family: "Papyrus Variable Text", serif; }\n.last { font-family: Georgia, Papyrus, serif; }', '<h1>Ledger</h1><h2>Notes</h2><p class="quote">Q</p><p class="note">N</p><p class="last">L</p>', TOKENS.replace('--font-body: "Public Sans", sans-serif;', '--font-body: Papyrus, serif;')));
+    const hits = byRule(findings, 'banned-font').map((f) => [f.grade, f.line, f.evidence]);
+    expect(hits).toEqual([
+      ['ask', lineOf(html, '--font-body: Papyrus'), '"papyrus" (--font-body)'],
+      ['ask', lineOf(html, '"Comic Sans MS"'), '"comic sans ms" (h1)'],
+      ['ask', lineOf(html, 'Impact'), '"impact" (h2)'],
+      ['ask', lineOf(html, '"Papyrus Variable Text"'), '"papyrus variable text" (.note)'],
+    ]);
+  });
+  test('an empty <i> icon glyph in a heading, and an <em> that is the whole heading, are not an italic word', () => {
+    const icon = lintPage(page('', '<h2><i class="fa fa-star" aria-hidden="true"></i> Features</h2>'));
+    expect(lines(byRule(icon.findings, 'italic-word-in-heading'))).toEqual([]);
+    const whole = lintPage(page('', '<h3><em>Whole heading italic</em></h3>'));
+    expect(lines(byRule(whole.findings, 'italic-word-in-heading'))).toEqual([]);
+    const word = lintPage(page('', '<h2>Fast <em>and</em> safe</h2>'));
+    expect(byRule(word.findings, 'italic-word-in-heading').map((f) => f.grade)).toEqual(['blocks']);
+  });
+});

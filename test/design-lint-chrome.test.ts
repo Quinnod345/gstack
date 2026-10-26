@@ -245,3 +245,25 @@ describe('design-lint chrome: fixtures', () => {
     expect(only(slopped.findings, 'kicker-above-heading').map((f) => [f.grade, f.line, f.evidence])).toEqual([['ask', 120, 'the eyebrow "01 / FEATURES" before <h2>']]);
   });
 });
+
+describe('design-lint chrome: third review cycle', () => {
+  test('repeated-fact counts a percentage printed in four sections', () => {
+    const band = (i: number) => '<section id="s' + i + '"><p>Save 30% off this month.</p></section>';
+    const hits = only(run(page('', '<main>\n' + [1, 2, 3, 4].map(band).join('\n') + '\n</main>')), 'repeated-fact');
+    expect(hits.map((f) => [f.grade, f.evidence])).toEqual([['ask', 'the same fact printed in 4 sections: 30% (4)']]);
+  });
+  test('a stock line in the hero blocks; the same line in body copy below the hero is suspected, so it sits at ask and a waiver can answer it', () => {
+    const inHero = page('', '<main>\n<header class="hero"><h1>Ledger</h1><p>Everything you need to close the month.</p></header>\n<section><h2>Notes</h2><p>The books close on the first.</p></section>\n</main>');
+    expect(only(run(inHero), 'generic-hero-copy').map((f) => [f.grade, f.line])).toEqual([['blocks', lineOf(inHero, 'Everything you need')]]);
+    const below = page('', '<main>\n<header class="hero"><h1>Ledger</h1><p>The books close on the first.</p></header>\n<section><h2>Help</h2><p>Whether you\'re logged in or not, your cart stays.</p></section>\n</main>');
+    expect(only(run(below), 'generic-hero-copy').map((f) => [f.grade, f.line])).toEqual([['ask', lineOf(below, 'Whether you')]]);
+    const waived = run('<!-- gstack-lint-disable generic-hero-copy: the help page quotes the cart notice word for word -->\n' + below);
+    expect(only(waived, 'generic-hero-copy').map((f) => f.grade)).toEqual(['waived']);
+    expect(only(waived, 'waiver')).toEqual([]);
+  });
+  test('a region whose list items leave their end tags out still counts facts per section', () => {
+    const band = (i: number) => '<section id="s' + i + '"><ul><li>From $49 a month.<li>Second item</ul></section>';
+    const hits = only(run(page('', '<main>\n' + [1, 2, 3, 4].map(band).join('\n') + '\n</main>')), 'repeated-fact');
+    expect(hits.map((f) => f.evidence)).toEqual(['the same fact printed in 4 sections: $49 (4)']);
+  });
+});

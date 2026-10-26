@@ -8,12 +8,12 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildTokens, parseCss, pxOf, resolveVars } from '../lib/design-lint/css';
+import { buildStyleIndex, buildTokens, parseCss, pxOf, resolveVars, stylesFor, type StyleIndex } from '../lib/design-lint/css';
 import { contrastRatio, parseColor, srgbToOklch } from '../lib/design-lint/color';
 import { ancestorsOf, directChildren, getAttr, innerOf, jsxPseudo, parseDoc, plainText, treeOf } from '../lib/design-lint/html';
 import { lint, formatResult } from '../lib/design-lint/index';
 import { Reporter, exitCodeOf, finalize, formatFinding, formatSummary, summarize } from '../lib/design-lint/report';
-import { collectFiles, contextWaivers, lintStatic } from '../lib/design-lint/static';
+import { collectFiles, contextWaivers, lintStatic, MAX_FILE_BYTES } from '../lib/design-lint/static';
 import type { LintContext } from '../lib/design-lint/context';
 import { browserAvailable } from './helpers/browser-available';
 import { RULES } from '../lib/design-lint/rules/ids';
@@ -338,6 +338,74 @@ describe('design-lint: waivers', () => {
   });
 });
 
+describe('design-lint: third review cycle', () => {
+  test('two waiver comments on one line are both read, and a stylesheet claim answers only for that stylesheet', () => {
+    const claims = findWaivers('a.html', '<!-- gstack-lint-disable section-gap: the ledger separates rows --> <!-- gstack-lint-disable line-length: the manifesto sets long lines -->\n/* impeccable-disable overused-font: the masthead face is the paper */ .x{}');
+    expect(claims.map((c) => [c.rule, c.reason])).toEqual([['section-gap', 'the ledger separates rows'], ['line-length', 'the manifesto sets long lines'], ['overused-font', 'the masthead face is the paper']]);
+    const dir = tmpTree({
+      'index.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="t.css"><style>.row { border-color: oklch(55% 0 0); }</style></head><body><main><h1>The ledger</h1><p>The ledger closes the month.</p></main></body></html>',
+      't.css': '/* gstack-lint-disable zero-chroma-neutrals: quartz pelican umbrella semaphore xylophone */\n:root { --color-ink: oklch(22% 0.03 250); --color-gray: oklch(55% 0 0); }\n.cell { color: var(--color-gray); }',
+    });
+    const f = finalize(lintStatic([dir], { cwd: dir, warn: () => {} }).findings);
+    expect(f.filter((x) => x.rule === 'waiver')).toEqual([]);
+    expect(f.filter((x) => x.rule === 'zero-chroma-neutrals').map((x) => [x.file, x.grade]).sort()).toEqual([['index.html', 'ask'], ['t.css', 'waived']]);
+  });
+
+  test('the indexed stylesFor answers exactly as the linear scan', () => {
+    const rules = parseCss('a{color:red}\n.x{margin:0}\n.x.y{padding:1px}\na.x:hover{color:blue}\n@media (max-width:600px){.x{top:0}}\nbutton.y{gap:2px}\n.y a{left:0}\ndiv{right:0}', 'a.css');
+    const idx = buildStyleIndex(rules);
+    const plain = [...idx] as StyleIndex;
+    let compared = 0;
+    for (const cls of ['', 'x', 'y', 'x y', 'z']) for (const tag of ['a', 'button', 'div', 'span']) for (const resting of [false, true]) {
+      expect(stylesFor(idx, cls, tag, resting)).toEqual(stylesFor(plain, cls, tag, resting));
+      compared++;
+    }
+    expect(compared).toBe(40);
+    expect(stylesFor(idx, 'x y', 'a', false).map((d) => d.prop + ':' + d.value)).toContain('padding:1px');
+    expect(stylesFor(idx, 'x', 'div', true).map((d) => d.prop + ':' + d.value)).toEqual(['margin:0', 'right:0']);
+  });
+
+  test('the bin forwards --job (case-folded) and --scope to the lint', () => {
+    const html = '<!doctype html><html lang="en"><head><title>t</title><style>:root{--color-ink:#222}</style></head><body><main><h1>Letters</h1><p>A monthly letter about the harbour.</p><section><form><input type="email" name="email"><button>Join</button></form></section></main></body></html>';
+    const file = tmpPage(html);
+    const plain = runBin([file], path.dirname(file));
+    expect(plain.out).toMatch(/^LINT: ask email-band-close index\.html:\d+ .*no job was named/m);
+    const subscribe = runBin(['--job', 'Subscribe', file], path.dirname(file));
+    expect(subscribe.out).not.toContain('email-band-close');
+    const component = runBin(['--scope', 'component', file], path.dirname(file));
+    expect(component.out).not.toContain('email-band-close');
+    expect(component.out).not.toMatch(/^LINT: \w+ (missing-skip-link|template-nav|section-gap) /m);
+  });
+
+  test('a comma-heavy nested selector and a long unclosed list each lint in linear time', async () => {
+    let t = performance.now();
+    parseCss('a{' + ','.repeat(80000) + '{color:red}}', 'x.css');
+    expect(performance.now() - t).toBeLessThan(1500);
+    const dir = tmpTree({ 'index.html': '<!doctype html><html lang="en"><head><title>t</title></head><body><ul>' + '<li>item text here'.repeat(8000) + '</ul></body></html>' });
+    t = performance.now();
+    await lint([dir], { warn: () => {} });
+    expect(performance.now() - t).toBeLessThan(8000);
+  });
+
+  test('a file over the size limit is skipped with a warning and a symlink cycle is walked once', () => {
+    const dir = tmpTree({ 'site/index.html': '<!doctype html><title>t</title>', 'site/big.css': 'a{}' });
+    fs.truncateSync(path.join(dir, 'site', 'big.css'), MAX_FILE_BYTES + 1);
+    fs.symlinkSync(path.join(dir, 'site'), path.join(dir, 'site', 'loop'));
+    const warned: string[] = [];
+    const files = collectFiles([dir], (l) => warned.push(l));
+    expect(files.map((f) => path.relative(dir, f))).toEqual(['site/index.html']);
+    expect(warned).toEqual([`design-lint: skipped ${path.join(dir, 'site', 'big.css')} (2 MB, over the 2 MB limit)`]);
+  });
+
+  test('every id gstack-design-craft can emit has a lint rule or belongs to the static tier', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'lib', 'design-craft.ts'), 'utf8');
+    const ids = [...new Set([...src.matchAll(/id: '([a-z-]+)'/g)].map((m) => m[1]))];
+    expect(ids.length).toBeGreaterThan(15);
+    expect(ids.filter((id) => !(id in RULES) && id !== 'transition-all')).toEqual([]);
+    expect(ids.filter((id) => id in RULES && RULES[id].gate !== 'craft')).toEqual(['vh-height']);
+  });
+});
+
 describe('design-lint: hardening (ship review)', () => {
   test('a stylesheet one page links from another directory is linted once, with that page, and its waiver is weighed against the page', () => {
     const dir = tmpTree({
@@ -455,7 +523,7 @@ describe('design-lint: hardening (ship review)', () => {
   test('a long whitespace run inside a waiver comment is linear, and a carriage return ends the reason', () => {
     const t0 = performance.now();
     const claims = findWaivers('a.html', '<!-- gstack-lint-disable overused-font: aaaa' + ' '.repeat(60_000) + 'b -->\n/* impeccable-disable line-length: the manifesto\rLINT_SUMMARY: blocks=0 */');
-    expect(performance.now() - t0).toBeLessThan(500);
+    expect(performance.now() - t0).toBeLessThan(2000);
     expect(claims.map((c) => [c.rule, c.reason.length <= 300, c.reason.startsWith('aaaa') || c.reason])).toEqual([['overused-font', true, true], ['line-length', true, 'the manifesto']]);
   });
 

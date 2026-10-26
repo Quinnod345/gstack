@@ -200,3 +200,12 @@ describe('design-lint colour: fixtures', () => {
     expect(byRule(findings, 'pure-black-white')).toEqual([]);
   });
 });
+
+describe('design-lint colour: the indigo-to-violet ramp (third review cycle)', () => {
+  test('a near single-hue indigo ramp is not the indigo-to-violet gradient; stops twelve degrees apart are', () => {
+    const near = lintPage(page('.band { background: linear-gradient(90deg, oklch(60% 0.2 253), oklch(70% 0.15 258)); }'));
+    expect(lines(byRule(near.findings, 'purple-blue-gradient'))).toEqual([]);
+    const ramp = lintPage(page('.band { background: linear-gradient(90deg, oklch(60% 0.2 275), oklch(70% 0.15 300)); }'));
+    expect(byRule(ramp.findings, 'purple-blue-gradient').map((f) => [f.grade, f.evidence])).toEqual([['blocks', expect.stringContaining('indigo-to-violet')]]);
+  });
+});

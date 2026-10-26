@@ -230,3 +230,34 @@ describe('design-lint structure: the shared fixtures', () => {
     expect(f.filter((x) => FAMILY.includes(x.rule)).map(formatFinding)).toEqual([]);
   });
 });
+
+describe('design-lint structure: third review cycle', () => {
+  test('sibling cards in a list whose end tags are left out are not nested cards', async () => {
+    const f = await lintPage(page('', '<ul><li class="card">One<li class="card">Two</ul>'));
+    none(f, 'nested-cards');
+    const nested = await lintPage(page('', '<ul><li class="card">One<div class="card">Inner</div></li></ul>'));
+    expect(hits(nested, 'nested-cards').map(([g]) => g)).toEqual(['blocks']);
+  });
+  test('one selector sticky at two breakpoints is not a double sticky; two selectors are', async () => {
+    none(await lintPage(page('.site-header { position: sticky; top: 0; }\n@media (min-width: 900px) { .site-header { position: sticky; top: 0; padding: 16px; } }', '<header class="site-header">H</header>')), 'double-sticky');
+    const two = await lintPage(page('.site-header { position: sticky; top: 0; }\n.toolbar { position: sticky; top: 0; }', '<header class="site-header">H</header><div class="toolbar">T</div>'));
+    expect(hits(two, 'double-sticky').map(([g]) => g)).toEqual(['blocks']);
+  });
+  test('a light grey side border on a blockquote is not the accent stripe; a dark ink stripe and a coloured one are', async () => {
+    none(await lintPage(page('blockquote { border-left: 4px solid #dddddd; }', '<blockquote>A line</blockquote>')), 'template-cards');
+    expect(hits(await lintPage(page('.note { border-left: 4px solid var(--color-ink); }', '<p class="note">A note</p>')), 'template-cards').map(([g]) => g)).toEqual(['ask']);
+    expect(hits(await lintPage(page('.note { border-left: 4px solid oklch(60% 0.18 30); }', '<p class="note">A note</p>')), 'template-cards').map(([g]) => g)).toEqual(['ask']);
+  });
+  test('many grid rules with a bare fr track do not rescan the document per rule', async () => {
+    let css = '';
+    let body = '';
+    for (let i = 0; i < 1500; i++) {
+      css += `.c${i} { grid-template-columns: 1fr 2fr; }\n`;
+      body += `<section class="c${i}"><h2>Heading ${i}</h2><p>Text.</p><div><img src="p${i}.jpg" alt="Photo ${i}"></div></section>`;
+    }
+    const t = performance.now();
+    const f = await lintPage(page(css, body));
+    expect(performance.now() - t).toBeLessThan(8000);
+    expect(hits(f, 'bare-fr-track').length).toBe(1500);
+  });
+});

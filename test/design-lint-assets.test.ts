@@ -137,3 +137,25 @@ describe('design-lint assets: fixtures', () => {
     expect(only(slopped.findings, 'unlabeled-decoration').map((f) => [f.grade, f.line])).toEqual([['blocks', 114]]);
   });
 });
+
+describe('design-lint assets: third review cycle', () => {
+  test('large text passes at 3:1 and the same colour on body text asks; body text at the 4.5:1 edge is clean', () => {
+    const big = page('.big { font-size: 32px; color: #959595; background: #fff; }', '<main><p class="big">Large text at three to one</p></main>');
+    expect(only(run(big), 'low-contrast')).toEqual([]);
+    const small = page('.small { font-size: 16px; color: #959595; background: #fff; }', '<main><p class="small">Body text at three to one</p></main>');
+    expect(only(run(small), 'low-contrast').map((f) => [f.grade, f.evidence])).toEqual([['ask', '3.00:1 under the 4.5:1 threshold on .small']]);
+    expect(only(run(page('.body { color: #767676; background: #fff; }', '<main><p class="body">Readable</p></main>')), 'low-contrast')).toEqual([]);
+  });
+  test('two-icon-libraries reads class tokens and asset references, not prose: feather-light and bi-weekly are words', () => {
+    const prose = page('', '<main><i class="fa-solid fa-star"></i><p>A feather-light app with our bi-weekly newsletter.</p></main>');
+    expect(only(run(prose), 'two-icon-libraries')).toEqual([]);
+    const mixed = page('', '<main><i class="fa-solid fa-star"></i><i class="bi-star"></i></main>');
+    expect(only(run(mixed), 'two-icon-libraries').map((f) => f.evidence)).toEqual(['icon libraries mixed on one page: font-awesome and bootstrap-icons']);
+    const linked = page('', '<main><i class="fa-solid fa-star"></i><script src="https://unpkg.com/feather-icons"></script></main>');
+    expect(only(run(linked), 'two-icon-libraries').map((f) => f.evidence)).toEqual(['icon libraries mixed on one page: font-awesome and feather']);
+  });
+  test('an svg inside a labelled list item whose end tag is left out is still labelled', () => {
+    const f = run(page('', '<main><ul><li aria-label="Home"><svg viewBox="0 0 10 10"></svg><li aria-label="Away"><svg viewBox="0 0 10 10"></svg></ul></main>'));
+    expect(only(f, 'unlabeled-decoration')).toEqual([]);
+  });
+});

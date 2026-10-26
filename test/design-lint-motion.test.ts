@@ -249,3 +249,22 @@ describe('design-lint motion: the shared fixtures', () => {
     expect(f.filter((x) => FAMILY.includes(x.rule)).map(formatFinding)).toEqual([]);
   });
 });
+
+describe('design-lint motion: the removed-outline check (third review cycle)', () => {
+  test('a fractional outline on :focus-visible is a ring, so outline: none on :focus does not block', async () => {
+    const f = await lintPage(page('a:focus { outline: none; }\na:focus-visible { outline: 0.25rem solid var(--color-ink); }', '<a href="/x">Go</a>', { states: false }).replace('a:focus-visible, .button:focus-visible { outline: 2px solid var(--color-ink); }\n', ''));
+    none(f, 'missing-focus-visible');
+  });
+  test('the usual :focus:not(:focus-visible) reset with a ring, and a box-shadow ring beside outline: none, are clean; outline: 0 and outline-style: none with no ring block', async () => {
+    const base = (css: string) => page(css, '<a href="/x">Go</a>', { states: false });
+    none(await lintPage(base('a:focus:not(:focus-visible) { outline: none; }\na:focus-visible { outline: 2px solid var(--color-ink); }')), 'missing-focus-visible');
+    none(await lintPage(base('a:focus { outline: none; box-shadow: 0 0 0 3px var(--color-ink); }')), 'missing-focus-visible');
+    for (const removed of ['outline: 0', 'outline: 0px', 'outline-style: none']) {
+      const html = base(`a:focus { ${removed}; }`);
+      const f = await lintPage(html);
+      expect(only(f, 'missing-focus-visible').map((x) => [x.grade, x.evidence.split(' on ')[0]])).toEqual([['blocks', removed]]);
+    }
+    const hoverOnly = await lintPage(base('a:focus { outline: none; }\na:hover { outline: 2px solid var(--color-ink); }'));
+    expect(only(hoverOnly, 'missing-focus-visible').map((x) => x.grade)).toEqual(['blocks']);
+  });
+});

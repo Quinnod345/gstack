@@ -360,3 +360,12 @@ describe('design-lint tailwind: fixtures', () => {
     }
   });
 });
+
+describe('design-lint tailwind: one gradient classifier for both tiers (third review cycle)', () => {
+  test('arbitrary indigo-to-violet stops report the same purple-blue-gradient the stylesheet form does', async () => {
+    const tw = await lintFiles({ 'A.tsx': 'export const A = () => <div className="bg-gradient-to-r from-[#6366f1] to-[#8b5cf6] p-4">hello there</div>;' });
+    expect(only(tw, 'purple-blue-gradient').map((f) => [f.grade, f.evidence])).toEqual([['blocks', expect.stringContaining('indigo-to-violet')]]);
+    const css = await lintFiles({ 'a.css': '.g { background: linear-gradient(90deg, #6366f1, #8b5cf6); }' });
+    expect(only(css, 'purple-blue-gradient').map((f) => [f.grade, f.evidence])).toEqual([['blocks', expect.stringContaining('indigo-to-violet')]]);
+  });
+});
