@@ -1020,9 +1020,11 @@ where it came from, with credentials redacted.
   scheme (`ftp://`), a bad port, a missing host, a path other than a bare
   `/`, a query or a fragment (where a `DOMAIN\user` login or a `/` in a
   password ends up after URL parsing, so such values are refused for every
-  source rather than printed unredacted; percent-encode `/ \ ? # @` in
-  `http://` and `https://` credentials), or credentials that are not valid
-  percent-encoding. `$B` connects directly (on Linux,
+  source rather than printed unredacted; percent-encode `/ ? #` in
+  credentials for every scheme, and `\` in `http://` and `https://`
+  credentials), or credentials that are not valid percent-encoding. A
+  credential-free value with a path (`http://proxy.corp:3128/pac`) is refused
+  the same way, where it used to be read with the path dropped. `$B` connects directly (on Linux,
   Chromium is told so and does not read the variable itself) instead of failing
   every command. Fix: `export HTTPS_PROXY=http://host:port` (or `socks5://`),
   or set `BROWSE_PROXY_URL=direct` to silence the warning (on macOS and
