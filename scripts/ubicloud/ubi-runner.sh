@@ -641,13 +641,21 @@ pass_name() {
   case $1 in UBICLOUD_*) die "--pass $1: the runner never forwards its own Ubicloud credentials to a VM" ;; esac
 }
 
-# inside_dir DIR ROOT: DIR exists (created if needed) and resolves, symlinks
-# followed, to ROOT or below it.
+# inside_dir DIR ROOT: DIR resolves, symlinks followed, to ROOT or below it.
+# Its nearest existing ancestor is checked first, so a refused destination
+# creates nothing (not even outside the root); only then is DIR created and
+# checked again.
 inside_dir() {
-  local a b
+  local a b near=$1
+  b=$(cd "$2" 2>/dev/null && pwd -P) || return 1
+  while [ ! -d "$near" ]; do
+    [ "$near" != "$(dirname "$near")" ] || return 1
+    near=$(dirname "$near")
+  done
+  a=$(cd "$near" 2>/dev/null && pwd -P) || return 1
+  [ "$a" = "$b" ] || [[ "$a" = "$b"/* ]] || return 1
   mkdir -p "$1" 2>/dev/null || return 1
   a=$(cd "$1" 2>/dev/null && pwd -P) || return 1
-  b=$(cd "$2" 2>/dev/null && pwd -P) || return 1
   [ "$a" = "$b" ] || [[ "$a" = "$b"/* ]]
 }
 

@@ -490,14 +490,14 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
   test('verify rechecks every pull destination at pull time: a symlink an earlier pull planted cannot redirect a later pull outside --src', () => {
     const f = fakeVm();
     try {
-      const dir = src(f, { command: 'make verify', pull: ['work/repo/escape:.', 'work/repo/artifacts:escape'] });
+      const dir = src(f, { command: 'make verify', pull: ['work/repo/escape:.', 'work/repo/artifacts:escape/new/sub'] });
       const victim = join(f.root, 'victim'); mkdirSync(victim);
       mkdirSync(join(f.root, 'remote-fs/artifacts'), { recursive: true });
       writeFileSync(join(f.root, 'remote-fs/artifacts/authorized_keys'), 'ssh-ed25519 AAAA attacker\n');
       symlinkSync(victim, join(f.root, 'remote-fs/escape'));
       const r = run(f, ['verify', '--src', dir]);
       expect(r.exitCode).toBe(1);
-      expect(r.stderr.toString()).toMatch(/pull refused: .*\/repo\/escape resolves outside .*\/repo/);
+      expect(r.stderr.toString()).toMatch(/pull refused: .*\/repo\/escape\/new\/sub resolves outside .*\/repo/);
       expect(lstatSync(join(dir, 'escape')).isSymbolicLink()).toBe(true);
       expect(readdirSync(victim)).toEqual([]);
       expect(f.calls()).toContain('destroy');
