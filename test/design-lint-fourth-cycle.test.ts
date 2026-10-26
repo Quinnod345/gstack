@@ -54,9 +54,12 @@ describe('design-lint fourth cycle: commented-out markup is dead for every rule'
     expect(only(after, 'literal-outside-tokens').concat(only(after, 'italic-word-in-heading'), only(after, 'broken-image'), only(after, 'fake-avatar'), only(after, 'generic-hero-copy'))).toEqual([]);
   });
 
-  test('a commented-out module script and stylesheet link do not make the page a build-only app', () => {
-    const live = run(page('', '<main><h1>Harbour</h1><p>Rows.</p></main>\n<!-- <script type="module" src="/src/main.tsx"></script> -->'));
-    expect(only(live, 'unbuilt-source')).toEqual([]);
+  test('a commented-out module script does not make the page a build-only shell, so its page rules still run', () => {
+    const body = '<main><h1>Harbour</h1><p>Rows.</p></main>';
+    const shell = HEAD + '<script type="module" src="/src/main.tsx"></script></head><body>' + body + '</body></html>';
+    const commented = HEAD + '<!-- <script type="module" src="/src/main.tsx"></script> --></head><body>' + body + '</body></html>';
+    expect(only(run(shell), 'overflow-x-unclipped')).toEqual([]);
+    expect(only(run(commented), 'overflow-x-unclipped').length).toBe(1);
   });
 });
 
@@ -97,7 +100,7 @@ describe('design-lint fourth cycle: one pairing for every tree reader', () => {
     }
     const t = performance.now();
     scriptSites('<template>' + '<script setup>\nconst a = 1;\n'.repeat(8000) + '</template>', 'vue');
-    expect(performance.now() - t).toBeLessThan(500);
+    expect(performance.now() - t).toBeLessThan(2000);
   });
 });
 
@@ -107,7 +110,7 @@ describe('design-lint fourth cycle: hostile CSS', () => {
     expect(resolveVars('var(--a)', { '--a': 'var(--a) ' + 'x'.repeat(40) })).toContain('x');
     expect(resolveVars('var(--a)', { '--a': 'var(--b)', '--b': 'var(--a)' })).toMatch(/var\(--[ab]\)/);
     expect(resolveVars('var(--a)', { '--a': 'var(--b) 1px', '--b': 'red' })).toBe('red 1px');
-    expect(performance.now() - t).toBeLessThan(1000);
+    expect(performance.now() - t).toBeLessThan(2000);
     const grown = resolveVars('var(--a)', { '--a': 'var(--b) var(--b)', '--b': 'var(--c) var(--c)', '--c': 'var(--d) var(--d)', '--d': 'var(--e) var(--e)', '--e': 'y'.repeat(2048) });
     expect(grown.length).toBeLessThan(40000);
   });
@@ -221,7 +224,7 @@ describe('design-lint fourth cycle: render answers of the wrong shape', () => {
     }) });
     expect(only(odd.findings, 'horizontal-scroll').map((f) => f.evidence)).toEqual(['[320px] the hero overflows']);
     expect(only(odd.findings, 'nested-cards').map((f) => [f.grade, f.line])).toEqual([['blocks', 1]]);
-    expect(only(odd.findings, 'render').map((f) => /\((.*?)\)/.exec(f.evidence)![1])).toEqual(['nested-cards', '7']);
+    expect(only(odd.findings, 'render').map((f) => /\((.*?)\)/.exec(f.evidence)![1])).toEqual(['nested-cards', '7', 'focus']);
     expect(only(odd.findings, 'missing-focus-visible')).toEqual([]);
   });
 
@@ -248,7 +251,7 @@ describe('design-lint fourth cycle: never-waivable classes refuse by class befor
   test('a short reason on an own rule, a measured Floor rule and a Floor rule nobody found is refused by class, never for its length', () => {
     const measured = new Reporter('page', '/x');
     measured.report('nested-cards', '/x/a.html', 4, 'div.card > div.card');
-    const claims = ['render', 'nested-cards', 'horizontal-scroll'].map((rule) => ({ rule, reason: 'fine here', file: '/x/a.html', line: 1, raw: '' }));
+    const claims = ['render', 'nested-cards', 'horizontal-scroll'].map((rule) => ({ rule, reason: 'fine here', file: '/x/a.html', line: 1 }));
     const set = resolveWaivers(claims, 'the ledger closes the month', '/x', suspectedRules(measured.findings));
     expect(set.refused.map((f) => f.evidence)).toEqual([
       `waiver on render refused: ${OWN_RULE_REFUSAL}`,

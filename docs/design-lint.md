@@ -32,7 +32,10 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   A page or stylesheet under a lint root that the lint skipped (over the cap,
   unreadable, unparseable) is also one `internal-error` finding at ask, so a
   page the lint could not read is not a pass; a linked stylesheet over the cap
-  is only warned about, because the page that links it is still read.
+  is only warned about, because the page that links it is still read. A
+  relative stylesheet href may not climb out of the project (the nearest
+  directory holding a `package.json` or `.git`); outside any project it is
+  bounded only by the disk, and only `.css` files are read.
 - Markup inside an HTML comment is dead for every rule, a commented-out
   `<style>` or `<script>` included. A tree nests at most 512 elements deep
   (the browser's own cap); a start tag deeper than that is read as empty. An
@@ -312,6 +315,15 @@ deduplicated at the end, so forty pages on one bundle cost forty passes over
 it. `overused-font` and `banned-font` match a catalog stem to the whole
 family name or its first words (`Cormorant Garamond`, `DM Serif Display`,
 `Comic Sans MS`), never to a longer word (`Interstate` is not `Inter`).
+Three checklist items are read more narrowly here than the LLM pass reads
+them: `missing-focus-visible` reports a removed outline only when no
+`:focus` rule anywhere on the page draws a ring (the per-element check is the
+render tier's focus walk); `off-scale-spacing` holds every px length to the
+4px scale whether or not DESIGN.md declares one (`raw-spacing` is the rule
+gated on `--space-*` tokens); and `double-sticky` pairs any two `top: 0`
+sticky selectors without reading their scroll containers, so a sticky table
+header inside an `overflow: auto` wrapper under a sticky nav reports and
+wants a waiver on the record.
 
 ## What is deliberately not ported
 
