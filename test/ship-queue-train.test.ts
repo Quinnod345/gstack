@@ -239,6 +239,14 @@ describe('ready under a train policy: the screen choice', () => {
     expect(build.status).toBe(EXIT.ok);
     expect(line(build.out, 'SCREEN:')).toBe('SCREEN: #1 run 101 planned 0 cases (concluded success); counted as not-run, the slot rides unscreened');
     expect(line(build.out, 'ORDER:')).toBe('ORDER: 1:#1(unscreened)');
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', record: { verdict: 'GREEN', census: { complete: true, planned: { rule: 0, judge: 3 }, executed: { rule: 0, judge: 3 } }, panels: [] } }; });
+    const live = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(live.status).toBe(EXIT.ok);
+    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 102 .*not following run 101 planned 0 cases/);
+    const followed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(followed.status).toBe(EXIT.ok);
+    expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 102 (same merge SHA, base and policy; no duplicate)');
+    expect(dispatches(fx, 'evals.yml').length).toBe(3);
   }, 120_000);
 });
 

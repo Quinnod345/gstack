@@ -66,8 +66,9 @@ function treeReceipt(ctx: QueueContext, policy: LoadedPolicy, gated: string, cur
  * slot's stamp commit, docs/ship-policy.md#ship-before-ready), or, from slot
  * 2 on, the stamp over a merge of the base into it: /ship ran on the pin, the
  * stamp changes nothing it checked, and verify --train binds the same pair
- * against the train's own prefix. Any other receipt head stays
- * QUEUE_RECEIPT_STALE.
+ * against the train's own prefix. A merge with no stamp on top is a lane's
+ * own push (rule 14), so it reruns /ship like any other head. Any other
+ * receipt head stays QUEUE_RECEIPT_STALE.
  */
 function acceptedReceiptHeads(ctx: QueueContext, policy: LoadedPolicy, head: string, body: string): string[] {
   const ex = extractReceipt(body);
@@ -80,13 +81,12 @@ function acceptedReceiptHeads(ctx: QueueContext, policy: LoadedPolicy, head: str
   if (stampOnly(full.out, head)) return [full.out, head];
   const baseSha = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
   const onBase = (sha: string) => !!sha && git(root, ['merge-base', '--is-ancestor', sha, baseSha]).ok;
-  for (const merge of [head, git(root, ['rev-parse', '--verify', '--quiet', `${head}^1`]).out]) {
-    if (!merge || !stampOnly(merge, head)) continue;
-    const parents = git(root, ['rev-list', '--parents', '-n', '1', merge]).out.split(' ').slice(1);
-    if (parents.length !== 2) continue;
-    const pinSide = onBase(parents[0]!) ? parents[1]! : onBase(parents[1]!) ? parents[0]! : '';
-    if (pinSide && git(root, ['merge-base', '--is-ancestor', full.out, pinSide]).ok && stampOnly(full.out, pinSide)) return [full.out, head];
-  }
+  const merge = git(root, ['rev-parse', '--verify', '--quiet', `${head}^1`]).out;
+  if (!merge || !stampOnly(merge, head)) return [head];
+  const parents = git(root, ['rev-list', '--parents', '-n', '1', merge]).out.split(' ').slice(1);
+  if (parents.length !== 2) return [head];
+  const pinSide = onBase(parents[0]!) ? parents[1]! : onBase(parents[1]!) ? parents[0]! : '';
+  if (pinSide && git(root, ['merge-base', '--is-ancestor', full.out, pinSide]).ok && stampOnly(full.out, pinSide)) return [full.out, head];
   return [head];
 }
 

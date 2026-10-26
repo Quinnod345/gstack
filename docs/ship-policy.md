@@ -334,8 +334,10 @@ on it: the receipt written for the pinned head stays the binding one. `verify
 --train` accepts a receipt whose `head` is either the slot's pinned head or
 the current head, and the re-READY after the stamp push (`ready` at the stamp
 commit) accepts the receipt for the pin when HEAD is the pin plus stamp files,
-or (from slot 2 on) the pin merged with main plus stamp files; any other head
-is `QUEUE_RECEIPT_STALE`.
+or (from slot 2 on) the pin merged with main plus stamp files on top of the
+merge; any other head is `QUEUE_RECEIPT_STALE`, including a merge of main with
+no stamp above it (a lane's own push under rule 14) and a merge whose pin side
+carries an edit made after /ship.
 
 This is a process gate, not an authenticity check: the receipt is a block in
 the PR body, which the PR author writes, so the codes prove that /ship was run

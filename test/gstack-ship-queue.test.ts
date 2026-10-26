@@ -299,7 +299,7 @@ describe('ready', () => {
   // Value: protects=the re-READY after a slot's stamp push accepts the receipt /ship wrote for the pinned head, and only then;
   // fails_when=ready binds the receipt to HEAD alone (every stamped READY turns QUEUE_RECEIPT_STALE) or accepts any ancestor's receipt;
   // why_new=the READY test above binds receipts to the exact head only; seam=none; no_claim=real gh and CI (shims; unit only)
-  test('ready at the stamp commit accepts the receipt written for the pinned head; a real edit on top of the pin is stale', () => {
+  test('ready at the stamp commit accepts the receipt written for the pinned head; a real edit on top of the pin, a bare merge of main, or an edit on the pin side under the slot-2 stamp is stale', () => {
     const repo = fixture();
     const pin = makePr(repo, 'pr-s');
     fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.4.0\n');
@@ -324,6 +324,22 @@ describe('ready', () => {
     const merged = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, slot2)], shim(slot2, shippedBody('1', pin)));
     expect([merged.status, merged.err]).toEqual([EXIT.ok, '']);
     expect(merged.out).toContain(`SHIP_RECEIPT: pr=1 head=${pin.slice(0, 12)} version=- base=main`);
+    const staleRe = (h: string) => new RegExp(`PR #1's ship receipt is for ${pin.slice(0, 12)}, not the head ${h.slice(0, 12)} being merged.*\\(QUEUE_RECEIPT_STALE\\)`);
+    const bareMerge = repo.git('rev-parse', 'HEAD^1');
+    repo.git('reset', '-q', '--hard', bareMerge);
+    const bare = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, bareMerge)], shim(bareMerge, shippedBody('1', pin)));
+    expect(bare.status).toBe(EXIT.refused);
+    expect(bare.err).toMatch(staleRe(bareMerge));
+    repo.git('reset', '-q', '--hard', pin);
+    fs.appendFileSync(path.join(repo.work, 'pr-s.txt'), 'real change before the merge\n');
+    repo.git('commit', '-qam', 'edit on the pin side');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+    repo.git('commit', '-qam', 'v1.2.5.0 stamp');
+    const editedPin = repo.git('rev-parse', 'HEAD');
+    const pinEdit = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, editedPin)], shim(editedPin, shippedBody('1', pin)));
+    expect(pinEdit.status).toBe(EXIT.refused);
+    expect(pinEdit.err).toMatch(staleRe(editedPin));
     repo.git('reset', '-q', '--hard', stamped);
     fs.appendFileSync(path.join(repo.work, 'pr-s.txt'), 'real change after /ship\n');
     repo.git('commit', '-qam', 'more');

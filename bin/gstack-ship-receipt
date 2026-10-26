@@ -211,7 +211,7 @@ function cmdResult(rest: string[], json: boolean): number {
     return EXIT.refused;
   };
   if (!head) { process.stderr.write('gstack-ship-receipt result: --head <sha> is required outside a git repository\n'); return EXIT.usage; }
-  if (!/^[0-9a-f]{7,64}$/i.test(head)) { process.stderr.write(`gstack-ship-receipt result: --head must be a hex commit id, got ${JSON.stringify(head.slice(0, 40))}\n`); return EXIT.usage; }
+  if (!/^[0-9a-f]{12,64}$/i.test(head)) { process.stderr.write(`gstack-ship-receipt result: --head must be a hex commit id of at least 12 characters, got ${JSON.stringify(head.slice(0, 40))}\n`); return EXIT.usage; }
   const incomplete = (why: string) => {
     process.stderr.write(`gstack-ship-receipt result: ${why}\n`);
     process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'incomplete', run: '-', message: why }) + '\n' : 'GSTACK_RESULT: skill=ship status=incomplete run=-\n');

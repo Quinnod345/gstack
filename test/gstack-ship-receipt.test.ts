@@ -229,7 +229,10 @@ describe('gstack-ship-receipt result (/ship terminal line, GBRA-108)', () => {
     expect(JSON.parse(fs.readFileSync(path.join(repo.root, 'pinned-out', 'ship-run.json'), 'utf8')).head).toBe('c'.repeat(40));
     const badHead = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned, '--head', '../../etc'], env);
     expect([badHead.status, badHead.out]).toEqual([EXIT.usage, '']);
-    expect(badHead.err).toContain('--head must be a hex commit id');
+    expect(badHead.err).toContain('--head must be a hex commit id of at least 12 characters');
+    const shortHead = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned, '--head', 'abcdef1'], env);
+    expect([shortHead.status, shortHead.out]).toEqual([EXIT.usage, '']);
+    expect(shortHead.err).toContain('--head must be a hex commit id of at least 12 characters');
     const noGit = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-receipt-nogit-'));
     const outside = runBin(repo, 'gstack-ship-receipt', ['result', '--body', pinned], env, noGit);
     expect([outside.status, outside.err.trim()]).toEqual([EXIT.usage, 'gstack-ship-receipt result: --head <sha> is required outside a git repository']);

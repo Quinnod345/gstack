@@ -76,7 +76,7 @@ export function bindReceipt(body: string, pr: string | undefined, accepted: read
   const head = accepted.find(h => h === r.head || (r.head.length >= 12 && h.startsWith(r.head)));
   if (!head) {
     const want = accepted.map(h => h.slice(0, 12)).join(' or ');
-    return { ok: false, code: 'QUEUE_RECEIPT_STALE', message: `${subject} ship receipt is for ${r.head.slice(0, 12)}, not the head ${want} being merged`, line };
+    return { ok: false, code: 'QUEUE_RECEIPT_STALE', message: `${subject} ship receipt is for ${oneLine(r.head.slice(0, 12))}, not the head ${want} being merged`, line };
   }
   if (pr !== undefined && r.pr !== undefined && String(r.pr) !== pr) return { ok: false, code: 'QUEUE_RECEIPT_STALE', message: `${subject} ship receipt names pr=${r.pr}, not this PR`, line };
   return { ok: true, receipt: r, head, line };
@@ -104,6 +104,9 @@ export function missingIssueLines(body: string, issues: NonNullable<ShipReceipt[
 }
 
 /** The first lines of the completion message to the coordinator: identifiers only. */
+/** Receipt fields come from the PR body, so anything printed from one stays on its own line, control characters included. */
+const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f]+/g, ' ');
+
 export function receiptSummaryLine(r: ShipReceipt): string {
   const parts = [`pr=${r.pr ?? '-'}`, `head=${r.head.slice(0, 12)}`, `version=${r.version ?? '-'}`, `base=${r.base}`];
   if (r.gated_tree) parts.push(`gated_tree=${r.gated_tree.slice(0, 12)}`);
@@ -113,7 +116,7 @@ export function receiptSummaryLine(r: ShipReceipt): string {
   if (r.session_kind) parts.push(`session_kind=${r.session_kind}`);
   if (r.artifacts_consumed) parts.push(`artifacts_consumed=${r.artifacts_consumed}`);
   if (r.approval) parts.push(`approval=${approvalSummary(r.approval)}`);
-  return `SHIP_RECEIPT: ${parts.join(' ').replace(/[\x00-\x1f\x7f]+/g, ' ')}`;
+  return `SHIP_RECEIPT: ${oneLine(parts.join(' '))}`;
 }
 
 // ---------------------------------------------------------------------------
