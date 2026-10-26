@@ -65,7 +65,7 @@ describe('C4: external section pointers', () => {
   });
 });
 
-describe('C4: ship, plan-ceo-review and office-hours are carved on every external host', () => {
+describe('C4: ship, plan-ceo-review, office-hours and design-review are carved on every external host', () => {
   for (const config of EXTERNAL) {
     test(`${config.name}: every pointer in the carved skill resolves to a generated section file`, () => {
       for (const skill of ['ship', 'plan-ceo-review', 'office-hours', 'design-review']) {

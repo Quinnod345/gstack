@@ -1573,9 +1573,9 @@ sections. Read a section in full before doing its step; do not work from memory.
 
 | When | Read this section |
 |------|-------------------|
-| auditing a Persuade page or a redesign | `sections/craft-audit.md` |
+| a craft, Persuade or redesign audit | `sections/craft-audit.md` |
 
-> **STOP.** Before auditing a Persuade page or a redesign, Read `~/.claude/skills/gstack/design-review/sections/craft-audit.md` and execute it
+> **STOP.** Before a craft, Persuade or redesign audit, Read `~/.claude/skills/gstack/design-review/sections/craft-audit.md` and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
 
 Record baseline design score and AI slop score at end of Phase 6.

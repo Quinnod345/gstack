@@ -3,9 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { acceptFindings, BUZZWORDS, CRAFT_IDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
-import { catalogEntry } from '../lib/design-catalog';
+import { catalogEntry, DESIGN_SLOP_CATALOG, detectorSlopEntries, judgmentTellEntries, renderCatalog, selectCatalog } from '../lib/design-catalog';
+import { checklistSlopEntries } from '../scripts/resolvers/design-checklist';
 import { selectTests } from './helpers/test-selection';
-import { E2E_TOUCHFILES } from './helpers/touchfiles-data';
+import { E2E_TOUCHFILES, LLM_JUDGE_TOUCHFILES } from './helpers/touchfiles-data';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN = path.join(ROOT, 'bin', 'gstack-design-craft');
@@ -57,6 +58,20 @@ describe('design-craft check', () => {
     const findings = checkCraft(DIRTY);
     expect(findings.map(f => f.id)).toEqual([...CRAFT_IDS]);
     for (const f of findings) expect(f.fix).toBe(catalogEntry(f.id)!.fix!);
+  });
+
+  // Value: protects=checker-only craft entries render into no skill prose or checklist, and each is a printed craft id; fails_when=a renderer reads DESIGN_SLOP_CATALOG, not RENDERED, or filters on fix; why_new=only goldens catch it, until regenerated; seam=none; no_claim=byte size of any one skill (size guard owns it)
+  test('checker-only catalog entries are craft ids that no rendered list carries; catalog entries with a fix still render', () => {
+    const checkerOnly = DESIGN_SLOP_CATALOG.filter(e => e.checkerOnly);
+    expect(checkerOnly.length).toBeGreaterThan(0);
+    const rendered = new Set([selectCatalog({}), detectorSlopEntries(), judgmentTellEntries(), checklistSlopEntries()].flat().map(e => e.id));
+    const prose = renderCatalog({ kind: 'slop' });
+    for (const e of checkerOnly) {
+      expect(CRAFT_IDS, e.id).toContain(e.id);
+      expect(rendered.has(e.id), e.id).toBe(false);
+      expect(prose, e.id).not.toContain(e.prose);
+    }
+    for (const id of ['marketing-buzzword', 'layout-transition']) expect(rendered.has(id), id).toBe(true);
   });
 
   test('BUZZWORDS covers every word the catalog marketing-buzzword heuristic names', () => {
@@ -198,6 +213,25 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test('an exception the page no longer triggers prints nothing, and a record is read only with --accepted', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-craft-cells-'));
+    try {
+      const page = path.join(dir, 'finalized.html');
+      const record = path.join(dir, 'finalized.json');
+      fs.writeFileSync(page, CLEAN);
+      fs.writeFileSync(record, JSON.stringify({ craft_exceptions: [{ id: 'placeholder-brand', count: 1, reason: 'Acme is the customer' }] }));
+      expect(run(page, '--accepted', record)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n' });
+      expect(acceptFindings([], [{ id: 'oops', count: 1, reason: 'x' }])).toEqual({ issues: [], accepted: [] });
+      fs.writeFileSync(page, CLEAN.replace('Halvorsen Freight', 'Acme and Nexus'));
+      expect(run(page)).toMatchObject({ code: 1, out: 'CRAFT_CHECK: placeholder-brand 2 use a supplied customer, or a fitting name in sample data\nCRAFT_RESULT: 1 issue(s)\n' });
+      fs.writeFileSync(page, CLEAN);
+      fs.writeFileSync(record, '{');
+      expect(run(page)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n', err: '' });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('design-shotgun to design-html handoff', () => {
@@ -222,6 +256,13 @@ describe('design-shotgun to design-html handoff', () => {
     for (const file of ['lib/design-craft.ts', 'bin/gstack-design-craft']) {
       expect(selectTests([file], E2E_TOUCHFILES).selected).toContain('design-html-slop-gate');
     }
+  });
+
+  // Value: protects=a change to the shared craft resolver reruns the paid cases whose prompts it renders; fails_when=scripts/resolvers/design-craft.ts drops from those touchfile lists; why_new=the row above covers lib/design-craft.ts and the bin only; seam=none; no_claim=that the selected cases pass
+  test('a change to the craft resolvers selects the design-review and plan-design-review cases that render them', () => {
+    const e2e = selectTests(['scripts/resolvers/design-craft.ts'], E2E_TOUCHFILES).selected;
+    for (const name of ['design-review-fix', 'design-review-detector-shim', 'design-review-detector-shim-dom', 'design-review-plugin-handoff', 'plan-design-review-plan-mode']) expect(e2e).toContain(name);
+    expect(selectTests(['scripts/resolvers/design-craft.ts'], LLM_JUDGE_TOUCHFILES).selected).toContain('plan-design-review/SKILL.md passes');
   });
 
   test('design-html persists accepted exceptions and passes them back with --accepted', () => {

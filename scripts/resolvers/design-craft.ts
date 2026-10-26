@@ -19,9 +19,9 @@ const CRAFT_SECTION = path.resolve(import.meta.dir, '../../design-html/sections/
 export const DESIGN_CRAFT_RULE: ResolverFn = (_ctx, args) => {
   const lead = args?.join(':');
   if (!lead) throw new Error('{{DESIGN_CRAFT_RULE:<lead>}} requires the bold lead of a craft paragraph');
-  const paragraph = fs.readFileSync(CRAFT_SECTION, 'utf-8').split(/\n{2,}/).find(p => p.startsWith(`**${lead}`));
-  if (!paragraph) throw new Error(`{{DESIGN_CRAFT_RULE:${lead}}}: no paragraph starting "**${lead}" in design-html/sections/craft.md.tmpl`);
-  return paragraph.trimEnd();
+  const matches = fs.readFileSync(CRAFT_SECTION, 'utf-8').split(/\n{2,}/).filter(p => p.startsWith(`**${lead}.**`) || p.startsWith(`**${lead},`));
+  if (matches.length !== 1) throw new Error(`{{DESIGN_CRAFT_RULE:${lead}}}: ${matches.length} paragraphs starting "**${lead}.**" or "**${lead}," in design-html/sections/craft.md.tmpl; need exactly one`);
+  return matches[0].trimEnd();
 };
 
 export const DESIGN_PERSUADE_CHECKS: ResolverFn = () => `1. **One primary action**, named; nothing competes with it above the fold, and the closing CTA repeats it.

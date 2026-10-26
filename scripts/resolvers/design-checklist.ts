@@ -12,7 +12,7 @@
  *
  * Derived in part from pbakaus/impeccable (Apache-2.0), modified. See NOTICE.md.
  */
-import { DESIGN_SLOP_CATALOG, RENDERED, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
+import { RENDERED, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
 import { SENTINEL, DETECT_EXIT_ECHO } from '../../lib/design-detect-contract';
 
 export const DESIGN_CHECKLIST_HEADER =
@@ -34,7 +34,7 @@ export function checklistSlopEntries(): DesignSlopEntry[] {
 
 /** Catalog rules a review may fix without asking: mechanical CSS changes with HIGH confidence. */
 export function autoFixEntries(): DesignSlopEntry[] {
-  return DESIGN_SLOP_CATALOG.filter(e => e.tier === 'auto-fix');
+  return RENDERED.filter(e => e.tier === 'auto-fix');
 }
 
 function endsWithPunctuation(s: string): boolean {
