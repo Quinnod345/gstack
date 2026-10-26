@@ -111,13 +111,13 @@ function markdownTargets(): string[] {
     /^capy\/skill\/gstack\/[^/]+\.md$/.test(rel));
 }
 
-/** Every shell helper under bin/, the setup script and the install scripts callers run first. */
+/** Every shell helper under bin/, the setup script and the scripts/*.sh build and doctor scripts. */
 function shellTargets(): string[] {
   const candidates = [...fs.readdirSync(path.join(ROOT, 'bin')).map(name => path.join('bin', name)), 'setup',
     ...fs.readdirSync(path.join(ROOT, 'scripts')).filter(name => name.endsWith('.sh')).map(name => path.join('scripts', name))];
   return candidates.filter(rel => {
     const full = path.join(ROOT, rel);
-    return fs.existsSync(full) && fs.statSync(full).isFile() && isShell(rel, fs.readFileSync(full, 'utf8'));
+    return fs.statSync(full).isFile() && isShell(rel, fs.readFileSync(full, 'utf8'));
   });
 }
 
@@ -164,7 +164,7 @@ describe('launch-env echo ratchet', () => {
     for (const want of ['ship/SKILL.md', 'ship/sections/documentation.md', 'review/SKILL.md', 'qa/SKILL.md',
       'document-release/SKILL.md', 'autoplan/DRIVER.md', 'capy/skill/gstack/SKILL.md']) expect(md).toContain(want);
     const sh = shellTargets();
-    for (const want of ['bin/gstack-capy-install', 'bin/gstack-capy-session', 'bin/gstack-skill-start']) expect(sh).toContain(want);
+    for (const want of ['bin/gstack-capy-install', 'bin/gstack-capy-session', 'bin/gstack-skill-start', 'setup', 'scripts/build.sh', 'scripts/sandbox-doctor.sh']) expect(sh).toContain(want);
   });
 
   test('no skill fence prints the environment', () => {
@@ -172,7 +172,7 @@ describe('launch-env echo ratchet', () => {
     expect(violations.map(v => `${v.file}:${v.line} [${v.rule}] ${v.text}`)).toEqual([]);
   });
 
-  test('no shell helper under bin/ prints the environment', () => {
+  test('no shell helper under bin/, setup or install script prints the environment', () => {
     const violations = shellTargets().flatMap(file => scanText(file, fs.readFileSync(path.join(ROOT, file), 'utf8'), 'whole'));
     expect(violations.map(v => `${v.file}:${v.line} [${v.rule}] ${v.text}`)).toEqual([]);
   });

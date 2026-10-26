@@ -477,6 +477,31 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
       fs.chmodSync(dir, 0o755);
     }
   });
+
+  // protects: when the launch file's temp file IS created and the final mv fails, write_launch_file
+  // removes its own temp file and nothing else (a sibling temp file from a concurrent run survives),
+  // the run says so, prints no GSTACK_LAUNCH_FILE line and keeps the earlier launch file, exit code
+  // and trailer. fails_when: the `|| { rm -f "$tmp"; return 1; }` cleanup goes (the temp file stays),
+  // or a glob cleanup returns (the sibling disappears). why_existing_misses: the unwritable-directory
+  // case above fails at mktemp, before any temp file exists. seam: an mv shim first on PATH that
+  // refuses only the launch-file target.
+  test('a launch-file move that fails after the temp file exists removes only that temp file', () => {
+    const f = fixture();
+    const first = run(f, ['--for', 'autoplan']);
+    expect(first.status, first.stdout + first.stderr).toBe(0);
+    const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    const before = fs.readFileSync(launchFile, 'utf8');
+    const sibling = `${launchFile}.tmp.OTHER1`;
+    fs.writeFileSync(sibling, '');
+    script(path.join(f.stub, 'mv'), [`for a in "$@"; do [ "$a" = "${launchFile}" ] && exit 1; done`, 'exec /bin/mv "$@"']);
+    const c = run(f, ['--check', '--for', 'autoplan']);
+    expect(c.status, c.stdout + c.stderr).toBe(0);
+    expect(c.stdout).toContain(`gstack-capy-install: could not write the launch file ${launchFile}`);
+    expect(c.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+    expect(lastLine(c.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+    expect(fs.readdirSync(path.dirname(launchFile)).filter(n => n.includes('.tmp.'))).toEqual([path.basename(sibling)]);
+    expect(fs.readFileSync(launchFile, 'utf8')).toBe(before);
+  });
 });
 
 // Plan A1/A3/A5/A6/A-f: install and --check resolve through one contract,
