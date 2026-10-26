@@ -14,11 +14,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { changedLiterals, constantsIn } from '../lib/pregate/checks/literals';
-import { parseSummary } from '../lib/pregate/checks/lanes';
-import { validateConfig } from '../lib/pregate/config';
+import { parseSummary, planRuns } from '../lib/pregate/checks/lanes';
+import { DEFAULT_CONFIG, validateConfig } from '../lib/pregate/config';
 import { isDocsEmptyLane } from '../lib/pregate/docs-lane';
 import { buildGraph, testsFor } from '../lib/pregate/import-graph';
 import { CHECK_IDS } from '../lib/pregate/index';
+import type { PregateContext } from '../lib/pregate/types';
 import { parseWorkflow } from '../lib/pregate/workflows';
 import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, write, type FixtureRepo } from './helpers/pregate-fixture';
 
@@ -80,6 +81,55 @@ describe('import graph (static imports ∪ repo-path literals ∪ bin convention
     expect(testsFor(g, 'test/fixtures/sample.md').tests).toEqual(['test/fixture-doc.test.js']);
     expect(testsFor(g, 'test/fixtures/sample.md').provenance[0]).toContain('(literal)');
     expect(testsFor(g, 'notes/scratch.md')).toMatchObject({ tests: [], declaredNone: false });
+  });
+
+  test('#3340: an extensionless import of a .jsx, .mts or .cts file maps to that file', () => {
+    const repo = fixture();
+    commit(repo, {
+      'src/components/Foo.jsx': 'export default function Foo() { return null; }\n',
+      'src/lib/m.mts': 'export const m = 1;\n',
+      'src/lib/c.cts': 'export const c = 1;\n',
+      'test/foo.test.jsx': "import Foo from '../src/components/Foo';\nimport { m } from '../src/lib/m';\nimport { c } from '../src/lib/c';\n",
+    });
+    const g = buildGraph(repo.work);
+    for (const f of ['src/components/Foo.jsx', 'src/lib/m.mts', 'src/lib/c.cts']) {
+      expect(testsFor(g, f).tests).toEqual(['test/foo.test.jsx']);
+      expect(testsFor(g, f).provenance[0]).toContain('(import)');
+    }
+  });
+
+  test('#3340: a directory import resolves to its index.jsx, index.tsx or index.mjs, not only the dir/** fallback', () => {
+    const repo = fixture();
+    commit(repo, {
+      'src/Bar/index.jsx': 'export default 1;\n',
+      'src/Bar/other.js': 'export default 2;\n',
+      'src/Baz/index.tsx': 'export default 1;\n',
+      'src/Baz/other.js': 'export default 2;\n',
+      'src/Qux/index.mjs': 'export default 1;\n',
+      'src/Qux/other.js': 'export default 2;\n',
+      'test/dirs.test.js': "import Bar from '../src/Bar';\nimport Baz from '../src/Baz';\nimport Qux from '../src/Qux';\n",
+    });
+    const g = buildGraph(repo.work);
+    for (const f of ['src/Bar/index.jsx', 'src/Baz/index.tsx', 'src/Qux/index.mjs']) {
+      expect(testsFor(g, f).tests).toEqual(['test/dirs.test.js']);
+      expect(testsFor(g, f).provenance[0]).not.toContain('/**');
+    }
+    for (const f of ['src/Bar/other.js', 'src/Baz/other.js', 'src/Qux/other.js']) expect(testsFor(g, f).tests).toEqual([]);
+  });
+
+  test('#3340: an import through a jsconfig paths alias reaches a .jsx file; an existing .js sibling still wins', () => {
+    const repo = fixture();
+    commit(repo, {
+      'jsconfig.json': '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      'src/ui/Button.jsx': 'export default function Button() { return null; }\n',
+      'src/ui/Card.js': 'export default 1;\n',
+      'src/ui/Card.jsx': 'export default 2;\n',
+      'test/ui.test.jsx': "import Button from '@/ui/Button';\nimport Card from '@/ui/Card';\n",
+    });
+    const g = buildGraph(repo.work);
+    expect(testsFor(g, 'src/ui/Button.jsx').tests).toEqual(['test/ui.test.jsx']);
+    expect(testsFor(g, 'src/ui/Card.js').tests).toEqual(['test/ui.test.jsx']);
+    expect(testsFor(g, 'src/ui/Card.jsx').tests).toEqual([]);
   });
 
   test('python: absolute, from-import submodule, relative and parenthesised imports and mock.patch targets map; stdlib, comments and docstrings do not', () => {
@@ -514,4 +564,86 @@ describe('gstack-pregate (bin)', () => {
     expect(runBin(repo, 'gstack-pregate', ['init']).out).toContain('PREGATE_CONFIG_WRITTEN');
     expect(runBin(repo, 'gstack-pregate', ['validate']).status).toBe(EXIT.ok);
   });
+});
+
+describe('nested JS packages run their own runner from their own directory', () => {
+  const APP = {
+    'app/package.json': JSON.stringify({ name: 'app', scripts: { test: 'vitest run' }, devDependencies: { vitest: '^3.2.0' } }) + '\n',
+    'app/pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+    'app/src/sum.ts': 'export const sum = (a: number, b: number) => a + b;\n',
+    'app/src/sum.test.ts': "import { expect, test } from 'vitest';\nimport { sum } from './sum';\ntest('sum', () => expect(sum(1, 2)).toBe(3));\n",
+  };
+  /**
+   * A `pnpm` (and `yarn`) on PATH that reports its cwd and argv and prints a vitest summary for the files it is given.
+   * The lane puts its Bun's directory first on PATH, and that directory can hold a real pnpm (/usr/local/bin), which
+   * would install from the network; the lane's bash puts the shim first again through BASH_ENV.
+   */
+  const pmShim = (repo: FixtureRepo): { PATH: string; BASH_ENV: string } => {
+    const dir = path.join(repo.root, 'shim');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const tool of ['pnpm', 'yarn']) fs.writeFileSync(path.join(dir, tool), '#!/usr/bin/env bash\necho "ran in $(basename "$PWD"): $*"\necho " Test Files  1 passed (1)"\necho "      Tests  3 passed (3)"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, 'path.sh'), `PATH='${dir}':"$PATH"\n`);
+    return { PATH: `${dir}:${process.env.PATH ?? ''}`, BASH_ENV: path.join(dir, 'path.sh') };
+  };
+  const ctxFor = (repo: FixtureRepo, env: Record<string, string>) => ({ repoRoot: repo.work, config: DEFAULT_CONFIG, env }) as unknown as PregateContext;
+
+  // Value: protects=a test owned by a nested package that declares vitest runs from that package with its lockfile's package manager
+  //   and package-relative paths, while root-owned tests keep the root runner; fails_when=the root package.json alone decides again
+  //   (the reported `bun test` from the repo root: vi.stubGlobal missing); why_new=only root package.json detection was tested;
+  //   seam=none; no_claim=the runners themselves (plan only)
+  test('a nested vitest package plans its own group with the lockfile\'s package manager; root tests keep the root runner', () => {
+    const repo = fixture({ pregate: null, baseFiles: APP });
+    const ctx = ctxFor(repo, pmShim(repo));
+    expect(planRuns(ctx, ['app/src/sum.test.ts', 'test/util.test.js'])).toEqual({ groups: [
+      { runner: 'node --test {files}', cwd: '', files: ['test/util.test.js'] },
+      { runner: 'pnpm exec vitest run {files}', cwd: 'app', files: ['src/sum.test.ts'] },
+    ], unclaimed: [], missing: [], noPubspec: [] });
+    // The lockfile is found walking up, and a packageManager field outranks it.
+    fs.rmSync(path.join(repo.work, 'app/pnpm-lock.yaml'));
+    write(repo.work, 'yarn.lock', '# yarn lockfile v1\n');
+    expect(planRuns(ctx, ['app/src/sum.test.ts']).groups).toEqual([{ runner: 'yarn vitest run {files}', cwd: 'app', files: ['src/sum.test.ts'] }]);
+    write(repo.work, 'app/package.json', JSON.stringify({ name: 'app', packageManager: 'pnpm@9.15.0', devDependencies: { jest: '^29.0.0' } }) + '\n');
+    expect(planRuns(ctx, ['app/src/sum.test.ts']).groups).toEqual([{ runner: 'pnpm exec jest {files}', cwd: 'app', files: ['src/sum.test.ts'] }]);
+    // Value: protects=a package manager missing from PATH is incomplete naming it, never exit 127 judged as a test failure;
+    //   fails_when=the PATH check is dropped; why_new=new detection path; seam=none; no_claim=a real pnpm install
+    expect(planRuns(ctxFor(repo, { PATH: path.join(repo.root, 'empty-path') }), ['app/src/sum.test.ts'])).toEqual({ groups: [], unclaimed: ['app/src/sum.test.ts'], missing: ['pnpm'], noPubspec: [] });
+    fs.rmSync(path.join(repo.work, 'yarn.lock'));
+    write(repo.work, 'app/package.json', JSON.stringify({ name: 'app', devDependencies: { vitest: '^3.2.0' } }) + '\n');
+    expect(planRuns(ctx, ['app/src/sum.test.ts']).groups).toEqual([{ runner: 'npx vitest run {files}', cwd: 'app', files: ['src/sum.test.ts'] }]);
+  });
+
+  // Value: protects=repos where root detection works today are unchanged: a nested package that declares no test runner stays with the
+  //   root runner from the root, a root vitest stays `npx vitest run` from the root, and a declared runner takes every file;
+  //   fails_when=every nested package.json splits a group or the root command changes; why_new=negative controls for the new
+  //   nested detection; seam=none; no_claim=the runners themselves (plan only)
+  test('negative controls: a nested package without a test runner, a root vitest repo and a declared runner keep today\'s plan', () => {
+    const repo = fixture({ pregate: null, baseFiles: { ...APP, 'app/package.json': JSON.stringify({ name: 'app', scripts: { build: 'tsc' } }) + '\n' } });
+    const ctx = ctxFor(repo, pmShim(repo));
+    write(repo.work, 'bun.lock', '{}\n');
+    expect(planRuns(ctx, ['app/src/sum.test.ts', 'test/util.test.js']).groups).toEqual([{ runner: 'bun test {files}', cwd: '', files: ['app/src/sum.test.ts', 'test/util.test.js'] }]);
+    fs.rmSync(path.join(repo.work, 'bun.lock'));
+    write(repo.work, 'package.json', JSON.stringify({ name: 'fixture', devDependencies: { vitest: '^3.2.0' } }) + '\n');
+    write(repo.work, 'pnpm-lock.yaml', "lockfileVersion: '9.0'\n");
+    expect(planRuns(ctx, ['app/src/sum.test.ts', 'test/util.test.js']).groups).toEqual([{ runner: 'npx vitest run {files}', cwd: '', files: ['app/src/sum.test.ts', 'test/util.test.js'] }]);
+    const declared = { ...ctx, config: { ...DEFAULT_CONFIG, runner: 'bun test {files}' } } as PregateContext;
+    write(repo.work, 'app/package.json', APP['app/package.json']);
+    expect(planRuns(declared, ['app/src/sum.test.ts']).groups).toEqual([{ runner: 'bun test {files}', cwd: '', files: ['app/src/sum.test.ts'] }]);
+  });
+
+  // Value: protects=the reported case end to end: a touched source file in a nested pnpm+vitest package runs `pnpm exec vitest run`
+  //   in that package with the package-relative path and passes on vitest's summary; fails_when=the lane runs from the repo root or
+  //   with the root runner; why_new=no nested package run existed; seam=none; no_claim=a real pnpm or vitest (PATH shim)
+  test('a touched file in a nested pnpm+vitest package runs vitest there', () => {
+    const repo = fixture({ pregate: null, baseFiles: APP });
+    // No workflows, so the Windows lane's unknown matrix cannot turn the selection into a requires-remote obligation.
+    commit(repo, { '.github/workflows/free-tests.yml': null, '.github/workflows/windows.yml': null }, 'no workflows');
+    repo.git('push', '-q', 'origin', 'HEAD:main');
+    repo.git('fetch', '-q', 'origin');
+    commit(repo, { 'app/src/sum.ts': 'export const sum = (a: number, b: number) => b + a;\n' });
+    const r = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--only', 'lanes'], pmShim(repo));
+    expect(r.out).toMatch(/^tests {6}lanes {5}pass .*3 tests ran in 1 file\(s\), exit 0/m);
+    expect(r.out).toContain("ran: (cd 'app' && pnpm exec vitest run 'src/sum.test.ts')");
+    expect(fs.readFileSync(/log: (\S+)/.exec(r.out)![1]!, 'utf8')).toContain('ran in app: exec vitest run src/sum.test.ts');
+    expect(r.status).toBe(EXIT.ok);
+  }, 60_000);
 });

@@ -342,6 +342,215 @@ describe('check-careful.sh', () => {
     expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
   });
 
+  // --- Commit message false positives (#1060) ---
+
+  describe('commit message false positives (#1060)', () => {
+    // Quoted -m content describes destructive patterns but does not run them.
+    test.each([
+      'git commit -m "fix: prevent accidental drop table in migration"',
+      'git commit -m "docs: explain truncate vs delete semantics"',
+      'git commit -m "feat: add guard for recursive delete patterns"',
+      'git add . && git commit -m "fix: handle drop database edge case"',
+    ])('does not warn on descriptive text in commit message: %s', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    // Real destructive commands chained with a commit still warn.
+    test('warns when a real DROP TABLE follows git commit in a chain', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "release" && psql -c "DROP TABLE staging"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('SQL DROP');
+    });
+
+    test('warns when a real TRUNCATE follows git commit in a chain', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "cleanup" && psql -c "TRUNCATE audit_log"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('SQL TRUNCATE');
+    });
+
+    // Quote-aware awk scanner: a single-quoted message whose content looks like
+    // a flag boundary must not swallow real commands that follow via &&.
+    test('warns when rm follows a single-quoted message that embeds a double-quote', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput(`git commit -m 'note -m "' && rm -rf build && echo '"'`),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    // A double-quoted message containing $(...) is not masked — the substitution
+    // content remains visible to the MEDIUM checks.
+    test('warns when a commit message contains a command substitution with rm', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "$(rm -rf build)"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    // A force-push chained after a commit must still warn even after the message is masked.
+    test('warns on force-push chained after git commit', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -m "x" && git push --force'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('force-push');
+    });
+
+    // -am shorthand: the message is masked, so "drop table" in the message text
+    // does not trigger the SQL DROP warning.
+    test('does not warn on drop-table text in -am commit message', () => {
+      const { exitCode, output } = runHook(
+        CAREFUL_SCRIPT,
+        carefulInput('git commit -am "drop table notes"'),
+      );
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    // bash 3.2 (macOS /bin/bash) mis-parses quote characters in a heredoc
+    // inside $( ), so the awk program inline made the whole hook a syntax error
+    // there. It is a file beside the hook, read with awk -f.
+    test('the masking program is a file beside the hook, not a heredoc inside $( )', () => {
+      const source = fs.readFileSync(CAREFUL_SCRIPT, 'utf8');
+      expect(source).not.toMatch(/\$\(cat <</);
+      expect(source).toContain('awk -f "$_MASK_AWK"');
+      expect(fs.existsSync(path.join(path.dirname(CAREFUL_SCRIPT), 'mask-commit-message.awk'))).toBe(true);
+    });
+
+    // Newlines separate commands, and quote state carries across them. The
+    // per-line scanner joined lines (`-m xtruncate`) and restarted quote
+    // state on every line, so a quoted line break could hide a real command.
+    test.each([
+      ['git commit -m x\ntruncate -s 0 f', 'SQL TRUNCATE'],
+      ['git commit -m wip\nrm -rf build', 'recursive delete'],
+      ["git commit -m \"a\n-m 'x\" && rm -rf build && echo '", 'recursive delete'],
+    ])('a command on the next line still asks: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
+    test('a multi-line quoted message is masked as one message', () => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput('git commit -m "fix: guard migrations\n\nNo more drop table in the seed script."'));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    // Only git commit's own message is masked: a -m argument of another
+    // command in the chain, a commit whose output is piped into a shell, and
+    // an escaped quote inside the message all stay visible.
+    test.each([
+      ["git commit -m a && ls | parallel -m 'rm -rf build'", 'recursive delete'],
+      ["git commit -m 'rm -rf build' | sh", 'recursive delete'],
+      ["echo git commit -m 'drop table users'", 'SQL DROP'],
+      ['git commit -m "a\\"b" && rm -rf build', 'recursive delete'],
+      ["git commit -m wip \\\n&& rm -rf build", 'recursive delete'],
+    ])('text outside commit\'s own message still asks: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
+    test.each([
+      'git -C repo commit --message="docs: truncate the changelog intro"',
+      "git commit --message 'chore: drop database fixtures from the seed'",
+      "git commit --amend -m 'fix: git reset --hard in the docs'",
+    ])('commit\'s own message is masked in every flag form: %s', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    // The form agents use most: a quoted-delimiter heredoc inside "$( )". Its
+    // body is never expanded, so it is masked whole. Any other substitution,
+    // backtick, $'...' or heredoc leaves the command unmasked.
+    const heredocMessage = (body: string, delimiter = "'EOF'", end = 'EOF') =>
+      `git commit -m "$(cat <<${delimiter}\n${body}\n${end}\n)"`;
+    test.each([
+      heredocMessage('fix: guard the migration that could drop table users\n\nCo-Authored-By: A <a@example.com>'),
+      heredocMessage('docs: why we never truncate "audit" rows (see #12)'),
+      heredocMessage('chore: git reset --hard is documented', '"MSG"', 'MSG'),
+      heredocMessage('chore: rm -rf build in the clean script', "-'EOF'", '\tEOF'),
+    ])('a quoted-delimiter heredoc message is masked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    test.each([
+      [heredocMessage('docs: drop table notes') + ' && git push --force', 'force-push'],
+      [heredocMessage('drop table $(rm -rf build)', 'EOF'), 'recursive delete'],
+      [`git commit -m "$(echo " -m 'x" ; rm -rf build ; echo ')"`, 'recursive delete'],
+      ['git commit -m "\`rm -rf build\`"', 'recursive delete'],
+      ["git commit -F - <<'EOF'\ndocs: drop table notes\nEOF", 'SQL DROP'],
+      ["git commit -m $'drop table notes\\n'", 'SQL DROP'],
+    ])('other substitutions and heredocs stay unmasked: %j', (command, reason) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain(reason);
+    });
+
+    // git prints the message on stdout, so any pipe after a masked message,
+    // a process substitution or a parameter expansion leaves it unmasked; a
+    // redirection's & is not a separator, and a comment's quote is not a quote.
+    test.each([
+      "git commit -m 'rm -rf build' 2>&1 | sh",
+      "(git commit -m 'rm -rf build') | sh",
+      "git commit -m 'rm -rf build' > >(sh)",
+      'git commit -m "${MSG:-rm -rf build}"',
+    ])('a message that can reach a shell stays unmasked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('recursive delete');
+    });
+
+    test.each([
+      "git commit -m 'drop table notes' 2>&1 && git log -1 --oneline",
+      "git commit -m 'drop table notes' || echo failed",
+      "git commit -m 'drop table notes' # it's the docs commit",
+    ])('redirections, || and comments keep the message masked: %j', (command) => {
+      const { exitCode, output } = runHook(CAREFUL_SCRIPT, carefulInput(command));
+      expect(exitCode).toBe(0);
+      expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+    });
+
+    test('a partial install without the masking program still asks on the message text', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-careful-nomask-'));
+      try {
+        for (const file of ['check-careful.sh', 'hook-extract.sh']) {
+          fs.copyFileSync(path.join(path.dirname(CAREFUL_SCRIPT), file), path.join(dir, file));
+        }
+        const { exitCode, output } = runHook(path.join(dir, 'check-careful.sh'), carefulInput('git commit -m "drop table notes"'));
+        expect(exitCode).toBe(0);
+        expect(output.hookSpecificOutput?.permissionDecision).toBe('ask');
+        expect(output.hookSpecificOutput?.permissionDecisionReason).toContain('SQL DROP');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   // --- Shell obfuscation ---
 
   describe('shell obfuscation', () => {

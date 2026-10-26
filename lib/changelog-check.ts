@@ -116,15 +116,88 @@ export function normalizeChangelog(text: string): string {
 }
 
 /**
+ * A merged-in head's CHANGELOG, however its conflict was resolved: why it is
+ * not main's CHANGELOG with the PR's own entry above it, or null. Main's
+ * header and every main section must follow unchanged and in order, and the
+ * sections above them may hold only lines the PR itself added (`authored`,
+ * the + lines of its pin's CHANGELOG diff), so a hand resolve can drop
+ * damage but never add text the train gate did not carry.
+ */
+export function ownEntryAboveMain(head: string, main: string, authored: ReadonlySet<string>): string | null {
+  const h = parseChangelog(head);
+  const m = parseChangelog(main);
+  const trim = (lines: string[]) => { const out = [...lines]; while (out.length && !out[out.length - 1]!.trim()) out.pop(); return out.join('\n'); };
+  if (trim(h.header) !== trim(m.header)) return 'the header differs from main';
+  const own = h.sections.length - m.sections.length;
+  if (own < 0) return `it has ${h.sections.length} sections, main has ${m.sections.length}`;
+  const moved = m.sections.findIndex((s, i) => trim(s.lines) !== trim(h.sections[own + i]!.lines));
+  if (moved >= 0) return `main's ${m.sections[moved]!.heading.trim()} is not carried unchanged below the PR's entry`;
+  const mainKeys = new Set(m.sections.map(s => s.version ?? 'Unreleased'));
+  const clash = h.sections.slice(0, own).find(s => mainKeys.has(s.version ?? 'Unreleased'));
+  if (clash) return `${clash.heading.trim()} is headed twice`;
+  const added = h.sections.slice(0, own).flatMap(s => s.lines.slice(1)).find(l => l.trim() && !authored.has(l));
+  return added === undefined ? null : `the PR's entry holds a line its pin never added: ${JSON.stringify(added.slice(0, 80))}`;
+}
+
+const MIN_BLOCK_CHARS = 12;
+
+/** Paragraph blocks of a section's entry text (heading lines dropped), long enough to identify one entry. */
+function entryBlocks(s: ChangelogSection): string[] {
+  const blocks: string[] = [];
+  let run: string[] = [];
+  const flush = () => { const text = run.join('\n').trim(); if (text.length >= MIN_BLOCK_CHARS) blocks.push(text); run = []; };
+  for (const line of s.lines.slice(1)) {
+    if (!line.trim() || line.startsWith('#')) flush();
+    else run.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+/**
+ * Why one side of a CHANGELOG merge damaged released history, or null. A
+ * side damages it when it lacks a released heading the merge base carries
+ * (dropped, or renamed), or when a section only that side carries holds a
+ * paragraph of a released entry the other side carries (a released heading
+ * replaced, so its body reads as part of the section above it; #3345).
+ */
+export function changelogDamage(ours: string, theirs: string, base?: string): string | null {
+  const sides = [{ name: 'ours', parsed: parseChangelog(ours) }, { name: 'theirs', parsed: parseChangelog(theirs) }];
+  const key = (s: ChangelogSection) => (s.unreleased ? 'Unreleased' : s.version!);
+  if (base !== undefined) {
+    const released = parseChangelog(base).sections.filter(s => !s.unreleased).map(key);
+    for (const side of sides) {
+      const has = new Set(side.parsed.sections.map(key));
+      const missing = released.find(v => !has.has(v));
+      if (missing) return `${side.name} drops released heading ${missing} that the merge base carries`;
+    }
+  }
+  for (const [i, side] of sides.entries()) {
+    const other = sides[1 - i]!.parsed.sections;
+    const otherKeys = new Set(other.map(key));
+    const releasedText = new Map<string, string>();
+    for (const s of other.filter(s => !s.unreleased)) for (const b of entryBlocks(s)) releasedText.set(b, s.version!);
+    for (const s of side.parsed.sections.filter(s => !otherKeys.has(key(s)))) {
+      const hit = entryBlocks(s).find(b => releasedText.has(b));
+      if (hit) return `${side.name}'s ${key(s)} section holds released ${releasedText.get(hit)} text (${JSON.stringify(hit.slice(0, 60))}); a released heading was dropped or renamed`;
+    }
+  }
+  return null;
+}
+
+/**
  * Gate-ahead merge of two CHANGELOGs that conflict textually but not
  * semantically: the predecessor's header and sections, with the branch's own
  * sections (those the predecessor lacks, by heading) placed first. When the
  * branch's top section carries the same version heading as a predecessor
  * section with a different body (both took the same tentative stamp), the
  * branch's entry is kept under `[Unreleased]` so the restamp re-heads it.
- * Both sides carrying `[Unreleased]` is a real conflict and returns null.
+ * Both sides carrying `[Unreleased]` is a real conflict and returns null, and
+ * so is damage to released history (`changelogDamage`): null means a hand
+ * resolve, never a merge that carries the damage through.
  */
-export function mergeChangelogs(ours: string, theirs: string): string | null {
+export function mergeChangelogs(ours: string, theirs: string, base?: string): string | null {
+  if (changelogDamage(ours, theirs, base)) return null;
   const a = parseChangelog(ours);
   const b = parseChangelog(theirs);
   const key = (s: ChangelogSection) => (s.unreleased ? 'Unreleased' : s.version!);

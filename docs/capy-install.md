@@ -109,22 +109,41 @@ and `/proc` start time; elsewhere `ps -o lstart`), because a pid is reused after
 a reboot or a machine wake. `bin/gstack-upgrade`, and so the session-start
 self-upgrade, refuses with [UPGRADE_BUSY](troubleshooting.md#upgrade-busy)
 while a lease held by a live process outside its own chain exists, naming each
-holder as `pid <p> (<age>m <command>)`. A lease whose pid now belongs to another
+holder as `pid <p> (<age>m <command>)`. The team-mode SessionStart hook
+(`bin/gstack-session-update`) honors the same leases: it logs
+`SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at
+the next session start, without writing its hourly throttle stamp. A lease whose
+pid now belongs to another
 process, or an identity-less lease from an older gstack past 120 minutes, is
 stale: `bin/gstack-lease live` reclaims it (`gstack-lease: reclaimed stale
 lease …`). Stale needs proof: two well-formed identities from the same backend
 that differ (`ps` is read under `LC_ALL=C TZ=UTC0`). An identity that cannot be
 read, a malformed record or a backend change keeps the lease. `touch` (publish
 by rename, prune) and reclaim (reread, then delete only the record judged
-stale) run under one lock in the lease directory, a symlink naming its holder's
-pid and start identity, so a renewal is never deleted and a live lease never
-disappears from a concurrent scan. The lock is broken only when its holder is
-dead or its pid was reused, never by age, and breakers serialize on a second
-symlink and reread the lock before removing it. One killed gstack-lease process
-is always safe; two killed in a row, one holding the lock and the next while
-breaking it, can still let a reclaim delete a renewal. While a live process holds it,
-`touch` exits 3 without writing (`gstack-skill-start` reports that the
-session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
+stale) run under one lock in the lease directory, a `.lock` directory whose
+`owner` file names its holder's pid and start identity, so a renewal is never
+deleted and a live lease never disappears from a concurrent scan. The lock is a
+directory because `mkdir` is atomic on every host, while Git Bash on Windows
+cannot `ln -s` to a target that does not exist (#3330). A taker publishes a
+claim before its `mkdir` and renames it in as the owner after, so an ownerless
+lock is broken only once no claimant lives and the lock is at least 2 s old
+and unchanged while checked, which keeps a taker between its two steps safe.
+A claim that records no start identity is abandoned after 2 minutes, so a
+reused pid cannot keep an orphan forever; an owner that names no valid pid
+counts as a dead holder, and an owner file that cannot be read keeps the
+lock. A live holder that never lets go bounds the wait at 300 tries or 30 s. A lock that names a holder is broken only when that holder is dead or
+its pid was reused, never by age, and breakers serialize on a second lock and
+reread the lock before removing it. A symlink `.lock` left by an older gstack
+is honored the same way. Three known limits remain. An older gstack's `ln -s`
+onto a directory lock links inside it and succeeds, so a process that started
+before an upgrade of this checkout can share the lock with a newer one. And a
+breaker killed while holding the second lock, followed by two live breakers
+clearing it at once, can let a reclaim delete a renewal. On a host without start
+identities, a taker stalled over 2 minutes between its `mkdir` and its owner
+rename can be broken and then publish into its successor's lock. While a live process
+holds the lock, or it cannot be taken at all, `touch` exits 3 without writing
+(`gstack-skill-start` reports that the session holds no lease) and a reclaim
+keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
 `GSTACK_UPGRADE_FORCE=1` overrides.
 
 ## What the installer does
@@ -141,7 +160,7 @@ session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` s
    packageManager, `.tool-versions`, `.bun-version` and CI `bun-version:` lanes
    for this platform). CI exact pins for this platform are alternatives: a
    repository may test several Bun versions (gstack's own CI pins 1.4.2 and
-   runs one job on 1.4.3), so a Bun equal to any one of them satisfies CI;
+   runs one job on 1.4.4), so a Bun equal to any one of them satisfies CI;
    CI ranges and every non-CI pin stay required. One resolver picks the Bun (`gstack_bun_resolve` in
    `bin/gstack-bun-version.sh`; `resolveBun` in `lib/pregate/runtime.ts` is
    its TypeScript twin), and the installer, `--check`, the doctor, the bun
@@ -160,7 +179,7 @@ session holds no lease) and a reclaim keeps the lease. `bin/gstack-lease list` s
    exact pin when gstack carries a verified archive for it
    (`GSTACK_BUN_VERIFIED`: 1.4.2, 1.4.3, 1.4.4); with only CI exact pins, the install
    default when it is one of them, else the highest verified one; else the
-   install default `GSTACK_BUN_DEFAULT` (1.4.3, above the 1.4.2 minimum; one
+   install default `GSTACK_BUN_DEFAULT` (1.4.4, above the 1.4.2 minimum; one
    CI job runs the quick free tier on it).
    `GSTACK_BUN_INSTALL_VERSION=<v>` overrides the default; a version without a
    verified archive or below the minimum stops the install

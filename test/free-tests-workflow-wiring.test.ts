@@ -131,6 +131,41 @@ describe('free-tests workflow wiring', () => {
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 
+  test('every Linux Playwright install has a version-keyed browser cache, 5-minute attempts and one retry of the install alone (run 39641712129)', () => {
+    const jobs = (Bun.YAML.parse(source) as any).jobs;
+    const installing = Object.keys(jobs).filter(name => jobs[name].steps.some((step: any) => step.run?.includes('playwright install --with-deps')));
+    expect(installing.sort()).toEqual(['free-suite', 'quick-bun-default']);
+    for (const name of installing) {
+      const steps = jobs[name].steps;
+      const version = steps.findIndex((step: any) => step.id === 'playwright');
+      const cache = steps.findIndex((step: any) => step.with?.path === '~/.cache/ms-playwright');
+      const install = steps.findIndex((step: any) => step.id === 'playwright_install');
+      const retry = steps.findIndex((step: any) => step.if === "steps.playwright_install.outcome == 'failure'");
+      expect(steps[version].run, name).toContain('require("playwright-core/package.json").version');
+      expect(steps[cache].with.key, name).toBe('linux-playwright-chromium-${{ steps.playwright.outputs.version }}');
+      expect(steps[cache].with['restore-keys'], name).toBeUndefined();
+      expect(version, name).toBeLessThan(cache);
+      expect(cache, name).toBeLessThan(install);
+      expect(retry, name).toBe(install + 1);
+      for (const step of [steps[install], steps[retry]]) {
+        expect(step['timeout-minutes'], name).toBe(5);
+        expect(step.run, name).toBe('npx playwright install --with-deps chromium');
+      }
+      expect(steps[install]['continue-on-error'], name).toBe(true);
+      expect(steps.filter((step: any) => step['continue-on-error']), name).toEqual([steps[install]]);
+    }
+  });
+
+  test('test jobs give PR and dispatch runs the local main that push runs get from checkout (#3237)', () => {
+    const jobs = (Bun.YAML.parse(source) as any).jobs;
+    for (const name of ['free-suite', 'quick-bun-default']) {
+      const [checkout, guard] = jobs[name].steps;
+      expect(checkout.uses, name).toStartWith('actions/checkout@');
+      expect(guard.if, name).toBe("github.ref != 'refs/heads/main'");
+      expect(guard.run, name).toBe('git checkout -q -B main');
+    }
+  });
+
   test('least-privilege token: contents read-only, credentials not persisted', () => {
     // The job executes PR-controlled code (install lifecycle scripts + the
     // suite itself). A default-grant GITHUB_TOKEN persisted into .git/config

@@ -777,18 +777,22 @@ Each item was deferred with a reason during the `/claude-api prompt-audit` clean
 - **Judge prose and rubric cleanup (W2 deferral)** — the arm, qa health-rubric,
   qa anti-refusal, cross-skill and voice judges, and the default workflow judge,
   now send a JSON schema; their prompt-audit s11 M1-M7 prose cleanup is still
-  open, as is the qa anti-refusal rubric's "always … regardless" wording. Two
+  open, as is the qa anti-refusal rubric's "always … regardless" wording. Three
   prose steps were triggered and not run: the qa workflow judge (its schema
   comparison held: 4/24 new flips vs 2/24 old, one new false pass on a06, zero
-  format errors, so it stays on today's request) and the default workflow judge
+  format errors, so it stays on today's request), the default workflow judge
   (landed, but one provider refusal on corpus item f03 under the new prompt,
-  matched by one under the old prompt). Reuse `test/fixtures/judge-calibration`
+  matched by one under the old prompt) and the cookie workflow judge (GSTA-91:
+  held on one new false pass on a07, zero new-request format errors, so it stays
+  on today's request; today's request itself false-passes a07 in `old-b` and on
+  both valid `old-a` samples, and a08 in `old-a`, so the prose step targets those). Reuse `test/fixtures/judge-calibration`
   and `scripts/judge-calibration.ts`. Priority P3. Effort M.
-- **Uncalibrated workflow-judge configurations** — build corpora and calibrate
-  schema transport for the frontier configuration (review/SKILL.md workflow) and
-  the cookie configuration (setup-browser-cookies/SKILL.md workflow); both stay on
-  today's request. After any transport change, re-run the review and cookie
-  workflow judges. Priority P3. Effort M.
+- **Uncalibrated workflow-judge configurations** — build a corpus and calibrate
+  schema transport for the frontier configuration (review/SKILL.md workflow); it
+  stays on today's request. The cookie configuration
+  (setup-browser-cookies/SKILL.md workflow) has a corpus and a held comparison-1
+  (GSTA-91), so it also stays on today's request. After any transport change,
+  re-run the review and cookie workflow judges. Priority P3. Effort M.
 - **Claude model auto-detection for the skill overlay** — when no
   `claude_overlay_model` is set, detect the Claude Code model (`ANTHROPIC_MODEL`,
   user and managed settings `model`) in `./setup` and render its pinned overlay.
