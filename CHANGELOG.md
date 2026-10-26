@@ -7,7 +7,7 @@
 ### Fixed
 - **Claims Need Evidence kernel** (`scripts/resolvers/preamble/generate-evidence-directive.ts`): the evidence-kind bullet ended with "Reuse rules: Step 16." That step exists only in /ship, so in every other skill the pointer led nowhere. It's gone. /ship's Step 16 still states its own reuse rule ("Reuse a check when its inputs match"), and every tier's DONE line still asks you to name reuse.
 - **AskUserQuestion Tool resolution** (`generate-ask-user-format.ts`): "per its Unattended session block" read like a section of the skill, but the block is runtime output. Item 1 now names the `unattended-session` block that gstack-skill-start prints, which is the id on its `GSTACK_INSTRUCTION_BEGIN` line. The failure fallback's `unattended` branch dropped its repeat of that pointer, because item 1 already states the rule.
-- **AskUserQuestion fallback hook** (`hosts/claude/hooks/auq-error-fallback-hook.ts`): its unattended directive ended with "GSTACK_RESULT status=gate_pending (Unattended session block).", the same section-style pointer to runtime output. The parenthetical is gone; the directive itself already states the rule.
+- **AskUserQuestion fallback hook** (`hosts/claude/hooks/auq-error-fallback-hook.ts`): its unattended directive ended with "GSTACK_RESULT status=gate_pending (Unattended session block).", the same section-style pointer to runtime output. The parenthetical is gone.
 - **Reality rows, eng/ceo branch** (`scripts/resolvers/plan-reality.ts`): the Completion Summary row and plan-eng-review's checklist ask for the `PLAN_REALITY` line, but the operative block never said where that line comes from. It now says `gstack-plan-reality check` prints it.
 
 ### Tests
