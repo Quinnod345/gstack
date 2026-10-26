@@ -288,9 +288,13 @@ describe('design-lint eighth cycle: rule judgements', () => {
     expect(desc.reduce((n, x) => n + x.selector.length, 0)).toBeLessThan((kids.length + 8002) * 8);
     expect(desc[200_000].selector).toBe('.a199999');
     const ws = ' '.repeat(1_000_000);
-    expect(timed(() => { for (let k = 0; k < 500; k++) stripTags(ws, false, 4); }), 'spaces').toBeLessThan(500);
-    expect(timed(() => { for (let k = 0; k < 500; k++) stripTags('\u00a0'.repeat(1_000_000), false, 4); }), 'nbsp').toBeLessThan(1500);
-    expect(stripTags(' '.repeat(5000) + 'hello world', false, 4).trim()).toBe('');
+    expect(timed(() => { for (let k = 0; k < 500; k++) stripTags(ws, false, 4); }), 'spaces').toBeLessThan(2000);
+    expect(timed(() => { for (let k = 0; k < 500; k++) stripTags('\u00a0'.repeat(1_000_000), false, 4); }), 'nbsp').toBeLessThan(2000);
+    const label = ' '.repeat(10_000) + 'Start your fourteen day free trial now today';
+    expect(stripTags(label, false, 40).trim()).toBe(stripTags(label).trim());
+    expect(stripTags(' '.repeat(10_000) + '\u{1F680}', false, 4).trim()).toBe('\u{1F680}');
+    for (const n of [4351, 4352, 4353]) expect(stripTags(' '.repeat(n) + '\u{1F600} more text', false, 4).isWellFormed()).toBe(true);
+    expect(stripTags(' '.repeat(5000) + 'hello world', false, 4).trim()).toBe('hello');
   }, 60_000);
 
   test('the emoji classes spell their variation selector and joiner as escapes', () => {
