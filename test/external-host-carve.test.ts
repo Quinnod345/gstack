@@ -1,5 +1,5 @@
 /**
- * C4 (#2777): ship, plan-ceo-review and office-hours are carved on every host, and no
+ * C4 (#2777): ship, plan-ceo-review, office-hours and design-review are carved on every host, and no
  * generated SKILL.md exceeds 160,000 UTF-8 bytes on any host or model overlay
  * setup can select. Carved sections on external hosts are pointed at relative
  * to the installed skill directory: `$GSTACK_ROOT/<skill>/sections/...` does

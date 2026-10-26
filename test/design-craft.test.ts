@@ -159,6 +159,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
     expect(issues.find(f => f.id === 'round-number')?.fix).toEndWith('(2 accepted earlier: supplied figures)');
     expect(issues).toHaveLength(findings.length - 2);
     expect(acceptFindings([{ id: 'needs-proof', count: 1, fix: 'f' }], [{ id: 'needs-proof', count: 1, reason: 'awaiting logo' }])).toEqual({ issues: [], accepted: [{ id: 'needs-proof', count: 1, reason: 'awaiting logo' }] });
+    expect(acceptFindings([{ id: 'needs-proof', count: 2, fix: 'f' }], [{ id: 'needs-proof', count: 1, reason: 'awaiting logo' }])).toEqual({ issues: [{ id: 'needs-proof', count: 2, fix: 'f (1 accepted earlier: awaiting logo)' }], accepted: [] });
     expect(formatCraft([], accepted)).toBe('CRAFT_ACCEPTED: placeholder-brand 1 Acme is the real customer\nCRAFT_ACCEPTED: scroll-listener 1 unused\nCRAFT_RESULT: clean (2 accepted)');
     const carried = [{ id: 'round-number', count: 1, reason: 'first run' }, { id: 'round-number', count: 3, reason: 'supplied figures' }];
     for (const list of [carried, [...carried].reverse()]) {
@@ -225,6 +226,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
       expect(run(page, '--accepted', record)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n' });
       expect(run(page)).toMatchObject({ code: 0, out: 'CRAFT_RESULT: clean\n', err: '' });
       expect(acceptFindings([], [{ id: 'oops', count: 1, reason: 'x' }])).toEqual({ issues: [], accepted: [] });
+      expect(acceptFindings([], [{ id: 'lorem', count: 1, reason: 'draft copy' }])).toEqual({ issues: [], accepted: [] });
       fs.writeFileSync(page, CLEAN.replace('Halvorsen Freight', 'Acme and Nexus'));
       expect(run(page)).toMatchObject({ code: 1, out: 'CRAFT_CHECK: placeholder-brand 2 use a supplied customer, or a fitting name in sample data\nCRAFT_RESULT: 1 issue(s)\n' });
       fs.writeFileSync(page, CLEAN);
@@ -255,7 +257,7 @@ describe('design-shotgun to design-html handoff', () => {
   });
 
   test('a change to the craft checker selects the design-html-slop-gate E2E that runs it', () => {
-    for (const file of ['lib/design-craft.ts', 'bin/gstack-design-craft']) {
+    for (const file of ['lib/design-craft.ts', 'lib/design-catalog.ts', 'bin/gstack-design-craft']) {
       expect(selectTests([file], E2E_TOUCHFILES).selected).toContain('design-html-slop-gate');
     }
   });

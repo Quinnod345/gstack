@@ -46,7 +46,7 @@ describe('craft resolvers', () => {
     expect(audit).toContain('add `--accepted` with that screen\'s finalized.json');
     expect(audit).toContain('a `CRAFT_ACCEPTED` line is a finding the user accepted, listed with its reason, not filed again, except `needs-proof` and `lorem`');
     expect(audit).toContain('After a `cannot use exceptions` warning, file every line.');
-    expect(audit).toContain('On a live page, never mark or cut a claim');
+    expect(audit).toContain('Never mark or cut a claim as the rules below say: file it and ask for the proof.');
     expect(audit).toContain('never copy it to the report directory');
   });
 });
