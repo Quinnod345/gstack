@@ -824,13 +824,20 @@ export interface ExactFile extends WalkedFile {
 export interface ExactSendSet {
   /** Each real file once, under the first lexical path a skill's walk reaches it by. */
   files: ExactFile[];
+  /** Files the bill walks outside the root and the gstack checkout: never sent, estimated offline. */
+  refused: WalkedFile[];
+  /** Realpath of the gstack checkout the root's gstack/ entry links to, when there is one. */
+  checkout?: string;
   /** Realpaths of the SKILL.md files whose frontmatter the bill prices. */
   frontmatter: Set<string>;
 }
 
 /**
  * What --exact sends: the same per-skill walks totalMd bills, with the same
- * fences, so nothing is walked or sent that no skill bills.
+ * fences, so nothing is walked or sent that no skill bills. Of those, only
+ * files inside the root or inside the gstack checkout the skills link into
+ * (the root's gstack/ entry, a repo checkout) are sent; anything else a link
+ * reaches is refused and estimated offline.
  *
  * The root is resolved before keying. buildBill resolves its root, so a
  * relative root here would produce keys that never match and every lookup
@@ -840,18 +847,26 @@ export function exactSendSet(root: string): ExactSendSet {
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
   const files: ExactFile[] = [];
+  const refused: WalkedFile[] = [];
   const frontmatter = new Set<string>();
   const seen = new Set<string>();
+  const rootReal = fs.realpathSync(resolved);
+  const gstackEntry = path.join(resolved, "gstack");
+  const checkout = fs.existsSync(path.join(gstackEntry, ".git")) ? fs.realpathSync(gstackEntry) : undefined;
   for (const dir of findSkillDirs(resolved)) {
     frontmatter.add(fs.realpathSync(path.join(dir, "SKILL.md")));
     for (const file of walkMdFiles(dir, { billedRoot: resolved, skipNestedSkills: true })) {
       if (seen.has(file.real)) continue;
       seen.add(file.real);
+      if (!encloses(rootReal, file.real) && !(checkout && encloses(checkout, file.real))) {
+        refused.push(file);
+        continue;
+      }
       const { dev, ino } = fs.statSync(file.real);
       files.push({ ...file, dev, ino });
     }
   }
-  return { files, frontmatter };
+  return { files, refused, frontmatter, checkout };
 }
 
 /**
@@ -1077,8 +1092,10 @@ const USAGE =
   "\n" +
   "  --exact              measure tokens with Anthropic's count_tokens instead of\n" +
   "                       estimating. Off by default: it sends the content of every\n" +
-  "                       .md file the bill prices (including files reached\n" +
-  "                       through symlinks) to api.anthropic.com. Needs\n" +
+  "                       .md file the bill prices inside the tree, or inside\n" +
+  "                       the gstack checkout its gstack/ entry links to, to\n" +
+  "                       api.anthropic.com. Files that symlinks reach anywhere\n" +
+  "                       else are named, not sent, and estimated offline. Needs\n" +
   "                       ANTHROPIC_API_KEY; passing --exact is the consent. An\n" +
   "                       egress receipt is written before the send (see\n" +
   "                       gstack-egress); if it cannot be written, the run falls\n" +
@@ -1135,17 +1152,28 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
     onDone?: () => void;
   }> => {
     if (!set) return {};
+    if (set.refused.length) {
+      const outsideDirs: string[] = [];
+      for (const d of [...new Set(set.refused.map((f) => path.dirname(f.real)))].sort()) {
+        if (!outsideDirs.some((kept) => encloses(kept, d))) outsideDirs.push(d);
+      }
+      stderr.write(
+        `--exact: not sending ${set.refused.length} .md file(s) that symlinks reach outside ${tree} and the gstack checkout ` +
+          `(under ${outsideDirs.join(", ")}); they are estimated offline:\n` +
+          set.refused.map((f) => `  ${path.relative(tree, f.path)}\n`).join(""),
+      );
+    }
     if (set.files.length === 0) {
-      if (findSkillDirs(path.resolve(tree)).length) {
+      if (set.refused.length || findSkillDirs(path.resolve(tree)).length) {
         stderr.write(`--exact: no markdown skill file to measure under ${tree}; nothing was sent, so the bill uses the offline estimate.\n`);
       }
       return {};
     }
     const treeReal = fs.realpathSync(tree);
-    const outside = set.files.filter((f) => !encloses(treeReal, f.real)).length;
+    const inCheckout = set.files.filter((f) => !encloses(treeReal, f.real)).length;
     stderr.write(
       `--exact: sending the content of ${set.files.length} .md file(s) under ${tree}` +
-        (outside ? ` (${outside} of them through symlinks to files outside it)` : "") +
+        (inCheckout ? ` (${inCheckout} of them in the gstack checkout ${set.checkout})` : "") +
         ` to api.anthropic.com for count_tokens (${flags.exactModel}). No other data leaves this machine.\n`,
     );
     try {

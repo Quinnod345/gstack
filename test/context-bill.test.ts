@@ -809,6 +809,8 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
       fs.symlinkSync(path.join(checkout, "SKILL.md"), path.join(skills, name, "SKILL.md"));
       fs.symlinkSync(path.join(checkout, "shared"), path.join(skills, name, "refs"));
     }
+    fs.mkdirSync(path.join(checkout, ".git"));
+    fs.symlinkSync(checkout, path.join(skills, "gstack"));
 
     const calls: { body: string }[] = [];
     const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
@@ -916,7 +918,7 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(bill.calibration.rows.length).toBeGreaterThan(0);
   });
 
-  it("says how many of the files it sends sit outside the tree behind symlinks", async () => {
+  it("says how many of the files it sends come from the gstack checkout", async () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-notice-"));
     fs.mkdirSync(path.join(tmp, "checkout", "qa", "sections"), { recursive: true });
@@ -927,6 +929,8 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.symlinkSync(path.join(tmp, "checkout", "qa", "SKILL.md"), path.join(skills, "qa", "SKILL.md"));
     fs.symlinkSync(path.join(tmp, "checkout", "qa", "sections"), path.join(skills, "qa", "sections"));
     fs.writeFileSync(path.join(skills, "qa", "notes.md"), "n");
+    fs.mkdirSync(path.join(tmp, "checkout", ".git"));
+    fs.symlinkSync(path.join(tmp, "checkout"), path.join(skills, "gstack"));
     const stderr = capture();
     const code = await contextBillMain([skills, "--exact", "--json"], {
       stdout: capture().stream,
@@ -937,7 +941,8 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     });
     expect(code).toBe(0);
     expect(stderr.text()).toContain("sending the content of 3 .md file(s)");
-    expect(stderr.text()).toContain("(2 of them through symlinks to files outside it)");
+    expect(stderr.text()).toContain(`(2 of them in the gstack checkout ${fs.realpathSync(path.join(tmp, "checkout"))})`);
+    expect(stderr.text()).not.toContain("not sending");
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -953,6 +958,8 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.writeFileSync(path.join(ext, "private", "notes.md"), "PRIVATE-NOTES");
     fs.symlinkSync(ext, path.join(ext, "cc", "up"));
     fs.symlinkSync(path.join(ext, "cc"), path.join(skills, "cc"));
+    fs.mkdirSync(path.join(ext, ".git"));
+    fs.symlinkSync(ext, path.join(skills, "gstack"));
     const calls: { body: string }[] = [];
     const stderr = capture();
     const code = await contextBillMain([skills, "--exact", "--json"], {
@@ -985,6 +992,8 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     fs.mkdirSync(skills);
     fs.symlinkSync(path.join(dev, "m"), path.join(skills, "m"));
     fs.symlinkSync(path.join(dev, "zz"), path.join(skills, "zz"));
+    fs.mkdirSync(path.join(dev, ".git"));
+    fs.symlinkSync(dev, path.join(skills, "gstack"));
     const calls: { body: string }[] = [];
     const measured = await measureExactTokens(skills, { model: "m", apiKey: "sk-test", fetchImpl: fakeFetch(calls), egressHome });
     const keys = [...measured.counts.keys()].map((k) => path.relative(skills, k)).sort();
@@ -1067,7 +1076,7 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
         fs.mkdirSync(path.join(tmp, tree, "qa"), { recursive: true });
         fs.writeFileSync(path.join(tmp, tree, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
       }
-      const store = path.join(tmp, "store");
+      const store = path.join(tmp, "b", "store");
       fs.mkdirSync(store);
       fs.writeFileSync(path.join(store, "safe.md"), "safe");
       fs.writeFileSync(path.join(store, "secret.env"), "SYNTHETIC_PRIVATE_NONMARKDOWN");
@@ -1108,6 +1117,50 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(replaced.calls.some((c) => c.body.includes("SYNTHETIC_PRIVATE"))).toBe(false);
     expect(replaced.code).toBe(1);
     expect(replaced.err).toContain("changed after it was walked");
+  });
+
+  it("sends files in the root and the linked gstack checkout, and refuses and names anything else a link reaches", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-egress-"));
+    const checkout = path.join(tmp, "checkout");
+    fs.mkdirSync(path.join(checkout, ".git"), { recursive: true });
+    fs.mkdirSync(path.join(checkout, "qa", "sections"), { recursive: true });
+    fs.writeFileSync(path.join(checkout, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# CHECKOUT-QA\n");
+    fs.writeFileSync(path.join(checkout, "qa", "sections", "flow.md"), "CHECKOUT-FLOW");
+    const documents = path.join(tmp, "Documents");
+    fs.mkdirSync(path.join(documents, "vault"), { recursive: true });
+    fs.writeFileSync(path.join(documents, "vault", "diary.md"), "PRIVATE-DIARY");
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.symlinkSync(checkout, path.join(skills, "gstack"));
+    fs.symlinkSync(path.join(checkout, "qa", "SKILL.md"), path.join(skills, "qa", "SKILL.md"));
+    fs.symlinkSync(path.join(checkout, "qa", "sections"), path.join(skills, "qa", "sections"));
+    fs.symlinkSync(documents, path.join(skills, "qa", "notes"));
+
+    const calls: { body: string }[] = [];
+    const stdout = capture();
+    const stderr = capture();
+    const code = await contextBillMain([skills, "--exact", "--json"], {
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+    });
+    const err = stderr.text();
+    const documentsReal = fs.realpathSync(path.join(documents, "vault"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.body.includes("CHECKOUT-QA"))).toBe(true);
+    expect(calls.some((c) => c.body.includes("CHECKOUT-FLOW"))).toBe(true);
+    expect(calls.some((c) => c.body.includes("PRIVATE-DIARY"))).toBe(false);
+    expect(err).toContain(`not sending 1 .md file(s)`);
+    expect(err).toContain(documentsReal);
+    expect(err).toContain(path.join("qa", "notes", "vault", "diary.md"));
+    expect(err).toContain("estimated");
+    const bill = JSON.parse(stdout.text());
+    const skillMd = "---\nname: qa\ndescription: d\n---\n# CHECKOUT-QA\n";
+    expect(bill.skills[0].totalMdBytes).toBe(skillMd.length + "CHECKOUT-FLOW".length + "PRIVATE-DIARY".length);
   });
 
   it("names a missing tree, without a raw ENOENT or any request", async () => {
