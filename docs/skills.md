@@ -41,6 +41,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/deslop-shared-libs`](#deslop-shared-libs) | **Shared Code Reviewer** | Find worthwhile shared-code extractions in recent work. Recommendations only. |
 | [`/test-audit`](#test-audit) | **Test Auditor** | Sweep existing tests for low-value, implementation-coupled or duplicate tests. Report-only unless you approve a batch. |
 | [`/landing-report`](#landing-report) | **Ship Queue Dashboard** | Read-only snapshot of the workspace-aware ship queue. Which version slots are claimed, which sibling workspaces have WIP. |
+| [`/captain`](#captain) | **Crew Controller** | Run many coding agents from one controller. Lanes build and send a READY block; the controller validates it, merges through trains (stamp on call, verify, merge with the expected head, verify again), keeps the digest, relays approvals in three fixed shapes and runs a daily flaky-fix pass. Also answers to `/crew`. |
 | [`/benchmark-models`](#benchmark-models) | **Model Benchmark** | Side-by-side cross-model benchmark for skills (Claude vs GPT vs Gemini). Latency, tokens, cost, optional LLM-judged quality. |
 | [`/eval-plan`](#eval-plan) | **Eval Planner** | Preregister a paid eval (bars, arms, decoys, stop rules), dry-run it for $0 with the stub model, pilot three priced items, then approve the spend from the extrapolation table. |
 | | | |
@@ -1290,6 +1291,39 @@ Full safety mode — combines `/careful` + `/freeze` in one command. Destructive
 Remove the `/freeze` boundary, allowing edits everywhere again. The hooks stay registered for the session — they just allow everything. Run `/freeze` again to set a new boundary.
 
 ---
+
+## `/captain`
+
+One controller, many lanes. `/captain` (also `/crew`) teaches a coordinating agent the
+operating model that keeps dozens of worker threads merging into one base branch without
+turning it red.
+
+```text
+You: /captain
+You: /captain ready 42        # validate a lane's READY block before it enters a train
+You: /captain train           # build, read the verdict, call slots, verify, merge, verify
+You: /captain digest          # rewrite Needs you / New / In progress
+```
+
+The rules: lanes never merge and their job ends at an unstamped **READY** (the block
+`gstack-ship-queue ready` prints, plus the full head SHA, the screen choice, the ship
+receipt at the pin and the logged flaky cases); a green PR page or a cheap test tier is
+never merge evidence. The controller batches READY pins into a **merge train**, reads one
+full gate on the train head (an in-run flaky rerun once; a case that failed twice is
+real), then merges slot by slot: slot call, lane stamps on call with a commit that holds
+only tool output, `verify --train`, `gh pr merge --match-head-commit`, verify again. A red
+train is bisected on its red cases and rebuilt at most once; a backstop gate on every
+base push freezes the queue when a tree no train covered lands. Approvals have three
+shapes (the per-thread record, the plan ask with before → after and a "do it" reply, the
+merge ask with captioned before/after images). The digest is Needs you / New / In
+progress with ages. A daily flaky-fix pass reads the gate runs' flake records and the free
+suites' retries into a ledger and fixes causes, never thresholds. Where crews that run
+this model disagree (squash or merge, who stamps, gate-ahead, the severe race, a gate run
+id in the READY), the skill ships both as options for the crew rules file.
+
+Templates (CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report,
+the READY block, the slot call, the plan and merge asks, the daily automation prompt)
+live in `captain/templates/`; the team setup guide for Capy is [docs/captain.md](captain.md).
 
 ## `/gstack-upgrade`
 

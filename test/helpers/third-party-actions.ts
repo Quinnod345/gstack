@@ -46,9 +46,17 @@ export function asideDriveOptions(text: string): string[] {
 /** Any lettered option offering a browser drive, for flows where no drive may be offered. */
 export const offersDriveOption = (text: string): boolean => letteredOptions(text).some(option => /drive|browse|Aside/i.test(option));
 
-/** The defer option: a lettered option that defers, postpones or sets the step aside for now. */
+/**
+ * The defer option: a lettered option that defers, postpones or sets the step aside for now. "Wait for now" and
+ * "hold off for now" count only as the option's own opening or sentence (gate 40290033102: "D) Wait for now. I'll
+ * mark this step as blocked on you."), never as a drive option's "I wait while you sign in": the phrase must open the
+ * option or a sentence and end it, and the option must not be a browser drive, so "I wait for now while you sign in",
+ * "wait for now and do it yourself" and "I drive it in Aside. I wait for now." do not count.
+ */
 export const offersDefer = (text: string): boolean => letteredOptions(text).some(option =>
-  /\b(?:defer\w*|postpone\w*|put (?:this|it)(?: step)? off|skip (?:this|it)(?: step)? for now|come back to (?:this|it)(?: step)? later|leave (?:this|it)(?: step)? for (?:now|later))\b/i.test(option));
+  /\b(?:defer\w*|postpone\w*|put (?:this|it)(?: step)? off|skip (?:this|it)(?: step)? for now|come back to (?:this|it)(?: step)? later|leave (?:this|it)(?: step)? for (?:now|later))\b/i.test(option)
+  || !/drive|browse|Aside/i.test(option)
+    && /(?:^|[.!?;:]\s+)(?:(?:we|I|let['\u2019]s) )?(?:wait|hold off)(?: on (?:this|it)(?: step)?)? for now\b(?=\s*(?:[.!?;:]|[-\u2013\u2014]|$))/i.test(option));
 
 /** The manual option: "manual", or one sentence offering instructions or steps the user follows themselves. */
 export function offersManualSteps(text: string): boolean {

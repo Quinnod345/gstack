@@ -673,6 +673,18 @@ Report `COMMIT_SIZE_BUCKETS`:
 - **Large** (500-1500 LOC)
 - **XL** (1500+ LOC)
 
+### Step 7.5: Factory scorecard (optional)
+
+With `gh` authenticated, add what git cannot show: merged PRs (crew vs outside), lead time (PR open → merge, READY → merge), review passes per PR, gate runs and known cost, red-train rate, flaky events, issues opened vs closed, releases. Read-only, no spend; a busy week takes minutes.
+
+```bash
+_FS="$HOME/.claude/skills/gstack/bin/gstack-factory-scorecard"
+gh auth status >/dev/null 2>&1 && "$_FS" --base "<default>" --since-days "<window-days>" \
+  || echo "FACTORY_SCORECARD: unavailable"
+```
+
+Paste the table under **Factory scorecard**, third column included (what one of the best factories shows on that line). Keep any `unavailable (...)` wording; never write 0 for it. `SCORECARD_TREND:` accumulates the weeks. `docs/recommended-harness.md#the-factory-scorecard` explains each line and the `--crew`, `--gate-workflow`, `--free-workflow`, `--train-prefix` knobs.
+
 ### Step 8: Focus Score + Ship of the Week
 
 **Focus score:** `FOCUS_SCORE` is the percentage of file changes touching the single most-changed top-level directory (e.g., `app/services/`). Higher score = deeper focused work. Lower score = scattered context-switching. Report as: "Focus score: 62% (app/services/)"
