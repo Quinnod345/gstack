@@ -153,7 +153,7 @@ is exercised against real check runs before it merges.
 
 | Line | Meaning |
 |---|---|
-| `CANDIDATE: <sha> (<date>)` | the commit that will be (or was) released |
+| `CANDIDATE: <sha> (<date>) gated by main-backstop|train <nonce>` | the commit that will be (or was) released, and which evidence gated it (`[hotfix: --ref]` before `gated by` on a `--ref` cut) |
 | `NOTHING_NEW: origin/main <sha> is already released as v<X>` | nothing merged since the last release; exit 0 |
 | `NO_GREEN_COMMIT: ...` with `SKIPPED:` lines | nothing in the window passed the gate; exit 1 (a dry run exits 0: the skips are its answer) |
 | `REFUSED: non-fast-forward: ...` | the candidate is behind stable; stable only moves forward |

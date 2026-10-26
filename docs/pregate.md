@@ -677,7 +677,12 @@ gstack-issue-links [--base <ref>] [--issue <n>]... [--ci-run <id>]... [--superse
 Reads `origin/<base>..HEAD`. `Fixes #N` only on explicit closure intent: a
 `Fixes`/`Closes`/`Resolves #N` trailer line or `--issue N`. A bare mention
 (a subject's `(#N)` included), a partial fix, a deferred ask and every
-cross-repo `owner/repo#N` are `Refs`. Same-repo references are printed as
+cross-repo `owner/repo#N` are `Refs`. A parenthesised named reference,
+`(name #N, #M)`, `(name PR #N)` or `(name issue #N)`, where the name is one
+token that is not a closure, reference, filler or version word, is a
+cross-repo `Refs name#N`, never a same-repo Refs line or a promotion
+candidate; `(see #12)`, `(closing #12)` and `(#301)` stay bare refs.
+Same-repo references are printed as
 promotion candidates (`reference #N ← <commit line> (promote: fix #N)` on
 stderr, `candidates` in `--json`): the owner's `fix #N` reply reruns with
 `--issue N`; an unattended run keeps them `Refs` and lists them in the
