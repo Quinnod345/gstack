@@ -34,8 +34,10 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   page the lint could not read is not a pass; a linked stylesheet over the cap
   is only warned about, because the page that links it is still read. A
   relative stylesheet href may not climb out of the project (the nearest
-  directory holding a `package.json` or `.git`); outside any project it is
-  bounded only by the disk, and only `.css` files are read.
+  directory holding a `package.json` or `.git`), by its path and by its real
+  path, so a symlink inside the project that points outside it is not read
+  either; outside any project it is bounded only by the disk, and only `.css`
+  files are read.
 - Markup inside an HTML comment is dead for every rule, a commented-out
   `<style>` or `<script>` included. A tree nests at most 512 elements deep
   (the browser's own cap); a start tag deeper than that is read as empty. An
@@ -66,6 +68,11 @@ One line per finding, then one summary line:
 LINT: <blocks|ask|polish|waived> <rule-id> <file>:<line> <evidence> | fix: <fix>
 LINT_SUMMARY: blocks=N ask=N waived=N polish=N render=<ran|skipped: reason>
 ```
+
+Page-supplied text in a finding never holds the line's own ` | fix: `
+separator (it is printed as ` / fix: `), so splitting a line on its first
+` | fix: ` always reads the fix; a program reading many fields should take
+`--json`.
 
 Exit **2** when anything blocks, **1** when an ask is unanswered, **0**
 otherwise (**3** on a usage error). Findings sort blocks, ask, waived, polish,
@@ -122,7 +129,13 @@ as `house-style`.
 A claim written in a stylesheet answers for that stylesheet on every page
 that links it, and only for findings located in it: the shared-word check does
 not apply (a stylesheet has no prose), so the claim cannot reach a finding in
-the page's own markup. Two claims on one line are both read. A blocking copy
+the page's own markup. A claim written in the page answers for that page,
+including a finding in a stylesheet it links; a second page linking the same
+sheet without answering still reports it, so the sheet's finding may print
+once waived and once at ask, each from its own page. In a directory of
+components (`--scope component`) each file's claim answers for that file
+alone and is weighed against that file's own text; a sibling component is not
+covered. Two claims on one line are both read. A blocking copy
 tell (`generic-hero-copy`) is the Floor inside the hero, the section or header
 that holds the h1; the same line, or a "Meet <Name>" or three-word triad
 heading, in body copy further down is suspected and reported at ask, so a
@@ -161,7 +174,7 @@ waiver can answer it.
 | `overflow-x-unclipped` | ask | 34 | overflow-x missing on html and body, or a 100vw width | overflow-x: clip on both; width: 100% |
 | `horizontal-scroll` | blocks | 34 | horizontal scroll at a width between 320 and 1920 (render) | find the element wider than its viewport and cap it |
 | `hero-balance` | ask | 44a/44c | the hero's content sits off centre for its screen, or its visual stands apart from the text (render) | centre the content in its screen; put the visual beside the text |
-| `hero-fold` | blocks | 44b | headline, lede, primary action and visual not all visible at 1280x800 (render) | pull the display clamp down, tighten leading, a two-line lede, trim padding |
+| `hero-fold` | blocks | 44b | the headline's bottom or the hero's first action below the 800px fold at 1280 wide (render; the lede and the visual are not measured) | pull the display clamp down, tighten leading, a two-line lede, trim padding |
 | `wide-container` | blocks | 44d | at 1920x1080 the container has no max-width, gutters under 120px, or a grid gains columns | cap 1360 to 1520px and centre; hold column counts; cap vw visuals |
 | `bare-fr-track` | blocks | 50 | an image-bearing grid track on bare 1fr | minmax(0, 1fr) |
 | `display-head-unwrapped` | blocks | 50 | a display head without overflow-wrap: break-word and min-width: 0 | overflow-wrap: break-word; min-width: 0 (never anywhere) |
@@ -180,7 +193,7 @@ waiver can answer it.
 | `photo-wall` | ask | 83 | photographs cover more than a third of the page below the hero (render) | keep the strongest pictures, set big; carry the rest in type, figures, the product, a table |
 | `email-band-close` | ask | 85 | the page ends on an email sign-up form on a page whose job is not subscribe, join, attend, listen or visit | end on what the visitor came to do, or on the last strong section |
 | `aphoristic-cadence` | blocks | 19 | the rebuttal cadence three or more times ("Not a feature. A platform.") | say what the product does, in its own nouns |
-| `generic-hero-copy` | blocks | 19 | a filler opener ("Built for the modern team", "In today's landscape") or "quietly trusted by" | say what the product does, in its own nouns |
+| `generic-hero-copy` | blocks | 19 | a filler opener ("Built for the modern team", "In today's landscape"), "quietly trusted by", or the catalog's "Welcome to" and "all-in-one solution" | say what the product does, in its own nouns |
 | `generic-cta-copy` | ask | 19/42 | a stock second action beside the primary (Learn more, Get started, Book a demo) | one action, or a second that names where it goes |
 | `em-dash-overuse` | ask | 19 | em or en dashes carrying the prose | a comma, a colon, a full stop or a line break |
 | `template-footer-line` | ask | 19 | a stock footer line (All rights reserved) | the page's own line, or nothing |
@@ -287,8 +300,12 @@ here: `!important` in new CSS (the parser drops the flag), an h1 past 6rem
 (`oversized-h1`), tracking below -0.04em (`extreme-negative-tracking`), body
 text under 16px in a static stylesheet (`tiny-text` here is hallmark's 12px
 running-text floor, measured by the render tier), the `theater-slop-phrase`
-list beyond "built for the modern", the pulsing dot, and a text container with
-no `max-width` (`line-length` reads a declared `ch` value). The copy tier
+list beyond "built for the modern", the pulsing dot, a text container with
+no `max-width` (`line-length` reads a declared `ch` value), an uppercase
+paragraph at body size (`wide-tracking` reads caps at label size or tracked;
+a 16px untracked uppercase `<p>` passes), and a fixed px `width` on a
+container with no responsive handling (`wide-container` reads the opposite
+case). The copy tier
 reports at the document's first line with a count, because
 `gstack-design-craft` counts matches without positions; Phase 2 folds those
 patterns into the lint with lines. Where a rule id is shared with
@@ -323,7 +340,12 @@ render tier's focus walk); `off-scale-spacing` holds every px length to the
 gated on `--space-*` tokens); and `double-sticky` pairs any two `top: 0`
 sticky selectors without reading their scroll containers, so a sticky table
 header inside an `overflow: auto` wrapper under a sticky nav reports and
-wants a waiver on the record.
+wants a waiver on the record. As in hallmark, a selector the heading pattern
+matches (`__title`, `__headline`, `display`) is read as display type unless
+its name is also a label's or a control's, so a 12px uppercase tracked
+`.card__title` is caught by the markup half only when its text is typed in
+capitals. `em-dash-overuse` does not count an en dash between two digits (a
+range).
 
 ## What is deliberately not ported
 

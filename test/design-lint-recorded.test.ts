@@ -42,7 +42,8 @@ describe('design-lint over the recorded review slop page', () => {
       // Issue 7: the three-column icon-tile grid and its coins
       expect(at('template-cards')).toEqual([['ask', 'styles.css', 33]]);
       expect(at('icon-coin')).toEqual([['polish', 'styles.css', 51]]);
-      // Issue 6: generic hero copy
+      // Issue 6: generic hero copy, the two lines the design catalog names for it and the buzzword behind them
+      expect(at('generic-hero-copy')).toEqual([['blocks', 'index.html', 12], ['blocks', 'index.html', 13]]);
       expect(at('marketing-buzzword')).toEqual([['ask', 'index.html', 1]]);
       // Tells the page does not annotate but hallmark's sloplint reports on the same files
       expect(at('pure-black-white').map((f) => f[2])).toEqual([17, 63, 85]);
@@ -51,7 +52,7 @@ describe('design-lint over the recorded review slop page', () => {
       expect(at('skipped-heading')).toEqual([['polish', 'index.html', 21]]);
       expect(r.findings.some((f) => f.grade === 'waived')).toBe(false);
       expect(exitCodeOf(r.summary)).toBe(2);
-      expect(formatSummary(r.summary)).toMatch(/^LINT_SUMMARY: blocks=5 ask=\d+ waived=0 polish=4 render=skipped: not requested$/);
+      expect(formatSummary(r.summary)).toMatch(/^LINT_SUMMARY: blocks=7 ask=\d+ waived=0 polish=4 render=skipped: not requested$/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

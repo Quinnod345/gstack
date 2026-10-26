@@ -233,7 +233,7 @@ describe('design-lint fifth cycle: rule judgement', () => {
     expect(only(glass, 'glow-wash').map((x) => x.evidence)).toEqual([expect.stringMatching(/translucent black/)]);
     const tracked = run(page('.btn { font-size: 13px; letter-spacing: .06em; }', '<main><h1>Hi there</h1><a class="btn" href="#">Go now</a></main>'));
     expect(only(tracked, 'wide-tracking').map((x) => x.evidence)).toEqual([expect.stringMatching(/^\.btn: a control tracked 0\.06em at 13px$/)]);
-    const tiles = run(page('', '<main><h1>Hi there</h1>' + Array.from({ length: 12 }, (_, i) => '<div class="card"><span class="icon">🚀</span><h3>T' + i + '</h3></div>').join('') + '</main>'));
-    expect(only(tiles, 'emoji-decoration').length).toBeLessThanOrEqual(8);
+    const tiles = run(page('', '<main><h1>Hi there</h1>' + Array.from({ length: 12 }, (_, i) => '<div class="card"><span class="icon">🚀</span><h3>T' + i + '</h3></div>').join('\n') + '</main>'));
+    expect(only(tiles, 'emoji-decoration').length).toBe(8);
   });
 });

@@ -240,7 +240,7 @@ describe('design-lint: the static tier\'s files and contexts', () => {
     expect(contexts).toHaveLength(1);
     expect(contexts[0].cssFiles.map((c) => path.relative(dir, c.file))).toEqual(['site/local.css', 'shared/theme.css']);
     const set = contextWaivers(contexts[0], dir);
-    expect([...set.accepted.entries()]).toEqual([['section-gap@site/local.css', { reason: 'the ledger separates its rows with rules', sheet: 'site/local.css' }], ['template-nav@shared/theme.css', { reason: 'the ledger keeps three links for its three modes', sheet: 'shared/theme.css' }]]);
+    expect([...set.accepted.entries()]).toEqual([['section-gap@site/local.css', 'the ledger separates its rows with rules'], ['template-nav@shared/theme.css', 'the ledger keeps three links for its three modes']]);
     expect(set.refused).toEqual([]);
   });
 

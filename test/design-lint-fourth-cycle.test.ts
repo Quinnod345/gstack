@@ -267,7 +267,7 @@ describe('design-lint fourth cycle: the pixel pass with a readable screenshot', 
   const SWATCH = path.join(path.resolve(import.meta.dir, '..'), 'test', 'fixtures', 'design-lint', 'render', 'swatch.png');
   const SETUP = 1, FIRST = 2, FOCUS = 13;
 
-  test('a contrast claim is dropped when the pixels behind it clear the threshold, rewritten when they confirm it, and a weak ring is confirmed from the pixels around it', async () => {
+  test('a contrast claim is dropped when the pixels behind it clear the threshold, rewritten when they confirm it, and a weak ring that clears on the pixels around it is dropped', async () => {
     // swatch.png is 8x8, red on the left half and blue on the right; the page rects are in CSS pixels, scaled to the screenshot by its width
     const dir = tree({ 'index.html': PAGE });
     const file = path.join(dir, 'index.html');
