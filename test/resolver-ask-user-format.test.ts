@@ -21,6 +21,7 @@ import * as path from 'path';
 import type { TemplateContext } from '../scripts/resolvers/types';
 import { HOST_PATHS } from '../scripts/resolvers/types';
 import { generateAskUserFormat } from '../scripts/resolvers/preamble/generate-ask-user-format';
+import { directiveFor } from '../hosts/claude/hooks/auq-error-fallback-hook.ts';
 import { expectMentions, expectTokens } from './helpers/prompt-structure';
 
 function makeCtx(): TemplateContext {
@@ -378,4 +379,14 @@ describe('CQ3 — cross-file invariant: the unattended pointer names a block gst
       expect(out).not.toContain('Unattended session block');
     });
   }
+});
+
+describe('CQ4 — every unattended pending set names destructive or irreversible options', () => {
+  test('the printed unattended-session block and the hook directive agree with the resolver fallback', () => {
+    const startSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'gstack-skill-start'), 'utf-8');
+    const block = /_emit_block unattended-session <<EOI\n([\s\S]*?)\nEOI/.exec(startSrc)?.[1] ?? '';
+    expect(block, 'gstack-skill-start must emit the unattended-session block').not.toBe('');
+    expectMentions(block, [['destructive', 'irreversible', 'pending']], 'unattended-session block');
+    expectMentions(directiveFor('unattended'), [['destructive', 'irreversible', 'pending']], 'hook unattended directive');
+  });
 });

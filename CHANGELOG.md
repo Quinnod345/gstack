@@ -12,12 +12,12 @@
 
 ### Tests
 - `test/honesty-kernel.test.ts` no longer requires the Step 16 pointer. It now rejects any `Step <n>` cross-reference in the kernel, which every skill renders.
-- `test/resolver-ask-user-format.test.ts` checks across files that the unattended pointer names `unattended-session` and that gstack-skill-start really emits a block with that id, so renaming either side fails the test. It also checks that the failure fallback's `unattended` branch names destructive or irreversible options as pending. `test/auq-error-fallback-hook.test.ts` asserts the hook's unattended directive no longer says "Unattended session block".
+- `test/resolver-ask-user-format.test.ts` checks across files that the unattended pointer names `unattended-session` and that gstack-skill-start really emits a block with that id, so renaming either side fails the test. It also checks that the failure fallback's `unattended` branch names destructive or irreversible options as pending, and that the printed `unattended-session` block and the hook's unattended directive say the same. `test/auq-error-fallback-hook.test.ts` asserts the hook's unattended directive no longer says "Unattended session block".
 - `test/plan-reality.test.ts` checks that the reality-rows block, generated for each of the eng, ceo and devex phases, says its `gstack-plan-reality check` line prints `PLAN_REALITY`.
-- 89 pins in `test/fixtures/skill-md-size-allowlist.json` were moved to their new exact sizes. 78 went down by 3 characters. The 11 non-Claude plan-eng-review pins went up by 21: the unattended failure-fallback branch regains the destructive/irreversible carve-out that the removed pointer used to supply (about 21 chars). The /ship goldens were regenerated.
+- 89 pins in `test/fixtures/skill-md-size-allowlist.json` were moved to their new exact sizes. Every pinned skill gets the same net -3 characters, and that already includes 36 for the destructive/irreversible carve-out the unattended failure-fallback branch regains (the removed pointer used to supply it). So 78 pins went down by 3. The 11 non-Claude plan-eng-review pins also inline the 24-character "prints `PLAN_REALITY`" pointer from `review-sections.md`, so they went up by 21; without the carve-out they would have gone down by 15. The /ship goldens were regenerated.
 
 ### Gate integrity
-- No threshold, rubric, trial count, case kind or judge prompt changed. 78 size pins went down; 11 went up by 21 characters for the restored carve-out above.
+- No threshold, rubric, trial count, case kind or judge prompt changed. 78 size pins went down by 3; 11 went up by 21, because the restored 36-character carve-out outweighs what those pins had shed (see Tests).
 
 ## [1.91.230.0] - 2026-10-26
 
