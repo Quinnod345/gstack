@@ -157,7 +157,7 @@ describe("upstream fix a: root-as-container + walkMd exclusions", () => {
     // Regression pin for the v1.63 double-count: totalMd on a skill dir that
     // CONTAINS other skill dirs (the gstack root wraps the whole tree) used to
     // swallow the children's .md bytes too, so the TOTAL line billed every
-    // nested skill twice. A revert of the topSeg/SKILL.md skip in totalMd
+    // nested skill twice. Dropping skipNestedSkills from totalMd's walkMd call
     // (lib/context-bill.ts) must fail here.
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-nested-total-"));
     fs.writeFileSync(path.join(tmp, "SKILL.md"), "---\nname: parent\ndescription: p\n---\n# Parent\n");
@@ -897,6 +897,22 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(stderr.text()).toContain("sending the content of 3 .md file(s)");
     expect(stderr.text()).toContain("(2 of them through symlinks to files outside it)");
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("names a missing tree, without a raw ENOENT or any request", async () => {
+    const out = capture();
+    const calls: { body: string }[] = [];
+    const code = await contextBillMain([path.join(os.tmpdir(), "context-bill-no-such-tree"), "--exact"], {
+      stdout: out.stream,
+      stderr: out.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+    });
+    expect(code).toBe(1);
+    expect(out.text()).toContain("No such tree:");
+    expect(out.text()).not.toContain("ENOENT");
+    expect(calls.length).toBe(0);
   });
 
   it("measures a skill's frontmatter even when its file was first walked under another name", async () => {

@@ -177,9 +177,13 @@ function sumTokens(entries: { tokens: number }[]): number {
   return entries.reduce((n, e) => n + e.tokens, 0);
 }
 
-/** Cache key for a SKILL.md's frontmatter block, which is a slice, not a whole file. */
-function frontmatterKey(skillMdPath: string): string {
-  return `${skillMdPath}#frontmatter`;
+/**
+ * Cache key for a .md file's frontmatter block, which is a slice, not a whole
+ * file. The bill looks it up through a SKILL.md path; --exact measures it for
+ * every walked file, so a SKILL.md first walked under another name still has one.
+ */
+function frontmatterKey(mdPath: string): string {
+  return `${mdPath}#frontmatter`;
 }
 
 function parseFrontmatter(text: string): { bytes: number; keys: string[]; block: string } {
@@ -1034,6 +1038,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
     onDone?: () => void;
   }> => {
     if (!flags.exact) return {};
+    if (!fs.existsSync(tree)) throw new Error(`No such tree: ${path.resolve(tree)}`);
     const walked = walkMd(tree);
     const treeReal = fs.realpathSync(tree);
     const outside = walked.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
