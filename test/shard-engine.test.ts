@@ -24,6 +24,7 @@ import {
   strictShardStatus,
   writeDurationSeed,
   zeroExecutionVerdict,
+  CAPY_LAUNCH_MARKERS,
 } from '../scripts/lib/shard-engine';
 import { FREE_LANE_POLICY, exitCodeFor, runFreeShard } from '../scripts/test-free-shards';
 import {
@@ -252,7 +253,7 @@ describe('shard engine: capture and isolation', () => {
       for (const box of [a, b]) {
         expect(box.env.KEEP).toBe('1');
         expect(box.env.GSTACK_HOME).toBeUndefined();
-        for (const key of ['GSTACK_SESSION_KIND', 'GSTACK_CAPY', 'GSTACK_EPHEMERAL', 'GSTACK_INSTALL_VERDICT']) expect(box.env[key]).toBeUndefined();
+        for (const key of CAPY_LAUNCH_MARKERS) expect(box.env[key]).toBeUndefined();
         expect(box.env.GSTACK_STATE_ROOT).toBe('/kept-root');
         for (const key of ['TMPDIR', 'TEMP', 'TMP']) expect(box.env[key]).toBe(box.tmp);
         expect(box.env.CHROMIUM_PROFILE).toBe(path.join(box.stateDir, 'chromium-profile'));
