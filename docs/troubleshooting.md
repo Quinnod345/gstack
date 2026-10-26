@@ -4370,12 +4370,14 @@ Exit 0 means the `--until` condition is met or the PR merged; exit 1 and 2
 end with one of the two codes below. `green` gates on every check on the
 head, as `gstack-ci-gate` does, so the two never disagree; a check the base
 branch requires (rulesets and classic branch protection) counts as pending
-until it appears, and advisory bots' checks never gate. A 403 on the classic
+until it appears. A 403 on the classic
 protection read (a token without admin scope) is logged and skipped, and the
 rulesets read still names the required checks. The review-bot lists are
 configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`
 and `pr_wait_advisory_bots coderabbit` (`none` empties a list); a bot owns
-the logins that start with its name and the checks that mention it. The loop
+the logins that start with its name and the checks that mention it, and an
+advisory bot's review is never waited for while its checks gate like any
+other. The loop
 is synchronous, so Ctrl-C and `kill` stop it at once; the lock it leaves is
 taken over by the next watcher for that PR once the pid is gone.
 
@@ -4401,7 +4403,7 @@ print. A watcher that stopped on a gh error restarts cleanly once `gh auth
 status` passes.
 
 <a id="pr-wait-refused"></a>
-### `gstack-pr-wait: the watcher did not start — ... (PR_WAIT_REFUSED)`
+### `gstack-pr-wait: the watcher did not start, or a local error stopped it before a verdict — ... (PR_WAIT_REFUSED)`
 
 **Meaning.** Exit 2, never a verdict on the PR. The target is not a PR number
 or URL, `--repo` is not `owner/name`, no repository could be read from the

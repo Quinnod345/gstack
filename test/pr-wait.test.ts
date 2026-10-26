@@ -221,11 +221,14 @@ describe('required checks and the green condition', () => {
     expect(lines()).toEqual(['#42 green on aaaaaaa: 3 pass; required 2/2 green; no greptile or macroscope yet; 0 unresolved threads; merge state CLEAN; 2 commits behind main']);
   });
 
-  test('every check on the head gates except advisory bots\' own, and a gating bot\'s review on the head makes it ready', () => {
+  test('every check on the head gates, advisory bots\' own included, and a gating bot\'s review on the head makes it ready', () => {
     const pr = prJson({ reviews: [review('g1', { login: 'greptile-apps', bot: true }, 'COMMENTED', 'Confidence score: 4/5')] });
-    const w = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'pass'], ['coderabbit', 'pending', 'Review in progress'])) });
+    const held = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'pass'], ['coderabbit', 'pending', 'Review in progress'])) });
+    expect(pollUntilDone(held, 4)).toBeNull();
+    expect(lines()).toEqual([]);
+    const w = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'pass'], ['coderabbit', 'pass', 'Reviewed'])) });
     expect(pollUntilDone(w)).toBe(PR_WAIT_EXIT.met);
-    expect(lines()).toEqual(['#42 ready on aaaaaaa: 2 pass; greptile done, coderabbit Review in progress (advisory); 0 unresolved threads; merge state CLEAN; 0 commits behind main']);
+    expect(lines()).toEqual(['#42 coderabbit finished on aaaaaaa (advisory, not waited on)', '#42 ready on aaaaaaa: 3 pass; greptile done, coderabbit Reviewed (advisory); 0 unresolved threads; merge state CLEAN; 0 commits behind main']);
   });
 
   test('ready is blocked by unresolved threads and by BEHIND, in that order', () => {
@@ -312,13 +315,13 @@ describe('review bots are configuration', () => {
     expect(botLists({ HOME: dir, GSTACK_STATE_ROOT: join(dir, 'state') })).toEqual({ gating: ['greptile', 'macroscope'], advisory: [] });
   });
 
-  test('pr_wait_advisory_bots is reported but never waited on', () => {
+  test('pr_wait_advisory_bots: its review is reported but never waited on, while its check gates like any other', () => {
     withConfig('pr_wait_gating_bots: greptile\npr_wait_advisory_bots: coderabbit, Sourcery\n');
     const pr = prJson({ reviews: [review('g1', { login: 'greptile-apps', bot: true }, 'COMMENTED', '')] });
-    const w = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['sourcery-ai', 'pending', 'Reviewing'])) });
+    const w = watcher({ pr, checks: ok(checksJson(['build', 'pass'], ['sourcery-ai', 'pass', 'Reviewed'])) });
     expect(w.bots.advisory).toEqual(['coderabbit', 'sourcery']);
     expect(pollUntilDone(w)).toBe(PR_WAIT_EXIT.met);
-    expect(lines()[0]).toContain('ready on aaaaaaa: 1 pass; greptile done, sourcery Reviewing (advisory)');
+    expect(lines()[0]).toContain('ready on aaaaaaa: 2 pass; greptile done, sourcery Reviewed (advisory)');
   });
 });
 
@@ -343,7 +346,7 @@ describe('the per-PR lock', () => {
     const gh = fakeGh({});
     const code = prWaitMain(['42', '--repo', REPO], env(gh, 9999));
     expect(code).toBe(PR_WAIT_EXIT.refused);
-    expect(lines()).toEqual([expect.stringMatching(/^gstack-pr-wait: the watcher did not start — pid 4242 already watches owner\/project#42.*\(PR_WAIT_REFUSED; https:\/\/github\.com\/garrytan\/gstack\/blob\/main\/docs\/troubleshooting\.md#pr-wait-refused\)$/)]);
+    expect(lines()).toEqual([expect.stringMatching(/^gstack-pr-wait: the watcher did not start, or a local error stopped it before a verdict — pid 4242 already watches owner\/project#42.*\(PR_WAIT_REFUSED; https:\/\/github\.com\/garrytan\/gstack\/blob\/main\/docs\/troubleshooting\.md#pr-wait-refused\)$/)]);
     expect(gh.calls.some(c => c[1] === 'graphql')).toBe(false);
   });
 });
@@ -418,18 +421,38 @@ describe('pass-1 review fixes: gates agree, bounded waits, bot identity, local f
     expect(lines()).toEqual(['#42 check failed: quality-gate https://ci.example/quality-gate', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
   });
 
-  test('a failed gating-bot check is a failed check, never a completed review; a failed advisory check is reported and not waited on', () => {
+  test('a failed bot check is a failed check, gating or advisory, as gstack-ci-gate counts it; never a completed review', () => {
     const gating = watcher({ pr: prJson({ reviews: [] }), checks: ok(checksJson(['build', 'pass'], ['greptile-review', 'fail'])) });
     expect(pollUntilDone(gating)).toBe(PR_WAIT_EXIT.blocked);
     expect(lines()[0]).toBe('#42 check failed: greptile-review https://ci.example/greptile-review');
     stdout = [];
     const advisory = watcher({ pr: prJson({ reviews: [GREPTILE] }), checks: ok(checksJson(['build', 'pass'], ['coderabbit', 'fail'])) });
-    expect(pollUntilDone(advisory)).toBe(PR_WAIT_EXIT.met);
+    expect(pollUntilDone(advisory)).toBe(PR_WAIT_EXIT.blocked);
     expect(lines()).toEqual([
+      '#42 check failed: coderabbit https://ci.example/coderabbit',
       '#42 greptile finished on aaaaaaa',
       '#42 coderabbit finished on aaaaaaa: failed: coderabbit (advisory, not waited on)',
-      expect.stringContaining('ready on aaaaaaa: 1 pass; greptile done, coderabbit fail (advisory)'),
+      expect.stringContaining('(PR_WAIT_BLOCKED;'),
     ]);
+  });
+
+  test('BEHIND is keyed on the head alone: a base that keeps moving does not repeat the line, even across restarts', () => {
+    const first = watcher({ pr: [prJson({ mergeState: 'BEHIND', baseOid: BASE_A }), prJson({ mergeState: 'BEHIND', baseOid: BASE_B })], checks: ok(checksJson(['build', 'pending'])), prFiles: ok('x\n'), compare: { [`${BASE_A}...${BASE_B}`]: ok('') } }, 'any-change');
+    expect(pollUntilDone(first, 3)).toBeNull();
+    expect(lines()).toEqual([]);
+    const restarted = watcher({ pr: prJson({ mergeState: 'BEHIND', baseOid: 'e'.repeat(40) }), checks: ok(checksJson(['build', 'pending'])), prFiles: ok('x\n'), compare: {} }, 'any-change');
+    expect(restarted.baseline).toBe(false);
+    expect(pollUntilDone(restarted, 3)).toBeNull();
+    expect(lines()).toEqual([]);
+  });
+
+  test('a verdict keeps its exit code when the state file cannot be written; the save error goes to stderr', () => {
+    const w = watcher({ pr: prJson({ state: 'MERGED' }) }, 'green');
+    rmSync(join(dir, 'state'), { recursive: true, force: true });
+    writeFileSync(join(dir, 'state'), '');
+    expect(w.poll()).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 merged: https://github.com/owner/project/pull/42']);
+    expect(stderr.join('')).toContain('could not save state');
   });
 
   test('a bot owns logins that start with its name, so a person called notgreptile is a reviewer, not the gating bot', () => {

@@ -232,12 +232,12 @@ export const RELEASE_RESULT_CODES = {
   // gstack-pr-wait (lib/pr-wait.ts): the landing-path PR watcher's two terminal codes.
   PR_WAIT_BLOCKED: {
     anchor: 'pr-wait-blocked',
-    summary: 'the --until condition cannot be met without action: a required check failed, the branch conflicts with its base, the PR closed, ready is blocked by unresolved threads or a BEHIND branch, or GitHub stayed unreachable',
-    fix: 'act on the event lines above it (fix the check, update or rebase the branch, resolve the threads), push, and start gstack-pr-wait again',
+    summary: 'the --until condition cannot be met without action: a check failed, the branch conflicts with its base, the PR closed, ready is blocked by unresolved threads or a BEHIND branch, GitHub stayed unreachable, or --timeout passed',
+    fix: 'act on the event lines above it (fix the check, update or rebase the branch, resolve the threads), push, and start gstack-pr-wait again; after a timeout, start again with a larger --timeout or --timeout 0',
   },
   PR_WAIT_REFUSED: {
     anchor: 'pr-wait-refused',
-    summary: 'the watcher did not start',
-    fix: 'pass a PR number or URL the current gh login can read (--repo owner/name when the checkout is not that repository), or stop the watcher the line names before starting another for the same PR',
+    summary: 'the watcher did not start, or a local error stopped it before a verdict',
+    fix: 'pass a PR number or URL the current gh login can read (--repo owner/name when the checkout is not that repository), stop the watcher the line names before starting another for the same PR, or fix the named local error',
   },
 } as const satisfies Record<string, ResultCode>;

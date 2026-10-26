@@ -61,7 +61,7 @@ comes from the URL or the current checkout.
 --until
   green       every CI check on the current head passed, confirmed by two
               identical polls; a check the base branch requires counts as
-              pending until it appears, and advisory bots' checks never gate
+              pending until it appears
   ready       green, a gating review bot reviewed the current head (none
               configured: green alone), no review thread is unresolved and the
               merge state is known (default)
@@ -81,8 +81,8 @@ CI and deploy bots are skipped because checks carry that news.
 Review bots: gstack-config set pr_wait_gating_bots greptile,macroscope
              gstack-config set pr_wait_advisory_bots coderabbit
 A bot owns the logins that start with its name (greptile-apps[bot]) and the
-checks that mention it. Advisory bots are reported but never waited on; the
-value none empties a list.
+checks that mention it. An advisory bot's review is reported, never waited on;
+its checks gate like any other. The value none empties a list.
 
 Exit codes
   0  the --until condition is met, or the PR merged
@@ -262,7 +262,8 @@ export class Watcher {
   private finish(code: number, lines: string[] = []): number {
     for (const line of lines) this.say(line);
     if (code === PR_WAIT_EXIT.blocked) this.say(`stopped: action needed ${resultCodeSuffix('PR_WAIT_BLOCKED')}`);
-    this.save();
+    // The verdict is printed; a state file that cannot be written must not turn it into a refusal.
+    try { this.save(); } catch (error) { this.log(`could not save state: ${error instanceof Error ? error.message : String(error)}`); }
     return code;
   }
 
@@ -296,9 +297,10 @@ export class Watcher {
 
   private evaluateChecks(checks: Map<string, Check>, head: string) {
     const required = this.required ?? new Set<string>();
-    // Every check on the head gates, as gstack-ci-gate does, so the two never disagree; a required
-    // check gates even before it appears, and advisory bots' checks never do.
-    const watched = new Map([...checks].filter(([name]) => !this.isAdvisory(name)));
+    // Every check on the head gates, as gstack-ci-gate does, so land-and-deploy's two gates never
+    // disagree; a required check gates even before it appears. An advisory bot's review is never
+    // waited for, but its check is a check like any other.
+    const watched = checks;
     const gate = new Set([...required, ...watched.keys()]);
     const bucketOf = (name: string) => checks.get(name)?.bucket ?? 'pending';
     const failLines: string[] = [];
@@ -344,8 +346,9 @@ export class Watcher {
   }
 
   /**
-   * Review bots on the current head. A bot with checks is done when they
-   * finish; otherwise once it reviewed the head commit or its summary names it.
+   * Review bots on the current head. A gating bot with checks is done when they
+   * pass (an advisory one when they finish); otherwise once it reviewed the head
+   * commit or its summary names it.
    */
   private emitBots(pr: PullRequest, checks: Map<string, Check>, head: string): { status: string[]; reviewed: string[] } {
     const short = head.slice(0, 7);
@@ -397,9 +400,10 @@ export class Watcher {
     if (pr.baseOid) this.state.base_oid = pr.baseOid;
     const mergeState = pr.mergeStateStatus;
     if (mergeState === 'UNKNOWN') return;
-    // The key holds the head and base, so each state is announced once per head, not once per transition.
+    // Keyed on the head alone, so each state is announced once per head: not once per transition, and
+    // not again for every base commit while the branch stays behind.
     if (mergeState === 'BEHIND' || mergeState === 'DIRTY') {
-      this.emit(`merge:${mergeState}:${head}:${pr.baseOid ?? ''}`, mergeState === 'DIRTY' ? this.dirtyLine(base, head) : this.behindLine(base, head));
+      this.emit(`merge:${mergeState}:${head}`, mergeState === 'DIRTY' ? this.dirtyLine(base, head) : this.behindLine(base, head));
     }
     this.state.merge_state = mergeState;
   }
