@@ -16,8 +16,10 @@ it, so `headless` keeps its BLOCK semantics.
 
 ## What the session kind changes
 
-`gstack-skill-start` prints `SESSION_KIND: unattended` and
-`UNATTENDED_SESSION: true`, then applies these rules for the whole skill:
+`gstack-skill-start` prints `SESSION_KIND: unattended`,
+`UNATTENDED_SESSION: true` and the `unattended-session` instruction block
+(`GSTACK_INSTRUCTION_BEGIN: unattended-session <session-id>` through
+`GSTACK_INSTRUCTION_END`), then applies these rules for the whole skill:
 
 - **No prompts.** The update check, upgrade offer, telemetry and sync consent,
   onboarding tips and routing blocks are suppressed exactly as they are for

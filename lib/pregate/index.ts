@@ -57,7 +57,7 @@ export async function runPregate(ctx: PregateContext, o: RunOptions): Promise<Pr
   const remote: PregateRemote[] = checks.flatMap(c => c.remote ?? []).map(r => ({ ...r }));
   const file: PregateFile = {
     schema_version: 1, tree: ctx.wtree, head: ctx.head, base: `${ctx.baseRef}@${ctx.baseSha.slice(0, 12)}`, generated_at: new Date().toISOString(),
-    policy: ctx.configLabel, ...(ctx.configDigest ? { policy_digest: ctx.configDigest } : {}), ...(ctx.absentUserPolicy ? { policy_user_path: ctx.absentUserPolicy } : {}), registry: ctx.registryLabel, run: o.run,
+    policy: ctx.configLabel, ...(ctx.configDigest ? { policy_digest: ctx.configDigest } : {}), ...(ctx.absentUserPolicy ? { policy_user_path: ctx.absentUserPolicy } : {}), registry: ctx.registryLabel, run: o.run, scratch: ctx.scratch,
     stage1_ms: o.stage === 'tests' ? undefined : clocks.preflight, stage2_ms: o.stage === 'preflight' ? undefined : clocks.tests,
     checks: checks.map(c => { const { remote: _r, ...rest } = c; return rest; }),
     requires_remote: remote,
@@ -85,6 +85,7 @@ export function renderTable(file: PregateFile, opts: { lines?: boolean } = { lin
   const clocks = [
     file.stage1_ms !== undefined ? `stage 1 (mechanical preflight): ${file.stage1_ms} ms` : null,
     file.stage2_ms !== undefined ? `stage 2 (test execution): ${file.stage2_ms} ms` : null,
+    file.scratch ? `scratch: ${file.scratch}` : null,
   ].filter(Boolean);
   const remote = (file.requires_remote ?? []).map(r => {
     const run = r.command ? `run ${r.command.length > 200 ? `${r.command.slice(0, 200)}… (full command in pregate.json)` : r.command}, then ` : '';
@@ -117,7 +118,7 @@ export function readPregateFile(file: string): { file: PregateFile | null; error
   return { file: errors.length ? null : (parsed as PregateFile), errors };
 }
 
-export interface Verification { ok: boolean; code?: 'PREGATE_STALE' | 'PREGATE_REMOTE_UNCLEARED' | 'PREGATE_INCOMPLETE' | 'PREGATE_LANE_FAILED'; message: string; current: boolean; uncleared: PregateRemote[] }
+export interface Verification { ok: boolean; code?: 'PREGATE_STALE' | 'PREGATE_REMOTE_UNCLEARED' | 'PREGATE_INCOMPLETE' | 'PREGATE_ENVIRONMENT' | 'PREGATE_LANE_FAILED'; message: string; current: boolean; uncleared: PregateRemote[] }
 
 /**
  * Publication check: the recorded tree must equal the tree now (results
@@ -136,7 +137,14 @@ export function verifyPregate(repoRoot: string, file: PregateFile, treeNow: Wtre
   const failed = file.checks.filter(c => c.status === 'fail');
   if (failed.length) return { ok: false, code: 'PREGATE_LANE_FAILED', message: `${failed.length} check(s) failed: ${failed.map(c => c.id).join(', ')}`, current, uncleared };
   const incomplete = file.checks.filter(c => c.status === 'incomplete' || c.status === 'not_installed');
-  if (incomplete.length) return { ok: false, code: 'PREGATE_INCOMPLETE', message: `${incomplete.length} check(s) incomplete: ${incomplete.map(c => c.id).join(', ')}`, current, uncleared };
+  // An environment cause is named apart from the diff: a lane waives it by kind, never by test name.
+  const environment = incomplete.filter(c => c.cause === 'environment');
+  if (environment.length === incomplete.length && environment.length) {
+    const inferred = environment.filter(c => c.environment?.proof === 'output');
+    const caveat = inferred.length ? `; ${inferred.map(c => c.id).join(', ')} inferred from output alone (no test was counted): confirm on another machine or with --remote before treating the diff as clear` : '';
+    return { ok: false, code: 'PREGATE_ENVIRONMENT', message: `${environment.length} check(s) blocked by the environment (${[...new Set(environment.map(c => c.environment?.kind ?? 'unknown'))].join(', ')}), not by the diff: ${environment.map(c => `${c.id}: ${c.environment?.evidence ?? c.detail}`).join('; ')}${caveat}`, current, uncleared };
+  }
+  if (incomplete.length) return { ok: false, code: 'PREGATE_INCOMPLETE', message: `${incomplete.length} check(s) incomplete: ${incomplete.map(c => c.id).join(', ')}${environment.length ? ` (blocked by the environment: ${environment.map(c => `${c.id} ${c.environment?.kind}`).join(', ')})` : ''}`, current, uncleared };
   if (uncleared.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${uncleared.length} requires-remote obligation(s) without a receipt: ${uncleared.map(r => r.lane).join(', ')}`, current, uncleared };
   return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}`, current, uncleared };
 }

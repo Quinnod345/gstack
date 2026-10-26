@@ -4,7 +4,8 @@
  * one-word reply, then Before → after, Why it matters, What caused this work,
  * Big decisions (each read from the reviewed plan through the shared heading
  * parser) and What we need from you (built from gate.json: every choice `rec`
- * takes, in words). Gate ids, gate_rev and rec_hash appear only on the last
+ * takes, in words, closed by the "do it" reply: rec at full scope, follow-ons
+ * included, carried through with no further ask). Gate ids, gate_rev and rec_hash appear only on the last
  * line, which is for the relaying agent. A plan missing a section yields a
  * brief that says it is not ready for approval and has no reply invitation
  * (CAPTAIN_BRIEF_INCOMPLETE). Called by bin/gstack-owner-brief render --captain.
@@ -98,7 +99,7 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
     const alt = example?.options.find(x => x.key !== example.recommended);
     need.push(`- **Change something:** say which choice and what you want instead, in words${example && alt ? ` (for example "${clip(stripRef(example.title), 60)}: ${plainOption(alt.text)}")` : ''}. A change that alters the plan reopens its review before anything is built.`);
     need.push('- **Reject:** nothing is built.', '');
-    if (!missing.length) need.push('Reply: **rec**', '');
+    if (!missing.length) need.push(`- **do it:** rec at full scope: every recommendation above, the follow-ons the plan names (docs, trains, cleanups) included, carried through to done with no further ask.`, '', 'Reply: **rec**, or **do it**', '');
   }
   const tokens = list.items.map(i => `${i.id}${i.recommended}`).join(' ');
   const trailer = `_For the relaying agent, not the person:_ run ${list.run}, gate_rev=${list.gate_rev}, rec_hash=${hash}; rec resolves to ${tokens}; plan ${plan.file ?? '(missing)'} (sha256 ${plan.sha}). Answer with ` +

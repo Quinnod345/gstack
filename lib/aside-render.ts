@@ -13,6 +13,7 @@
  *   1. Aside refuses `file://` URLs ("Cannot navigate to a file URL without
  *      local file access"), so the HTML's directory is served over loopback
  *      with Bun.serve on an ephemeral port for the duration of ONE render.
+ *      An http(s) `file` is opened as it is and nothing is served.
  *   2. One `aside repl` process runs ONE generated script: open the page,
  *      wait, run the steps in order, close the tab. Nothing persists between
  *      `aside repl` calls and tabs die with the script, so a render is always
@@ -37,7 +38,8 @@
  * bookkeeping is best-effort: after a `cookie-import` the daemon refuses `js`
  * on other origins, and a pdf/screenshot-only spec must still print. Not
  * mirrored on this path: pageRanges/scale, screenshot quality, the 2x default
- * device scale.
+ * device scale, and an eval step's deviceScaleFactor and mobile (the browse
+ * daemon's `viewport` takes a size alone).
  *
  * Node builtins + Bun only (bun build --compile embeds this into make-pdf).
  */
@@ -133,11 +135,13 @@ export type RenderStep =
    * the result is written to that file: strings verbatim; `data:` URLs are
    * decoded to bytes; other values as JSON. Without `out`, the result comes
    * back in `RenderResult.evals` (strings are truncated to `maxInline` chars).
+   * With `width`, the viewport is set before the eval the way a sized
+   * screenshot sets it, and cleared after.
    */
-  | { kind: 'eval'; expression: string; out?: string; maxInline?: number };
+  | { kind: 'eval'; expression: string; out?: string; maxInline?: number; width?: number; height?: number; deviceScaleFactor?: number; mobile?: boolean };
 
 export interface RenderSpec {
-  /** Absolute path of the HTML file to open. */
+  /** Absolute path of the HTML file to open, or an http(s) URL (opened as it is, nothing served). */
   file: string;
   /** Directory served over loopback (default: the file's directory). Must contain `file`. */
   serveRoot?: string;
@@ -217,8 +221,18 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
   if (wait?.expression) {
     L.push(`{ const deadline = Date.now() + ${wait.timeoutMs ?? DEFAULT_WAIT_MS}; let ok = false; while (Date.now() < deadline) { try { ok = !!(await pg.evaluate((src) => (0, eval)(src), ${JSON.stringify(wait.expression)})); } catch (e) {} if (ok) break; await sleep(150); } if (!ok) throw new Error("waitFor expression never became truthy: " + ${JSON.stringify(wait.expression)}); }`);
   }
+  // The device override is set when a sized step's size differs from the one in force and cleared before an un-sized step, so consecutive evals at one width pay one override, not one per step.
+  let override: string | null = null;
+  const sized = (step: Exclude<RenderStep, { kind: 'pdf' }>): string | null => (step.width ? JSON.stringify({ width: step.width, height: step.height ?? Math.round(step.width * DEFAULT_ASPECT), deviceScaleFactor: step.deviceScaleFactor ?? DEFAULT_DEVICE_SCALE, mobile: step.mobile ?? step.width <= MOBILE_MAX_WIDTH }) : null);
+  const setOverride = (want: string | null) => {
+    if (want === override) return;
+    if (want) L.push(`await pg._sendToTarget("Emulation.setDeviceMetricsOverride", ${want}); await sleep(250);`);
+    else L.push(`await pg._sendToTarget("Emulation.clearDeviceMetricsOverride", {});`);
+    override = want;
+  };
   spec.steps.forEach((step, i) => {
     if (step.kind === 'pdf') {
+      setOverride(null);
       const o = step.options ?? {};
       if (o.waitForPagedJs) {
         L.push(`{ const deadline = Date.now() + 3000; let ready = false; while (Date.now() < deadline) { try { ready = await pg.evaluate(() => !!window.__pagedjsAfterFired); } catch (e) {} if (ready) break; await sleep(150); } }`);
@@ -233,9 +247,7 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
       const shot: Record<string, unknown> = { path: name, fullPage: step.fullPage !== false };
       if (step.type) shot.type = step.type;
       if (step.quality !== undefined) shot.quality = step.quality;
-      if (step.width) {
-        L.push(`await pg._sendToTarget("Emulation.setDeviceMetricsOverride", ${JSON.stringify({ width: step.width, height: step.height ?? Math.round(step.width * DEFAULT_ASPECT), deviceScaleFactor: step.deviceScaleFactor ?? DEFAULT_DEVICE_SCALE, mobile: step.mobile ?? step.width <= MOBILE_MAX_WIDTH })}); await sleep(250);`);
-      }
+      setOverride(sized(step));
       if (step.selector) {
         const sel: Record<string, unknown> = { path: name };
         if (step.type) sel.type = step.type;
@@ -243,10 +255,11 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
       } else {
         L.push(`await pg.screenshot(${JSON.stringify(shot)});`);
       }
-      if (step.width) L.push(`await pg._sendToTarget("Emulation.clearDeviceMetricsOverride", {});`);
+      setOverride(null);
       L.push(`console.log("STEP_OK ${i}");`);
     } else {
       // eval: promises are awaited by evaluate; write or inline the result
+      setOverride(sized(step));
       L.push(`{ const v = await pg.evaluate((src) => (0, eval)(src), ${JSON.stringify(step.expression)});`);
       if (step.out) {
         L.push(`  const name = ${JSON.stringify(artifactName(i, step.out))};`);
@@ -262,6 +275,7 @@ export function buildRenderScript(url: string, spec: RenderSpec): string {
       }
     }
   });
+  setOverride(null);
   L.push(`console.log("PAGE_ERRORS=" + JSON.stringify(await pg.evaluate(() => window.__gstackErrs || [])));`);
   L.push(`console.log("ASIDE_DIR=" + pwd);`);
   L.push(`await closeTab(pg);`);
@@ -340,17 +354,33 @@ export async function renderWithAside(spec: RenderSpec): Promise<RenderResult> {
   return { ...(await asideRender(spec)), engine: 'aside' };
 }
 
-async function asideRender(spec: RenderSpec): Promise<RenderResult> {
+/** What the engine opens: an http(s) `file` as it is, else the file served from its root over loopback. */
+type PageTarget = { kind: 'url'; url: string } | { kind: 'file'; root: string; rel: string } | { kind: 'error'; error: string };
+
+function pageTarget(spec: RenderSpec): PageTarget {
+  if (/^https?:\/\//.test(spec.file)) return { kind: 'url', url: spec.file };
   const file = path.resolve(spec.file);
-  if (!fs.existsSync(file)) return { ok: false, outputs: [], evals: {}, stdout: '', error: `HTML file not found: ${file}` };
+  if (!fs.existsSync(file)) return { kind: 'error', error: `HTML file not found: ${file}` };
   const root = path.resolve(spec.serveRoot ?? path.dirname(file));
   const rel = path.relative(root, file);
-  if (rel.startsWith('..')) return { ok: false, outputs: [], evals: {}, stdout: '', error: `file ${file} is outside serveRoot ${root}` };
+  if (rel.startsWith('..')) return { kind: 'error', error: `file ${file} is outside serveRoot ${root}` };
+  return { kind: 'file', root, rel };
+}
 
-  const srv = serveDir(root);
+/** Serve a file target for one render; an http(s) target needs no server. */
+function openTarget(target: Exclude<PageTarget, { kind: 'error' }>): { url: string; stop: () => void } {
+  if (target.kind === 'url') return { url: target.url, stop: () => {} };
+  const srv = serveDir(target.root);
+  return { url: `${srv.url}/${target.rel.split(path.sep).map(encodeURIComponent).join('/')}`, stop: srv.stop };
+}
+
+async function asideRender(spec: RenderSpec): Promise<RenderResult> {
+  const target = pageTarget(spec);
+  if (target.kind === 'error') return { ok: false, outputs: [], evals: {}, stdout: '', error: target.error };
+
+  const srv = openTarget(target);
   try {
-    const url = `${srv.url}/${rel.split(path.sep).map(encodeURIComponent).join('/')}`;
-    const script = buildRenderScript(url, spec);
+    const script = buildRenderScript(srv.url, spec);
     // Async spawn: a synchronous wait would block this event loop, and the
     // loopback server above runs on it — Page.navigate would then time out.
     const proc = await runProc('aside', ['repl', script], (spec.timeoutMs ?? DEFAULT_TIMEOUT_MS) + processSlackMs());
@@ -492,11 +522,8 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
   const log: string[] = [];
   const fail = (error: string): RenderResult => ({ ok: false, engine: 'browse', outputs, evals, stdout: log.join('\n'), error });
   if (!bin) return fail(`${NO_BROWSER}: ${NO_BROWSER_HELP}`);
-  const file = path.resolve(spec.file);
-  if (!fs.existsSync(file)) return fail(`HTML file not found: ${file}`);
-  const root = path.resolve(spec.serveRoot ?? path.dirname(file));
-  const rel = path.relative(root, file);
-  if (rel.startsWith('..')) return fail(`file ${file} is outside serveRoot ${root}`);
+  const target = pageTarget(spec);
+  if (target.kind === 'error') return fail(target.error);
 
   const deadline = Date.now() + (spec.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const run = async (args: string[]): Promise<string> => {
@@ -525,7 +552,7 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
   let tab: number | undefined;
   try {
     work = fs.mkdtempSync(path.join(SAFE_TMP_DIR, 'gstack-render-browse-'));
-    srv = serveDir(root);
+    srv = openTarget(target);
     // The first CLI call auto-starts the daemon; on a cold start it can answer
     // "Unable to connect" once while the server is still coming up. One retry
     // after a short pause turns that into the wait it really is.
@@ -555,7 +582,7 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
       throw new Error(`${what} (waited ${timeoutMs}ms)`);
     };
 
-    await run(['goto', `${srv.url}/${rel.split(path.sep).map(encodeURIComponent).join('/')}`, ...T]);
+    await run(['goto', srv.url, ...T]);
     // Best-effort: once `$B cookie-import` has run, the daemon blocks `js` on
     // every other origin (127.0.0.1 included). pdf/screenshot/`js --out` steps
     // must still run; a waitFor or eval step that is genuinely blocked fails
@@ -568,8 +595,16 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
     if (wait?.selector) await until(`document.querySelector(${JSON.stringify(wait.selector)})`, `waitFor selector never attached: ${wait.selector}`, wait.timeoutMs ?? DEFAULT_WAIT_MS);
     if (wait?.expression) await until(wait.expression, `waitFor expression never became truthy: ${wait.expression}`, wait.timeoutMs ?? DEFAULT_WAIT_MS);
 
+    // The viewport is set when a sized step's size differs from the one in force and reset to the daemon's default before an un-sized step, so consecutive evals at one width pay one `viewport` spawn, not two per step.
+    let vp: string | null = null;
+    const viewport = async (want: string | null) => {
+      if (want === vp) return;
+      await run(['viewport', want ?? '1280x720', ...T]);
+      vp = want;
+    };
     for (const [i, step] of spec.steps.entries()) {
       if (step.kind === 'pdf') {
+        await viewport(null);
         const tmp = path.join(work, artifactName(i, step.out));
         const payload = path.join(work, `pdf-${i}.json`);
         fs.writeFileSync(payload, JSON.stringify(browsePdfPayload(step.options ?? {}, tmp)));
@@ -578,26 +613,31 @@ export async function renderWithBrowse(spec: RenderSpec, bin: string | null = re
       } else if (step.kind === 'screenshot') {
         const tmp = path.join(work, screenshotName(i, step));
         if (step.width) {
-          const vp = [`${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}`];
+          const args = [`${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}`];
           // `--scale` recreates the daemon's browser context (and is refused in
           // headed mode), so it is passed only when the caller asked for it; the
           // 2x default stays Aside-only (see the header's "not mirrored" list).
-          if (step.deviceScaleFactor) vp.push('--scale', String(step.deviceScaleFactor));
-          await run(['viewport', ...vp, ...T]);
-        }
+          if (step.deviceScaleFactor) args.push('--scale', String(step.deviceScaleFactor));
+          await run(['viewport', ...args, ...T]);
+          vp = args[0];
+        } else await viewport(null);
         await run([...browseScreenshotArgs(step, tmp), ...T]);
         copyOut(tmp, step.out, i);
         // Aside clears its device override after each shot; restore the daemon's
         // default so a later un-sized screenshot is not taken at this width.
-        if (step.width) await run(['viewport', '1280x720', ...T]);
-      } else if (step.out) {
-        const tmp = path.join(work, artifactName(i, step.out));
-        await js(step.expression, ['--out', tmp]); // the daemon decodes data: URLs to bytes itself
-        copyOut(tmp, step.out, i);
+        if (step.width) await viewport(null);
       } else {
-        evals[i] = (await js(step.expression)).slice(0, step.maxInline ?? DEFAULT_MAX_INLINE);
+        await viewport(step.width ? `${step.width}x${step.height ?? Math.round(step.width * DEFAULT_ASPECT)}` : null);
+        if (step.out) {
+          const tmp = path.join(work, artifactName(i, step.out));
+          await js(step.expression, ['--out', tmp]); // the daemon decodes data: URLs to bytes itself
+          copyOut(tmp, step.out, i);
+        } else {
+          evals[i] = (await js(step.expression)).slice(0, step.maxInline ?? DEFAULT_MAX_INLINE);
+        }
       }
     }
+    await viewport(null);
     const errs = await bestEffortJs('JSON.stringify(window.__gstackErrs || [])', 'PAGE_ERRORS');
     if (errs !== null) log.push(`PAGE_ERRORS=${errs}`);
     return { ok: true, engine: 'browse', outputs, evals, stdout: log.join('\n') };
