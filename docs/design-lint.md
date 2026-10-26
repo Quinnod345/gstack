@@ -29,12 +29,11 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
   output below the top level are skipped; a symlink is followed once and lint
   roots and the working directory are read through their real paths; a file
   over 2 MB is a bundle, not a page, and is skipped with a warning on stderr.
-  A page or stylesheet under a lint root that the lint skipped (over the cap,
-  unreadable, unparseable) is also one `internal-error` finding at ask, so a
-  page the lint could not read is not a pass; a linked stylesheet over the cap
-  is only warned about, because the page that links it is still read, and a
-  linked stylesheet that does not exist is warned about and otherwise ignored
-  (its tokens are simply absent). A
+  A page or stylesheet the lint skipped (over the cap, unreadable,
+  unparseable; a linked sheet or an inline `<style>` block included) is also
+  one `internal-error` finding at ask, so a page whose CSS the lint could not
+  read is not a pass; only a linked stylesheet that does not exist is warned
+  about and otherwise ignored (its tokens are simply absent). A
   relative stylesheet href may not climb out of the project (the nearest
   directory holding a `package.json` or `.git`), by its path and by its real
   path, so a symlink inside the project that points outside it is not read
@@ -286,7 +285,7 @@ Source gates are Nutlope/hallmark `references/gates.md` at 7ec8682; `craft`
 marks a rule carried over from `gstack-design-craft` (Elaya-derived). Four
 ids are the lint's own: `waiver` (a refused waiver, ask), `house-style` (more
 than three waivers, polish), `render` (a page that did not render, blocks:
-an unrendered page is never a pass) and `internal-error` (a rule family that
+an unrendered page is never a pass) and `internal-error` (a page or stylesheet the lint could not read, or a rule family that
 threw on a page, ask: the page is not a pass until the lint has read it).
 
 ## Token names the rules read

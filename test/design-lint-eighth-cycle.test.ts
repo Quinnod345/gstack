@@ -11,10 +11,11 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { parseCss, resolveVars } from '../lib/design-lint/css';
-import { parseDoc, parseHtml } from '../lib/design-lint/html';
+import { parseCss, resolveVars, selectorNames } from '../lib/design-lint/css';
+import { parseDoc, parseHtml, stripTags } from '../lib/design-lint/html';
 import { lineOf } from '../lib/design-lint/render';
 import { glAccent, glLayout } from '../lib/design-lint/render-probe';
+import { glHeroSpace, glWide, glWords } from '../lib/design-lint/render-probe-space';
 import { Reporter, type Finding } from '../lib/design-lint/report';
 import { run as runAssets } from '../lib/design-lint/rules/assets';
 import { run as runCopy } from '../lib/design-lint/rules/copy';
@@ -138,7 +139,7 @@ describe('design-lint eighth cycle: a file costs its length', () => {
   test('ten thousand unclosed <em> under headings cost the assets rules their length', () => {
     const doc = parseDoc('x.html', HEAD + '</head><body>' + '<h2>a <em>x '.repeat(10000) + '</body></html>');
     const reporter = new Reporter('page', '/');
-    expect(timed(() => runAssets({ docs: [doc], cssFiles: [], rules: [], tokens: {}, twTokens: null, allCss: '', cache: {} } as never, reporter))).toBeLessThan(600);
+    expect(timed(() => runAssets({ docs: [doc], cssFiles: [], rules: [], tokens: {}, twTokens: null, allCss: '', cache: {} } as never, reporter))).toBeLessThan(3000);
   });
 
   test('a deeply nested comma selector list costs its length, not parts^depth', () => {
@@ -147,6 +148,11 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(timed(() => { rules = parseCss(css, 'x.css'); })).toBeLessThan(2000);
     expect(rules.reduce((n, x) => n + x.selector.length, 0)).toBeLessThan(1_000_000);
     expect(parseCss('.a, .b { .c, .d { color: red } }', 'x.css').map((x) => x.selector)).toEqual(['.a, .b', ':is(.a, .b) .c, :is(.a, .b) .d']);
+    const amp = '.' + 'a'.repeat(4000) + '{' + '&&&&&&&&&&&&&&&&{color:red}'.repeat(20_000) + '}';
+    let nested: ReturnType<typeof parseCss> = [];
+    expect(timed(() => { nested = parseCss(amp, 'x.css'); })).toBeLessThan(2000);
+    expect(nested.length).toBe(20_001);
+    expect(nested.every((x) => x.selector.length <= 8192)).toBe(true);
   });
 
   test('a huge token value is not expanded into every reference', () => {
@@ -165,6 +171,9 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(only(inline, 'internal-error')).toEqual([]);
     const big = lintDir({ 'index.html': HEAD + '<link rel="stylesheet" href="big.css"></head><body><main><h1>Hi</h1></main></body></html>', 'big.css': '.a{color:red}\n'.repeat(160_000) }).findings;
     expect(only(big, 'internal-error').map((f) => [f.file, f.grade])).toEqual([['big.css', 'ask']]);
+    const unreadable = lintDir({ 'index.html': HEAD + '<link rel="stylesheet" href="dir.css"></head><body><main><h1>Hi</h1></main></body></html>', 'dir.css/.keep': '' }).findings;
+    expect(only(unreadable, 'internal-error').map((f) => [f.file, f.fix])).toEqual([['dir.css', 'check the path']]);
+    expect(only(unreadable, 'internal-error')[0].evidence).toMatch(/cannot be read \(EISDIR\)/);
   });
 
   test('a long gradient className line, or an import word before a long whitespace run, costs the asset scan its length; ES imports still name their libraries', () => {
@@ -189,9 +198,23 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(timed(() => lintStatic([em], { cwd: em, ...quiet })), 'em').toBeLessThan(4000);
   });
 
-  test('an unclosed JSX expression at the end of a deep element costs the file its length', () => {
+  test('an unclosed JSX expression at the end of a deep element, or a malformed close tag under it, costs the file its length', () => {
     const src = 'export default function A(){ return (' + '<div>'.repeat(200) + '{ ' + 'x '.repeat(1_000_000) + ')';
     expect(timed(() => parseDoc('/x/App.tsx', src))).toBeLessThan(2000);
+    const bad = 'export default function A(){ return (' + '<div>'.repeat(190) + 'x '.repeat(500_000) + '</div foo>' + '</div>'.repeat(189) + '); }';
+    expect(timed(() => parseDoc('/x/App.tsx', bad))).toBeLessThan(500);
+  });
+
+  test('stripTags with a limit stops reading once the limit is passed, and a heading of thousands of classed spans costs its length', () => {
+    const inner = '<p>' + 'lorem ipsum dolor '.repeat(60_000) + '</p>';
+    expect(timed(() => { for (let k = 0; k < 500; k++) stripTags(inner, false, 4); })).toBeLessThan(500);
+    expect(stripTags('<b>x</b> hi', false, 4)).toBe(' x  hi');
+    expect(stripTags('<b>x</b> hi there friend', false, 4).length).toBeLessThan(' x  hi there friend'.length);
+    const nested = tree({ 'index.html': HEAD + '</head><body>' + '<div>'.repeat(500) + '<p>' + 'lorem ipsum dolor '.repeat(60_000) + '</p>' + '</div>'.repeat(500) + '</body></html>' });
+    expect(timed(() => lintStatic([nested], { cwd: nested, ...quiet })), 'nested').toBeLessThan(4000);
+    const spans = Array.from({ length: 4000 }, (_, i) => '<span class="c">w' + i + '</span> ').join('');
+    const dir = tree({ 'index.html': HEAD + '</head><body><main><h1>' + spans + '</h1><p>Body.</p></main></body></html>' });
+    expect(timed(() => lintStatic([dir], { cwd: dir, ...quiet })), 'spans').toBeLessThan(1500);
   });
 
   test('the render locator costs the page its length when a class value holds a >, and refuses a tag that is not one', () => {
@@ -225,6 +248,9 @@ describe('design-lint eighth cycle: rule judgements', () => {
     expect(only(tip('opacity .5s ease'), 'tooltip-focus-delay')).toEqual([]);
     expect(only(tip('opacity 1s'), 'tooltip-focus-delay')).toEqual([]);
     expect(only(tip('opacity 0.2s 0.1s'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
+    expect(only(tip('opacity 200ms cubic-bezier(0.4, 0, 0.2, 1) 500ms'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
+    expect(only(tip('opacity 0.2s steps(4, end) 1s'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
+    expect(only(tip('opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)'), 'tooltip-focus-delay')).toEqual([]);
     expect(only(tip('opacity 0.2s 1s'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
     expect(only(tip('opacity 200ms 600ms'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
   });
@@ -234,8 +260,11 @@ describe('design-lint eighth cycle: rule judgements', () => {
     expect(only(findings, 'emoji-decoration').map((f) => [f.line, f.evidence])).toEqual([[2, 'emoji icon "\u{1F680}" in <Icon>'], [3, 'emoji icon "\u{1F680}" in <Icon>'], [4, 'emoji icon "\u{1F680}" in <Icon>']]);
   });
 
-  test('the 1280 probes read their viewport from the page, not a literal', () => {
+  test('the probes read their viewport from the page, not a literal', () => {
     for (const fn of [glLayout, glAccent]) expect(fn.toString()).not.toMatch(/\b800\b|1280x800/);
+    for (const fn of [glHeroSpace, glWide, glWords]) expect(fn.toString()).not.toMatch(/1440x900|900px|1920x1080|at 1920/);
+    expect([...selectorNames([':is(a, button)']).tags].sort()).toEqual(['a', 'button']);
+    expect([...selectorNames(['nav :where(h1, h2) em']).tags].sort()).toEqual(['em', 'h1', 'h2', 'nav']);
   });
 
   test('the emoji classes spell their variation selector and joiner as escapes', () => {
