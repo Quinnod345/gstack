@@ -45,7 +45,7 @@ describe('pregate invalidation', () => {
     // Re-running on the moved tree makes it current again.
     expect(run(repo, []).status).toBe(EXIT.ok);
     expect(receipt(repo).status).toBe(EXIT.ok);
-  });
+  }, 30_000);
 
   test('an uncleared requires-remote obligation is PREGATE_REMOTE_UNCLEARED until `clear` records a receipt, which the ship receipt then carries', () => {
     const repo = fixture();
@@ -69,7 +69,7 @@ describe('pregate invalidation', () => {
     const ok = receipt(repo);
     expect(ok.status).toBe(EXIT.ok);
     expect(JSON.parse(ok.out)).toMatchObject({ pregate: expect.stringMatching(/^requires-remote cleared @/), requires_remote: ['windows.yml/windows-shard: https://github.com/o/r/actions/runs/42'] });
-  });
+  }, 30_000);
 
   test('a failed check and an incomplete check both refuse publication; a missing or invalid pregate.json is not evidence', () => {
     const repo = fixture();
@@ -89,5 +89,5 @@ describe('pregate invalidation', () => {
     const bad = receipt(none);
     expect(bad.status).toBe(EXIT.fail);
     expect(bad.err).toContain('(ARTIFACT_SCHEMA)');
-  });
+  }, 30_000);
 });

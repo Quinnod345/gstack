@@ -33,6 +33,10 @@ export interface PregateContext {
   touched: TouchedFile[];
   config: PregateConfig;
   configLabel: string;
+  /** Where the policy came from: the base branch, the unreviewed head, the user-owned file, or nowhere (defaults). */
+  configKind: 'base' | 'head' | 'user' | 'none';
+  /** This run's scratch directory under the state root (lib/pregate/run-scratch.ts): logs and scan files, never os.tmpdir(). */
+  scratch: string;
   /** The policy file to edit: the user-owned path when it is the active policy, else `.gstack/pregate.json`. */
   configFile: string;
   /** sha256 of the user-owned policy's bytes when it is active; recorded as `inputs.policy` (a base copy is pinned by `inputs.base`). */
@@ -86,7 +90,14 @@ export interface CheckResult extends PregateCheck {
   /** Per-file or per-item lines for the table body. */
   lines?: string[];
   remote?: RemoteObligation[];
+  /** With `cause: 'environment'` (declared on PregateCheck): the kind and the line that proves it. */
+  environment?: EnvironmentCause;
 }
+
+export type EnvironmentKind = 'missing-binary' | 'network' | 'quota' | 'disk' | 'runtime' | 'tool';
+/** How the cause was established: `launch` (the command could not start, its binary is off PATH, the runtime or a gstack tool refused), or `output` (a rule matched the command's text before any test was counted, which the diff's own output could have written). */
+export type EnvironmentProof = 'launch' | 'output';
+export interface EnvironmentCause { kind: EnvironmentKind; evidence: string; proof: EnvironmentProof }
 
 export interface CheckDef {
   id: string;

@@ -97,6 +97,53 @@ describe('census attribution from the 2026-10-03 artifacts', () => {
   });
 });
 
+describe('a case shard\'s result records are its one case\'s cost (2026-10-26 train 76db1d1f10c4: 54 of 136 trials cost-unknown, verdict $24.41 under a $32.92 run)', () => {
+  const shard = (dir: string, slug: string) => path.join(dir, 'paid-slice-1-a1', 'shards', slug);
+  const results = (dir: string, slug: string, tests: Array<Record<string, unknown>>) =>
+    fs.writeFileSync(path.join(shard(dir, slug), 'e2e-2026-10-26.json'), JSON.stringify({ tests, total_cost_usd: tests.reduce((sum, t) => sum + Number(t.cost_usd), 0) }));
+  const collector = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, 'collector-outcomes.json'), 'utf8'));
+
+  test('a record named by its display label ("/qa fix loop") belongs to the shard\'s only case, so the trial and the verdict carry its cost', () => {
+    const r = report('periodic', dir => results(dir, 'skill-e2e-qa-workflow--qa-fix-loop',
+      [{ name: '/qa fix loop', suite: 'QA skill E2E', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 1.23 }]));
+    const trial = r.history.find(record => record.case === 'qa-fix-loop');
+    expect(trial).toMatchObject({ outcome: 'passed', cost_usd: 1.23 });
+    expect(trial.cost_known).toBeUndefined();
+    expect(collector(r.dir).verdict.costUsd).toBe(1.23);
+    expect(r.out).toContain('cost $1.23 known + 6 of 7 trial(s) cost unknown');
+  });
+
+  test('a multi-case shard whose records carry display labels keeps those trials cost-unknown instead of guessing', () => {
+    const r = report('periodic', dir => results(dir, 'skill-e2e-cso',
+      [{ name: '/cso full audit', suite: 'cso', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 0.5 },
+        { name: 'cso-infra-scope', suite: 'cso', tier: 'e2e', passed: true, duration_ms: 1000, cost_usd: 0.25 }]));
+    expect(r.history.find(record => record.case === 'cso-full-audit')).toMatchObject({ cost_usd: 0, cost_known: false });
+    expect(r.history.find(record => record.case === 'cso-infra-scope')).toMatchObject({ cost_usd: 0.25 });
+    expect(r.history.find(record => record.case === 'cso-infra-scope').cost_known).toBeUndefined();
+    expect(collector(r.dir).verdict.costUsd).toBe(0.75);
+  });
+
+  // Value: protects=a failed case shard's trial reads its failure class, exit reason, error and cost from the display-labelled record the shard
+  // wrote, not a generic 'assertion' with the JUnit message (the same attribution the cost fix made; train-gate's INFRA/VERDICT class follows failure_class);
+  // fails_when=failedRecord is looked up through the old name/case_id-only filter again so the record's class and error are dropped;
+  // existing_gap=both attribution rows above use passing records, so the failedRecord branch of the widened filter is unexercised; seam=none
+  test('a failed display-labelled record in a case shard supplies the trial\'s failure class, exit reason and error, not a bare assertion', () => {
+    const r = report('periodic', dir => {
+      const qa = junit(dir, 'skill-e2e-qa-workflow--qa-fix-loop');
+      fs.writeFileSync(qa, fs.readFileSync(qa, 'utf8').replace('failures="0"', 'failures="1"')
+        .replace(/(<testcase name="qa-fix-loop"[^>]*?) \/>/, '$1><failure type="AssertionError" message="qa-fix-loop: expected a fix commit" /></testcase>'));
+      results(dir, 'skill-e2e-qa-workflow--qa-fix-loop', [{ name: '/qa fix loop', suite: 'QA skill E2E', tier: 'e2e', passed: false, duration_ms: 1000, cost_usd: 2.5,
+        failure_class: 'timeout', exit_reason: 'timeout', timeout_at_turn: 7, error: 'no terminal outcome within 1800000ms\nsecond line' }]);
+    });
+    expect(r.status, r.out).toBe(1);
+    const trial = r.history.find(record => record.case === 'qa-fix-loop');
+    expect(trial).toMatchObject({ outcome: 'failed', failure_class: 'timeout', exit_reason: 'timeout', error: 'no terminal outcome within 1800000ms', cost_usd: 2.5 });
+    expect(trial.cost_known).toBeUndefined();
+    expect(r.out).toContain('✗ qa-fix-loop  rule  FAIL  timeout at turn 7 — no terminal outcome within 1800000ms');
+    expect(trialRecordProblemsV1(trial)).toEqual([]);
+  });
+});
+
 describe('record builders attach ledger sessions and failure causes (plan 0.1/0.2)', () => {
   const noOp = (dir: string) => path.join(dir, 'paid-slice-1-a1', 'shards', 'skill-e2e-plan-mode-no-op');
   const failNoOp = (dir: string) => {

@@ -109,7 +109,7 @@ RESULT FORMAT (required by gstack-autoplan; the parent binds your file by this c
 
 A reply binds to the `gate_rev` you read (`--gate-rev`). Bare `yes`/`no` is unparsed, never guessed.
 
-- `rec`: every item takes its recommendation, plan changes included (each prints APPLY:); `all` is an alias.
+- `rec`: every item takes its recommendation, plan changes included (each prints APPLY:); `all` and `do it` are aliases.
 - `as-is`: keep every direction; no plan change.
 - `d3b uc1a`: one <id><option> token per item you set; unanswered auto items take their default.
 - `rec except d3b`: recommendations, with the listed overrides.
