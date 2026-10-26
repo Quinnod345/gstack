@@ -188,10 +188,17 @@ describe('clear --receipt accepts a stamp-only predecessor tree (gate ahead of t
     const v = verifyPregate(repo.work, edited, { tree: file.tree });
     expect(v.ok).toBe(false);
     expect(v.code).toBe('PREGATE_REMOTE_UNCLEARED');
-    expect(v.message).toContain(`pregate.json/remote_gate (accepted for cafecafecafe, pregate.json is ${file.tree.slice(0, 12)}); clear again`);
+    expect(v.message).toContain(`pregate.json/remote_gate (accepted for cafecafecafe from gated ${gatedTree.slice(0, 12)}, pregate.json is ${file.tree.slice(0, 12)}); clear again`);
     const r = runBin(repo, 'gstack-pregate', ['verify']);
     expect(r.status).toBe(EXIT.fail);
     expect(r.err).toContain('PREGATE_REMOTE_UNCLEARED');
+    // A substitution whose gated tree is not the one the receipt string names is refused too: the record and the receipt must agree.
+    const swapped = pregateJson(repo);
+    swapped.requires_remote[0].substitution.gated_tree = 'beef'.repeat(10);
+    const w = verifyPregate(repo.work, swapped, { tree: file.tree });
+    expect(w.ok).toBe(false);
+    expect(w.code).toBe('PREGATE_REMOTE_UNCLEARED');
+    expect(w.message).toContain('from gated beefbeefbeef');
   }, 120_000);
 
   test('a same-tree receipt after a substituted clear drops the recorded substitution', async () => {
@@ -233,7 +240,7 @@ describe('clear --receipt accepts a stamp-only predecessor tree (gate ahead of t
     expect('problem' in wrong && wrong.problem).toContain('1.0.7');
   }, 120_000);
 
-  test("the policy branch comes from pregate.json's base field, else origin/HEAD; an invalid base policy refuses", async () => {
+  test("the policy branch is origin/HEAD's; a pregate.json base naming another branch, a stamp-sensitive test lane and an invalid base policy refuse", async () => {
     const { repo, gatedTree } = gatedRepo();
     stamp(repo);
     const file = await pregateAt(repo);
@@ -250,6 +257,11 @@ describe('clear --receipt accepts a stamp-only predecessor tree (gate ahead of t
     const other = clearDecision({ ...file, base: 'origin/release@0123456789ab' }, LANE, { receiptPath: receiptFile(repo, gatedTree) }, repo.work);
     expect('refused' in other && other.message).toContain(`pregate.json was recorded against origin/release, not this repository's base origin/main`);
     expect('refused' in other && other.fix).toBe('rerun gstack-pregate --base main, then clear again');
+    // Without origin/HEAD the base falls back to main, so the fix also says how to set the recorded base instead.
+    repo.git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+    const unset = clearDecision({ ...file, base: 'origin/release@0123456789ab' }, LANE, { receiptPath: receiptFile(repo, gatedTree) }, repo.work);
+    expect('refused' in unset && unset.fix).toBe('rerun gstack-pregate --base main, then clear again; or, since origin/HEAD is unset here, git remote set-head origin release so clear reads that base\'s policy');
+    repo.git('remote', 'set-head', 'origin', 'main');
     // A policy that lists the test lane as stamp-sensitive (gstack's own does) refuses the substitution: that lane never reuses across a stamp.
     repo.git('checkout', '-q', 'main');
     commit(repo, { '.gstack/ship-policy.json': JSON.stringify({ ...POLICY, stamp_sensitive_gates: ['tests'] }, null, 2) + '\n' }, 'tests read the stamps');

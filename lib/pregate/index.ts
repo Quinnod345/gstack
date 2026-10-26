@@ -24,7 +24,7 @@ import { straysCheck } from './checks/strays';
 import { timingCheck } from './checks/timing';
 import { NON_DOWNGRADABLE, userPolicyAbsent } from './config';
 import { sha256, withFingerprint } from './context';
-import { baseBranchOf, describeSubstitution, substituteStampOnlyTree } from './remote-receipt';
+import { baseBranchOf, baseMismatchFix, describeSubstitution, substituteStampOnlyTree } from './remote-receipt';
 import { resolveBaseBranch } from '../ship-policy';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
@@ -141,8 +141,8 @@ export function verifyPregate(repoRoot: string, file: PregateFile, treeNow: Wtre
   if (incomplete.length) return { ok: false, code: 'PREGATE_INCOMPLETE', message: `${incomplete.length} check(s) incomplete: ${incomplete.map(c => c.id).join(', ')}`, current, uncleared };
   if (uncleared.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${uncleared.length} requires-remote obligation(s) without a receipt: ${uncleared.map(r => r.lane).join(', ')}`, current, uncleared };
   // A receipt accepted from a stamp-only predecessor tree was accepted for one head tree; recorded for another, it clears nothing here.
-  const misapplied = (file.requires_remote ?? []).filter(r => r.substitution && r.substitution.accepted_for !== file.tree);
-  if (misapplied.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${misapplied.length} remote receipt(s) accepted for another tree: ${misapplied.map(r => `${r.lane} (accepted for ${r.substitution!.accepted_for.slice(0, 12)}, pregate.json is ${file.tree.slice(0, 12)})`).join(', ')}; clear again`, current, uncleared: misapplied };
+  const misapplied = (file.requires_remote ?? []).filter(r => r.substitution && (r.substitution.accepted_for !== file.tree || !(r.receipt ?? '').includes(`tree=${r.substitution.gated_tree.slice(0, 12)} `)));
+  if (misapplied.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${misapplied.length} remote receipt(s) accepted for another tree or recorded against another gated tree: ${misapplied.map(r => `${r.lane} (accepted for ${r.substitution!.accepted_for.slice(0, 12)} from gated ${r.substitution!.gated_tree.slice(0, 12)}, pregate.json is ${file.tree.slice(0, 12)})`).join(', ')}; clear again`, current, uncleared: misapplied };
   const substituted = (file.requires_remote ?? []).filter(r => r.substitution).map(r => `${r.lane}: ${describeSubstitution(r.substitution!)}`);
   return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}${substituted.length ? `; ${substituted.join('; ')}` : ''}`, current, uncleared };
 }
@@ -194,12 +194,14 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
     catch (e: any) { return { refused: 'PREGATE_RECEIPT_INVALID', message: `cannot read ${input.receiptPath}: ${e.message}` }; }
     const report = parseRemoteReport(text);
     if (!report) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${input.receiptPath} has no PREGATE_REMOTE: line; ${lane} stays uncleared` };
+    const own = remoteReportProblem(report, report.tree);
+    if (own) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${own}; ${lane} stays uncleared` };
     let substitution: PregateReceiptSubstitution | undefined;
     if (report.tree !== file.tree) {
       // The stamp rule is the ship's own base branch's policy (origin/HEAD, as regate reads it), never a branch the artifact names.
       const base = resolveBaseBranch(repoRoot);
       const recorded = baseBranchOf(file.base);
-      if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${treeMismatch(report.tree, file.tree)}; pregate.json was recorded against origin/${recorded}, not this repository's base origin/${base}, so the stamp rule that would class the difference is not the base's; ${lane} stays uncleared`, fix: `rerun gstack-pregate --base ${base}, then clear again` };
+      if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${treeMismatch(report.tree, file.tree)}; pregate.json was recorded against origin/${recorded}, not this repository's base origin/${base}, so the stamp rule that would class the difference is not the base's; ${lane} stays uncleared`, fix: baseMismatchFix(repoRoot, base, recorded) };
       const s = substituteStampOnlyTree(repoRoot, base, report.tree, file.tree);
       if ('problem' in s) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${s.problem}; ${lane} stays uncleared`, fix: s.fix };
       substitution = s.substitution;
