@@ -73,7 +73,7 @@ describe('gstack-lease under Git Bash semantics (#3330)', () => {
     const script = [
       'set -u',
       'mkdir -p "$LEASES/.lock" && printf "%s \\n" "$$" > "$LEASES/.lock/owner"',
-      'GSTACK_LEASE_LOCK_TRIES=2 bash "$LEASE" touch --root "$ROOT" --pid 4244; echo "held=$? holder=$$"',
+      'GSTACK_LEASE_LOCK_TRIES=2 bash "$LEASE" touch --root "$ROOT" --pid 4244; echo "held=$? holder=$$ owner=$(head -1 "$LEASES/.lock/owner")"',
       '( exit 0 ) & dead=$!; wait "$dead"',
       'printf "%s \\n" "$dead" > "$LEASES/.lock/owner"',
       'GSTACK_LEASE_LOCK_TRIES=2 bash "$LEASE" touch --root "$ROOT" --pid 4245; echo "dead=$?"',
@@ -84,8 +84,9 @@ describe('gstack-lease under Git Bash semantics (#3330)', () => {
     });
     const out = `${r.error ?? ''}${r.stdout}${r.stderr}`;
     expect(r.status, out).toBe(0);
-    const holder = /held=(\d+) holder=(\d+)/.exec(r.stdout);
+    const holder = /held=(\d+) holder=(\d+) owner=(\d+)/.exec(r.stdout);
     expect(holder?.[1], out).toBe('3');
+    expect(holder?.[3], out).toBe(holder?.[2]);
     expect(r.stderr).toContain(`locked by live process ${holder?.[2]}`);
     expect(r.stdout, out).toContain('dead=0');
     expect(fs.readdirSync(leases).sort()).toEqual(['4245']);
