@@ -238,4 +238,25 @@ describe.skipIf(!hasBrowser)('design-lint render: the browser tier', () => {
     expect(r.of('photo-wall').map((f) => [f.grade, f.evidence])).toEqual([['ask', expect.stringMatching(/^\[1440px\] photographs cover \d\d% of the page below the hero \(3 pictures\)$/)]]);
     expect(r.of('accent-footprint').map((f) => [f.grade, f.evidence])).toEqual([['ask', expect.stringMatching(/^\[1280px\] the accent paints about \d+\.\d% of the 1280x800 viewport \(over 8%\)$/)]]);
   }, 60_000);
+
+  test('a hero with more than two actions reports the count under screen-word-budget; the clean two do not', async () => {
+    const html = pageWith('', '', [['<a class="quiet" href="/method">Read how the close works</a>', '<a class="quiet" href="/method">Read how the close works</a>\n        <a class="quiet" href="/pricing">See the pricing</a>\n        <a class="quiet" href="/tour">Take the tour</a>']]);
+    const r = await measure(html);
+    expect(r.of('screen-word-budget').map((f) => [f.grade, f.line, f.evidence])).toEqual([['ask', lineIn(html, 'href="/pricing"'), '[1440px] the hero offers 4 actions']]);
+  }, 60_000);
+
+  test('section gaps: sections crowded together, every gap the same, and more than nine sections', async () => {
+    const block = (n: number) => '<section class="gap' + n + '"><h2>Section ' + n + ' of the close</h2><p>' + WORDS(24) + '.</p></section>';
+    const crowded = await measure(pageWith('.gap1, .gap2, .gap3 { padding: 0; margin: 4px 0; }', block(1) + '\n' + block(2) + '\n' + block(3)));
+    expect(crowded.of('section-gap').map((f) => [f.grade, f.evidence])).toEqual([['ask', expect.stringMatching(/^\[1440px\] the smallest gap between sections is \d+px \(gaps: [-\d, ]+\)$/)]]);
+    const same = await measure(pageWith(
+      '.wrap > section { padding: 0; margin: 0 0 140px; } .wrap > section:last-child { margin-bottom: 0; } .hero { min-height: 0; } .hero figure { display: none; }',
+      block(1) + '\n' + block(2) + '\n' + block(3),
+      [['<section class="story">', '<section class="story" style="display: none">'], ['<section class="ledger">', '<section class="ledger" style="display: none">'], ['<section class="close">', '<section class="close" style="display: none">']],
+    ));
+    expect(same.of('section-gap').map((f) => [f.grade, f.evidence])).toEqual([['ask', expect.stringMatching(/^\[1440px\] every section gap is \d+px$/)]]);
+    const many = await measure(pageWith('.wrap > section { padding: 0; margin: 0 0 160px; }', Array.from({ length: 7 }, (_, i) => block(i + 1)).join('\n')));
+    expect(many.of('section-gap').map((f) => [f.grade, f.evidence])).toContainEqual(['ask', '[1440px] 11 sections on one page']);
+    expect(many.of('section-gap').find((f) => f.evidence.endsWith('sections on one page'))!.line).toBe(lineIn(many.html, 'class="gap6"'));
+  }, 90_000);
 });

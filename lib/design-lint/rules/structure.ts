@@ -2,7 +2,7 @@
  * Structure rules of the design lint (sloplint gates 3 4 6a 24a 24b 34 44d 50 53 56 58; Nutlope/hallmark,
  * MIT, see NOTICE.md), rewritten in gstack's voice. Rule ids: template-cards, nested-cards, vh-height, raw-spacing,
  * off-scale-spacing, overflow-x-unclipped, wide-container, bare-fr-track, display-head-unwrapped, radio-tab-jump,
- * double-sticky, screen-word-budget. Gate 59 (section-gap) has no static check: the render tier owns it, as it owns
+ * double-sticky, screen-word-budget. Gate 59 (section-gap) has no static check: the render tier owns it (render-probe-space.ts glGaps), as it owns
  * the render halves of 34 (horizontal-scroll) and 44d.
  */
 import { isTokenRule, pxOf, resolveVars } from '../css';

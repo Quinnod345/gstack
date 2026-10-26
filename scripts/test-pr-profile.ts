@@ -248,8 +248,6 @@ export const FREE_ONLY_PR_FILES = [
   '.github/ISSUE_TEMPLATE/**', // Issue templates: read by GitHub and free test/gstack-doctor.test.ts.
   'scripts/retired-command.ts', // One-release stubs for retired package scripts; no paid case imports it.
   'careful/bin/check-careful.sh', // /careful PreToolUse hook: covered by test/hook-scripts.test.ts; no paid fixture copies or runs it.
-  'NOTICE.md', // Third-party attribution for people; no test or paid case reads it.
-  'licenses/*.txt', // The licence texts NOTICE.md points at; same reason.
   // Reporting and launch tools: they read CI history or start a lane, never run inside a paid case.
   'scripts/test-health-report.ts',
   'scripts/bump-harness-version.ts',

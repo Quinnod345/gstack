@@ -138,7 +138,7 @@ as `house-style`.
 | `radio-tab-jump` | blocks | 53 | CSS-only radio tabs at position: absolute; top: 0 with no JS guard | radios in flow at zero size, or a handler with preventScroll |
 | `double-sticky` | blocks | 56 | two position: sticky; top: 0 elements | top: var(--banner-height) on the second |
 | `screen-word-budget` | ask | 58 | more than about 80 words in one 900px window, or a hero with more than two text blocks before its actions | headline, one sentence, actions; a section is a head block, then its composition |
-| `section-gap` | ask | 59 | a gap under 120px between sections, or every gap the same | 120px at least, varied |
+| `section-gap` | ask | 59 | a gap under 120px between sections at 1440, every gap the same, or more than nine sections (render) | 120px at least, varied; six to nine sections a page |
 | `heading-rhythm` | ask | 71 | a heading nearer what precedes it than what it heads (render) | at least twice the space above a head as below it |
 | `cramped-padding` | ask | 72 | text closer than 8px (or half an em) to the side of its filled box (render) | pad the box; a 16px gutter |
 | `thin-section` | ask | 77 | a section below the hero with no mass: a narrow body on a wide canvas (render) | widen the body, add a visual, set a statement, or merge the section |

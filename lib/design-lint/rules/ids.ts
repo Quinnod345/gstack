@@ -72,7 +72,7 @@ export const RULES: Record<string, RuleMeta> = {
   'radio-tab-jump': { tier: 'blocks', gate: '53', title: 'CSS-only radio tabs at position: absolute; top: 0 with no JS guard', fix: 'radios in flow at zero size, or a handler with preventScroll' },
   'double-sticky': { tier: 'blocks', gate: '56', title: 'two position: sticky; top: 0 elements', fix: 'top: var(--banner-height) on the second' },
   'screen-word-budget': { tier: 'ask', gate: '58', title: 'more than about 80 words in one 900px window, or a hero with more than two text blocks before its actions', fix: 'headline, one sentence, actions; a section is a head block, then its composition' },
-  'section-gap': { tier: 'ask', gate: '59', title: 'a gap under 120px between sections, or every gap the same', fix: '120px at least, varied', pageOnly: true },
+  'section-gap': { tier: 'ask', gate: '59', title: 'a gap under 120px between sections at 1440, every gap the same, or more than nine sections', fix: '120px at least, varied; six to nine sections a page', pageOnly: true, render: true },
   'heading-rhythm': { tier: 'ask', gate: '71', title: 'a heading nearer what precedes it than what it heads', fix: 'at least twice the space above a head as below it', render: true },
   'cramped-padding': { tier: 'ask', gate: '72', title: 'text closer than 8px (or half an em) to the side of its filled box', fix: 'pad the box; a 16px gutter', render: true },
   'thin-section': { tier: 'ask', gate: '77', title: 'a section below the hero with no mass: a narrow body on a wide canvas', fix: 'widen the body, add a visual, set a statement, or merge the section', render: true },

@@ -6,7 +6,7 @@
  * nothing outside its arguments.
  *
  * Ported from Nutlope/hallmark's sloplint-render.mjs observeSpace (MIT, see
- * NOTICE.md): gates 44a, 44c, 44d, 58, 77, 78, 79, 80, 81, 82, 83, F17, F18.
+ * NOTICE.md): gates 44a, 44c, 44d, 58, 59, 77, 78, 79, 80, 81, 82, 83, F17, F18.
  * The posture, hero-shape, photo-shape and job guards are gone: the strict
  * form applies.
  */
@@ -105,7 +105,39 @@ export function glHero(P: Probes): HeroCtx {
 export function glSpace(P: Probes, atLaptop: boolean): ProbeFinding[] {
   const ctx = P.hero(P);
   if (!atLaptop) return P.wide(P, ctx);
-  return [...P.words(P, ctx), ...P.slots(P), ...P.pictures(P), ...P.marks(P), ...P.photos(P, ctx), ...P.heroSpace(P, ctx), ...P.thin(P, ctx)];
+  return [...P.words(P, ctx), ...P.slots(P), ...P.pictures(P), ...P.marks(P), ...P.photos(P, ctx), ...P.heroSpace(P, ctx), ...P.thin(P, ctx), ...P.gaps(P, ctx)];
+}
+
+// sloplint-render observeSpace, the gaps between sections at 1440 and the section count (gate 59)
+export function glGaps(P: Probes, ctx: HeroCtx): ProbeFinding[] {
+  const { at } = P.H;
+  const out: ProbeFinding[] = [];
+  const { secs, content } = ctx;
+  const paperOf = (el: Element): string => {
+    for (let q: Element | null = el; q; q = q.parentElement) {
+      const cs = getComputedStyle(q);
+      if (/gradient|url\(/.test(cs.backgroundImage)) return cs.backgroundColor + '|' + cs.backgroundImage;
+      if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)) return cs.backgroundColor;
+    }
+    return 'none';
+  };
+  const gaps: number[] = [], shifts: boolean[] = [];
+  for (let i = 0; i < secs.length - 1; i++) {
+    gaps.push(Math.round(content(secs[i + 1]).top - content(secs[i]).bottom));
+    shifts.push(paperOf(secs[i]) !== paperOf(secs[i + 1]));
+  }
+  const real = gaps.filter((g) => g > -50);
+  const short = gaps.filter((g, i) => g > -50 && g < (shifts[i] ? 64 : 112));
+  if (real.length) {
+    if (short.length) {
+      const i = gaps.indexOf(Math.min(...short));
+      out.push({ rule: 'section-gap', grade: 'fail', evidence: 'the smallest gap between sections is ' + Math.min(...short) + 'px (gaps: ' + real.join(', ') + ')', fix: '120px or more between sections (64px where the paper changes)', at: at(secs[i + 1]) });
+    } else if (real.length > 2 && new Set(real).size === 1) {
+      out.push({ rule: 'section-gap', grade: 'fail', evidence: 'every section gap is ' + real[0] + 'px', fix: 'vary the rhythm: a small, a regular and a large section gap', at: at(secs[1]) });
+    }
+  }
+  if (secs.length > 9) out.push({ rule: 'section-gap', grade: 'warn', evidence: secs.length + ' sections on one page', fix: 'six to nine sections a page, hero and footer included; merge or cut', at: at(secs[9]) });
+  return out;
 }
 
 // sloplint-render observeSpace, the word budget (gate 58)
@@ -129,6 +161,10 @@ export function glWords(P: Probes, ctx: HeroCtx): ProbeFinding[] {
   if (maxWords > 95) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: maxWords + ' words on one 900px screen (from y=' + at + ')', fix: 'one idea per screen: cut to about 80 words and make the section an object' });
   else if (maxWords > 80) out.push({ rule: 'screen-word-budget', grade: 'warn', evidence: maxWords + ' words on one 900px screen (from y=' + at + '), close to the 80-word budget' });
   if (ctx.stack > 2) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: 'the hero carries ' + ctx.stack + ' text blocks before its actions', fix: 'headline, one sentence, actions; delete the rest', at: ctx.h1 ? P.H.at(ctx.h1) : undefined });
+  if (ctx.hero && ctx.h1) {
+    const actions = Array.from(ctx.hero.querySelectorAll('a, button')).filter((c) => vis(c) && (c.textContent || '').trim() && !c.closest('nav, form, figure, footer'));
+    if (actions.length > 2) out.push({ rule: 'screen-word-budget', grade: 'fail', evidence: 'the hero offers ' + actions.length + ' actions', fix: 'one primary action and at most one quiet second; the rest belong to their sections', at: P.H.at(actions[2]) });
+  }
   return out;
 }
 

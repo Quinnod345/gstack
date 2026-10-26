@@ -11,7 +11,7 @@
  * space and quality measurements are in render-probe-space.ts and
  * render-probe-quality.ts.
  */
-import { glHero, glHeroSpace, glMarks, glPhotos, glPictures, glSlots, glSpace, glThin, glWide, glWords } from './render-probe-space';
+import { glGaps, glHero, glHeroSpace, glMarks, glPhotos, glPictures, glSlots, glSpace, glThin, glWide, glWords } from './render-probe-space';
 import { glFields, glGrid, glPadding, glProse, glQuality, glRhythm, glStrain } from './render-probe-quality';
 
 export interface ProbeAt { tag: string; cls: string; text: string; /** A distinguishing attribute in the open tag, like data-slot="hero" or id="main". */ attr?: string }
@@ -109,6 +109,7 @@ export interface Probes {
   photos: typeof glPhotos;
   heroSpace: typeof glHeroSpace;
   thin: typeof glThin;
+  gaps: typeof glGaps;
   wide: typeof glWide;
   quality: typeof glQuality;
   rhythm: typeof glRhythm;
@@ -119,7 +120,7 @@ export interface Probes {
   grid: typeof glGrid;
 }
 
-const PROBE_FNS = { setup: glSetup, layout: glLayout, contrast: glContrast, accent: glAccent, focus: glFocus, occlusion: glOcclusion, hide: glHide, restore: glRestore, hero: glHero, space: glSpace, words: glWords, slots: glSlots, pictures: glPictures, marks: glMarks, photos: glPhotos, heroSpace: glHeroSpace, thin: glThin, wide: glWide, quality: glQuality, rhythm: glRhythm, padding: glPadding, prose: glProse, fields: glFields, strain: glStrain, grid: glGrid };
+const PROBE_FNS = { setup: glSetup, layout: glLayout, contrast: glContrast, accent: glAccent, focus: glFocus, occlusion: glOcclusion, hide: glHide, restore: glRestore, hero: glHero, space: glSpace, words: glWords, slots: glSlots, pictures: glPictures, marks: glMarks, photos: glPhotos, heroSpace: glHeroSpace, thin: glThin, gaps: glGaps, wide: glWide, quality: glQuality, rhythm: glRhythm, padding: glPadding, prose: glProse, fields: glFields, strain: glStrain, grid: glGrid };
 
 export const PROBE_GLOBAL = 'window.__gstackLint';
 

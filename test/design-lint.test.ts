@@ -13,6 +13,8 @@ import { contrastRatio, parseColor, srgbToOklch } from '../lib/design-lint/color
 import { getAttr, parseDoc, plainText } from '../lib/design-lint/html';
 import { lint, formatResult } from '../lib/design-lint/index';
 import { Reporter, exitCodeOf, finalize, formatFinding, formatSummary, summarize } from '../lib/design-lint/report';
+import { collectFiles, contextWaivers, lintStatic } from '../lib/design-lint/static';
+import { browserAvailable } from './helpers/browser-available';
 import { RULES, RULE_IDS } from '../lib/design-lint/rules/ids';
 import { FAMILIES } from '../lib/design-lint/rules';
 import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers } from '../lib/design-lint/waivers';
@@ -31,6 +33,16 @@ function tmpPage(html: string, name = 'index.html'): string {
   const file = path.join(dir, name);
   fs.writeFileSync(file, html);
   return file;
+}
+
+/** A temporary tree: each key is a relative path (parent directories are created), each value the file's text. */
+function tmpTree(files: Record<string, string>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-tree-'));
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
+  return dir;
 }
 
 describe('design-lint: CSS reading', () => {
@@ -160,6 +172,106 @@ describe('design-lint: the output contract', () => {
     expect(unexpected.map(formatFinding)).toEqual([]);
     expect(result.exitCode).toBe(0);
     expect(formatResult(result)).toContain('LINT_SUMMARY: blocks=0 ask=0');
+  });
+
+  // Value: protects=every usage exit (3) the bin promises and --help's 0; fails_when=a flag check is dropped or a usage error falls through to lint() and exits 0; why_new=the bin test only covers no-args and --scope; seam=none; no_claim=stderr wording beyond the key phrase
+  test('the bin exits 3 for a non-http --url, an unknown flag, a flag without its value, a path it cannot read and a tree with nothing to lint; --help exits 0', () => {
+    const url = runBin(['--url', 'ftp://example.test/page']);
+    expect([url.code, url.err]).toEqual([3, expect.stringContaining('http or https')]);
+    const flag = runBin(['--bogus', 'x.html']);
+    expect([flag.code, flag.err]).toEqual([3, expect.stringContaining('unknown flag --bogus')]);
+    const value = runBin(['x.html', '--job']);
+    expect([value.code, value.err]).toEqual([3, expect.stringContaining('--job needs a value')]);
+    const missing = runBin(['/nowhere/design-lint/none.html']);
+    expect([missing.code, missing.err]).toEqual([3, expect.stringContaining('cannot read /nowhere/design-lint/none.html')]);
+    expect(missing.err).toContain('no .html, .css, .jsx, .tsx, .vue, .svelte or .astro files found');
+    const nothing = runBin([tmpTree({ 'notes.txt': 'not a page', 'data.json': '{}' })]);
+    expect([nothing.code, nothing.out]).toEqual([3, '']);
+    const help = runBin(['--help']);
+    expect([help.code, help.out.trim(), help.err]).toEqual([0, expect.stringMatching(/^usage: gstack-design-lint </), '']);
+  });
+
+  // Value: protects=lint() wires --render/--url to the render tier: only HTML pages render, a URL is a target of its own; fails_when=render is requested but never reaches lintRender, or a URL target is dropped; why_new=lintRender is tested alone, the glue in lint() and the bin is not; seam=none; no_claim=the no-browser summary wording beyond its prefix
+  test('render requested on a tree without a page says so in the summary; --url with no file is a render target of its own', async () => {
+    const cssOnly = tmpTree({ 'tokens.css': ':root { --color-ink: oklch(22% 0.03 250); }', 'Hero.tsx': 'export const Hero = () => <h1 className="text-xl">Ledger</h1>;' });
+    const result = await lint([cssOnly], { cwd: cssOnly, render: true, warn: () => {} });
+    expect(result.files.map((f) => path.basename(f))).toEqual(['Hero.tsx', 'tokens.css']);
+    expect(result.summary.render).toBe('skipped: no HTML page to render');
+    expect(formatResult(result)).toMatch(/render=skipped: no HTML page to render$/);
+    const nothing = await lint([cssOnly], { cwd: cssOnly, warn: () => {} });
+    expect(nothing.summary.render).toBe('skipped: not requested');
+
+    const r = runBin(['--url', 'http://127.0.0.1:9/']);
+    if (browserAvailable()) {
+      expect(r.code).toBe(2);
+      expect(r.out).toMatch(/^LINT: blocks render http:\/\/127\.0\.0\.1:9\/:1 could not reach http:\/\/127\.0\.0\.1:9\/: .+ \| fix: .+$/m);
+      expect(r.out).toMatch(/^LINT_SUMMARY: blocks=1 ask=0 waived=0 polish=0 render=ran$/m);
+    } else {
+      expect(r.code).toBe(0);
+      expect(r.out).toMatch(/^LINT_SUMMARY: blocks=0 ask=0 waived=0 polish=0 render=skipped: /m);
+    }
+  });
+});
+
+describe('design-lint: the static tier\'s files and contexts', () => {
+  // Value: protects=which files the walk reads and which stylesheet may carry a page's waiver; fails_when=vendored or built CSS is linted, or a linked stylesheet from elsewhere waives a page's finding; why_new=no test walks a tree with node_modules, dot or build directories, or a waiver in CSS; seam=none; no_claim=ordering inside one directory beyond sorted names
+  test('the walk skips node_modules, dot folders and build output below the top, warns on an unreadable path; a waiver counts from the page\'s own stylesheet, not one it only links', () => {
+    const dir = tmpTree({
+      'site/index.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="local.css"><link rel="stylesheet" href="../shared/theme.css"></head><body><main><h1>The ledger</h1><p>The ledger separates its rows with hairline rules.</p></main></body></html>',
+      'site/local.css': '/* gstack-lint-disable section-gap: the ledger separates its rows with rules */\n.row { border-top: 1px solid var(--color-line); }',
+      'shared/theme.css': '/* gstack-lint-disable template-nav: the ledger keeps three links for its three modes */\n:root { --color-line: oklch(85% 0.015 80); }',
+      'site/node_modules/lib/vendor.css': '.v { color: #123456; }',
+      'site/.cache/stale.html': '<h1>stale</h1>',
+      'site/dist/built.css': '.b { color: #654321; }',
+      'dist/top.css': '.t { color: var(--color-line); }',
+    });
+    const warned: string[] = [];
+    const files = collectFiles([path.join(dir, 'site'), path.join(dir, 'dist'), path.join(dir, 'site', 'index.html'), path.join(dir, 'gone')], (l) => warned.push(l));
+    expect(files.map((f) => path.relative(dir, f))).toEqual(['site/index.html', 'site/local.css', 'dist/top.css']);
+    expect(warned).toEqual([`design-lint: cannot read ${path.join(dir, 'gone')}`]);
+
+    const { contexts } = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: (l) => { throw new Error(l); } });
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].cssFiles.map((c) => [path.relative(dir, c.file), c.attached ?? false])).toEqual([['site/local.css', false], ['shared/theme.css', true]]);
+    const set = contextWaivers(contexts[0], dir);
+    expect([...set.accepted.entries()]).toEqual([['section-gap', 'the ledger separates its rows with rules']]);
+    expect(set.refused).toEqual([]);
+  });
+
+  // Value: protects=two pages in one directory each own only the stylesheets they link; fails_when=grouping hands every stylesheet to every page, so one page's waiver answers the other's finding and the finding prints twice; why_new=every fixture directory holds one page; seam=none; no_claim=which page a stylesheet linked by neither belongs to
+  test('two pages in one directory: a finding in one page\'s stylesheet is reported once and is not waived by the other page', () => {
+    const dir = tmpTree({
+      'a.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="a.css"></head><body><main><h1>The ledger</h1><p>The ledger closes the month on the first day.</p></main></body></html>',
+      'a.css': ':root { --color-gray: oklch(55% 0 0); --color-ink: oklch(22% 0.03 250); }\n.rule { border-color: var(--color-gray); }',
+      'b.html': '<!-- gstack-lint-disable zero-chroma-neutrals: the archive keeps its grey plates grey -->\n<!doctype html><html lang="en"><head><title>Archive</title><link rel="stylesheet" href="b.css"></head><body><main><h1>The archive</h1><p>The archive keeps its grey plates on the shelf.</p></main></body></html>',
+      'b.css': ':root { --color-ink: oklch(22% 0.03 250); }\n.shelf { color: var(--color-ink); }',
+    });
+    const result = lintStatic([dir], { cwd: dir, warn: (l) => { throw new Error(l); } });
+    expect(result.contexts.map((c) => [path.basename(c.key), c.cssFiles.map((f) => path.basename(f.file))])).toEqual([['a.html', ['a.css']], ['b.html', ['b.css']]]);
+    const grey = finalize(result.findings).filter((f) => f.rule === 'zero-chroma-neutrals');
+    expect(grey.map((f) => [f.grade, f.file, f.line])).toEqual([['ask', 'a.css', 1]]);
+    expect(result.findings.filter((f) => f.rule === 'waiver')).toEqual([]);
+  });
+});
+
+describe('design-lint: the copy tier', () => {
+  // Value: protects=design-craft tells reach the lint as findings at line 1 with their count, source copy, under the craft ids; fails_when=the craft bridge drops ids, loses the count suffix, or re-reports the static tier's 100vh and transition: all tells; why_new=no test asserts a single copy-tier finding (the fixtures only check line format); seam=none; no_claim=the craft patterns themselves, which lib/design-craft owns
+  test('lorem, missing alt and alert() report with their counts at line 1 as copy findings; 100vh and transition: all stay with the static tier; a component file gets none', () => {
+    const dir = tmpTree({
+      'index.html': '<!doctype html>\n<html lang="en">\n<head><title>Ledger</title><meta name="description" content="The ledger closes the month."><link rel="icon" href="/icon.svg"><style>.hero { min-height: 100vh; transition: all 0.2s; }</style></head>\n<body><a class="skip" href="#main">Skip to content</a><main id="main"><h1>Lorem ipsum dolor</h1><img src="a.png"><img src="b.png"><p>Lorem ipsum again on the ledger.</p></main>\n<script>alert("saved")</script></body></html>',
+      'Card.tsx': 'export const Card = () => <article className="p-4"><p>Lorem ipsum in a component</p><img src="c.png" /></article>;',
+    });
+    const { findings } = lintStatic([dir], { cwd: dir, warn: (l) => { throw new Error(l); } });
+    const copy = findings.filter((f) => f.source === 'copy');
+    expect(copy.map((f) => [f.grade, f.rule, f.file, f.line, f.evidence])).toEqual([
+      ['blocks', 'lorem', 'index.html', 1, 'lorem ipsum placeholder text, 2 times'],
+      ['ask', 'alert', 'index.html', 1, 'alert() for a message'],
+      ['blocks', 'img-no-alt', 'index.html', 1, 'an <img> without alt, 2 times'],
+    ]);
+    expect(copy.find((f) => f.rule === 'img-no-alt')?.fix).toBe('add alt text (alt="" when decorative)');
+    expect(findings.filter((f) => f.rule === 'vh-height').map((f) => [f.source, f.grade])).toEqual([['static', 'blocks']]);
+    expect(findings.filter((f) => f.rule === 'layout-transition').map((f) => f.source)).toEqual(['static']);
+    expect(findings.some((f) => f.file === 'Card.tsx' && f.source === 'copy')).toBe(false);
   });
 });
 
