@@ -103,10 +103,10 @@ export function missingIssueLines(body: string, issues: NonNullable<ShipReceipt[
   return expected.filter(e => !have.some(l => l === e || l.startsWith(`${e} `)));
 }
 
-/** The first lines of the completion message to the coordinator: identifiers only. */
 /** Receipt fields come from the PR body, so anything printed from one stays on its own line, control characters included. */
 const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f]+/g, ' ');
 
+/** The first lines of the completion message to the coordinator: identifiers only. */
 export function receiptSummaryLine(r: ShipReceipt): string {
   const parts = [`pr=${r.pr ?? '-'}`, `head=${r.head.slice(0, 12)}`, `version=${r.version ?? '-'}`, `base=${r.base}`];
   if (r.gated_tree) parts.push(`gated_tree=${r.gated_tree.slice(0, 12)}`);

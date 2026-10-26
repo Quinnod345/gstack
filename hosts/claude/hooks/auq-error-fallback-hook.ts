@@ -154,8 +154,9 @@ export function directiveFor(kind: SessionKind): string {
         'a destructive or irreversible option, or an approval gate is appended with kind "approval" and status ' +
         '"pending" — never chosen, never approved — and the skill ends at its next gate. Only /autoplan and ' +
         '/eval-plan print `GSTACK_RESULT: skill=<name> status=gate_pending run=<dir>` there, and /ship prints its ' +
-        'own line at Step 22 (`gstack-ship-receipt result`); every other skill prints no GSTACK_RESULT line, so do ' +
-        'not invent one (Unattended session block; docs/unattended.md names each skill\'s record).'
+        'own line at Step 22 (`gstack-ship-receipt result`); every other skill prints no GSTACK_RESULT line of its own ' +
+        '(only a refused install check prints `status=refused run=-` for any skill), so do not invent one ' +
+        '(Unattended session block; docs/unattended.md names each skill\'s record).'
       );
     case 'headless':
       // #2733 review (multi-specialist): a spawned-marked subagent under a

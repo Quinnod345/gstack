@@ -427,7 +427,7 @@ describe('gstack-skill-start behavior', () => {
     expect(ship.match(line)).toHaveLength(1);
     expect((ship.match(/^GSTACK_INSTRUCTION_BEGIN: (\S+)/gm) ?? []).map((h) => h.replace(/^GSTACK_INSTRUCTION_BEGIN: /, ''))).toEqual(['unattended-session']);
     expect(ship).toContain('`GSTACK_RESULT: skill=ship status=complete run=<dir>`');
-    expect(ship).toContain("update that PR's body with the receipt through the pr-body section's existing-PR path (never pr-create, never a push)");
+    expect(ship).toContain("update that PR's body and title with the receipt through the pr-body section's existing-PR path (never pr-create, never a push, and never `gh pr ready`");
     expect(ship).toContain('the handoff section writes the receipt to .gstack/tmp/ship-receipt.md');
     for (const skill of ['review', 'qa', 'autoplan']) {
       expect(runStart(['--skill', skill], { GSTACK_SESSION_KIND: 'unattended' })).not.toContain('UNATTENDED_SHIP');

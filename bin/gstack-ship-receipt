@@ -225,24 +225,31 @@ function cmdResult(rest: string[], json: boolean): number {
     source = path.resolve(bodyFile);
   } else if (pr) {
     const repo = flag(rest, '--repo');
-    const r = gh(['pr', 'view', pr, ...(repo ? ['--repo', repo] : []), '--json', 'body']);
+    const r = gh(['pr', 'view', pr, ...(repo ? ['--repo', repo] : []), '--json', 'body,headRefOid']);
     if (!r.ok) return incomplete(`gh pr view failed: ${r.err.trim()}`);
-    try { body = JSON.parse(r.out).body ?? ''; } catch { return incomplete('gh returned no JSON body'); }
+    let pushed: unknown;
+    try { const v = JSON.parse(r.out); body = v.body ?? ''; pushed = v.headRefOid; } catch { return incomplete('gh returned no JSON body'); }
+    if (typeof pushed === 'string' && /^[0-9a-f]{12,64}$/i.test(pushed) && !pushed.toLowerCase().startsWith(head.toLowerCase())) {
+      return refused('QUEUE_RECEIPT_STALE', `HEAD ${head.slice(0, 12)} is not PR #${pr}'s pushed head ${pushed.slice(0, 12)}; push it, then rerun gstack-ship-receipt result`);
+    }
     source = `PR #${pr}${repo ? ` (${repo})` : ''}`;
   } else { process.stderr.write(`gstack-ship-receipt result: --pr <n> or --body <file> is required\n${HELP}\n`); return EXIT.usage; }
   const bound = bindReceipt(body, pr, [head]);
   if (!bound.ok) return refused(bound.code, bound.message);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = flag(rest, '--out') ?? path.join(resolveStateRoot(), 'ship', 'runs', `${stamp}-${head.slice(0, 12)}`);
-  fs.mkdirSync(dir, { recursive: true });
+  const out = flag(rest, '--out');
+  const dir = out ? path.resolve(out) : path.join(resolveStateRoot(), 'ship', 'runs', `${stamp}-${head.slice(0, 12)}`);
   const receiptPath = path.join(dir, 'ship-receipt.md');
-  fs.writeFileSync(receiptPath, renderReceiptBlock(bound.receipt));
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(receiptPath, renderReceiptBlock(bound.receipt));
+  } catch (e) { return incomplete(`cannot write the run record under ${dir}: ${e instanceof Error ? e.message : String(e)}`); }
   const run = {
     schema_version: 1, skill: 'ship', status: 'complete', head, pr: bound.receipt.pr ?? (pr ? Number(pr) : null), base: bound.receipt.base, version: bound.receipt.version ?? null,
     queue_mode: bound.receipt.queue_mode ?? null, session_kind: bound.receipt.session_kind ?? process.env.GSTACK_SESSION_KIND ?? null,
     receipt: receiptPath, receipt_source: source, branch: repoRoot ? git(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot) ?? null : null, created_at: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(dir, 'ship-run.json'), JSON.stringify(run, null, 2) + '\n');
+  try { fs.writeFileSync(path.join(dir, 'ship-run.json'), JSON.stringify(run, null, 2) + '\n'); } catch (e) { return incomplete(`cannot write ${path.join(dir, 'ship-run.json')}: ${e instanceof Error ? e.message : String(e)}`); }
   process.stderr.write(bound.line + '\n');
   process.stdout.write(json ? JSON.stringify({ ...run, run: dir }) + '\n' : `GSTACK_RESULT: skill=ship status=complete run=${dir}\n`);
   return EXIT.ok;

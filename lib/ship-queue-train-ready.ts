@@ -118,7 +118,8 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
     const again = `resolve the conflict with ${ctx.base} (or wait for GitHub to recompute refs/pull/${o.pr}/merge), push, then ${Q} ready --pr ${o.pr} --screen; a screen dispatched on a stale merge ref plans no cases`;
     if (!/^[0-9a-f]{40,64}$/.test(mergeSha)) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `${env.remote} has no refs/pull/${o.pr}/merge (the PR conflicts with ${ctx.base}, or GitHub has not computed it yet)` }, lines, again, 'none');
     const fetched = git(ctx.repoRoot, ['fetch', '-q', env.remote, `refs/pull/${o.pr}/merge`]);
-    const mergeParent = fetched.ok ? git(ctx.repoRoot, ['rev-parse', '--verify', '--quiet', `${mergeSha}^2`]).out : '';
+    if (!fetched.ok) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `could not fetch refs/pull/${o.pr}/merge from ${env.remote}: ${(fetched.err || fetched.out).trim().slice(0, 200) || 'git fetch failed'}` }, lines, `check the remote, then ${Q} ready --pr ${o.pr} --screen`, 'none');
+    const mergeParent = git(ctx.repoRoot, ['rev-parse', '--verify', '--quiet', `${mergeSha}^2`]).out;
     if (mergeParent !== head) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `${env.remote}'s refs/pull/${o.pr}/merge (${mergeSha.slice(0, 12)}) merges ${mergeParent ? mergeParent.slice(0, 12) : 'no PR head'}, not the PR head ${head.slice(0, 12)}: GitHub has not recomputed it, which is what a conflicting PR looks like (CHANGELOG-only conflicts included)` }, lines, again, 'none');
     const d = await dispatchScreen(env, o, mergeSha, baseSha);
     if ('exit' in d) return { ...d, lines: [...lines, ...d.lines] };

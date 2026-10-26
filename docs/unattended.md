@@ -100,8 +100,11 @@ Not every workflow writes this line or a run directory today:
   open PR for the branch exists and HEAD is its pushed head, Step 18 takes the
   pr-body section's existing-PR path and posts the body (receipt first) and
   title through `gstack-post`. That is the one publication the unattended
-  rules allow; it never runs `pr-create`, never pushes a commit, and a branch
-  with no open PR, or whose PR head is not HEAD, takes the handoff section.
+  rules allow; it never runs `pr-create`, never pushes a commit, never runs
+  `gh pr ready` (the existing-PR path's draft-state items concern an early PR
+  an unattended run never opens), and a branch with no open PR, or whose PR
+  head is not HEAD, takes the handoff section. `result --pr <n>` also refuses
+  `QUEUE_RECEIPT_STALE` when HEAD is not the PR's pushed head.
   When the run committed anything (a CHANGELOG entry, generated tests), the
   parent pushes those commits itself, then reruns the receipt write, the body
   post and `result` at the pushed head: a receipt for an unpushed head is
