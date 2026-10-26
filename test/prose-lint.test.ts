@@ -69,9 +69,9 @@ describe('lintProse: each rule, positive and negative', () => {
   });
 
   test('dropped-article flags a bare noun opening a sentence and spares one with its article', () => {
-    expect(rules('Parser rejects bad date and exits.')).toEqual(['dropped-article']);
+    expect(rules('Gate refuses stale receipt and exits.')).toEqual(['dropped-article']);
     expect(rules('- Gate refuses the head when the receipt is stale.')).toEqual(['dropped-article']);
-    expect(rules('The parser rejects a bad date and exits.')).toEqual([]);
+    expect(rules('The gate refuses a stale receipt and exits.')).toEqual([]);
     expect(rules('Garry approves the plan; Bun runs the tests.')).toEqual([]);
     expect(rules('Parser errors are rare.')).toEqual([]);
   });
@@ -84,7 +84,7 @@ describe('lintProse: each rule, positive and negative', () => {
       'echo "not just X, but Y" → substrate',
       '```',
       'See https://example.com/vibrant-tapestry and `a pivotal → change`. <!-- showcases -->',
-      'Parser rejects bad date.',
+      'Gate refuses stale receipt.',
     ].join('\n');
     const f = lintProse(text, 'x.md');
     expect(f.map(x => [x.rule, x.line])).toEqual([['dropped-article', 7]]);
@@ -92,6 +92,23 @@ describe('lintProse: each rule, positive and negative', () => {
     expect(masked.split('\n').length).toBe(text.split('\n').length);
     expect(masked).not.toContain('substrate');
     expect(masked).not.toContain('vibrant');
+  });
+
+  // Value: protects=a longer fence is closed only by a fence at least as long, so a quoted template in a PR body draft is never linted; fails_when=a shorter inner fence or a tilde fence closes the block early, or an unclosed fence stops masking; why_new=the case above uses one three-backtick fence; seam=none; no_claim=other fence syntaxes (indented code blocks) are not masked
+  test('a longer fence holds a shorter inner fence, a tilde fence masks too, and an unclosed fence masks to the end', () => {
+    const text = [
+      '````md',
+      '```',
+      'Showcasing a vibrant release.',
+      '````',
+      'Gate refuses stale receipt.',
+      '~~~',
+      'Showcasing a vibrant release.',
+      '~~~',
+      '```',
+      'Showcasing a vibrant release.',
+    ].join('\n');
+    expect(lintProse(text, 'x.md').map(f => [f.rule, f.line])).toEqual([['dropped-article', 5]]);
   });
 
   test('findings are sorted by line and the render ends in the trailer', () => {
@@ -117,6 +134,7 @@ describe('selections', () => {
     expect(unreleasedBlock('# Changelog\n\n## [1.0.0] - 2026-01-01\n- x\n')).toBeNull();
   });
 
+  // Value: protects=the Step 13 call (--base <ref> --gate): exit 1 on a tell the branch added, none for an older one, exit 2 and no trailer on an unresolvable ref; fails_when=a bad ref or failed git diff reads as ok, --gate stops gating, or a ref with no merge base is not diffed directly; why_new=this test asserted only the none case and addedOnly's return values; seam=none; no_claim=origin/<base> resolution in a real clone (a temp repo with a local main stands in)
   test('addedOnly keeps only the lines the working tree added, with their line numbers, and reads an untracked file whole', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-prose-lint-'));
     const git = (...a: string[]) => {
@@ -129,14 +147,25 @@ describe('selections', () => {
       fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.0] - 2026-01-01\n\nOld entry showcases a vibrant tapestry.\n');
       git('add', '.'); git('commit', '-q', '-m', 'base');
       git('checkout', '-q', '-b', 'feature');
-      fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.1] - 2026-01-02\n\nParser rejects bad date → exit 2.\n\n## [1.0.0] - 2026-01-01\n\nOld entry showcases a vibrant tapestry.\n');
+      fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.1] - 2026-01-02\n\nGate refuses stale receipt → exit 3.\n\n## [1.0.0] - 2026-01-01\n\nOld entry showcases a vibrant tapestry.\n');
       const cwd = process.cwd();
       process.chdir(repo);
       try {
         const added = addedOnly('CHANGELOG.md', 'main')!;
-        expect(added.split('\n')[4]).toBe('Parser rejects bad date → exit 2.');
+        expect(added.split('\n')[4]).toBe('Gate refuses stale receipt → exit 3.');
         expect(added.split('\n')[8]).toBe('');
         expect(lintProse(added, 'CHANGELOG.md').map(f => [f.rule, f.line])).toEqual([['arrow', 5], ['dropped-article', 5]]);
+        const gated = run(['CHANGELOG.md', '--base', 'main', '--gate'], repo);
+        expect(gated.code).toBe(1);
+        expect(gated.out).toMatch(/^PROSE: CHANGELOG\.md:5 arrow /m);
+        expect(gated.out).not.toMatch(/^PROSE: CHANGELOG\.md:9 /m);
+        expect(gated.err).toContain('PROSE_LINT_FOUND');
+        const badRef = run(['CHANGELOG.md', '--base', 'no-such-ref', '--gate'], repo);
+        expect(badRef.code).toBe(2);
+        expect(badRef.out).not.toContain('PROSE_LINT:');
+        git('branch', 'orphan', git('commit-tree', git('write-tree'), '-m', 'unrelated history'));
+        expect(() => git('merge-base', 'orphan', 'HEAD')).toThrow();
+        expect(addedOnly('CHANGELOG.md', 'orphan')).toBe(added);
         fs.writeFileSync(path.join(repo, 'NEW.md'), 'A vibrant note.\n');
         expect(addedOnly('NEW.md', 'main')).toBe('A vibrant note.\n');
         git('checkout', '-q', '--', 'CHANGELOG.md');
@@ -149,12 +178,19 @@ describe('selections', () => {
 });
 
 describe('bin/gstack-prose-lint', () => {
+  // Value: protects=printed line numbers locate the finding in the file, and one gated call covers several files (the Step 19 body-draft shape); fails_when=the block offset is off by one, or a later file's findings are dropped or misattributed; why_new=the line check here was a 3..12 range and the multi-file call ran only as a report; seam=none; no_claim=none beyond protects
   test('a slopped [Unreleased] block gates with exit 1, every rule named, and the result code on stderr', () => {
     const r = run([path.join(FIXTURES, 'slopped-changelog.md'), '--unreleased', '--gate']);
     expect(r.code).toBe(1);
     const found = [...r.out.matchAll(/^PROSE: \S+:(\d+) (\S+) /gm)].map(m => [Number(m[1]), m[2]] as const);
     for (const rule of ['vocabulary', 'not-just-but', 'metaphor-noun', 'mid-sentence-colon', 'inline-header-list', 'arrow', 'dropped-article']) expect(found.map(f => f[1])).toContain(rule);
     expect(found.every(f => f[0] >= 3 && f[0] <= 12)).toBe(true);
+    for (const pair of [[5, 'not-just-but'], [8, 'inline-header-list'], [9, 'arrow'], [10, 'mid-sentence-colon']] as const) expect(found).toContainEqual(pair);
+    const both = run([path.join(FIXTURES, 'clean-changelog.md'), path.join(FIXTURES, 'slopped-changelog.md'), '--unreleased', '--gate']);
+    expect(both.code).toBe(1);
+    expect(both.out).toMatch(/^PROSE: \S+slopped-changelog\.md:5 /m);
+    expect(both.out).not.toMatch(/^PROSE: \S+clean-changelog\.md/m);
+    expect(both.out).toMatch(/\nPROSE_LINT: found=\d+ files=2\n$/);
     expect(r.out).toMatch(/\nPROSE_LINT: found=\d+ files=1\n$/);
     expect(r.err).toMatch(/^gstack-prose-lint: .+; fix: .+ \(PROSE_LINT_FOUND\)$/m);
   });
@@ -176,6 +212,7 @@ describe('bin/gstack-prose-lint', () => {
     expect(r.out.trim()).toBe('PROSE_LINT: none files=0 nothing-to-scan=1');
   });
 
+  // Value: protects=a --base with no ref, a directory and a call with no file exit 2 with their own message, never a clean run; fails_when=a missing ref falls through to a whole-file lint (exit 0) or no file reads as none; why_new=the rows above cover unknown flags, a missing file and --base with --unreleased only; seam=none; no_claim=none beyond protects
   test('--json carries the findings; usage errors exit 2', () => {
     const j = run([path.join(FIXTURES, 'slopped-changelog.md'), '--unreleased', '--json']);
     expect(j.code).toBe(0);
@@ -188,6 +225,13 @@ describe('bin/gstack-prose-lint', () => {
     expect(run([path.join(FIXTURES, 'missing.md')]).code).toBe(2);
     expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--nope']).code).toBe(2);
     expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--unreleased', '--base', 'main']).code).toBe(2);
+    const dir = run([FIXTURES]);
+    expect(dir.code).toBe(2);
+    expect(dir.err).toContain('cannot read');
+    expect(run(['--gate']).code).toBe(2);
+    const noRef = run([path.join(FIXTURES, 'slopped-changelog.md'), '--base']);
+    expect(noRef.code).toBe(2);
+    expect(noRef.err).toContain('--base needs a ref');
   });
 });
 

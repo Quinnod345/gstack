@@ -6,7 +6,7 @@
 
 ### Added
 - **Performance:** Performance improved across the substrate because the parser now short-circuits.
-- Parser rejects bad date → exit 2, no write.
+- Gate refuses stale receipt → exit 3, no stamp.
 - The lint is pivotal for teams coming from other tools: instead of reading every entry by hand, they run one command and additionally get a report.
 - Measured 1.6740 → 1.7010 (this arrow is a measurement and stays).
 - `gstack-prose-lint`: a code span that says `not just X, but Y` is never scanned.

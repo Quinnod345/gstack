@@ -245,7 +245,6 @@ export const FREE_ONLY_PR_FILES = [
   '.osv-scanner.toml', // Read by .github/workflows/osv-scanner.yml and the free OSV tests (test/osv-*.test.ts).
   'setup.ps1', // The Windows installer: run only by .github/workflows/windows-setup-e2e.yml; the paid lane is Linux.
   '.gitlab-ci.yml', // gstack's own GitLab config: skills probe the fixture repo's .gitlab-ci.yml, never this one.
-  'NOTICE.md', // Third-party notices: read by people and by free tests (test/prose-lint.test.ts); no paid case reads it.
   '.github/ISSUE_TEMPLATE/**', // Issue templates: read by GitHub and free test/gstack-doctor.test.ts.
   'scripts/retired-command.ts', // One-release stubs for retired package scripts; no paid case imports it.
   'careful/bin/check-careful.sh', // /careful PreToolUse hook: covered by test/hook-scripts.test.ts; no paid fixture copies or runs it.
