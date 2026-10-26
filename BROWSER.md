@@ -1301,15 +1301,15 @@ ARCHITECTURE.md § "Prompt injection defense" for the full threat model.
 The fallback engine checks HTTPS certificates against the root store compiled
 into its bundled Playwright Chromium. The default headless browser never gets
 the CRLSet revocation updates Chrome pushes to running browsers. Headed mode and
-`handoff` do fetch them, but only about a minute after each launch, so the
-first pages they open, including the page `handoff` reopens, are checked
-against the compiled root store alone. `BROWSE_EXTENSIONS_DIR` makes the
+`handoff` fetched them in testing on Linux, but only about a minute after each
+launch, so the first pages they open, including the page `handoff` reopens, are
+checked against the compiled root store alone. `BROWSE_EXTENSIONS_DIR` makes the
 headless browser launch like headed mode. `GSTACK_CHROMIUM_PATH` replaces the
 bundled build for headless and headed launches, but `handoff` always reopens in
 the bundled build, and the headless launch still gets no CRLSet, so pointing it
 at a current Chrome only helps if that build itself drops the root. The bundled
 build does not enforce Certificate Transparency. That matters most for the
-commands that put real sessions and credentials into the browser:
+commands that put real sessions and credentials into the browser, including
 `cookie-import-browser`, `cookie-import`, `cookie`, `header`, `state load`,
 `fill`/`type` and `handoff`, and a paired agent using `fill`/`type`. Aside
 uses your own browser's trust store and updates.
@@ -1327,9 +1327,10 @@ fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
 the first Playwright release whose Chromium carries the removal. Until then,
 don't do signed-in work in this engine on a network you do not trust (sessions
 imported earlier persist in the headed profile and in saved state), and prefer
-Aside for signed-in work where you have it. To check a build, run the same
-`goto` in the default headless mode with `GSTACK_CHROMIUM_PATH` and
-`BROWSE_EXTENSIONS_DIR` unset: only `ERR_CERT_AUTHORITY_INVALID` means its root store no longer
+Aside for signed-in work where you have it. To check a build, run `$B stop`,
+then the same `goto` in the default headless mode with `BROWSE_EXTENSIONS_DIR` unset and
+`GSTACK_CHROMIUM_PATH` unset (the bundled build) or set to the build you want
+to check: only `ERR_CERT_AUTHORITY_INVALID` means its root store no longer
 trusts them. `ERR_CERT_REVOKED` only shows that the session has a CRLSet, and a
 DNS, network or other error proves nothing.
 
