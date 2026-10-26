@@ -10,8 +10,8 @@ or inline takeover, including failed launches; inline work follows the same
 validation gates. A stale snapshot is neither a new attempt nor a current audit.
 Save the child handle. An exited child with missing output is stopped, but its audit is blocked.
 
-**Entry:** First entry always launches the initial audit.
-On reentry, reuse only this invocation's validated audit or named-risk decision whose accepted
+**Entry:** First entry runs `rm -f .gstack/tmp/docs-audit.json` (an earlier run's
+record would pass as this run's audit) and launches the initial audit. On reentry, reuse only this invocation's validated audit or named-risk decision whose accepted
 base/input hashes still match; retain its actual status and scope. Otherwise use
 Blocked recovery, not an unconditional launch.
 Reentry never resets the count or authorizes a launch.
@@ -86,8 +86,11 @@ A failed check or `blocked` result goes to recovery, even with valid JSON.
 Otherwise run the doc caps the base policy declares, before the verification gate:
 
 ```bash
-~/.claude/skills/gstack/bin/gstack-ship-receipt docs-caps --policy .gstack/ship-policy.json
+~/.claude/skills/gstack/bin/gstack-ship-receipt docs-caps --base <base>
 ```
+
+It reads `docs.caps` from `origin/<base>`'s `.gstack/ship-policy.json`, never the
+branch's copy, so a PR cannot raise its own cap.
 
 It prints one `DOCS_CAP: <path> <bytes>/<max> ok|over` line per `docs.caps` entry
 (`DOCS_CAP: none declared` without any) and exits 1 on any `over` (an absent

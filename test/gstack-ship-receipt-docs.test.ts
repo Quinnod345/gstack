@@ -11,9 +11,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { CARRY_NAMED_PATHS, extractReceipt, planCarry, stampOnlyText } from '../lib/ship-receipt';
-import { checkDocsCaps, docsCapLine, docsExceptionLine, parseReceiptDocs, receiptDocs } from '../lib/ship-receipt-docs';
+import { checkDocsCaps, docsCapLine, docsExceptionLine, parseReceiptDocs } from '../lib/ship-receipt-docs';
 import { DOCS_CAPS_KEY_VERSION, validatePolicy } from '../lib/ship-policy';
-import { cleanup, makeFixtureRepo, makePr, runBin, type FixtureRepo } from './helpers/restamp-fixture';
+import { BASE_POLICY, cleanup, makeFixtureRepo, makePr, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 import { gitArgvIn } from './helpers/scratch-repo';
 
 const repos: FixtureRepo[] = [];
@@ -64,6 +64,29 @@ describe('E18: a repository without a version source or CHANGELOG', () => {
     expect(only.status).toBe(EXIT.ok);
     expect('version' in JSON.parse(only.out)).toBe(false);
   });
+
+  test('"none" means absent: a package.json version is used, and a malformed VERSION, a policy stamp file or an unreadable base keep the no-version path', () => {
+    const version = (repo: FixtureRepo, args: string[] = []) => JSON.parse(runBin(repo, 'gstack-ship-receipt', ['write', '--base', 'main', '--session-kind', 'x', '--json', ...args]).out).version;
+    const manifest = bareRepo();
+    fs.writeFileSync(path.join(manifest.work, 'package.json'), JSON.stringify({ name: 'x', version: '4.5.6' }) + '\n');
+    manifest.git('add', '-A');
+    manifest.git('commit', '-qm', 'manifest only');
+    expect(version(manifest)).toBe('4.5.6');
+    const malformed = bareRepo();
+    fs.writeFileSync(path.join(malformed.work, 'VERSION'), 'not-a-version\n');
+    malformed.git('add', '-A');
+    malformed.git('commit', '-qm', 'malformed VERSION');
+    expect(version(malformed)).toBeUndefined();
+    const stamped = fixture({ policy: { ...BASE_POLICY, stamp_files: ['RELEASE'] } });
+    fs.writeFileSync(path.join(stamped.work, 'RELEASE'), 'build 7\n');
+    for (const f of ['VERSION', 'package.json', 'package-lock.json', 'CHANGELOG.md']) fs.rmSync(path.join(stamped.work, f));
+    stamped.git('add', '-A');
+    stamped.git('commit', '-qm', 'only a policy stamp file');
+    expect(version(stamped)).toBeUndefined();
+    const unreachable = bareRepo();
+    unreachable.git('update-ref', '-d', 'refs/remotes/origin/main');
+    expect(version(unreachable)).toBeUndefined();
+  });
 });
 
 describe('E11: the documentation audit record and the doc caps', () => {
@@ -79,8 +102,6 @@ describe('E11: the documentation audit record and the doc caps', () => {
     expect(full).toEqual({ ok: true, docs: { status: 'blocked', scope: 'docs/, README.md', exception: { accepted_by: 'owner', date: '2026-10-26', via: 'PR #12 comment', reason: 'the removed page is republished next release' } } });
     expect(docsExceptionLine((full as any).docs)).toBe('Documentation exception: accepted by owner 2026-10-26 via PR #12 comment: the removed page is republished next release');
     expect(docsExceptionLine({ status: 'current', scope: 'x' })).toBeNull();
-    expect(receiptDocs({ docs: { status: 'updated', scope: 'docs/' } })).toEqual({ status: 'updated', scope: 'docs/' });
-    expect(receiptDocs({})).toBeUndefined();
   });
 
   test('write --docs refuses a blocked audit with no exception and a body without the exception line, and records the exception otherwise', () => {
@@ -143,6 +164,24 @@ describe('E11: the documentation audit record and the doc caps', () => {
     expect(runBin(repo, 'gstack-ship-receipt', ['docs-caps', '--policy', path.join(repo.root, 'nope.json')]).status).toBe(EXIT.usage);
   });
 
+  test('docs-caps reads the caps from the base policy, so a branch that raises its own cap in the working tree still reports over', () => {
+    const repo = fixture({ policy: { ...BASE_POLICY, docs: { caps: [{ path: 'CHANGELOG.md', max_bytes: 16 }] }, min_gstack_version: DOCS_CAPS_KEY_VERSION } });
+    const raised = JSON.stringify({ ...BASE_POLICY, docs: { caps: [{ path: 'CHANGELOG.md', max_bytes: 1_000_000 }] }, min_gstack_version: DOCS_CAPS_KEY_VERSION }, null, 2) + '\n';
+    fs.writeFileSync(path.join(repo.work, '.gstack', 'ship-policy.json'), raised);
+    repo.git('add', '-A');
+    repo.git('commit', '-qm', 'raise my own cap');
+    const r = runBin(repo, 'gstack-ship-receipt', ['docs-caps', '--base', 'main']);
+    expect(r.status).toBe(EXIT.fail);
+    expect(r.out.trim()).toBe(`DOCS_CAP: CHANGELOG.md ${fs.statSync(path.join(repo.work, 'CHANGELOG.md')).size}/16 over`);
+    expect(r.err).toContain('DOCS_AUDIT_BLOCKED');
+    const explicit = runBin(repo, 'gstack-ship-receipt', ['docs-caps', '--policy', path.join(repo.work, '.gstack', 'ship-policy.json')]);
+    expect(explicit.status).toBe(EXIT.ok);
+    repo.git('update-ref', '-d', 'refs/remotes/origin/main');
+    const gone = runBin(repo, 'gstack-ship-receipt', ['docs-caps', '--base', 'main']);
+    expect(gone.status).toBe(EXIT.refused);
+    expect(gone.err).toContain('POLICY_SOURCE_UNAVAILABLE');
+  });
+
   test('the policy docs key validates its shape and needs min_gstack_version', () => {
     const codes = (raw: Record<string, unknown>) => validatePolicy(raw, { gstackVersion: '9.9.9.9' }).map(e => `${e.code}:${e.path}`);
     expect(codes({ docs: null })).toEqual([]);
@@ -194,5 +233,30 @@ describe('carry follow-ups: git floor, named refusal, branch-touched walk, digit
     expect(changed.status).toBe(EXIT.refused);
     expect(changed.err).toContain('RECEIPT_CARRY_PRODUCT_CHANGED');
     expect(changed.err).toContain('src.ts');
+  });
+
+  test('the carry walk names the branch product path and not a product path a base merge brought in', () => {
+    const repo = fixture();
+    makePr(repo, 'pr-walk', { expects: '1.2.4.0' });
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, '## Summary\n');
+    expect(runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '4', '--base', 'main', '--session-kind', 'x', '--body', body]).status).toBe(EXIT.ok);
+    repo.git('checkout', '-q', 'main');
+    fs.writeFileSync(path.join(repo.work, 'lib-base-only.ts'), 'export const base = 1;\n');
+    repo.git('add', 'lib-base-only.ts');
+    repo.git('commit', '-qm', 'base change');
+    repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'pr-walk');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    const merged = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main']);
+    expect(merged.status).toBe(EXIT.ok);
+    expect(merged.out).toContain('CARRY: carried');
+    fs.writeFileSync(path.join(repo.work, 'src.ts'), 'export const x = 2;\n');
+    repo.git('add', 'src.ts');
+    repo.git('commit', '-qm', 'product change after the merge');
+    const changed = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main']);
+    expect(changed.status).toBe(EXIT.refused);
+    expect(changed.err).toMatch(/product diff changed between [0-9a-f]{12} and [0-9a-f]{12}: src\.ts/);
+    expect(changed.err).not.toContain('lib-base-only.ts');
   });
 });

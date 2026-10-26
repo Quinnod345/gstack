@@ -10,7 +10,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { LATE_DEFER_PHASE, renderDeferredSection, reviewLoopLine, summarizeReviewLoop } from '../lib/review-scope';
+import { ALREADY_FILED_REASON, LATE_DEFER_SKILL, renderDeferredSection, reviewLoopLine, summarizeReviewLoop } from '../lib/review-scope';
+import { reviewFreshness } from '../lib/review-evidence';
 import { cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -18,19 +19,23 @@ const fixture = () => { const r = makeFixtureRepo({ prefix: 'review-scope-2-' })
 afterEach(() => { while (repos.length) cleanup(repos.pop()!); });
 
 describe('late defers from Step 11', () => {
-  test('a review row with phase late-defer adds its deferred findings and is not counted as a pass', () => {
+  test('a review-late-defer row adds its deferred findings, is not counted as a pass, and is invisible to review freshness', () => {
+    const late = { skill: LATE_DEFER_SKILL, via: 'ship', timestamp: '2026-10-26T10:30:00Z', pass: 2, review_scope: 'frozen', findings: [
+      { fingerprint: 'c:9:z', blocking: true, action: 'deferred', issue: null }, { fingerprint: 'b:1:y', blocking: true, action: 'deferred', issue: 5 }] };
     const rows = [
       { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:00:00Z', pass: 1, review_scope: 'frozen', findings: [
         { fingerprint: 'a:1:x', blocking: true, action: 'auto-fixed' }, { fingerprint: 'b:1:y', blocking: true, action: 'deferred', issue: 5 }] },
       { skill: 'review', via: 'ship', timestamp: '2026-10-26T10:20:00Z', pass: 2, review_scope: 'frozen', findings: [] },
-      { skill: 'review', via: 'ship', phase: LATE_DEFER_PHASE, timestamp: '2026-10-26T10:30:00Z', pass: 2, review_scope: 'frozen', findings: [
-        { fingerprint: 'c:9:z', blocking: true, action: 'deferred', issue: null }, { fingerprint: 'b:1:y', blocking: true, action: 'deferred', issue: 5 }] },
+      late,
       { skill: 'adversarial-review', via: 'ship', timestamp: '2026-10-26T10:25:00Z', findings: [{ fingerprint: 'd:1:w', blocking: true, action: 'deferred' }] },
     ];
     const s = summarizeReviewLoop(rows, '2026-10-26T09:30:00Z');
     expect(s).toEqual({ passes: 2, blocking_found: 3, deferred: 2, noted: 0, fixed: 1, scope: 'frozen' });
     expect(reviewLoopLine(s)).toBe('REVIEW_LOOP: passes=2 blocking_found=3 deferred=2 noted=0 fixed=1 scope=frozen');
-    expect(LATE_DEFER_PHASE).toBe('late-defer');
+    expect(LATE_DEFER_SKILL).toBe('review-late-defer');
+    // A `review` row logged without a start token would be the newest review row and read UNVERIFIED; the late-defer row is not a diff review at all.
+    expect(reviewFreshness(late, 'abc')).toBeUndefined();
+    expect(reviewFreshness({ ...late, skill: 'review' }, 'abc')?.status).toBe('UNVERIFIED');
   });
 });
 
@@ -68,6 +73,7 @@ describe('deferred-issue search page and the repository argument gh accepts', ()
     expect(records[0]).toMatchObject({ issue: 900, reason: 'filed; the marker search was truncated at 200, so an older issue may duplicate it' });
     expect(fs.readFileSync(full.log, 'utf8')).toContain('--limit 200');
     expect(renderDeferredSection(records)).toContain('- Deferred: #900 (filed; the marker search was truncated at 200, so an older issue may duplicate it) — CRITICAL `lib/legacy.ts:7` Unbounded delete');
+    expect(renderDeferredSection([{ ...records[0], issue: 9, reason: ALREADY_FILED_REASON }])).toContain('- Deferred: #9 — CRITICAL `lib/legacy.ts:7` Unbounded delete');
     const repo2 = fixture();
     const short = shim(repo2, 'PRIVATE', 199);
     const r2 = runBin(repo2, 'gstack-review-scope', ['defer', '--findings', classified, '--pr', '42', '--repo', 'acme/app', '--json'], { PATH: `${short.dir}:${process.env.PATH}` });

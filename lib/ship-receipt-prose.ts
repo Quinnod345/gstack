@@ -30,22 +30,28 @@ const ESCAPE = /[.*+?^${}()|[\]\\]/g;
 /**
  * Every `<name>=<n>`, `<name>: <n>` and `<n> <name>` in the prose (the body
  * without its receipt block), where `<name>` is a counter's leaf key with `_`
- * matched as `_`, space or `-`, compared with the receipt. A leaf key shared
- * by several counters (gate.passed and ci.passed) is checked against each.
+ * matched as `_`, space or `-` and not part of a longer word (`3 pass-through`
+ * is not a `pass` claim), compared with the receipt. A leaf key shared by
+ * several counters (`pass` under every gate lane, `passed` under gate and ci)
+ * names any of them: the claim matches when its number equals one of those
+ * counters, and a mismatch names the first of them.
  */
 export function checkReceiptProse(receipt: Record<string, unknown>, body: string): ProseCheck {
   const prose = body.replace(BLOCK_RE, '');
-  const counters = receiptCounters(receipt);
+  const byLeaf = new Map<string, Array<{ field: string; value: number }>>();
+  for (const [field, value] of receiptCounters(receipt)) {
+    const leaf = field.split('.').at(-1)!;
+    byLeaf.set(leaf, [...(byLeaf.get(leaf) ?? []), { field, value }]);
+  }
   const mismatches: ProseClaim[] = [];
   let checked = 0;
-  for (const [field, value] of counters) {
-    const leaf = field.split('.').at(-1)!;
+  for (const [leaf, counters] of byLeaf) {
     const name = leaf.replace(ESCAPE, '\\$&').replaceAll('_', '[ _-]');
-    const re = new RegExp(`(?:\\b${name}\\s*[=:]\\s*(\\d+)\\b|\\b(\\d+)\\s+${name}\\b)`, 'gi');
+    const re = new RegExp(`(?:(?<![\\w-])${name}\\s*[=:]\\s*(\\d+)\\b|\\b(\\d+)\\s+${name}(?![\\w-]))`, 'gi');
     for (const m of prose.matchAll(re)) {
       checked++;
       const n = Number(m[1] ?? m[2]);
-      if (n !== value) mismatches.push({ field, prose: n, receipt: value });
+      if (!counters.some(c => c.value === n)) mismatches.push({ field: counters[0]!.field, prose: n, receipt: counters[0]!.value });
     }
   }
   return { checked, mismatches };

@@ -88,7 +88,7 @@ puts in the receipt:
 |---|---|
 | `review_loop.passes` | review passes this ship ran (1 to 3) |
 | `review_loop.blocking_found` | distinct blocking findings across the passes |
-| `review_loop.deferred` | blocking findings in unchanged code filed as issues (a Step 11 late defer, logged as a `review` row with `phase: late-defer`, counts here and is not a pass) |
+| `review_loop.deferred` | blocking findings in unchanged code filed as issues (a Step 11 late defer, logged as a `review-late-defer` row so it never displaces the newest `review` pass, counts here and is not a pass) |
 | `review_loop.noted` | below-floor findings listed in the PR body |
 | `review_loop.fixed` | findings fixed in this PR |
 | `review_loop.scope` | the `review_scope` the loop ran under |

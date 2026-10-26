@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { EXIT } from '../lib/headless-artifacts';
+import { runScriptSync } from '../lib/script-invocation';
 
 const BIN = path.resolve(import.meta.dir, '../bin/gstack-coauthor-trailers');
 const temps: string[] = [];
@@ -52,7 +53,7 @@ function repo() {
   git(dir, ['checkout', '-q', 'port/contrib']);
   return dir;
 }
-const run = (cwd: string, args: string[]) => spawnSync(BIN, args, { cwd, env: ENV, encoding: 'utf8', timeout: 60_000 });
+const run = (cwd: string, args: string[]) => runScriptSync(BIN, args, { cwd, env: ENV, encoding: 'utf8', timeout: 60_000 });
 
 test('the default range is origin/HEAD..HEAD; authors print once each in first-appearance order without the porter', () => {
   const dir = repo();
@@ -78,4 +79,23 @@ test('--message appends only the missing trailers and is idempotent; a bad range
   expect(fs.readFileSync(file, 'utf8')).toBe(expected);
   expect(run(dir, ['nope..HEAD']).status).toBe(EXIT.fail);
   expect(run(dir, ['--bogus']).status).toBe(EXIT.usage);
+});
+
+test('--base takes a bare branch, an origin ref or a sha; a slash-named default branch still resolves through origin/; a leading dash is refused', () => {
+  const dir = repo();
+  const sha = git(dir, ['rev-parse', 'origin/main']);
+  for (const base of ['main', 'origin/main', sha]) {
+    const r = run(dir, ['--base', base]);
+    expect(r.status, base).toBe(EXIT.ok);
+    expect(r.stdout, base).toBe('Co-authored-by: Ada Contributor <Ada@Example.org>\nCo-authored-by: Bo Helper <bo@example.org>\n');
+  }
+  expect(run(dir, ['--base', 'main']).stderr.trim()).toBe('COAUTHORS: 2 in origin/main..HEAD');
+  git(dir, ['update-ref', 'refs/remotes/origin/release/1.2', 'refs/remotes/origin/main']);
+  git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/release/1.2']);
+  const slash = run(dir, []);
+  expect(slash.status).toBe(EXIT.ok);
+  expect(slash.stderr.trim()).toBe('COAUTHORS: 2 in origin/release/1.2..HEAD');
+  const dash = run(dir, ['--base', '--output=/dev/null']);
+  expect(dash.status).toBe(EXIT.usage);
+  expect(dash.stderr).toContain('cannot start with -');
 });

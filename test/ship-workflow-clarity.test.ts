@@ -217,7 +217,9 @@ test('a repository without a version source or CHANGELOG ships with one skipped 
 });
 
 test('Step 14.5 runs the doc caps before the verification gate and records the audit for the receipt, with the owner exception shape (E11)', () => {
-  expectOrdered(docsTemplate, ['### Continue or recover', 'gstack-ship-receipt docs-caps --policy .gstack/ship-policy.json', '`DOCS_CAP: <path> <bytes>/<max> ok|over`', '.gstack/tmp/docs-audit.json', '## Blocked recovery'], 'ship documentation section');
+  // The caps come from origin/<base>'s policy (a branch cannot raise its own cap), and the per-invocation record is cleared before the first launch.
+  expectOrdered(docsTemplate, ['rm -f .gstack/tmp/docs-audit.json', '### Continue or recover', 'gstack-ship-receipt docs-caps --base <base>', 'never the\nbranch\'s copy', '`DOCS_CAP: <path> <bytes>/<max> ok|over`', 'write the receipt\'s record to `.gstack/tmp/docs-audit.json`', '## Blocked recovery'], 'ship documentation section');
+  expectAbsent(docsTemplate, ['docs-caps --policy .gstack/ship-policy.json'], 'ship documentation section cap source');
   expectTokens(docs, ['`DOCS_CAP: none declared`', '"status":"updated|current"', '"status":"blocked"', '"exception":{"accepted_by"', '`DOCS_AUDIT_BLOCKED`', 'An unattended run has no owner to accept: it stops here.'], 'ship documentation section');
   const compose = between(prTemplate, 'Handoff record first', '**Existing open PR/MR**');
   expectTokens(compose, ['--docs @.gstack/tmp/docs-audit.json', '`DOCS_AUDIT_BLOCKED`'], 'ship pr-body receipt write');
@@ -226,13 +228,16 @@ test('Step 14.5 runs the doc caps before the verification gate and records the a
 
 test('Step 9.4 applies the cap before any edit, names its scratch files under .gstack/tmp/, logs Step 11 late defers, and hands reviewers the range from pass 2 (PR 1 review notes)', () => {
   const fixFirst = between(reviewTemplate, '## Step 9.4:', '### Decide whether to repeat Step 9');
-  expectOrdered(fixFirst, ['0. **Scope the findings.**', '.gstack/tmp/review-findings-p$PASS.json', '.gstack/tmp/review-classified-p$PASS.json', '1. **Apply the cap before any edit, then classify.**', '2. **Auto-fix all AUTO-FIX items.**', '**Late defers from Step 11.**', '"phase":"late-defer"', '6. Persist the review result'], 'ship Step 9.4');
+  expectOrdered(fixFirst, ['0. **Scope the findings.**', '.gstack/tmp/review-findings-p$PASS.json', '.gstack/tmp/review-classified-p$PASS.json', '1. **Apply the cap before any edit, then classify.**', '2. **Auto-fix all AUTO-FIX items.**', '**Late defers from Step 11.**', '"skill":"review-late-defer"', '6. Persist the review result'], 'ship Step 9.4');
   expectTokens(compact(fixFirst), ['`.gstack/tmp/review-deferred.json`', '`CYCLES >= 3`', '`PASS >= 3`', 'no `--finish` token'], 'ship Step 9.4');
-  expectTokens(reviewFlow, ['`DIFF_BASE=${RANGE_BASE:-$(git merge-base origin/<base> HEAD)}`', 'RANGE_BASE..HEAD'], 'ship Step 9 range');
+  // The sha is written into each dispatched prompt: a reviewer's shell never sees the parent's RANGE_BASE, so a variable there would silently widen the read.
+  expectTokens(reviewFlow, ['`DIFF_BASE=<diff-base>`', 'RANGE_BASE..HEAD', 'never sees your shell\'s `RANGE_BASE`'], 'ship Step 9 range');
+  expectAbsent(reviewFlow, ['DIFF_BASE=${RANGE_BASE'], 'ship Step 9 range fallback');
   for (const host of ALL_HOST_CONFIGS) {
     const army = generateReviewArmy({ host: host.name, skillName: 'ship', tmplPath: '', paths: HOST_PATHS[host.name] });
     if (!army) continue;
-    expect(army.match(/DIFF_BASE=\$\{RANGE_BASE:-\$\(git merge-base origin\/<base> HEAD\)\}/g)?.length, `${host.name} ship review army range`).toBe(2);
+    expect(army.match(/DIFF_BASE=<diff-base>/g)?.length, `${host.name} ship review army range`).toBe(2);
+    expectAbsent(army, ['${RANGE_BASE'], `${host.name} ship review army fallback`);
     expectTokens(army, ['--review-fanout auto|serial|parallel', /Fan-out: N specialists in\s+M batches of K/], `${host.name} ship review army fan-out`);
     const review = generateReviewArmy({ host: host.name, skillName: 'review', tmplPath: '', paths: HOST_PATHS[host.name] });
     expectAbsent(review, ['RANGE_BASE', '--review-fanout'], `${host.name} /review army`);

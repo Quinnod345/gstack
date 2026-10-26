@@ -165,7 +165,7 @@ export function createShipFrozenScopeFixture(workflow: string, root = fs.mkdtemp
 
 Supported interactions, declared before launch:
 - Read: ${workflowPath}, ${invoice}, ${payments}, and any file under ${tmp}/ once it exists.
-- Edit or Write: ${invoice} only, and only to apply a fix for a finding the classified output scopes \`fix\`. ${payments} is never written in this fixture. Write also accepts ${draft}, the item-6 review record of the current pass: the JSON object the gstack-review-log example takes (skill, timestamp, status, issues_found, critical, informational, quality_score 10.0, specialists {}, findings with fingerprint, severity, action and the copied locus, kind and blocking, commit, via "ship", completed, converged, cycles, pass, review_scope, range_base).
+- Edit or Write: ${invoice} only, and only to apply a fix for a finding the classified output scopes \`fix\`. ${payments} is never written in this fixture. Write also accepts ${draft}, the item-6 review record of the current pass: the JSON object the gstack-review-log example takes (skill, timestamp, status, issues_found, critical, informational, quality_score 10.0, specialists {}, findings with fingerprint, severity, action and the copied locus, kind and blocking, commit, via "ship", completed, converged, cycles, pass, review_scope, range_base). The record's commit is the short HEAD: ${head.slice(0, 7)} now, and the sha the commit adapter prints after it commits a fix; no git command is needed for it.
 - Bash accepts exactly these single commands, without chaining, redirection or backgrounding. Each is the bound adapter for the generated helper command it names and does not decide which item or decision applies:
   ${commands.classify} runs gstack-review-scope classify for the current pass against this pass's .gstack/tmp/review-findings-p$PASS.json (--range-base is bound from pass 2 on); it writes .gstack/tmp/review-classified-p$PASS.json and prints the REVIEW_SCOPE line and the classified JSON.
   ${commands.defer} runs gstack-review-scope defer on the current pass's classified file; it writes .gstack/tmp/review-deferred.json and prints the DEFERRED lines and the rendered PR-body sections (gh is absent here, so a deferred finding stays unfiled with its reason).
@@ -198,7 +198,8 @@ export async function shipFrozenScopeFailures(fixture: ReturnType<typeof createS
   const failures: string[] = [];
   const check = (ok: boolean, message: string) => { if (!ok) failures.push(message); };
   check(result.exitReason === 'success', `actor ended: ${result.exitReason}`);
-  check(evidence.refusals.length === 0 && !evidence.executions.some(event => !event.allowed), `undeclared interaction: ${evidence.refusals.join('; ')}`);
+  const denied = evidence.executions.filter(event => !event.allowed).map(event => `${event.tool} ${JSON.stringify(event.input).slice(0, 160)}`);
+  check(evidence.refusals.length === 0 && denied.length === 0, `undeclared interaction: ${[...evidence.refusals, ...denied].join('; ')}`);
   check(evidence.payments === evidence.originalPayments, 'pre-existing payments.ts was edited: the frozen scope fixes only the diff');
   try {
     const url = `${pathToFileURL(fixture.invoice).href}?v=${randomUUID()}`;

@@ -159,8 +159,11 @@ export const POLICY_EXPLANATIONS: Record<PolicyKey, string> = {
 export const POLICY_COMPAT_FLOOR = '1.91.98.0';
 export const SHIP_QUEUE_KEYS_VERSION = '1.91.108.0';
 export const TRAIN_KEYS_VERSION = '1.91.146.0';
-export const REVIEW_SCOPE_KEY_VERSION = '1.91.249.0';
-export const DOCS_CAPS_KEY_VERSION = '1.91.250.0';
+// Each constant is the release that first reads its key: a policy declaring the key must name at least
+// that version as min_gstack_version, so an older gstack refuses the policy by name instead of failing on
+// an unknown key. review_scope shipped in 1.91.256.0 (#3481); docs.caps ships in the release after it.
+export const REVIEW_SCOPE_KEY_VERSION = '1.91.256.0';
+export const DOCS_CAPS_KEY_VERSION = '1.91.257.0';
 export const POLICY_KEY_INTRODUCED: Record<PolicyKey, string> = {
   bump: '1.91.73.0', queue_mode: '1.91.73.0', release_tool: '1.91.73.0', release_outputs: '1.91.73.0', stamp_paths: '1.91.73.0',
   changelog: '1.91.73.0', mirror: '1.91.73.0', history: '1.91.73.0', preregistration_shas: '1.91.73.0', stamp_sensitive_gates: '1.91.73.0',

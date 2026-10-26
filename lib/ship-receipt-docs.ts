@@ -47,12 +47,6 @@ export function docsExceptionLine(docs: ReceiptDocs): string | null {
   return `Documentation exception: accepted by ${e.accepted_by} ${e.date} via ${e.via}: ${e.reason}`;
 }
 
-/** The `docs` object a receipt carries, when it validates; receipts written before this record have none. */
-export function receiptDocs(receipt: Record<string, unknown>): ReceiptDocs | undefined {
-  const parsed = parseReceiptDocs(receipt.docs);
-  return parsed.ok ? parsed.docs : undefined;
-}
-
 // ---------------------------------------------------------------------------
 // doc caps: `docs.caps` in .gstack/ship-policy.json
 // ---------------------------------------------------------------------------

@@ -231,7 +231,7 @@ export const RELEASE_RESULT_CODES = {
   },
   DOCS_AUDIT_BLOCKED: {
     anchor: 'docs-audit-blocked',
-    summary: 'the documentation audit (/ship Step 14.5) is blocked and no owner exception is recorded, or a declared doc cap is over, so gstack-ship-receipt write refused to record the ship as audited',
+    summary: 'the documentation audit (/ship Step 14.5) is blocked: gstack-ship-receipt docs-caps found a declared doc cap over, or gstack-ship-receipt write was given a blocked audit with no owner exception and refused to record the ship as audited',
     fix: 'repair the audit (or trim the doc named by the DOCS_CAP: over line) and rerun Step 14.5; when the owner accepts the named risk, record it as docs.exception { accepted_by, date, via, reason } and carry the same line in the PR body\'s Documentation section',
   },
   RECEIPT_PROSE_MISMATCH: {

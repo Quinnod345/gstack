@@ -38,6 +38,16 @@ describe('checkReceiptProse', () => {
     expect(proseLine(bad)).toBe('PROSE: mismatch review_loop.passes body=3 receipt=2; review_loop.deferred body=2 receipt=1');
     expect(proseLine(checkReceiptProse(receipt, 'PR #7 adds the docs.'))).toBe('PROSE: no receipt counter claims in the body');
   });
+
+  test('a leaf key shared by several counters matches any of them, and a hyphenated word is not a claim', () => {
+    // /ship writes the gate per lane ({"<lane>":{pass,fail,skip}}), so `pass` names every lane and `passed` names gate and ci alike.
+    const lanes = { ...receipt, gate: { unit: { pass: 41, fail: 0, skip: 2 }, e2e: { pass: 7, fail: 0, skip: 0 } }, ci: { status: 'success', passed: 31, failed: 0 } };
+    expect(checkReceiptProse(lanes, 'unit: pass=41, e2e pass: 7; CI passed: 31.')).toEqual({ checked: 3, mismatches: [] });
+    expect(checkReceiptProse(lanes, '3 pass-through tests and the fail-fast path; blocking-found: 2.')).toEqual({ checked: 1, mismatches: [] });
+    const bad = checkReceiptProse(lanes, 'pass: 40');
+    expect(bad.mismatches).toEqual([{ field: 'gate.unit.pass', prose: 40, receipt: 41 }]);
+    expect(checkReceiptProse(receipt, 'Gate passed: 41. CI passed=41.').mismatches).toEqual([]);
+  });
 });
 
 describe('gstack-ship-receipt read --check-prose', () => {

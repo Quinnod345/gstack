@@ -88,9 +88,14 @@ Print the selection:
 "Dispatching N specialists: [names]. Skipped: [names] (scope not detected). Gated: [names] (0 findings in N+ reviews)."`;
 }
 
-/** The diff command every dispatched reviewer runs: in /ship, pass 2+ reads the range since the previous pass (RANGE_BASE), never the whole branch again. */
+/**
+ * The diff command every dispatched reviewer runs. In /ship the parent writes the
+ * base sha into the prompt (the merge base on pass 1, RANGE_BASE from pass 2 on):
+ * a reviewer is its own process and never sees the parent's shell variables, so a
+ * `$RANGE_BASE` reference there would silently fall back to the whole branch.
+ */
 function diffBase(ctx: TemplateContext): string {
-  return ctx.skillName === 'ship' ? 'DIFF_BASE=${RANGE_BASE:-$(git merge-base origin/<base> HEAD)}' : 'DIFF_BASE=$(git merge-base origin/<base> HEAD)';
+  return ctx.skillName === 'ship' ? 'DIFF_BASE=<diff-base>' : 'DIFF_BASE=$(git merge-base origin/<base> HEAD)';
 }
 
 function generateSpecialistDispatch(ctx: TemplateContext): string {
@@ -134,7 +139,7 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 5. Instructions:
 
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
-\`${diffBase(ctx)} && git diff "$DIFF_BASE"\` to get the ${ctx.skillName === 'ship' ? 'diff (the whole branch on pass 1; from pass 2 on, RANGE_BASE is set and the diff is the range since the previous pass)' : 'full diff'}. Apply the checklist against the diff.
+\`${diffBase(ctx)} && git diff "$DIFF_BASE"\` to get the ${ctx.skillName === 'ship' ? 'diff (`<diff-base>`: write the sha in before dispatch, the merge base on pass 1 and `RANGE_BASE` from pass 2 on; never a shell variable)' : 'full diff'}. Apply the checklist against the diff.
 
 \`NO FINDINGS\` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line:
 {\\"severity\\":\\"CRITICAL|INFORMATIONAL\\",\\"confidence\\":N,\\"path\\":\\"file\\",\\"line\\":N,\\"category\\":\\"category\\",\\"summary\\":\\"description\\",\\"fix\\":\\"recommended fix\\",\\"fingerprint\\":\\"path:line:category\\",\\"specialist\\":\\"name\\"}

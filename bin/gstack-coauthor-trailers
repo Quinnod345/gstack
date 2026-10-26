@@ -48,15 +48,20 @@ function main(argv: string[]): number {
     else if (range) { process.stderr.write(`gstack-coauthor-trailers: one range only\n${HELP}\n`); return EXIT.usage; }
     else range = arg;
   }
+  if ((range ?? base ?? '').startsWith('-')) { process.stderr.write(`gstack-coauthor-trailers: a range or base cannot start with -\n${HELP}\n`); return EXIT.usage; }
   const root = git(['rev-parse', '--show-toplevel']);
   if (!root.ok) { process.stderr.write('gstack-coauthor-trailers: not inside a git repository\n'); return EXIT.fail; }
   if (!range) {
+    // The base branch name may itself hold a slash (release/1.2), so "has a slash" is not "already qualified":
+    // origin/<ref> wins when it resolves; a sha or a ref that only resolves as given is used as given.
     const ref = base ?? resolveBaseBranch(root.out);
-    range = `${/^[0-9a-f]{7,64}$/i.test(ref) || ref.includes('/') ? ref : `origin/${ref}`}..HEAD`;
+    const qualified = /^[0-9a-f]{7,64}$/i.test(ref) || ref.startsWith('origin/') ? ref
+      : git(['rev-parse', '--verify', '--quiet', `origin/${ref}^{commit}`]).ok ? `origin/${ref}` : ref;
+    range = `${qualified}..HEAD`;
   }
   const self = /<([^>]*)>/.exec(git(['var', 'GIT_COMMITTER_IDENT']).out)?.[1]?.toLowerCase();
   if (self) excludes.add(self);
-  const log = git(['log', '--no-merges', '--reverse', '--format=%an%x1f%ae', range]);
+  const log = git(['log', '--no-merges', '--reverse', '--format=%an%x1f%ae', '--end-of-options', range]);
   if (!log.ok) { process.stderr.write(`gstack-coauthor-trailers: cannot read ${range}: ${log.err.split('\n')[0] ?? ''}\n`); return EXIT.fail; }
   const authors = new Map<string, { name: string; email: string }>();
   for (const line of log.out.split('\n').filter(Boolean)) {

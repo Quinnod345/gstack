@@ -13,7 +13,7 @@
  *   gstack-ship-receipt result (--pr <n> [--repo <owner/repo>] | --body <file>) [--head <sha>] [--out <dir>] [--json]
  *   gstack-ship-receipt census --repo <owner/repo> --since <tag|YYYY-MM-DD> [--cohort <file>] [--limit <n>] [--json]
  *   gstack-ship-receipt carry (--pr <n> [--repo <owner/repo>] | --body <file>) [--base <ref>] [--head <sha>] [--dry-run] [--out <dir>] [--json]
- *   gstack-ship-receipt docs-caps [--policy <ship-policy.json>] [--json]
+ *   gstack-ship-receipt docs-caps [--base <ref>] [--policy <ship-policy.json>] [--json]
  *
  * `write` validates against `gstack-artifact schema ship-receipt`, prints the
  * fenced block (and SHIP_RECEIPT: <identifiers> on stderr), writes it to --out,
@@ -36,7 +36,7 @@ import { EXIT, exitTableHelp, type ShipReceipt } from '../lib/headless-artifacts
 import { resultLine, resultLineWithDocs } from '../lib/result-codes';
 import { versionAtRef } from '../lib/restamp';
 import { readPregateFile, verifyPregate } from '../lib/pregate/index';
-import { DEFAULT_POLICY, SHIP_POLICY_PATH, isUnavailable, loadPolicyFromBase, matchesAny, resolveBaseBranch, stampFilesInTree, validatePolicy, type ShipPolicy } from '../lib/ship-policy';
+import { isUnavailable, loadPolicyFromBase, matchesAny, policyUnavailableLine, resolveBaseBranch, stampFilesInTree, validatePolicy, type ShipPolicy } from '../lib/ship-policy';
 import { approvalForReceipt } from '../lib/approval-citations';
 import {
   CARRY_METADATA_GLOBS, CARRY_NAMED_PATHS, CARRY_TEST_GLOBS,
@@ -66,8 +66,9 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
                                       posts the body (gh pr edit) and prints GSTACK_RESULT: skill=ship status=complete;
                                       RECEIPT_CARRY_PRODUCT_CHANGED / RECEIPT_CARRY_REFUSED leave the body unchanged (exit 3);
                                       needs git >= 2.39 (RECEIPT_GIT_TOO_OLD)
-  docs-caps [--policy <file>]         /ship Step 14.5: one DOCS_CAP: <path> <bytes>/<max> ok|over line per docs.caps entry of the
-                                      policy (default .gstack/ship-policy.json); any over (or absent) file exits 1 (DOCS_AUDIT_BLOCKED)
+  docs-caps [--base <ref>]            /ship Step 14.5: one DOCS_CAP: <path> <bytes>/<max> ok|over line per docs.caps entry of the
+                                      reviewed policy (origin/<base>'s .gstack/ship-policy.json; --policy <file> reads that file
+                                      instead); any over (or absent) file exits 1 (DOCS_AUDIT_BLOCKED)
 
 write flags: --pr --head --base --version --gated-tree --predecessor --gate <json|@file> --ci <json|@file> --spend-usd
   --session-kind --artifacts-consumed <n>/<m> --run --thread --receipt <tree-receipt.json> --policy --preregistration
@@ -115,16 +116,20 @@ function gh(args: string[]): { ok: boolean; out: string; err: string } {
  * policy stamp file and no CHANGELOG at HEAD has no release version to record,
  * and the receipt says so with `"none"` (docs/ship-policy.md#ship-receipt);
  * `read`, `result` and the queue accept it like any other version string.
+ * Only an absent source is `"none"`: a VERSION that exists but holds no
+ * parsable version, a pin that escapes the repository, or an unreadable base
+ * policy keeps the existing no-version refusal.
  */
 function receiptVersion(repoRoot: string, head: string, base: string): string | undefined {
   const atHead = versionAtRef(repoRoot, head);
   if ('version' in atHead) return atHead.version;
+  if (!/ does not exist at /.test(atHead.error)) return undefined;
   const show = (rel: string) => git(['show', `${head}:${rel}`], repoRoot);
   try { const v = JSON.parse(show('package.json') ?? 'null')?.version; if (typeof v === 'string' && v.trim()) return v.trim(); } catch { /* not a manifest */ }
   const load = loadPolicyFromBase(repoRoot, base);
-  const policy = isUnavailable(load) ? DEFAULT_POLICY : load.policy;
-  const changelogs = [...new Set([policy.changelog, 'CHANGELOG.md'].filter((p): p is string => !!p))];
-  if (stampFilesInTree(repoRoot, head, policy.stamp_files).length || changelogs.some(p => show(p) !== undefined)) return undefined;
+  if (isUnavailable(load)) return undefined;
+  const changelogs = [...new Set([load.policy.changelog, 'CHANGELOG.md'].filter((p): p is string => !!p))];
+  if (stampFilesInTree(repoRoot, head, load.policy.stamp_files).length || changelogs.some(p => show(p) !== undefined)) return undefined;
   return 'none';
 }
 
@@ -524,26 +529,39 @@ function cmdCensus(rest: string[], json: boolean): number {
 }
 
 /**
- * /ship Step 14.5's doc-cap check: every `docs.caps` entry of the policy against
- * the working tree, one DOCS_CAP: line each; any `over` (an absent file counts)
- * exits 1 so the audit blocks before the verification gate.
+ * /ship Step 14.5's doc-cap check: every `docs.caps` entry of the reviewed
+ * policy (origin/<base>'s .gstack/ship-policy.json, like every other policy
+ * read here; the branch cannot raise its own cap) against the working tree,
+ * one DOCS_CAP: line each; any `over` (an absent file counts) exits 1 so the
+ * audit blocks before the verification gate. `--policy <file>` reads that
+ * file instead, for a repository bootstrapping its policy.
  */
 function cmdDocsCaps(rest: string[], json: boolean): number {
   const repoRoot = git(['rev-parse', '--show-toplevel']) ?? process.cwd();
-  const policyFile = flag(rest, '--policy') ?? path.join(repoRoot, SHIP_POLICY_PATH);
-  let policy: Partial<ShipPolicy> = {};
-  if (fs.existsSync(policyFile)) {
+  const policyFile = flag(rest, '--policy');
+  let caps: NonNullable<ShipPolicy['docs']>['caps'] = [];
+  let source: string;
+  if (policyFile !== undefined) {
+    if (!fs.existsSync(policyFile)) { process.stderr.write(`gstack-ship-receipt docs-caps: ${policyFile} does not exist\n`); return EXIT.usage; }
     let raw: unknown;
     try { raw = JSON.parse(fs.readFileSync(policyFile, 'utf8')); } catch (e: any) { process.stderr.write(`gstack-ship-receipt docs-caps: ${policyFile} is not JSON: ${e.message}\n`); return EXIT.fail; }
     const errors = validatePolicy(raw).filter(e => e.path === 'docs' || e.path.startsWith('docs.'));
     if (errors.length) { for (const e of errors) process.stderr.write(resultLine('gstack-ship-receipt docs-caps', e.code, `${e.message} at ${e.path}`) + '\n'); return EXIT.fail; }
-    policy = raw as Partial<ShipPolicy>;
-  } else if (flag(rest, '--policy')) { process.stderr.write(`gstack-ship-receipt docs-caps: ${policyFile} does not exist\n`); return EXIT.usage; }
-  const caps = policy.docs?.caps ?? [];
+    caps = (raw as Partial<ShipPolicy>).docs?.caps ?? [];
+    source = policyFile;
+  } else {
+    const base = flag(rest, '--base') ?? resolveBaseBranch(repoRoot);
+    const load = loadPolicyFromBase(repoRoot, base);
+    if (isUnavailable(load)) { process.stderr.write(policyUnavailableLine('gstack-ship-receipt docs-caps', base, `${load.detail}; pass --policy <file> to check caps without the base`) + '\n'); return EXIT.refused; }
+    const errors = load.errors.filter(e => e.path === 'docs' || e.path.startsWith('docs.'));
+    if (errors.length) { for (const e of errors) process.stderr.write(resultLine('gstack-ship-receipt docs-caps', e.code, `${e.message} at ${e.path} (${load.source.label})`) + '\n'); return EXIT.fail; }
+    caps = load.policy.docs?.caps ?? [];
+    source = load.source.label;
+  }
   const results = checkDocsCaps(caps, rel => { try { const st = fs.statSync(path.join(repoRoot, rel)); return st.isFile() ? st.size : null; } catch { return null; } });
   const over = results.filter(r => r.verdict === 'over');
   const lines = results.length ? results.map(docsCapLine) : ['DOCS_CAP: none declared'];
-  process.stdout.write(json ? JSON.stringify({ policy: policyFile, caps: results, over: over.length }) + '\n' : lines.join('\n') + '\n');
+  process.stdout.write(json ? JSON.stringify({ policy: source, caps: results, over: over.length }) + '\n' : lines.join('\n') + '\n');
   if (!over.length) return EXIT.ok;
   process.stderr.write(resultLineWithDocs('gstack-ship-receipt docs-caps', 'DOCS_AUDIT_BLOCKED', `${over.length} of ${results.length} documentation cap${results.length === 1 ? '' : 's'} over: ${over.map(r => r.path).join(', ')}`) + '\n');
   return EXIT.fail;

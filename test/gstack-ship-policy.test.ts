@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { DEFAULT_POLICY, POLICY_KEYS, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
+import { DEFAULT_POLICY, POLICY_KEYS, REVIEW_SCOPE_KEY_VERSION, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
 import { fillDue } from '../lib/ship-queue-train';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
@@ -32,8 +32,10 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(codes({ pr_count: { default_pr_count: 0, split_requires_owner: 'yes' } })).toEqual(['POLICY_INVALID:pr_count.default_pr_count', 'POLICY_INVALID:pr_count.split_requires_owner']);
     expect(codes({ review_scope: 'loose' })).toEqual(['POLICY_INVALID:review_scope', 'POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'all' })).toEqual(['POLICY_INVALID:review_scope']);
-    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual([]);
-    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'all', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
+    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
+    // The constant is the release that first read the key (1.91.256.0, #3481); an earlier minimum would admit a gstack that fails on the unknown key.
+    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual(['POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'frozen' })).toEqual([]);
     expect(codes([])).toEqual(['POLICY_INVALID:']);
   });

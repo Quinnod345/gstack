@@ -15,12 +15,12 @@ Finish the complete review and QA before applying any fix in Step 9.4.
 
 **Pass 2+ reads the range, not the tree** (`review_scope frozen`): the core read
 in item 2 becomes `git diff $RANGE_BASE`, and every dispatched prompt (specialists,
-Red Team, the Step 11 native and outside reviewers) runs
-`DIFF_BASE=${RANGE_BASE:-$(git merge-base origin/<base> HEAD)}`, so with `RANGE_BASE`
-exported from pass 2 on every reviewer reads what changed since the previous pass
-and an outside backend receives the range `RANGE_BASE..HEAD`, never the whole branch
-again. Unset `RANGE_BASE` on pass 1 and under `review_scope all`, where every pass
-reads the full diff. The gate scan (2.5) and the QA probes keep the whole candidate:
+Red Team, the Step 11 reviewers) carries a literal sha you write in:
+`DIFF_BASE=<diff-base>`, the merge base on pass 1 and `RANGE_BASE` from pass 2 on.
+A reviewer never sees your shell's `RANGE_BASE`; a variable left in a prompt
+re-reads the whole branch. An outside backend receives the range `RANGE_BASE..HEAD`.
+Under `review_scope all` every pass reads the full diff. The gate scan (2.5) and
+the QA probes keep the whole candidate:
 they are tools, not reviewers. `NO FINDINGS` is the expected result for a clean range.
 
 ## Confidence Calibration
@@ -382,7 +382,7 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 5. Instructions:
 
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
-`DIFF_BASE=${RANGE_BASE:-$(git merge-base origin/<base> HEAD)} && git diff "$DIFF_BASE"` to get the diff (the whole branch on pass 1; from pass 2 on, RANGE_BASE is set and the diff is the range since the previous pass). Apply the checklist against the diff.
+`DIFF_BASE=<diff-base> && git diff "$DIFF_BASE"` to get the diff (`<diff-base>`: write the sha in before dispatch, the merge base on pass 1 and `RANGE_BASE` from pass 2 on; never a shell variable). Apply the checklist against the diff.
 
 `NO FINDINGS` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line:
 {\"severity\":\"CRITICAL|INFORMATIONAL\",\"confidence\":N,\"path\":\"file\",\"line\":N,\"category\":\"category\",\"summary\":\"description\",\"fix\":\"recommended fix\",\"fingerprint\":\"path:line:category\",\"specialist\":\"name\"}
@@ -553,7 +553,7 @@ The Red Team subagent receives:
 
 Prompt, after the defensive framing and fixture handling from item 4 of the specialist dispatch: "You are a red team reviewer. The code has already been reviewed by N specialists
 who found the following issues: {merged findings summary}. Your job is to find what they
-MISSED. Read the checklist at {red-team checklist path}, list changed files with `DIFF_BASE=${RANGE_BASE:-$(git merge-base origin/<base> HEAD)} && git diff --name-status "$DIFF_BASE"`, read them as that fixture handling says, and look for gaps.
+MISSED. Read the checklist at {red-team checklist path}, list changed files with `DIFF_BASE=<diff-base> && git diff --name-status "$DIFF_BASE"`, read them as that fixture handling says, and look for gaps.
 Output findings as JSON objects (same schema as the specialists), or `NO FINDINGS` alone, the expected result when they missed nothing. Focus on cross-cutting
 concerns, integration boundary issues, and failure modes that specialist checklists
 don't cover."
@@ -722,8 +722,8 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    Step 19's PR body. Deferred and noted findings are never edited.
    **Late defers from Step 11.** When Step 11's finish rules run this item for a
    queued adversarial finding after this pass's items 5–6 were logged, append one
-   row so the receipt's summary counts the deferral (it is not a pass):
-   `~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"review","via":"ship","phase":"late-defer","timestamp":"TIMESTAMP","status":"issues_found","issues_found":0,"critical":0,"informational":0,"pass":PASS,"review_scope":"SCOPE","findings":FINDINGS_JSON}'`
+   row under its own skill (a tokenless `review` row would read UNVERIFIED):
+   `~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"review-late-defer","via":"ship","timestamp":"TIMESTAMP","status":"issues_found","issues_found":0,"critical":0,"informational":0,"pass":PASS,"review_scope":"SCOPE","findings":FINDINGS_JSON}'`
    with `findings` holding only the deferred records (`action: "deferred"`, `issue`,
    `locus`, `kind`, `blocking` as in item 6) and no `--finish` token.
 
