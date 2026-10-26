@@ -6,8 +6,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { EXIT } from '../lib/headless-artifacts';
-import { DEFAULT_POLICY, POLICY_KEYS, REVIEW_SCOPE_KEY_VERSION, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
+import { DEFAULT_POLICY, POLICY_KEYS, POLICY_KEY_INTRODUCED, REVIEW_SCOPE_KEY_VERSION, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
 import { fillDue } from '../lib/ship-queue-train';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
@@ -70,6 +71,23 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(matchesAny(['a+b(c).md'], 'a+b(c).md')).toBe(true);
     expect(() => globToRegExp('?'.repeat(150))).toThrow(/512/);
     expect(validatePolicy({ stamp_paths: ['?'.repeat(150)] }).map(e => e.code)).toEqual(['POLICY_CONTAINMENT']);
+  });
+});
+
+describe('policy key versions against the CHANGELOG', () => {
+  test('an unreleased key names the release right after the newest heading; a released key has a heading', () => {
+    // The base branch's CHANGELOG counts too: a stamp-at-merge branch carries main's headings only after the slot merge.
+    const root = path.join(import.meta.dir, '..');
+    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+    const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.stdout ?? '');
+    const headings = [...text.matchAll(/^## \[(\d+\.\d+\.\d+\.\d+)\]/gm)].map(m => m[1]!.split('.').map(Number));
+    const newest = headings.sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!).at(-1)!;
+    const next = `${newest[0]}.${newest[1]}.${newest[2]! + 1}.0`;
+    const released = new Set(headings.map(h => h.join('.')));
+    for (const [key, version] of Object.entries(POLICY_KEY_INTRODUCED)) {
+      if (released.has(version)) continue;
+      expect(version, `${key} is introduced in ${version}, which has no CHANGELOG heading; an unreleased key names the next release ${next} (move it when the stamp lands elsewhere)`).toBe(next);
+    }
   });
 });
 

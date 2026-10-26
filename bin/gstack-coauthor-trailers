@@ -9,9 +9,10 @@
  * `<base>..HEAD`, base `origin/HEAD`'s branch) other than this checkout's own
  * committer identity and any --exclude, and prints one
  * `Co-authored-by: Name <email>` line per author in first-appearance order.
- * With --message <file>, the trailers the file lacks are appended after a
- * blank line (idempotent; existing trailers are matched by email, case
- * folded), so a port's own fix commits keep the original author's credit.
+ * With --message <file>, the trailers the file lacks join its trailer block
+ * (after a blank line when it has none; idempotent; existing trailers are
+ * matched by email, case folded), so a port's own fix commits keep the
+ * original author's credit.
  * Exit: 0 printed · 1 the range does not resolve · 2 usage.
  */
 import * as fs from 'node:fs';
@@ -77,12 +78,11 @@ function main(argv: string[]): number {
     const present = new Set([...text.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)].map(m => m[1]!.toLowerCase()));
     appended = [...authors.entries()].filter(([key]) => !present.has(key)).map(([, a]) => `Co-authored-by: ${a.name} <${a.email}>`);
     if (appended.length) {
-      // Trailers are one paragraph: a blank line before the new ones would make git (and GitHub's
-      // attribution) read only the last paragraph as the trailer block and drop the existing co-authors.
-      const body = text.replace(/\s+$/, '');
-      const cut = body.lastIndexOf('\n\n');
-      const endsInTrailer = cut >= 0 && body.slice(cut + 2).split('\n').every(l => /^[A-Za-z][\w-]*: \S/.test(l));
-      fs.writeFileSync(message, (body ? body + (endsInTrailer ? '\n' : '\n\n') : '') + appended.join('\n') + '\n');
+      // git places the lines in the message's trailer block (joining an existing block, above comment
+      // lines, CRLF kept), so an existing co-author keeps GitHub's attribution; a separate paragraph would not.
+      if (!fs.existsSync(message)) fs.writeFileSync(message, '');
+      const placed = git(['interpret-trailers', '--in-place', ...appended.flatMap(t => ['--trailer', t]), message]);
+      if (!placed.ok) { process.stderr.write(`gstack-coauthor-trailers: cannot append to ${message}: ${placed.err.split('\n')[0] ?? ''}\n`); return EXIT.fail; }
     }
   }
   if (argv.includes('--json')) process.stdout.write(JSON.stringify({ range, authors: [...authors.values()], trailers, appended }) + '\n');
