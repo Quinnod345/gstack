@@ -122,10 +122,22 @@ describe.skipIf(process.platform === 'win32')('#915 proxy from the environment, 
     expect(proxiedHosts.length).toBe(before);
   }, 120_000);
 
-  test('a curl-style HTTPS_PROXY warns and falls back to direct instead of failing', async () => {
+  test('a scheme-less HTTPS_PROXY is the configured http:// proxy (#3440), redacted in the start line and the state', async () => {
+    expect((await browse(['stop'], {})).code).toBe(0);
+    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'user:secret@proxy.corp:8080' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.stderr).toContain('Starting server with proxy http://***:***@proxy.corp:8080/ from HTTPS_PROXY...');
+    expect(r.stderr).not.toContain('warning: HTTPS_PROXY is not a proxy URL');
+    expect(r.out).not.toContain('secret');
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    expect(state.proxy).toBe('http://***:***@proxy.corp:8080/');
+    expect(state.proxySource).toBe('HTTPS_PROXY');
+  }, 120_000);
+
+  test('an HTTPS_PROXY that does not parse even as http:// warns and falls back to direct instead of failing', async () => {
     expect((await browse(['stop'], {})).code).toBe(0);
     const before = proxiedHosts.length;
-    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'user:secret@proxy.corp:8080' });
+    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { HTTPS_PROXY: 'ftp://user:secret@proxy.corp:21' });
     expect(r.code, r.out).toBe(0);
     expect(r.stderr).toContain('warning: HTTPS_PROXY is not a proxy URL browse can use');
     expect(r.stderr).toContain('BROWSE_PROXY_URL=direct');
@@ -133,5 +145,36 @@ describe.skipIf(process.platform === 'win32')('#915 proxy from the environment, 
     expect(r.stderr).toContain('Starting server...');
     expect(proxiedHosts.length).toBe(before);
     expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).proxy).toBeUndefined();
+  }, 120_000);
+
+  // Added by: /ship test coverage audit (Capy), 2026-10-25, for #3440 item 8.
+  // Value: protects=the daemon state records BROWSE_PROXY_URL=direct where it bypasses the system proxy settings, and a default session there is refused, not handed the opt-out;
+  //   fails_when=server.ts drops proxyDirect from the state, the CLI hash stops carrying the opt-out, or Linux starts refusing a reused daemon over it;
+  //   why_new=proxy-env.test.ts drives proxyMismatchLines with a hand-built state; nothing reads the state the daemon wrote or runs the refusal through the CLI;
+  //   seam=none; no_claim=Chromium's proxy behaviour (loopback page only); the proxyDirect=true write and the refusal arm run on the macOS named-regressions CI job and on a Windows checkout, the Linux lanes run the reuse arm
+  test('BROWSE_PROXY_URL=direct is daemon state where it bypasses the system proxy, and a default session is refused there (#3440)', async () => {
+    expect((await browse(['stop'], {})).code).toBe(0);
+    const r = await browse(['goto', `http://127.0.0.1:${direct.port}/`], { BROWSE_PROXY_URL: 'direct' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.stderr).toContain('Starting server...');
+    const pid = daemonPid();
+    const bypassesSystemProxy = process.platform !== 'linux';
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    expect(state.proxy).toBeUndefined();
+    if (bypassesSystemProxy) expect(state.proxyDirect).toBe(true);
+    else expect(state.proxyDirect).toBeUndefined();
+    const plain = await browse(['text'], {});
+    if (bypassesSystemProxy) {
+      expect(plain.code).toBe(1);
+      expect(plain.stderr).toContain('different proxy settings (BROWSE_PROXY_URL differs)');
+      expect(plain.stderr).toContain('daemon:  no proxy (BROWSE_PROXY_URL=direct)');
+      expect(plain.stderr).toContain('session: no proxy');
+      expect(plain.stderr).toContain('or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy');
+    } else {
+      expect(plain.code, plain.out).toBe(0);
+      expect(plain.stderr).not.toContain('Starting server');
+      expect(plain.stdout).toContain('direct loopback page');
+    }
+    expect(daemonPid()).toBe(pid);
   }, 120_000);
 });
