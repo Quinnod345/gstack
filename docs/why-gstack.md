@@ -73,7 +73,7 @@ gstack works well with one sprint. It gets interesting with ten running at once.
 
 **Safety guardrails on demand.** Say "be careful" and `/careful` warns before any destructive command — rm -rf, DROP TABLE, force-push, git reset --hard. `/freeze` locks edits to one directory while debugging so Claude can't accidentally "fix" unrelated code. `/guard` activates both. `/investigate` auto-freezes to the module being investigated.
 
-**Proactive skill suggestions.** gstack notices what stage you're in — brainstorming, reviewing, debugging, testing — and suggests the right skill. Don't like it? Say "stop suggesting" and it remembers across sessions.
+**Proactive skill suggestions.** gstack notices what stage you're in and, by default, suggests only the four core skills: `/office-hours` for a new idea, `/review` for a diff, `/qa` for "does this work?", `/ship` to land it. `gstack-config set proactive all` suggests every matching skill, `off` suggests nothing, and "stop suggesting" in a session turns it off and remembers across sessions (see [docs/proactive.md](proactive.md)).
 
 ## 10-15 parallel sprints
 
