@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+**The Captain guide says which questions never need to reach a person.** Follow-up to #3493 (pstack absorb item 4, GSTA-124).
+
+### Changed
+- **`capy/skill/gstack/captain.md` section 1**: a new bullet after "Always a fresh ask": a question a command, render or measurement can settle is settled by the thread, which runs the thing and reports the result; only a product or preference call goes up, with the observation already made; a Captain that receives an observable question sends it back with the check that answers it. The Drive copy of captain.md syncs from main.
+
 ## [1.91.258.0] - 2026-10-26
 
 **The session check stops failing for things that are not failures, and a consuming repository can name the gstack it wants without broadcasting to every thread.** Five Captains running gstack on Capy hit the same install friction this week: eight crew-wide "upgrade to <version>" messages since Oct 16, `gstack: fail not-installed` on coordinator machines that run no workflow, `fail pins` from the image's Node while the tests run on the pinned one, reviewers told to "reinstall" when asked to run a workflow, and an environment dump from a broken `/cso` shell line. Each of these is now a product behaviour instead of a crew rule.
