@@ -1,9 +1,11 @@
 /**
  * Per-skill SKILL.md size budget regression (v1.46.0.0 T5).
  *
- * Asserts that no skill's generated SKILL.md grew beyond the v1.47.0.0
- * baseline. Catches preamble/resolver changes that bloat skills back to
- * the pre-compression size. Free — pure file IO + JSON diff.
+ * Asserts that no skill's startup context grew beyond the baseline: its
+ * generated SKILL.md, plus sections/preamble.md for a tier 2+ skill that
+ * points to the shared preamble (readSkillStartup), the same measure as the
+ * shrink floor below. Catches preamble/resolver changes that bloat skills
+ * back to the pre-compression size. Free — pure file IO + JSON diff.
  *
  * Baseline rebased v1.44.1 → v1.47.0.0 in the AskUserQuestion split-rule
  * PR after main merged GSTACK_PLAN_MODE + /spec, pushing the v1.44.1
