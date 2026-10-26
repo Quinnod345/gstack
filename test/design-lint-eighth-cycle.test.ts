@@ -11,9 +11,12 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { parseCss, resolveVars } from '../lib/design-lint/css';
 import { parseDoc, parseHtml } from '../lib/design-lint/html';
 import { lineOf } from '../lib/design-lint/render';
+import { glAccent, glLayout } from '../lib/design-lint/render-probe';
 import { Reporter, type Finding } from '../lib/design-lint/report';
+import { run as runAssets } from '../lib/design-lint/rules/assets';
 import { run as runCopy } from '../lib/design-lint/rules/copy';
 import { lintStatic } from '../lib/design-lint/static';
 import { compInner } from '../lib/design-lint/tailwind';
@@ -87,6 +90,7 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(doc.src.indexOf('<', '<!doctype html>'.length)).toBe(doc.src.indexOf('<p>'));
     expect(doc.src.includes('<!--')).toBe(false);
     expect(doc.tags.map((t) => t.name)).toEqual(['p', 'p']);
+    expect(parseHtml('x.html', '<p>Fees are <1% of volume and <b>nothing</b> else</p>').text.replace(/\s+/g, ' ').trim()).toBe('Fees are 1% of volume and nothing else');
   });
 
   test('repeated unclosed <script>, <nav>, <style> and <template> openers cost the copy tier their length', () => {
@@ -117,6 +121,11 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     expect(warns.filter((w) => /internal error/.test(w))).toEqual([]);
     expect(only(findings, 'internal-error')).toEqual([]);
     expect(only(findings, 'wide-container').map((f) => f.evidence)).toEqual([expect.stringContaining('(2 to 4294967296)')]);
+    const named = lintDir({
+      'index.html': HEAD + '<link rel="stylesheet" href="style.css"></head><body><main><section class="grid"><h1>Hi</h1><p>x</p></section></main></body></html>',
+      'style.css': TOKENS + '\n.grid { grid-template-columns: repeat(12, 1fr); }\n@media (min-width: 1600px) { .grid { grid-template-columns: repeat(12, [col-start] 1fr) [col-end]; } }',
+    }).findings;
+    expect(only(named, 'wide-container')).toEqual([]);
   });
 
   test('unclosed @starting-style blocks cost their length, not the sheet squared', () => {
@@ -124,6 +133,38 @@ describe('design-lint eighth cycle: a file costs its length', () => {
     const warns: string[] = [];
     expect(timed(() => lintStatic([dir], { cwd: dir, warn: (l: string) => warns.push(l) }))).toBeLessThan(2000);
     expect(warns.filter((w) => /internal error/.test(w))).toEqual([]);
+  });
+
+  test('ten thousand unclosed <em> under headings cost the assets rules their length', () => {
+    const doc = parseDoc('x.html', HEAD + '</head><body>' + '<h2>a <em>x '.repeat(10000) + '</body></html>');
+    const reporter = new Reporter('page', '/');
+    expect(timed(() => runAssets({ docs: [doc], cssFiles: [], rules: [], tokens: {}, twTokens: null, allCss: '', cache: {} } as never, reporter))).toBeLessThan(600);
+  });
+
+  test('a deeply nested comma selector list costs its length, not parts^depth', () => {
+    const css = 'a,b{'.repeat(40) + 'color:red' + '}'.repeat(40);
+    let rules: ReturnType<typeof parseCss> = [];
+    expect(timed(() => { rules = parseCss(css, 'x.css'); })).toBeLessThan(2000);
+    expect(rules.reduce((n, x) => n + x.selector.length, 0)).toBeLessThan(1_000_000);
+    expect(parseCss('.a, .b { .c, .d { color: red } }', 'x.css').map((x) => x.selector)).toEqual(['.a, .b', ':is(.a, .b) .c, :is(.a, .b) .d']);
+  });
+
+  test('a huge token value is not expanded into every reference', () => {
+    const tokens = { '--a': 'x'.repeat(1_000_000), '--b': 'blue' };
+    const value = 'var(--a) '.repeat(900).trim();
+    let out = '';
+    expect(timed(() => { out = resolveVars(value, tokens); })).toBeLessThan(200);
+    expect(out).toBe(value);
+    expect(resolveVars('1px solid var(--b)', tokens)).toBe('1px solid blue');
+  });
+
+  test('a stylesheet or <style> block the lint could not parse is an internal-error finding, not a silent pass', () => {
+    const boom = 'a,b{'.repeat(30) + 'color:red' + '}'.repeat(30);
+    const inline = lintDir({ 'index.html': HEAD + '<style>' + boom + ' * { transition: all .3s ease }</style></head><body><main><h1>Hi</h1></main></body></html>' }).findings;
+    expect(only(inline, 'layout-transition').map((f) => f.grade)).toEqual(['blocks']);
+    expect(only(inline, 'internal-error')).toEqual([]);
+    const big = lintDir({ 'index.html': HEAD + '<link rel="stylesheet" href="big.css"></head><body><main><h1>Hi</h1></main></body></html>', 'big.css': '.a{color:red}\n'.repeat(160_000) }).findings;
+    expect(only(big, 'internal-error').map((f) => [f.file, f.grade])).toEqual([['big.css', 'ask']]);
   });
 
   test('a long gradient className line costs the asset scan its length', () => {
@@ -162,9 +203,13 @@ describe('design-lint eighth cycle: rule judgements', () => {
     expect(only(tip('opacity 200ms 600ms'), 'tooltip-focus-delay').map((f) => f.grade)).toEqual(['ask']);
   });
 
-  test('one emoji-decoration per emoji icon in a component file, keyed by the icon and not by the wording', () => {
-    const { findings } = lintDir({ 'Card.tsx': 'export function Card() { return <div className="icon"><Icon>\u{1F680}</Icon></div>; }' });
-    expect(only(findings, 'emoji-decoration').map((f) => f.evidence)).toEqual(['emoji icon "\u{1F680}" in <Icon>']);
+  test('one emoji-decoration per emoji icon in a component file, however the parent wraps it', () => {
+    const { findings } = lintDir({ 'Card.tsx': 'export function Card() { return <div>\n<div className="icon"><Icon>\u{1F680}</Icon></div>\n<div className="icon"><Icon>\u{1F680}</Icon></div>\n<div className="feature"><Icon>\u{1F680}</Icon><h3>Fast</h3></div>\n</div>; }' });
+    expect(only(findings, 'emoji-decoration').map((f) => [f.line, f.evidence])).toEqual([[2, 'emoji icon "\u{1F680}" in <Icon>'], [3, 'emoji icon "\u{1F680}" in <Icon>'], [4, 'emoji icon "\u{1F680}" in <Icon>']]);
+  });
+
+  test('the 1280 probes read their viewport from the page, not a literal', () => {
+    for (const fn of [glLayout, glAccent]) expect(fn.toString()).not.toMatch(/\b800\b|1280x800/);
   });
 
   test('the emoji classes spell their variation selector and joiner as escapes', () => {

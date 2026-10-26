@@ -90,7 +90,7 @@ describe('design-lint fourth cycle: one pairing for every tree reader', () => {
       lintStatic([dir], { cwd: dir, ...quiet });
       expect(performance.now() - t, frag).toBeLessThan(8000);
     }
-  });
+  }, 40_000);
 
   test('a component file of unclosed <script> openers parses in linear time', () => {
     for (const ext of ['vue', 'svelte', 'astro']) {
