@@ -17,7 +17,7 @@ import type { PregateFile } from './headless-artifacts';
 import { PREGATE_OUT_REL, clearObligation, readPregateFile, writePregateFile } from './pregate/index';
 import type { QueueContext } from './ship-queue';
 import type { QueueFailure } from './ship-queue-gate';
-import { execFor, repoSlug, runView } from './ship-queue-train-github';
+import { prInfo, repoSlug, runView } from './ship-queue-train-github';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -32,25 +32,24 @@ function runsAt(ctx: QueueContext, workflow: string, branch: string, head: strin
 }
 
 export async function dispatchCi(ctx: QueueContext, o: DispatchCiOptions): Promise<DispatchCiResult> {
-  const view = ctx.gh(['pr', 'view', o.pr, '--json', 'headRefOid,headRefName,isCrossRepository']);
-  let info: { headRefOid?: string; headRefName?: string; isCrossRepository?: boolean } = {};
-  try { info = view.ok ? JSON.parse(view.out) : {}; } catch {}
-  if (!info.headRefOid || !info.headRefName) return { lines: [], failure: { code: 'QUEUE_NOT_READY', message: `cannot read PR #${o.pr}'s head and branch through gh (${(view.err ?? view.out).trim().slice(0, 120)})` } };
+  const info = prInfo(ctx, o.pr);
+  if ('error' in info) return { lines: [], failure: { code: 'QUEUE_NOT_READY', message: info.error } };
+  if (!info.headRefName) return { lines: [], failure: { code: 'QUEUE_NOT_READY', message: `cannot read PR #${o.pr}'s branch through gh (no headRefName)` } };
   if (info.isCrossRepository) return { lines: [], failure: { code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr}'s head is on a fork; its workflows are not dispatched here (the coordinator decides)` } };
   const head = info.headRefOid;
   const branch = info.headRefName;
   const slug = repoSlug(ctx);
-  const exec = execFor(ctx);
   const deadline = Date.now() + o.timeoutSec * 1000;
   const lines: string[] = [];
   const concluded = new Map<string, RunRow>();
   for (const wf of o.workflows) {
-    const prior = runsAt(ctx, wf, branch, head).find(r => r.status === 'completed');
+    const atHead = runsAt(ctx, wf, branch, head);
+    const prior = atHead.find(r => r.status === 'completed');
     if (prior) { lines.push(`CI_DISPATCH: ${wf} not dispatched (run ${prior.databaseId} already concluded ${prior.conclusion ?? 'unknown'} at this head)`); concluded.set(wf, prior); continue; }
-    const live = runsAt(ctx, wf, branch, head)[0];
+    const live = atHead[0];
     if (!live) {
-      const d = exec('gh', ['workflow', 'run', wf, '--ref', branch]);
-      if (d.status !== 0) return { lines, failure: { code: 'QUEUE_NOT_READY', message: `gh workflow run ${wf} --ref ${branch} failed (${d.stdout.trim().slice(0, 120) || 'no output'})` } };
+      const d = ctx.gh(['workflow', 'run', wf, '--ref', branch]);
+      if (!d.ok) return { lines, failure: { code: 'QUEUE_NOT_READY', message: `gh workflow run ${wf} --ref ${branch} failed (${(d.err ?? d.out).trim().replace(/\s+/g, ' ').slice(0, 120) || 'no output'})` } };
     }
     let run: RunRow | undefined = live;
     for (;;) {

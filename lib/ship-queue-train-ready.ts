@@ -208,7 +208,7 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
     choice = merge.branch ? { ...d.choice, branch: merge.branch } : d.choice;
     lines.push(...d.lines);
   }
-  lines.splice(1, 0, screenLine(choice));
+  lines.splice(lines.findIndex(l => l.startsWith('READY ')) + 1, 0, screenLine(choice));
   const now = nowIso();
   const receipt: ReadyReceipt = { schema: 1, kind: 'ready', repo_key: env.repo.key, pr: o.pr, head, base_sha: baseSha, ready_at: prior?.ready_at ?? now, screen: choice, updated_at: now };
   if (o.dryRun) return outOk([...lines, 'DRY-RUN: no READY receipt written, nothing dispatched'], `${Q} ready --pr ${o.pr} --${o.screen}${o.broad ? ' --broad' : ''}`, 'none');

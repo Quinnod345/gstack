@@ -347,7 +347,7 @@ describe('verify --post-merge', () => {
 
 describe('ready --dispatch-ci', () => {
   // Value: protects=a PR that conflicts with the base (a CHANGELOG-only conflict after every stamp) gets its free workflows dispatched on the branch, waited for, and its requires-remote pregate lanes cleared with the run URLs in one command, replacing the four-step hand procedure;
-  // fails_when=the dispatch happens on a fork head, a red run clears a lane, a lane whose workflow was not dispatched is cleared, or ready still says ci: none; why_new=the ci-hint was advisory prose; seam=the gh shim's workflow run, run list and check runs; no_claim=GitHub's real dispatch latency
+  // fails_when=the dispatch happens on a fork head, a red run clears a lane, a lane whose workflow was not dispatched is cleared, ready still says ci: none, or the CI_DISPATCH lines push the screen: line in front of READY (identifiers first); why_new=the ci-hint was advisory prose; seam=the gh shim's workflow run, run list and check runs; no_claim=GitHub's real dispatch latency
   test('dispatches the named workflows on a conflicting PR, waits for their runs, clears the matching pregate lanes with the run URLs and then READYs; a fork head and a red run are refused', () => {
     const { fx, head, pregate } = readyFixture();
     fx.write(d => {
@@ -379,6 +379,14 @@ describe('ready --dispatch-ci', () => {
     const again = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen', '--dispatch-ci', 'free-tests.yml', '--timeout', '5']);
     expect(dispatches(fx).length).toBe(2);
     expect(line(again.out, 'CI_DISPATCH:')).toBe('CI_DISPATCH: free-tests.yml not dispatched (run 100 already concluded success at this head)');
+    const cleared = JSON.parse(fs.readFileSync(pregate, 'utf8'));
+    cleared.requires_remote[2].receipt = 'https://example.invalid/runs/7';
+    fs.writeFileSync(pregate, JSON.stringify(cleared));
+    const ok = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen', '--dispatch-ci', 'free-tests.yml', '--timeout', '5']);
+    expect([ok.status, ok.err]).toEqual([EXIT.ok, '']);
+    const okLines = ok.out.split('\n');
+    expect(okLines[0]).toBe('CI_DISPATCH: free-tests.yml not dispatched (run 100 already concluded success at this head)');
+    expect(okLines[okLines.findIndex(l => l.startsWith('READY #1 ')) + 1]).toBe('screen: no-screen');
     fx.write(d => { d.rules['free-tests.yml'] = { ci: 'free-tests', conclusion: 'failure', headSha: head }; d.ci[head] = []; d.runs.length = 0; });
     const red = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen', '--dispatch-ci', 'free-tests.yml', '--timeout', '5']);
     expect([red.status, line(red.out, 'CI_DISPATCH:')]).toEqual([EXIT.refused, 'CI_DISPATCH: free-tests.yml --ref pr-1 run 102 https://example.invalid/runs/102 failure']);
