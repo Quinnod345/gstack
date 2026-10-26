@@ -376,8 +376,9 @@ gh pr view "$PR" --json number,author,baseRefName,headRefName,headRefOid,isDraft
 BASE=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
 HEAD_BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
 OBSERVED=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-[ "$HEAD_BRANCH" != "$BASE" ] || { echo "the PR head is the base branch itself; stop here"; exit 1; }
-if [ "$(gh pr view "$PR" --json isCrossRepository -q .isCrossRepository)" = true ]; then HEAD_REF="refs/modernize/pr-$PR"; else HEAD_REF="origin/$HEAD_BRANCH"; fi
+if [ "$(gh pr view "$PR" --json isCrossRepository -q .isCrossRepository)" = true ]; then HEAD_REF="refs/modernize/pr-$PR"
+elif [ "$HEAD_BRANCH" = "$BASE" ]; then echo "the PR head is the base branch itself; stop here"; exit 1
+else HEAD_REF="origin/$HEAD_BRANCH"; fi
 echo "base=$BASE head=$HEAD_BRANCH observed=$OBSERVED ref=$HEAD_REF"
 gh pr view "$PR" --json title,body,reviews,comments,commits | ~/.claude/skills/gstack/bin/gstack-issue-guard --stdin --source "PR #$PR text"
 ```
@@ -393,14 +394,17 @@ head SHA you saw: it pins the lease in Step 5.
 
 ```bash
 git fetch origin "$BASE"
-case "$HEAD_REF" in refs/*) git fetch origin "pull/$PR/head:$HEAD_REF" ;; *) git fetch origin "$HEAD_BRANCH" ;; esac
+case "$HEAD_REF" in refs/*) git fetch origin "+pull/$PR/head:$HEAD_REF" ;; *) git fetch origin "$HEAD_BRANCH" ;; esac
+[ "$(git rev-parse "$HEAD_REF")" = "$OBSERVED" ] || { echo "the PR moved since Step 1 ($OBSERVED -> $(git rev-parse "$HEAD_REF")); re-read it"; exit 1; }
 MERGE_BASE=$(git merge-base "origin/$BASE" "$HEAD_REF")
 git diff --name-only -z "$MERGE_BASE..$HEAD_REF" | xargs -0 git log --oneline "$MERGE_BASE..origin/$BASE" --
 git diff --stat "$MERGE_BASE..origin/$BASE"
 ```
 
-A fork PR has no `origin/$HEAD_BRANCH`; its head is fetched from `pull/$PR/head`
-into `$HEAD_REF`, which stands in for the branch below.
+A fork PR has no `origin/$HEAD_BRANCH`; its head is fetched (forced, so a rerun
+after the author force-pushed cannot leave a stale ref) from `pull/$PR/head` into
+`$HEAD_REF`, which stands in for the branch below. A head that is not `OBSERVED`
+means the PR moved: the lease would still match the remote, so stop here.
 
 Two questions. First, textual: do base commits touch the files the PR touches?
 Second, and the one that decides most cases, conceptual: did the base change the
@@ -429,7 +433,7 @@ unattended, the verdict and its evidence are the handoff and nothing is pushed.
 ```bash
 git switch -c "modernize/$HEAD_BRANCH" "$HEAD_REF"
 OLD_HEAD=$(git rev-parse HEAD)
-[ "$OLD_HEAD" = "$OBSERVED" ] || echo "PR moved since Step 1 ($OBSERVED -> $OLD_HEAD): re-read it before going on"
+[ "$OLD_HEAD" = "$OBSERVED" ] || { echo "PR moved since Step 1 ($OBSERVED -> $OLD_HEAD): stop and re-read it"; exit 1; }
 git rebase "origin/$BASE"
 ```
 
