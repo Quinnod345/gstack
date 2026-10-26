@@ -831,7 +831,9 @@ export interface ExactMeasurement {
  */
 export async function measureExactTokens(
   root: string,
-  { model, apiKey, fetchImpl = fetch, onProgress, egressHome }: {
+  { files, model, apiKey, fetchImpl = fetch, onProgress, egressHome }: {
+    /** The send set from exactSendFiles(root), when the caller already computed it. */
+    files?: string[];
     model: string;
     apiKey: string;
     fetchImpl?: FetchLike;
@@ -852,7 +854,7 @@ export async function measureExactTokens(
   // the same file by every lexical path it is billed under; lexicalOf maps a
   // real file back to the one key that was measured.
   const lexicalOf = new Map<string, string>();
-  for (const file of exactSendFiles(root)) {
+  for (const file of files ?? exactSendFiles(root)) {
     const text = fs.readFileSync(file, "utf8");
     texts.set(file, text);
     lexicalOf.set(fs.realpathSync(file), file);
@@ -1004,7 +1006,8 @@ const USAGE =
   "\n" +
   "  --exact              measure tokens with Anthropic's count_tokens instead of\n" +
   "                       estimating. Off by default: it sends the content of every\n" +
-  "                       .md file in the tree to api.anthropic.com. Needs\n" +
+  "                       .md file the bill prices (including files reached\n" +
+  "                       through symlinks) to api.anthropic.com. Needs\n" +
   "                       ANTHROPIC_API_KEY; passing --exact is the consent. An\n" +
   "                       egress receipt is written before the send (see\n" +
   "                       gstack-egress); if it cannot be written, the run falls\n" +
@@ -1053,15 +1056,14 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
 
   // Exact mode is the only path that leaves the machine. Announce what is sent
   // before sending it, and degrade to the estimate rather than failing the run.
-  const exactFor = async (tree: string): Promise<{
+  const sendSet = (tree: string) => (flags.exact ? exactSendFiles(tree) : []);
+  const exactFor = async (tree: string, walked: string[]): Promise<{
     tokensOf?: TokensOf;
     tokenSource?: string;
     calibration?: Calibration;
     onDone?: () => void;
   }> => {
     if (!flags.exact) return {};
-    if (!fs.existsSync(tree)) throw new Error(`No such tree: ${path.resolve(tree)}`);
-    const walked = exactSendFiles(tree);
     const treeReal = fs.realpathSync(tree);
     const outside = walked.filter((f) => !encloses(treeReal, fs.realpathSync(f))).length;
     stderr.write(
@@ -1071,6 +1073,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
     );
     try {
       const measured = await measureExactTokens(tree, {
+        files: walked,
         model: flags.exactModel,
         apiKey: options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "",
         fetchImpl: options.fetchImpl,
@@ -1104,8 +1107,10 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       }
       const treeA = path.resolve(cwd, positional[0]);
       const treeB = path.resolve(cwd, positional[1]);
-      const optsA = await exactFor(treeA);
-      const optsB = await exactFor(treeB);
+      const filesA = sendSet(treeA);
+      const filesB = sendSet(treeB);
+      const optsA = await exactFor(treeA, filesA);
+      const optsB = await exactFor(treeB, filesB);
       const diff = diffBills(buildBill(treeA, optsA), buildBill(treeB, optsB));
       optsA.onDone?.();
       optsB.onDone?.();
@@ -1120,7 +1125,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       );
       return 2;
     }
-    const exactOpts = await exactFor(tree);
+    const exactOpts = await exactFor(tree, sendSet(tree));
     const bill = buildBill(tree, exactOpts);
     exactOpts.onDone?.();
     if (bill.skills.length === 0) {

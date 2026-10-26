@@ -921,24 +921,47 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
       egressHome,
     });
     expect(code).toBe(0);
+    expect(stderr.text()).not.toContain("--exact unavailable");
+    expect(calls.some((c) => c.body.includes("# cc"))).toBe(true);
     expect(calls.some((c) => c.body.includes("PRIVATE-NOTES"))).toBe(false);
     expect(stderr.text()).toContain("sending the content of 1 .md file(s)");
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
   it("names a missing tree, without a raw ENOENT or any request", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-missing-"));
     const out = capture();
     const calls: { body: string }[] = [];
-    const code = await contextBillMain([path.join(os.tmpdir(), "context-bill-no-such-tree"), "--exact"], {
+    const code = await contextBillMain([path.join(parent, "absent"), "--exact"], {
       stdout: out.stream,
       stderr: out.stream,
       apiKey: "sk-test",
       fetchImpl: fakeFetch(calls),
       egressHome,
     });
+    fs.rmSync(parent, { recursive: true, force: true });
     expect(code).toBe(1);
     expect(out.text()).toContain("No such tree:");
     expect(out.text()).not.toContain("ENOENT");
+    expect(calls.length).toBe(0);
+  });
+
+  it("--diff with a missing second tree sends nothing from the first", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-diff-missing-"));
+    fs.mkdirSync(path.join(parent, "a", "qa"), { recursive: true });
+    fs.writeFileSync(path.join(parent, "a", "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    const out = capture();
+    const calls: { body: string }[] = [];
+    const code = await contextBillMain(["--diff", path.join(parent, "a"), path.join(parent, "absent"), "--exact"], {
+      stdout: out.stream,
+      stderr: out.stream,
+      apiKey: "sk-test",
+      fetchImpl: fakeFetch(calls),
+      egressHome,
+    });
+    fs.rmSync(parent, { recursive: true, force: true });
+    expect(code).toBe(1);
+    expect(out.text()).toContain("No such tree:");
     expect(calls.length).toBe(0);
   });
 
