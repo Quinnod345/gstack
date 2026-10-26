@@ -2,15 +2,14 @@
 
 ## [Unreleased]
 
-**An issue we intend to fix later now stays open under the `parked` label instead of being closed into a TODOS theme.** The Oct 11 triage closed 75 feature requests with a "not rejected, tracked in TODOS.md" note, and GitHub showed them as closed with no fix. Those 75 are reopened under `parked`, each with one comment saying where it is tracked and what fixes it, and the rule is written down: closing means fixed, duplicate or won't fix, each with its reason.
+**An issue we intend to fix later now stays open under the `parked` label instead of being closed.** The Oct 11 triage closed 75 feature requests with a "not rejected" note, and GitHub showed them as closed with no fix. Those 75 are open again under the new `parked` label on garrytan/gstack ("Not fixed yet, not rejected: stays open; a comment says where it is tracked and what fixes it"), each with one comment saying where the work is tracked and what fixes it. The rule is written down: an issue closes only as fixed, duplicate or won't fix, each with its reason; a report that main already fixed closes as fixed, not won't fix; and a duplicate uses GitHub's own duplicate close reason.
 
 ### Added
-- **`docs/triage.md`**: the three issue states (open, parked, closed), how to park an issue (the label plus one comment naming where it is tracked and what fixes it), the three close reasons with their GitHub close reason and label, and where the Wave 9 themes live.
-- The `parked` label on garrytan/gstack: "Not fixed yet, not rejected: stays open; a comment says where it is tracked and what fixes it".
+- **`docs/triage.md`**: the three issue states (open, parked, closed), how to park an issue (the label plus one comment naming where it is tracked and what fixes it), when the label comes off, the three close reasons with their GitHub close reason and label, and where the parked themes live.
 
-### Changed
+### For contributors
 - **`CONTRIBUTING.md`**: an "Issue triage" section ahead of the PR wave process, pointing at docs/triage.md.
-- **`TODOS.md`**: the Wave 9 feature-themes note says issues stay open under `parked` with a link to their theme, instead of closing with one.
+- **`TODOS.md`**: the Wave 9 feature-themes note says issues stay open under `parked` and points at their theme there (73 listed, 75 with #3061 and #3122), instead of closing with a link.
 
 ## [1.91.221.0] - 2026-10-25
 

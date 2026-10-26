@@ -29,10 +29,12 @@ folding it into a tracking issue, or deciding it waits for other work are all
 3. Add the issue number to the TODOS.md entry so the theme credits the reporter
    when it is picked up.
 
-When the work ships, close the issue as fixed with the version or PR, and the
-label goes with it. When a lane picks a parked issue up, it may remove the
-label while it works on it; an issue the lane later drops goes back to parked
-with an updated comment.
+When the work ships, close the issue as fixed with the version or PR. Whatever
+the close reason, remove the `parked` label when the issue closes, so a
+`label:parked` search lists only open parked issues. When a lane picks a parked
+issue up, it removes the label while it works on it (the issue is open again,
+with the lane on it); an issue the lane later drops goes back to parked with an
+updated comment.
 
 ## Closing an issue
 
