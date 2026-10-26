@@ -70,7 +70,7 @@ gstack/
 ├── freeze/          # /freeze skill; bin/check-freeze.sh (PreToolUse edit-boundary hook; sources careful/bin/hook-extract.sh, fails closed)
 ├── guard/, unfreeze/  # /guard (careful + freeze in one), /unfreeze
 ├── gstack-upgrade/  # /gstack-upgrade skill + migrations/ (run after ./setup during an upgrade)
-├── bin/             # CLI utilities (gstack-render.ts = render a local HTML file through Aside or the engine, gstack-design-detect.ts = probe/scan through a user-installed impeccable engine; gstack-design-md.ts = open DESIGN.md check/convert/tokens/mark; gstack-repo-mode, gstack-slug, gstack-config, gstack-wtree, gstack-evidence, gstack-issue-guard, gstack-relink, gstack-memorable, etc.)
+├── bin/             # CLI utilities (gstack-render.ts = render a local HTML file through Aside or the engine, gstack-design-detect.ts = probe/scan through a user-installed impeccable engine; gstack-design-md.ts = open DESIGN.md check/convert/tokens/mark; gstack-design-lint = the free deterministic design lint over HTML/CSS/components, --render measures in the browser (docs/design-lint.md); gstack-repo-mode, gstack-slug, gstack-config, gstack-wtree, gstack-evidence, gstack-issue-guard, gstack-relink, gstack-memorable, etc.)
 ├── document-release/ # /document-release skill (every-ship pre-verification audit; standalone doc updates + Diataxis coverage map)
 ├── document-generate/ # /document-generate skill (Diataxis doc generator: tutorial/how-to/reference/explanation)
 ├── cso/             # /cso skill (OWASP Top 10 + STRIDE security audit)
@@ -88,7 +88,7 @@ gstack/
 │   └── dist/        # Compiled binary
 ├── agents-digest/   # Committed 2KB instruction-tier rules digest (gstack-AGENTS.md) for rules-reading hosts
 ├── extension/       # Chrome extension (side panel + activity feed + CSS inspector)
-├── lib/             # Shared libraries (aside-render.ts = local-HTML rendering, Aside first, engine fallback; design-catalog.ts = the typed design anti-pattern catalog every design skill renders from; design-detect-contract.ts = detector sentinel vocabulary; design-md.ts = open DESIGN.md reader/writer; dom-dump-script.ts + generated dom-dump.js = rendered-DOM dump for the detector; review-evidence.ts = review-start receipt binding, computed freshness and shared-code snapshot eligibility; frontend-scope.ts; claude-bin.ts, error-handling.ts, worktree.ts, egress-receipt.ts, context-bill.ts, redact-engine.ts, tracker-guard.ts, version-source.ts, code-intelligence/)
+├── lib/             # Shared libraries (aside-render.ts = local-HTML rendering, Aside first, engine fallback; design-catalog.ts = the typed design anti-pattern catalog every design skill renders from; design-lint/ = the static and render tiers behind bin/gstack-design-lint, ported from hallmark's sloplint; design-detect-contract.ts = detector sentinel vocabulary; design-md.ts = open DESIGN.md reader/writer; dom-dump-script.ts + generated dom-dump.js = rendered-DOM dump for the detector; review-evidence.ts = review-start receipt binding, computed freshness and shared-code snapshot eligibility; frontend-scope.ts; claude-bin.ts, error-handling.ts, worktree.ts, egress-receipt.ts, context-bill.ts, redact-engine.ts, tracker-guard.ts, version-source.ts, code-intelligence/)
 │   └── diagram-render/  # Vendored mermaid + excalidraw runtimes, built into one offline bundle the renderer loads
 ├── patches/         # bun `patchedDependencies` patches (playwright-core windowsHide)
 ├── docs/designs/    # Design documents (incl. IMPECCABLE_INTEROP.md = the design detector / catalog / open DESIGN.md record, and fork-port-residual-2026-09/ evaluation evidence)
@@ -102,7 +102,7 @@ gstack/
 ├── SKILL.md         # Generated from SKILL.md.tmpl (don't edit directly)
 ├── SKILL.md.tmpl    # Template: edit this, run gen:skill-docs
 ├── ETHOS.md         # Builder philosophy (Boil the Ocean, Search Before Building)
-├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (both Apache-2.0)
-├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt)
+├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (Apache-2.0), Elaya's design skills and hallmark's sloplint (MIT)
+├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt, MIT-elaya.txt, MIT-hallmark.txt)
 └── package.json     # Build scripts for browse
 ```
