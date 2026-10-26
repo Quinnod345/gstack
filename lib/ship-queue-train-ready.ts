@@ -115,7 +115,8 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
   let choice: ScreenChoice = { choice: 'no-screen', policy: null, nonce: null, run: null, merge_sha: null };
   if (o.screen === 'screen') {
     const ls = git(ctx.repoRoot, ['ls-remote', env.remote, `refs/pull/${o.pr}/merge`]);
-    const mergeSha = ls.ok ? ls.out.split(/\s/)[0] ?? '' : '';
+    if (!ls.ok) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `could not list ${env.remote}'s refs: ${(ls.err || ls.out).trim().replace(/\s+/g, ' ').slice(0, 200) || 'git ls-remote failed'}` }, lines, `check the remote, then ${Q} ready --pr ${o.pr} --screen`, 'none');
+    const mergeSha = ls.out.split(/\s/)[0] ?? '';
     const again = `resolve the conflict with ${ctx.base} (or wait for GitHub to recompute refs/pull/${o.pr}/merge), push, then ${Q} ready --pr ${o.pr} --screen; a screen dispatched on a stale merge ref plans no cases`;
     if (!/^[0-9a-f]{40,64}$/.test(mergeSha)) return outRefused({ code: 'QUEUE_SCREEN_STALE_REF', message: `${env.remote} has no refs/pull/${o.pr}/merge (the PR conflicts with ${ctx.base}, or GitHub has not computed it yet)` }, lines, again, 'none');
     const fetched = git(ctx.repoRoot, ['fetch', '-q', env.remote, `refs/pull/${o.pr}/merge`]);

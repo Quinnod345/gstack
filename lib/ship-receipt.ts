@@ -68,7 +68,7 @@ export function bindReceipt(body: string, pr: string | undefined, accepted: read
   const ex = extractReceipt(body);
   if (!ex.found) return { ok: false, code: 'QUEUE_RECEIPT_MISSING', message: `${subject} body carries no ship receipt`, line: 'SHIP_RECEIPT: none in the PR body' };
   if (!ex.receipt || ex.errors.length) {
-    const why = ex.errors[0] ? `${ex.errors[0].message} at ${ex.errors[0].path}` : 'invalid';
+    const why = ex.errors[0] ? oneLine(`${ex.errors[0].message} at ${ex.errors[0].path}`).slice(0, 200) : 'invalid';
     return { ok: false, code: 'QUEUE_RECEIPT_MISSING', message: `${subject} ship receipt is invalid (${why})`, line: 'SHIP_RECEIPT: invalid in the PR body' };
   }
   const r = ex.receipt;
