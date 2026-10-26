@@ -11,7 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  BENCHMARKS, DEFAULTS, classifyGate, collectScorecard, fixtureSource, flakeRecords, gateOutcome, percentile, readComments, renderCsv,
+  BENCHMARKS, DEFAULTS, classifyGate, collectScorecard, fixtureSource, flakeRecords, fmtHours, gateOutcome, percentile, readComments, renderCsv,
   renderMarkdown, scorecardRows, verdictCost, type FixtureFile, type ScorecardOptions,
 } from '../lib/factory-scorecard';
 
@@ -112,6 +112,54 @@ describe('factory-scorecard: recorded window', () => {
     expect(csv).toHaveLength(rows.length + 2);
     expect(csv[1]).toStartWith('"acme/widgets","2026-10-19T12:00:00.000Z","2026-10-26T12:00:00.000Z","merged","Merged PRs","3 (crew 2, outside 1)"');
   });
+
+  test('--gate-event any keeps non-dispatch runs and drops the event filter from the query', () => {
+    // Value: protects=gateEvent null counts every completed gate run and omits event= from the runs query; fails_when=the null branch filters or the query keeps event=; why_new=only the default dispatch path was covered; seam=none; no_claim=live GitHub query semantics
+    const fx = fixture();
+    const key = Object.keys(fx.responses).find(k => k.includes('/evals.yml/runs?'))!;
+    fx.responses[key.replace('&event=workflow_dispatch', '')] = fx.responses[key];
+    const source = fixtureSource(fx, scratch());
+    const card = collectScorecard(source, options({ gateEvent: null }));
+    expect(source.calls.find(c => c.includes('/evals.yml/runs?'))).not.toContain('event=');
+    expect(card.gates.map(g => g.id)).toEqual([9005, 9004, 9003, 9002, 9001]);
+    expect(card.gates.find(g => g.id === 9005)!.kind).toBe('other');
+  });
+
+  test('an empty window prints n/a on every ratio instead of NaN, and short durations read as minutes', () => {
+    // Value: protects=zero merges and zero trains render n/a and sub-hour lead times render as minutes; fails_when=a 0/0 guard is removed or fmtHours loses a branch; why_new=every other case has merges and hour-scale durations; seam=none; no_claim=none beyond protects
+    const fx = fixture();
+    for (const key of Object.keys(fx.responses)) {
+      if (key.includes('/pulls?') || key.includes('/releases?')) fx.responses[key] = [];
+      else if (key.includes('/runs?')) fx.responses[key] = { total_count: 0, workflow_runs: [] };
+      else if (key.startsWith('search/issues')) fx.responses[key] = { total_count: 0, items: [] };
+    }
+    const card = collectScorecard(fixtureSource(fx, scratch()), options());
+    const values = byId(scorecardRows(card));
+    expect(card.unavailable).toEqual([]);
+    expect(values.merged).toBe('0 (crew 0, outside 0)');
+    expect(values.lead_time).toBe('median n/a, p90 n/a');
+    expect(values.cost_per_merge).toBe('n/a (no merges)');
+    expect(values.red_train).toBe('n/a (0 red of 0 trains; 0 red backstop, 0 red screens)');
+    expect(values.releases).toBe('0');
+    expect(renderMarkdown(card, scorecardRows(card))).not.toContain('NaN');
+    expect(fmtHours(0.5)).toBe('30m');
+    expect(fmtHours(null)).toBe('n/a');
+  });
+
+  test('a failed merged-PR read leaves gate rows standing with comment costs unknown', () => {
+    // Value: protects=each input is guarded on its own so a PR-list failure still prints gates, free retries, issues and releases; fails_when=the guards are merged into one try or the gate read depends on the PR read succeeding; why_new=only the issues guard was exercised; seam=none; no_claim=none beyond protects
+    const fx = fixture();
+    for (const key of Object.keys(fx.responses)) if (key.includes('/pulls?')) delete fx.responses[key];
+    const card = collectScorecard(fixtureSource(fx, scratch()), options());
+    expect(card.unavailable).toHaveLength(1);
+    expect(card.unavailable[0]).toStartWith('merged PRs: ');
+    const values = byId(scorecardRows(card));
+    expect(values.merged).toStartWith('unavailable (');
+    expect(values.lead_time).toStartWith('unavailable (');
+    expect(values.gates).toBe('2 / 1 / 1; known cost $30.50 on 1 of 4 runs');
+    expect(card.gates.find(g => g.id === 9003)!.costSource).toBeNull();
+    expect(values.issues).toBe('5 / 7');
+  });
 });
 
 describe('factory-scorecard: pieces', () => {
@@ -187,6 +235,8 @@ describe('factory-scorecard: the bin', () => {
   test('bad usage exits 2 with the usage text; --help exits 0', () => {
     const cwd = scratch();
     expect(run(['--since-days', 'soon'], cwd).status).toBe(2);
+    // Value: protects=an unparsable --now exits 2 before any read; fails_when=the --now validation branch is removed; why_new=the other flag validations were covered and this one was not; seam=none; no_claim=none beyond protects
+    expect(run(['--now', 'yesterday-ish', '--fixtures', FIXTURE], cwd).status).toBe(2);
     expect(run(['--ready-marker', '(', '--fixtures', FIXTURE], cwd).status).toBe(2);
     const stray = run(['stray'], cwd);
     expect(stray.status).toBe(2);
