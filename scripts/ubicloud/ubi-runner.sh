@@ -588,18 +588,31 @@ cmd_down() {
 
 # pack SRC: write a gzipped checkout tarball to stdout (tracked + untracked
 # files that are not ignored, plus .git; a non-git directory is taken whole).
+# A linked worktree's .git is a one-line pointer into the main repository,
+# useless on the VM, so it is replaced by a self-contained clone of the
+# checked-out branch carrying the worktree's own index.
 cmd_pack() {
-  local src
+  local src tmp="" gitdir branch
   src=$(cd "${1:-.}" && pwd)
   if git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ -f "$src/.git" ]; then
+      branch=$(git -C "$src" rev-parse --abbrev-ref HEAD)
+      [ "$branch" != HEAD ] || die "pack: $src is a linked worktree on a detached HEAD; check out a branch so the VM gets a self-contained .git"
+      tmp=$(mktemp -d)
+      gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
+      git clone -q --bare --no-local --single-branch --branch "$branch" "$gitdir" "$tmp/.git"
+      git -C "$tmp/.git" config core.bare false
+      cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+    fi
     (
       cd "$src"
-      { git ls-files -z -co --exclude-standard; printf '.git\0'; } \
+      { git ls-files -z -co --exclude-standard; [ -n "$tmp" ] || printf '.git\0'; } \
         | while IFS= read -r -d '' f; do
             if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\0' "$f"; fi
           done \
-        | tar --null -T - -czf -
+        | if [ -n "$tmp" ]; then tar --null -T - -c -C "$tmp" .git -zf -; else tar --null -T - -czf -; fi
     )
+    [ -z "$tmp" ] || rm -rf "$tmp"
   else
     tar -C "$src" -czf - .
   fi

@@ -294,6 +294,23 @@ esac
     expect(owner.stdout.toString().trim()).toBe('lane7');
   });
 
+test('pack ships a linked worktree with a self-contained .git on the checked-out branch, carrying its index', () => {
+    const d = mkdtempSync(join(tmpdir(), 'ubi-pack-'));
+    try {
+      const sh = (cmd: string, cwd: string) => { const r = Bun.spawnSync(['bash', '-c', cmd], { cwd, timeout: 30_000, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }); expect(r.exitCode).toBe(0); return r.stdout.toString(); };
+      sh('git init -q main && cd main && echo a > a && git add a && git commit -qm one && git branch feat && git worktree add -q ../wt feat', d);
+      sh('echo b > b && git add b && git commit -qm two && echo u > u && echo ignored > ig && echo ig > .gitignore', join(d, 'wt'));
+      expect(readFileSync(join(d, 'wt/.git'), 'utf8')).toStartWith('gitdir:');
+      sh(`bash ${JSON.stringify(join(DIR, 'ubi-runner.sh'))} pack . > ../pack.tgz && mkdir ../vm && tar -xzf ../pack.tgz -C ../vm`, join(d, 'wt'));
+      expect(existsSync(join(d, 'vm/.git/HEAD'))).toBe(true);
+      expect(lstatSync(join(d, 'vm/.git')).isDirectory()).toBe(true);
+      expect(existsSync(join(d, 'vm/ig'))).toBe(false);
+      expect(sh('git rev-parse --abbrev-ref HEAD && git status --short && git log --oneline | wc -l', join(d, 'vm')).replace(/\s+/g, ' ').trim()).toBe('feat ?? .gitignore ?? u 2');
+      const wtree = (cwd: string) => sh(`bash ${JSON.stringify(join(ROOT, 'bin/gstack-wtree'))}`, cwd).trim();
+      expect(wtree(join(d, 'vm'))).toBe(wtree(join(d, 'wt')));
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('up records the VM in the scratch file before the create request is sent', () => {
     const runner = read('scripts/ubicloud/ubi-runner.sh');
     const create = runner.indexOf('cli "${args[@]}" >/dev/null 2>"$dir/create.err"');
