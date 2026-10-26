@@ -42,6 +42,7 @@ describe('craft resolvers', () => {
     const audit = read('design-review', 'sections', 'craft-audit.md');
     expect(audit).toContain('line is one category 9 finding under that id');
     expect(audit).toContain('no `CRAFT_RESULT` line (framework source');
+    expect(audit).toContain('or a mount-node shell: say the check was unavailable for that page and judge the tells below by eye');
     expect(audit).toContain('add `--accepted` with that screen\'s finalized.json');
     expect(audit).toContain('a `CRAFT_ACCEPTED` line is a finding the user accepted, listed with its reason, not filed again, except `needs-proof` and `lorem`');
     expect(audit).toContain('After a `cannot use exceptions` warning, file every line.');
