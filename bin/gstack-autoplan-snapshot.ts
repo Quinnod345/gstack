@@ -538,22 +538,14 @@ function methodologyContent(phase: string, skillFile: string) {
     if (indexHeadings.length !== 1 || /^## Review Sections\b/m.test(mainProse)) throw new Error('Ambiguous methodology layout');
     const index = mainProse.slice(indexHeadings[0]!.index! + indexHeadings[0]![0].length).split(/\n## /)[0]!;
     const sections = [...index.matchAll(/`(sections\/[^`]+)`/g)].map(match => match[1]!);
-    // The index names the one complete review section plus any companion
-    // sections a situation adds to it (plan-eng-review's design-twice pass);
-    // every listed file is bound, in index order, so the dispatch carries them all.
-    if (new Set(sections).size !== sections.length || sections.filter(s => s === 'sections/review-sections.md').length !== 1) {
-      throw new Error('Expected the one complete current review section');
+    if (sections.length !== 1 || sections[0] !== 'sections/review-sections.md') throw new Error('Expected the one complete current review section');
+    const section = readPart(join(dirname(skillFile), sections[0]));
+    const sectionProse = referenceProse(section.text).join('\n');
+    if ([...sectionProse.matchAll(/^## Review Sections\b/gm)].length !== 1 ||
+        /^## Section index\b/m.test(sectionProse) || /sections\/[\w.-]+\.md/.test(sectionProse)) {
+      throw new Error('Missing or nested methodology review section');
     }
-    for (const file of sections) {
-      const section = readPart(join(dirname(skillFile), file));
-      const sectionProse = referenceProse(section.text).join('\n');
-      const reviewHeadings = [...sectionProse.matchAll(/^## Review Sections\b/gm)].length;
-      if (reviewHeadings !== (file === 'sections/review-sections.md' ? 1 : 0) ||
-          /^## Section index\b/m.test(sectionProse) || /sections\/[\w.-]+\.md/.test(sectionProse)) {
-        throw new Error('Missing or nested methodology review section');
-      }
-      parts.push(section);
-    }
+    parts.push(section);
   } else if ([...mainProse.matchAll(/^## Review Sections\b/gm)].length !== 1) {
     throw new Error('Inline methodology is missing its complete review section');
   }

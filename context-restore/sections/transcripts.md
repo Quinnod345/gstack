@@ -14,7 +14,6 @@ edits code.
 | Host | Transcripts | How this workspace's files are told apart |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<slug>/*.jsonl` | one folder per workspace; <slug> is the workspace path with every character that is not a letter or digit turned into "-" |
-| OpenAI Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl` | dated rollout files from every workspace on the machine; the first line of each names its cwd |
 | Capy (any model) | none | the harness keeps no transcript on the machine; say so and use the shared record and git |
 
 ### Step T1: Lock the scope, then list the files

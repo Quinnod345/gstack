@@ -493,7 +493,6 @@ sections. Read a section in full before doing its step; do not work from memory.
 | When | Read this section |
 |------|-------------------|
 | starting the Scope Challenge and full review (after target selection and startup) | `sections/review-sections.md` |
-| reviewing a plan that introduces a new module, service, package or boundary (the design-twice pass inside Section 1, the Architecture review) | `sections/design-twice.md` |
 ---
 
 ## Web research runs in Aside
@@ -625,9 +624,6 @@ Do not rerun the preamble or re-offer the prerequisite.
 Scope Challenge is mandatory before Section 1. Read the section below: it runs **Review preparation**, then **Scope Challenge**.
 
 **Complexity gate:** while a Scope Challenge complexity question awaits an answer, do not start Section 1, call ExitPlanMode, or write findings or fixes into a plan file. An unchanged copy of the original plan is allowed. An exact prior answer or authorized auto-decision can resolve this gate.
-
-> **STOP.** Before reviewing a plan that introduces a new module, service, package or boundary (the design-twice pass inside Section 1, the Architecture review), Read `~/.claude/skills/gstack/plan-eng-review/sections/design-twice.md` and execute it
-> in full. Do not work from memory — that section is the source of truth for this step.
 
 > **STOP.** Before starting the Scope Challenge and full review (after target selection and startup), Read `~/.claude/skills/gstack/plan-eng-review/sections/review-sections.md` and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.

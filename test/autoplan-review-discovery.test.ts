@@ -122,13 +122,9 @@ describe('autoplan reads installed host methodology', () => {
             expect(directive).toContain('"<REVIEW_SKILL>"');
           }
           if (carved) {
-            // An install carries every generated section, not only the review body:
-            // plan-eng-review's design-twice companion is bound by the same snapshot.
-            const sectionsDir = path.dirname(sectionSource);
-            for (const file of fs.readdirSync(sectionsDir).filter(name => name.endsWith('.md'))) {
-              installFile(path.join(sectionsDir, file), path.resolve(path.dirname(entry), reference, '..', 'sections', file), mode);
-            }
-            const sectionInstalled = path.resolve(path.dirname(entry), reference, '..', 'sections/review-sections.md');
+            const relative = 'sections/review-sections.md';
+            const sectionInstalled = path.resolve(path.dirname(entry), reference, '..', relative);
+            installFile(sectionSource, sectionInstalled, mode);
             const section = fs.readFileSync(sectionInstalled, 'utf8');
             expect(section).toBe(fs.readFileSync(sectionSource, 'utf8'));
             expect(section).toContain('## Review Sections');
@@ -139,10 +135,7 @@ describe('autoplan reads installed host methodology', () => {
             const restore = path.join(registry, 'restore.md');
             fs.writeFileSync(restore, 'owned restore\n');
             const skillPath = path.resolve(path.dirname(entry), reference);
-            // The bundle binds every section the skill's index names, in index order.
-            const indexed = [...loaded.matchAll(/^\| .* \| `(sections\/[^`]+)` \|$/gm)].map(match => match[1]!);
-            expect(indexed).toContain('sections/review-sections.md');
-            assertBundle(methodology(phase, skillPath, restore), [skillPath, ...indexed.map(rel => path.resolve(path.dirname(skillPath), rel))]);
+            assertBundle(methodology(phase, skillPath, restore), [skillPath, sectionInstalled]);
           } else {
             expect(directive).not.toContain('sections/review-sections.md');
             expect(loaded).toContain('## Review Sections');

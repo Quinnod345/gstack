@@ -102,6 +102,6 @@ the shared-premise red flag in `investigate/sections/blast-radius.md.tmpl` and
 `investigate/SKILL.md.tmpl`; the transcript-mining fallback and its status-tagged brief in
 `context-restore/sections/transcripts.md.tmpl`; the seven questions in
 `benchmark/sections/vet-the-number.md.tmpl`; the second-shape comparison and the eight
-design red flags in `plan-eng-review/sections/design-twice.md.tmpl`; and the generated
+design red flags in Section 1 of `plan-eng-review/sections/review-sections.md.tmpl`; and the generated
 `SKILL.md` / `sections/*.md` files. Each section names its source in a first-line comment.
 Written in gstack's words; no sentence is copied, so no license text is carried.

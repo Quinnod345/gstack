@@ -2,10 +2,12 @@
  * Transcript resolvers for /context-restore's no-checkpoint fallback
  * (context-restore/sections/transcripts.md.tmpl).
  *
- *   {{TRANSCRIPT_SOURCES}}   → the table of transcript stores, one row per host
- *                              that declares `transcripts` in hosts/<name>.ts,
- *                              plus the Capy row (none; the harness keeps no
- *                              transcript on the machine).
+ *   {{TRANSCRIPT_SOURCES}}   → the table of transcript stores for THIS host
+ *                              (its `transcripts` row from hosts/<name>.ts, or
+ *                              a none row) plus the Capy row (none; the harness
+ *                              keeps no transcript on the machine). Only the
+ *                              rendering host's paths appear: a Codex render
+ *                              never names ~/.claude/.
  *   {{TRANSCRIPT_DISCOVERY}} → the bash block that lists THIS host's transcript
  *                              files for the current workspace only, inside the
  *                              window, and prints `TRANSCRIPTS: none (...)` on
@@ -16,19 +18,20 @@
  * never hand-writes them. test/context-restore-transcripts.test.ts runs the
  * discovery block against fixture transcripts.
  */
-import { ALL_HOST_CONFIGS, getHostConfig } from '../../hosts/index';
+import { getHostConfig } from '../../hosts/index';
 import type { TemplateContext } from './types';
 
 export const CAPY_NO_TRANSCRIPTS = 'TRANSCRIPTS: none (Capy keeps no session transcript on this machine; use the shared record and git)';
 
-export function generateTranscriptSources(): string {
-  const rows = ALL_HOST_CONFIGS
-    .filter(h => h.transcripts)
-    .map(h => `| ${h.displayName} | \`${h.transcripts!.root}\` | ${h.transcripts!.layout} |`);
+export function generateTranscriptSources(ctx: TemplateContext): string {
+  const host = getHostConfig(ctx.host);
+  const row = host.transcripts
+    ? `| ${host.displayName} | \`${host.transcripts.root}\` | ${host.transcripts.layout} |`
+    : `| ${host.displayName} | none | this host declares no transcript store gstack may read; use the shared record and git |`;
   return [
     '| Host | Transcripts | How this workspace\'s files are told apart |',
     '|---|---|---|',
-    ...rows,
+    row,
     '| Capy (any model) | none | the harness keeps no transcript on the machine; say so and use the shared record and git |',
   ].join('\n');
 }

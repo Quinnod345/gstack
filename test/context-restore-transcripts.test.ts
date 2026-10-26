@@ -48,16 +48,20 @@ describe('context-restore carve: the transcript fallback', () => {
     expect(skeleton).toMatch(/HARD GATE:\*\* Do NOT implement code changes/);
   });
 
-  test('the host table comes from hosts/*.ts and carries Claude Code, Codex and the Capy row', () => {
-    const table = generateTranscriptSources();
-    expect(section).toContain(table);
-    for (const host of ALL_HOST_CONFIGS.filter(h => h.transcripts)) {
-      expect(table).toContain('| ' + host.displayName + ' | \u0060' + host.transcripts!.root + '\u0060 |');
-    }
+  test("the host table comes from hosts/*.ts: this host's row plus the Capy row, never another host's paths", () => {
+    const ctx = (host: string) => ({ host, skillName: 'context-restore', paths: { binDir: '$GSTACK_BIN' } }) as never;
     expect(ALL_HOST_CONFIGS.filter(h => h.transcripts).map(h => h.name).sort()).toEqual(['claude', 'codex']);
-    expect(table).toContain('~/.claude/projects/<slug>/*.jsonl');
-    expect(table).toContain('~/.codex/sessions/');
-    expect(table).toContain('| Capy (any model) | none |');
+    const claude = generateTranscriptSources(ctx('claude'));
+    expect(section).toContain(claude);
+    expect(claude).toContain('| Claude Code | `~/.claude/projects/<slug>/*.jsonl` |');
+    expect(claude).not.toContain('~/.codex/');
+    const codex = generateTranscriptSources(ctx('codex'));
+    expect(codex).toContain('| OpenAI Codex CLI | `~/.codex/sessions/');
+    expect(codex).not.toContain('~/.claude/');
+    const cursor = generateTranscriptSources(ctx('cursor'));
+    expect(cursor).toContain('| Cursor | none |');
+    expect(cursor).not.toContain('~/.claude/');
+    for (const table of [claude, codex, cursor]) expect(table).toContain('| Capy (any model) | none |');
     expect(section).toMatch(/Capy[^\n]*say so and use the shared record and git/);
   });
 

@@ -1,6 +1,6 @@
 /**
  * pstack absorb (GSTA-116 plan, items 6 and 9): benchmark's vet-the-number
- * section and plan-eng-review's design-twice section. Pins the carve shape
+ * section and plan-eng-review's design-twice pass. Pins the carve shape
  * (manifest ids, STOP pointers, where each pointer sits) and the tokens each
  * section must carry; prose is not pinned.
  */
@@ -50,38 +50,39 @@ describe('benchmark carve: vet the number', () => {
   });
 });
 
-describe('plan-eng-review carve: two shapes before one', () => {
+describe('plan-eng-review: two shapes before one inside Section 1 of the lazy review section', () => {
   const skeleton = read('plan-eng-review/SKILL.md');
-  const section = read('plan-eng-review/sections/design-twice.md');
-  const manifest = JSON.parse(read('plan-eng-review/sections/manifest.json')) as { sections: Array<{ id: string; file: string; scope?: string; runner_only?: boolean }> };
+  const section = read('plan-eng-review/sections/review-sections.md');
+  const manifest = JSON.parse(read('plan-eng-review/sections/manifest.json')) as { sections: Array<{ id: string }> };
 
-  test('registered beside review-sections, pointed to before it, and visible to the autoplan runner', () => {
-    expect(manifest.sections.map(s => s.id)).toEqual(['review-sections', 'design-twice', 'checklist']);
-    const entry = manifest.sections.find(s => s.id === 'design-twice')!;
-    expect(entry.scope).toBe('always');
-    expect(entry.runner_only).toBeUndefined();
-    expect(CARVE_GUARDS['plan-eng-review']!.expectedSections).toEqual(['design-twice.md', 'review-sections.md']);
-    const designStop = skeleton.indexOf('sections/design-twice.md', skeleton.indexOf('> **STOP.**'));
-    const reviewStop = skeleton.indexOf('sections/review-sections.md', skeleton.indexOf('> **STOP.**'));
-    expect(designStop).toBeGreaterThan(0);
-    expect(designStop).toBeLessThan(reviewStop);
-    expect(skeleton.lastIndexOf('EXIT PLAN MODE GATE')).toBeGreaterThan(skeleton.lastIndexOf('> **STOP.**'));
+  test('the pass lives in review-sections.md between Sections 1 and 2, the skeleton and manifest are unchanged, and the checklist maps it', () => {
+    expect(manifest.sections.map(s => s.id)).toEqual(['review-sections', 'checklist']);
+    expect(CARVE_GUARDS['plan-eng-review']!.expectedSections).toEqual(['review-sections.md']);
+    expect(skeleton).not.toContain('design-twice');
+    expect(skeleton.match(/> \*\*STOP\.\*\*/g)).toHaveLength(1);
+    const one = section.indexOf('### 1. Architecture review');
+    const pass = section.indexOf('### Two shapes before one (design-twice)');
+    const two = section.indexOf('### 2. Code quality review');
+    expect(one).toBeGreaterThan(0);
+    expect(pass).toBeGreaterThan(one);
+    expect(two).toBeGreaterThan(pass);
+    expect(section.slice(pass, two)).toMatch(/only when the plan introduces a new module, service, package or\s+boundary/);
     expect(read('plan-eng-review/sections/checklist.md')).toContain('Two shapes before one (design-twice)');
   });
 
   test('a second structurally distinct shape, interface depth, the agent-contributor assumption, and the eight red flags in order', () => {
-    expect(section).toContain('## Two shapes before one');
-    expect(section).toContain('### Ask for the second shape');
-    expect(section).toMatch(/require a second shape that is structurally\s+different/);
-    expect(section).toMatch(/A point fix inside the first shape is not a\s+second candidate\./);
-    expect(section).toContain('interface depth');
-    expect(section).toContain('A deep module is not a deep call chain');
-    expect(section).toMatch(/an agent that sees only the files it opened, copies the nearest example\s+and takes the shortest path that compiles/);
+    const pass = section.slice(section.indexOf('### Two shapes before one (design-twice)'), section.indexOf('### 2. Code quality review'));
+    expect(pass).toContain('**Ask for the second shape.**');
+    expect(pass).toMatch(/require a second\s+shape that is structurally different/);
+    expect(pass).toMatch(/A point fix inside\s+the first shape is not a second candidate\./);
+    expect(pass).toContain('interface depth');
+    expect(pass).toContain('A deep module is not a deep call chain');
+    expect(pass).toMatch(/an agent that sees only the files it opened,\s+copies the nearest example and takes the shortest path that compiles/);
     const flags = ['**Shallow module.**', '**Information leakage.**', '**Temporal decomposition.**', '**Pass-through method.**', '**Split ownership.**', '**Two ways to do one task.**', '**Importable internals.**', '**Hand-synced list.**'];
-    let last = section.indexOf('### The eight red flags');
+    let last = pass.indexOf('**The eight red flags.**');
     expect(last).toBeGreaterThan(0);
     for (const f of flags) {
-      const at = section.indexOf(f);
+      const at = pass.indexOf(f);
       expect(at, f).toBeGreaterThan(last);
       last = at;
     }
@@ -89,14 +90,24 @@ describe('plan-eng-review carve: two shapes before one', () => {
 });
 
 describe('every pstack-derived section carries its credit line', () => {
-  for (const rel of ['investigate/sections/blast-radius.md.tmpl', 'context-restore/sections/transcripts.md.tmpl', 'benchmark/sections/vet-the-number.md.tmpl', 'plan-eng-review/sections/design-twice.md.tmpl']) {
+  const credited = {
+    'investigate/sections/blast-radius.md.tmpl': 0,
+    'context-restore/sections/transcripts.md.tmpl': 0,
+    'benchmark/sections/vet-the-number.md.tmpl': 0,
+    // The design-twice pass lives inside an existing section; its credit sits on the line above its heading.
+    'plan-eng-review/sections/review-sections.md.tmpl': '### Two shapes before one (design-twice)',
+  } as const;
+  for (const [rel, where] of Object.entries(credited)) {
     test(rel, () => {
-      const first = read(rel).split('\n')[0]!;
-      expect(first.startsWith('<!--')).toBe(true);
-      expect(first).toContain('pstack');
-      expect(first).toContain('MIT');
-      expect(first).toContain('rewritten');
-      expect(first).toContain('See NOTICE.md');
+      const lines = read(rel).split('\n');
+      const at = typeof where === 'number' ? where : lines.indexOf(where) - 1;
+      expect(at).toBeGreaterThanOrEqual(0);
+      const credit = lines[at]!;
+      expect(credit.startsWith('<!--')).toBe(true);
+      expect(credit).toContain('pstack');
+      expect(credit).toContain('MIT');
+      expect(credit).toContain('rewritten');
+      expect(credit).toContain('See NOTICE.md');
       expect(read('NOTICE.md')).toContain(rel.replace('.tmpl', ''));
     });
   }
