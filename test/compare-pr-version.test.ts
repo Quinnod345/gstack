@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { BASE_POLICY, cleanup, makeFixtureRepo, type FixtureRepo } from './helpers/restamp-fixture';
-import { bumpVersion } from '../lib/version-gate-train';
+import { bumpVersion, regeneratedAtBase } from '../lib/version-gate-train';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'compare-pr-version.ts');
@@ -214,6 +214,20 @@ describe('version gate: unstamped heads under a train policy', () => {
       expect(Date.now() - started).toBeLessThan(15_000);
       expect(res.code).toBe(0);
       expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('a tool that ignores TERM is killed at the limit and reported, never waited for', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      const head = commit(r, 'output without a working tool');
+      const started = Date.now();
+      const res = regeneratedAtBase({ repoRoot: r.work, head, baseVersion: '1.2.3.0\n', tool: "trap '' TERM; echo stubborn; sleep 30", outputs: ['generated/digest.md'], timeoutMs: 2_000 });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(res.kind).toBe('error');
+      expect((res as { reason: string }).reason).toContain('was killed at the 2s limit');
+      expect((res as { reason: string }).reason).toContain('stubborn');
+      expect(r.git('worktree', 'list').trim().split('\n')).toHaveLength(1);
     });
 
     test('the tool runs without the gate\'s tokens, and an output the tool never writes still counts as a stamp', () => {

@@ -40,8 +40,9 @@ export function bumpVersion(version: string, level: string): string | null {
  * VERSION is unchanged on this path; the base tip may have stamped since):
  * the slot's restamp regenerates it anyway. Runs the head's tool in a
  * throwaway worktree with that VERSION and compares each changed output byte
- * for byte, reading the tool's output from a file so a lingering child cannot
- * hold the gate open. A stamp (new
+ * for byte, reading the tool's output from a file (first 4 KB) so a lingering
+ * child cannot hold the gate open, and killing a tool that outlives the limit
+ * with SIGKILL so one that ignores TERM cannot either. A stamp (new
  * VERSION inside the output) differs, so it still classifies as stamped, and
  * so does an output the tool never writes (it is removed before the run).
  * The tool is head code: it runs with a bare environment (no tokens), no
@@ -49,7 +50,8 @@ export function bumpVersion(version: string, level: string): string | null {
  * the staging worktree.
  */
 const TOOL_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'BUN_INSTALL', 'SystemRoot', 'TEMP', 'TMP'];
-function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: string; tool: string; outputs: string[] }): { kind: 'same' } | { kind: 'differs'; files: string[] } | { kind: 'error'; reason: string } {
+export function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: string; tool: string; outputs: string[]; timeoutMs?: number }): { kind: 'same' } | { kind: 'differs'; files: string[] } | { kind: 'error'; reason: string } {
+  const timeoutMs = o.timeoutMs ?? 120_000;
   if (!o.baseVersion.trim()) return { kind: 'error', reason: 'the merge base has no VERSION to regenerate the release outputs at' };
   let staging: string;
   try { staging = fs.mkdtempSync(path.join(os.tmpdir(), 'version-gate-regen-')); } catch (e) { return { kind: 'error', reason: `cannot create a staging directory to regenerate the release outputs: ${e instanceof Error ? e.message : String(e)}` }; }
@@ -64,10 +66,13 @@ function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersion: str
     const logPath = path.join(os.tmpdir(), path.basename(staging) + '.log');
     const log = fs.openSync(logPath, 'w');
     let run: ReturnType<typeof spawnSync>;
-    try { run = spawnSync('sh', ['-c', o.tool], { cwd: staging, stdio: ['ignore', log, log], timeout: 120_000, env }); } finally { fs.closeSync(log); }
-    const output = (() => { try { return fs.readFileSync(logPath, 'utf8'); } catch { return ''; } finally { fs.rmSync(logPath, { force: true }); } })();
+    try { run = spawnSync('sh', ['-c', o.tool], { cwd: staging, stdio: ['ignore', log, log], timeout: timeoutMs, killSignal: 'SIGKILL', env }); } finally { fs.closeSync(log); }
+    const output = (() => {
+      try { const fd = fs.openSync(logPath, 'r'); try { const buf = Buffer.alloc(4096); return buf.subarray(0, fs.readSync(fd, buf)).toString('utf8'); } finally { fs.closeSync(fd); } } catch { return ''; } finally { fs.rmSync(logPath, { force: true }); }
+    })();
     if (run.status !== 0) {
-      const how = run.status === null ? (run.error ? run.error.message : `was killed by ${run.signal ?? 'a signal'} (120s limit)`) : `exited ${run.status}`;
+      const timedOut = run.signal !== null || (run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+      const how = run.status !== null ? `exited ${run.status}` : timedOut ? `was killed at the ${Math.round(timeoutMs / 1000)}s limit` : (run.error?.message ?? 'did not exit');
       return { kind: 'error', reason: `release_tool \`${o.tool}\` ${how} at ${o.head.slice(0, 12)} with its merge base's VERSION, so its release outputs cannot be told from a stamp: ${output.trim().slice(0, 200)}` };
     }
     const files = o.outputs.filter(f => {
