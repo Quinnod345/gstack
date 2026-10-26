@@ -9,7 +9,10 @@
  * writer scans through this engine, so the value itself is now what it refuses.
  */
 import { describe, expect, test } from "bun:test";
-import { credentialEnvValues, redactFindingSpans, scan } from "../lib/redact-engine";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { NON_SECRET_ENV_NAMES, credentialEnvValues, redactFindingSpans, scan } from "../lib/redact-engine";
 
 // Fixture values live in plain constants: a credential-named assignment with an
 // entropic literal on one line is exactly what the repo's own pregate secrets
@@ -23,10 +26,8 @@ const dbPasswdValue = "passwd-passwd-passwd";
 const lowerCaseValue = "lower-case-name-value";
 const monkeyValue = "banana-banana-banana";
 const tokenizerValue = "tokenizer-value-here";
-const sslKeyPath = "/etc/ssl/private/x.key";
-const winKeyPath = "C:\\Users\\me\\key.pem";
-const homeKeyPath = "~/.ssh/id_key";
 const lockOwner = ["12345", "6789", "17"].join("-");
+const slashSecret = "/Qm9vZ2llV29vZ2ll/abc123XYZ+=";
 
 const env = {
   ANTHROPIC_API_KEY: anthropicValue,
@@ -143,21 +144,33 @@ describe("env-value scan", () => {
     expect(credentialEnvValues({ PUBLICITY_KEY: monkeyValue }).map(e => e.name)).toEqual(["PUBLICITY_KEY"]);
   });
 
-  // /ship Step 11 adversarial fixes: (1) the name rule also admits *_PASS, *_PAT, *_APIKEY and *_PWD,
-  // while the shell's own PWD and OLDPWD stay out; (2) a credential-named variable whose value is a
-  // filesystem path (SSL_KEY=/etc/ssl/private/x.key) names where the credential lives, so the path
-  // is not a finding; (3) gstack's own GSTACK_BRAIN_LOCK_TOKEN (pid-random-epoch, written to the lock
-  // owner file) is not a secret. fails_when: PWD is admitted (every mention of the cwd becomes HIGH),
-  // the path rule goes, or the non-secret set loses the lock token.
-  test("more credential suffixes, path values and gstack's own lock token", () => {
-    const names = credentialEnvValues({
-      DB_PASS: dbValue, GITHUB_PAT: ghValue, STRIPE_APIKEY: lowerCaseValue, MYSQL_PWD: dbPasswdValue,
-      PWD: "/workspace/gstack", OLDPWD: "/workspace/other",
-      SSL_KEY: sslKeyPath, WIN_KEY: winKeyPath, HOME_KEY: homeKeyPath,
-      GSTACK_BRAIN_LOCK_TOKEN: lockOwner,
-    }).map(e => e.name).sort();
-    expect(names).toEqual(["DB_PASS", "GITHUB_PAT", "MYSQL_PWD", "STRIPE_APIKEY"]);
-    expect(credentialEnvValues({ SLASH_KEY: "/abc12345-no-second-slash" }).map(e => e.name)).toEqual(["SLASH_KEY"]);
+  // (1) the name rule also admits *_PASS, *_PAT, *_APIKEY and *_PWD, while the shell's own PWD and
+  // OLDPWD stay out by NAME (their fixture values are plain words, so only the name rule keeps them
+  // out); (2) a credential-named variable whose value names an EXISTING file (SSL_KEY=/etc/ssl/...)
+  // says where the credential lives, so that path is no finding, while a path-shaped value that
+  // names no file, a base64 secret starting with "/" included, is still scanned; (3) gstack's own
+  // GSTACK_BRAIN_LOCK_TOKEN (pid-random-epoch, written to the lock owner file) is not a secret, and
+  // bin/gstack-brain-lock.sh still exports every name in that set. fails_when: PWD is admitted (every
+  // mention of the cwd becomes HIGH), the path rule becomes a shape rule (the slash secret is skipped),
+  // the existence check goes (the real file's path becomes HIGH), or the non-secret set drifts.
+  test("more credential suffixes, path values that exist, and gstack's own lock token", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gsta104-"));
+    const keyFile = path.join(dir, "x.key");
+    fs.writeFileSync(keyFile, "pem");
+    try {
+      const names = credentialEnvValues({
+        DB_PASS: dbValue, GITHUB_PAT: ghValue, STRIPE_APIKEY: lowerCaseValue, MYSQL_PWD: dbPasswdValue,
+        PWD: "workspace-dir-name", OLDPWD: "previous-dir-name",
+        SSL_KEY: keyFile, DIR_KEY: dir, MISSING_KEY: path.join(dir, "absent", "x.key"), SLASH_KEY: slashSecret,
+        GSTACK_BRAIN_LOCK_TOKEN: lockOwner,
+      }).map(e => e.name).sort();
+      expect(names).toEqual(["DB_PASS", "GITHUB_PAT", "MISSING_KEY", "MYSQL_PWD", "SLASH_KEY", "STRIPE_APIKEY"]);
+      expect(scan(`b64 ${slashSecret}`, { processEnv: { SLASH_KEY: slashSecret } }).findings.map(f => f.id)).toEqual(["env.value"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    const lock = fs.readFileSync(path.join(import.meta.dir, "..", "bin", "gstack-brain-lock.sh"), "utf8");
+    for (const name of NON_SECRET_ENV_NAMES) expect(lock, name).toContain(`export ${name}`);
   });
 
   test("the default environment is process.env", () => {
