@@ -16,6 +16,8 @@
 import { createHash } from "crypto";
 import { scan, type Finding, type RepoVisibility } from "./redact-engine";
 import { canonicalRemote } from "./remote-identity";
+import { parseChangelog } from "./changelog-check";
+import { versionWidth } from "./version-source";
 
 export const OPS = ["pr-comment", "issue-comment", "reply", "pr-title", "pr-body", "pr-create", "issue-create"] as const;
 export type Op = (typeof OPS)[number];
@@ -198,11 +200,61 @@ function visibility(env: PostEnv, req: Request, kind: HostKind, configBin: strin
 type Part = "title" | "body";
 interface Located { part: Part; finding: Finding }
 
-function scanParts(parts: Array<[Part, string]>, vis: RepoVisibility, selfEmail: string | undefined) {
+/**
+ * The repository's own four-part release versions: the root VERSION file's
+ * value and every version in a root CHANGELOG.md release heading, read with
+ * the same parser gstack-restamp uses (`## [1.2.3.4]`, `## v1.2.3.4`, an
+ * optional `- date`; a heading that only mentions a quad is not one). A
+ * four-part version is byte-for-byte a dotted quad, and `1.91.191.0` is a
+ * public address, so "(1.91.191.0)" in a PR body raised pii.ip_public
+ * (MEDIUM), which an unattended /ship cannot confirm. The engine's own version
+ * exemption reads only the declaration right before the span, so prose that
+ * merely names a release gets no help from it. These exact strings are
+ * allowlisted for the scan wherever they appear (the allowlist is exact-string
+ * and context-free, so `host: <released quad>` is exempt too, a trade the
+ * repo's own release set is small enough to carry); any other dotted quad
+ * (8.8.8.8, 203.0.113.7, a version this repo never released) still reports.
+ * The files are read from the checked-out tree, so a branch that adds a
+ * four-part heading widens the set for posts made from that checkout.
+ */
+function repoReleaseVersions(env: PostEnv): string[] {
+  const top = env.run("git", ["rev-parse", "--show-toplevel"]);
+  const root = top.status === 0 ? top.stdout.trim() : "";
+  if (!root) return [];
+  const read = (name: string) => { try { return env.readFile(`${root}/${name}`); } catch { return ""; } };
+  const versions = new Set<string>();
+  const current = read("VERSION").trim();
+  if (versionWidth(current) === 4) versions.add(current);
+  for (const s of parseChangelog(read("CHANGELOG.md")).sections) if (s.version && versionWidth(s.version) === 4) versions.add(s.version);
+  return [...versions];
+}
+
+/**
+ * All-digit identifiers a ship receipt or a CI link names, which pii.phone.e164
+ * reads as phone numbers: a 12-hex receipt sha that happens to be all digits
+ * (`tree=704992822996`, `tree 704992822996`, and the receipt's `head=`,
+ * `gated_tree=` and `predecessor=` keys) and an 11-digit GitHub Actions
+ * run id as prose or link text (`run 19368712345`, `[run 19368712345](…/actions/runs/19368712345)`;
+ * the engine already exempts the id inside the URL itself). Only the exact
+ * tokens found in those positions are allowlisted, so a bare 11-digit number,
+ * a 10-digit national number and an E.164 `+14155551234` still report.
+ */
+function receiptDigitTokens(texts: string[]): string[] {
+  const tokens = new Set<string>();
+  for (const text of texts) {
+    for (const m of text.matchAll(/(?:^|[^\w])(?:tree|gated_tree|head|predecessor)[= ](\d{12})\b/g)) tokens.add(m[1]!);
+    for (const m of text.matchAll(/\brun #?(\d{11})\b/g)) tokens.add(m[1]!);
+    for (const m of text.matchAll(/\/actions\/runs\/(\d{11})\b/g)) tokens.add(m[1]!);
+  }
+  return [...tokens];
+}
+
+function scanParts(parts: Array<[Part, string]>, vis: RepoVisibility, selfEmail: string | undefined, releaseVersions: string[]) {
   const found: Located[] = [];
   let oversize = false;
+  const allowlist = [...releaseVersions, ...receiptDigitTokens(parts.map(([, text]) => text))];
   for (const [part, text] of parts) {
-    const result = scan(text, { repoVisibility: vis, ...(selfEmail ? { selfEmail } : {}) });
+    const result = scan(text, { repoVisibility: vis, allowlist, ...(selfEmail ? { selfEmail } : {}) });
     oversize ||= result.oversize;
     for (const finding of result.findings) found.push({ part, finding });
   }
@@ -303,7 +355,8 @@ export function runPost(argv: string[], env: PostEnv, configBin = "gstack-config
 
     const vis = visibility(env, req, remote.kind, configBin);
     const email = env.run("git", ["config", "user.email"]);
-    const { found, oversize } = scanParts(parts, vis, email.status === 0 ? email.stdout.trim() || undefined : undefined);
+    const hasQuad = parts.some(([, text]) => /\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(text));
+    const { found, oversize } = scanParts(parts, vis, email.status === 0 ? email.stdout.trim() || undefined : undefined, hasQuad ? repoReleaseVersions(env) : []);
     env.out(`REPO_VISIBILITY: ${vis}\n`);
     const line = (m: Located) => `RULE: ${m.finding.id} LINE: ${m.finding.line} PART: ${m.part}\n`;
     const high = found.filter(m => m.finding.severity === "HIGH");

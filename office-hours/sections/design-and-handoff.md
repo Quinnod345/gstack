@@ -659,8 +659,8 @@ straight into a structured review. Map the design-doc mode to the recommended op
 (default `/plan-eng-review` when ambiguous — it has the broadest real-world use and the
 strongest retention).
 
-**If `PROACTIVE` is `false` OR `CONDUCTOR_SESSION: true`:** do NOT auto-launch. Recommend
-in one line and stop, letting the user invoke:
+**If `PROACTIVE` is `false` or `off`, OR `CONDUCTOR_SESSION: true`:** do NOT auto-launch.
+Recommend in one line and stop; the user invokes:
 - EXPANSION / ambitious → "Next: `/plan-ceo-review` to pressure-test scope and find the 10-star product."
 - well-scoped → "Next: `/plan-eng-review` to lock architecture, tests, and edge cases."
 - visual/UX-heavy → "Next: `/plan-design-review` for a visual/UX pass."

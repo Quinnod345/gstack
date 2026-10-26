@@ -54,8 +54,11 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # Docs: https://github.com/garrytan/gstack
 #
 # ─── Behavior ────────────────────────────────────────────────────────
-# proactive: true           # Auto-invoke skills when your request matches one.
-#                           # Set to false to only run skills you type explicitly.
+# proactive: core           # core = auto-invoke only /office-hours, /review, /qa and /ship
+#                           # when your request matches one; every other skill waits
+#                           # for you to type it. all = auto-invoke any matching skill.
+#                           # off = only run skills you type explicitly.
+#                           # (true and false still work: true means all, false means off.)
 #
 # routing_declined: false   # Set to true to skip the CLAUDE.md routing injection
 #                           # prompt. Set back to false to be asked again.
@@ -80,6 +83,9 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # ─── Updates ─────────────────────────────────────────────────────────
 # auto_upgrade: false       # true = silently upgrade on session start
 # update_check: true        # false = suppress version check notifications
+# update_channel: auto      # auto   = stable when team_mode is true, else main
+#                           # stable = the weekly tagged release (refs/heads/stable)
+#                           # main   = every merge to main (docs/releases.md)
 #
 # ─── Skill naming ────────────────────────────────────────────────────
 # skill_prefix: false       # true = namespace skills as /gstack-qa, /gstack-ship
@@ -279,11 +285,12 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # AND the env override is not set. Keep in sync with the CONFIG_HEADER comments.
 lookup_default() {
   case "$1" in
-    proactive) echo "true" ;;
+    proactive) echo "core" ;; # core | all | off (true = all, false = off); core suggests only /office-hours, /review, /qa, /ship
     routing_declined) echo "false" ;;
     telemetry) echo "off" ;;
     auto_upgrade) echo "false" ;;
     update_check) echo "true" ;;
+    update_channel) echo "auto" ;; # auto | stable | main — bin/gstack-update-channel.sh resolves auto (docs/releases.md)
     skill_prefix) echo "false" ;;
     explain_level) echo "default" ;;
     plan_mode_preamble) echo "on" ;; # on | off — off drops the plan-mode preamble on the next ./setup (#3168)
@@ -742,6 +749,20 @@ $_gstack_legacy_root"
       echo "Warning: explain_level '$VALUE' not recognized. Valid values: default, terse. Using default." >&2
       VALUE="default"
     fi
+    if [ "$KEY" = "proactive" ]; then
+      # Case-insensitive, and the YAML yes/no family maps like gstack-skill-start
+      # reads a hand-edited value: an opt-out must never fail open to core.
+      VALUE=$(printf '%s' "$VALUE" | tr '[:upper:]' '[:lower:]')
+      case "$VALUE" in
+        yes|y|on|1) VALUE="all" ;;
+        no|n|none|0|disabled|never) VALUE="off" ;;
+        core|all|off|true|false) ;;
+        *)
+          echo "Warning: proactive '$VALUE' not recognized. Valid values: core, all, off (true = all, false = off). Using core." >&2
+          VALUE="core"
+          ;;
+      esac
+    fi
     if [ "$KEY" = "plan_mode_preamble" ] && [ "$VALUE" != "on" ] && [ "$VALUE" != "off" ]; then
       echo "Warning: plan_mode_preamble '$VALUE' not recognized. Valid values: on, off. Using on." >&2
       VALUE="on"
@@ -841,6 +862,11 @@ $_gstack_legacy_root"
           echo "Error: $KEY '$VALUE' not recognized. Valid values: local, ubicloud. Existing value left unchanged." >&2
           exit 1
         fi ;;
+      update_channel)
+        case "$VALUE" in auto|stable|main) ;; *)
+          echo "Error: update_channel '$VALUE' not recognized. Valid values: auto, stable, main. Existing value left unchanged. (https://github.com/garrytan/gstack/blob/main/docs/releases.md#channels)" >&2
+          exit 1 ;;
+        esac ;;
     esac
     # design_detector_install_prompted records "never ask again" for the one-time
     # engine install offer. Rejecting a typo keeps the offer from silently coming
@@ -1025,7 +1051,7 @@ $_gstack_legacy_root"
     echo ""
     echo "# ─── Active values (including defaults for unset keys) ───"
     report_root_disagreement
-    for KEY in proactive routing_declined telemetry auto_upgrade update_check \
+    for KEY in proactive routing_declined telemetry auto_upgrade update_check update_channel \
                skill_prefix explain_level plan_mode_preamble \
                codex_reviews gstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted artifacts_sync_removals plan_tune_hooks \
@@ -1050,7 +1076,7 @@ $_gstack_legacy_root"
     ;;
   defaults)
     echo "# gstack-config defaults"
-    for KEY in proactive routing_declined telemetry auto_upgrade update_check \
+    for KEY in proactive routing_declined telemetry auto_upgrade update_check update_channel \
                skill_prefix explain_level plan_mode_preamble \
                codex_reviews gstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted artifacts_sync_removals plan_tune_hooks \

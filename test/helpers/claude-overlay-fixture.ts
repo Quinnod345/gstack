@@ -21,7 +21,7 @@ export const MARKER = 'Effort-match the step';
 export function failableBun(f: Fixture) {
   put(join(f.commands, 'bun'), `#!/usr/bin/env bash
 case "$*" in
-  'install --frozen-lockfile') exit 0 ;;
+  'install --production --frozen-lockfile') exit 0 ;;
   'run build') echo 'Unexpected build in an install fixture' >&2; exit 90 ;;
   *gen:skill-docs*--out-dir*) if [ -f "$HOME/fail-render" ]; then echo 'render failed (fixture)' >&2; exit 7; fi ;;
 esac
