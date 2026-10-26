@@ -34,8 +34,9 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(codes({ review_scope: 'all' })).toEqual(['POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'all', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
     expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
-    // The constant is the release that first read the key (1.91.256.0, #3481); an earlier minimum would admit a gstack that fails on the unknown key.
-    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual(['POLICY_INVALID:review_scope']);
+    // The constant is the release that first read the key; any earlier minimum would admit a gstack that fails on the unknown key.
+    const earlier = REVIEW_SCOPE_KEY_VERSION.replace(/(\d+)\.0$/, (_, p) => `${Number(p) - 7}.0`);
+    expect(codes({ review_scope: 'all', min_gstack_version: earlier })).toEqual(['POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'frozen' })).toEqual([]);
     expect(codes([])).toEqual(['POLICY_INVALID:']);
   });
