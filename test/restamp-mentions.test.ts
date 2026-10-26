@@ -30,6 +30,12 @@ describe('quoted stamp forms (pure)', () => {
     // A quote is an exact boundary too: a longer version behind it is not X.
     expect(rewriteStamps("since: '1.2.3.01'", '1.2.3.0', '1.2.4.0').count).toBe(0);
     expect(rewriteStamps("since: '1.2.3.0.1'", '1.2.3.0', '1.2.4.0').count).toBe(0);
+    // An opened quote must close right after X: a quoted prerelease or a mismatched pair is not the form
+    // (the tree receipt and gate reuse share this table, so a looser match would call a real change a stamp).
+    expect(rewriteStamps("since: '1.2.3.0-beta'", '1.2.3.0', '1.2.4.0').count).toBe(0);
+    expect(rewriteStamps('since: "1.2.3.0-beta"', '1.2.3.0', '1.2.4.0').count).toBe(0);
+    expect(rewriteStamps("since: '1.2.3.0\"", '1.2.3.0', '1.2.4.0').count).toBe(0);
+    expect(rewriteStamps('since: 1.2.3.0-beta', '1.2.3.0', '1.2.4.0').count).toBe(1);
   });
 
   test('rewriteStamps: (was X) accepts a matching quote pair and keeps it; a mismatched pair is not the form; a quoted vX already matched', () => {
@@ -59,6 +65,9 @@ describe('quoted stamp forms (pure)', () => {
     expect(tentativeMentions(added, '1.2.3.0', '1.2.9.0', ['<!-- x-tree-stamp: {version} -->']).sort()).toEqual(['1.2.4.0', '1.2.5.0', '1.2.6.0', '1.2.7.0']);
     // The fork-version floor and the allocated version still apply to quoted mentions.
     expect(tentativeMentions(added, '1.2.5.0', '1.2.6.0').sort()).toEqual([]);
+    // A quoted prerelease, a mismatched pair and an unclosed (was are not candidates; the bare prerelease still is.
+    const odd = new Map([['x', new Set(["since: '1.2.4.0-rc'", 'since: "1.2.5.0\'', "(was '1.2.6.0'x", '(was 1.2.7.0-rc)', 'since: 1.2.8.0-rc'])]]);
+    expect(tentativeMentions(odd, '1.2.3.0', '1.2.9.0').sort()).toEqual(['1.2.8.0']);
   });
 });
 
@@ -157,6 +166,55 @@ describe('a PR whose VERSION already equals the base (gbrain #7640)', () => {
     expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.3.0', 'base_row'), row('1.2.4.0', 'mine')]));
     expect(readFile(repo, 'docs/pr-mine.md')).toBe('Requires v1.2.4.0 or later.\n');
     expect(readFile(repo, 'docs/notes.md')).toBe('Previous release v1.2.3.0.\nleft-pad pinned at 1.2.3 (was 1.2.2)\n');
+  });
+
+  test('provenance is by position: a branch-added line whose text equals a base line moves alone, and the base copy stays', () => {
+    const repo = makeFixtureRepo({ prefix: 'restamp-mentions-dup-', policy: policy(true) }); repos.push(repo);
+    write(repo, NOTICE, notice([row('1.2.3.0', 'dup')]));
+    repo.git('add', '-A'); repo.git('commit', '-qm', 'notice rows'); repo.git('push', '-q', 'origin', 'main');
+    makePr(repo, 'pr-mine');
+    write(repo, NOTICE, notice([row('1.2.3.0', 'dup'), '', '', '', row('1.2.3.0', 'dup')]));
+    repo.git('commit', '-qam', 'my row, same text as the base row');
+    const r = restamp(repo, ['--next']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(stageDetail(r.out, 'stamp_paths')![2]).toBe(`1 mention(s) in 1 file(s) (1.2.3.0 -> 1.2.4.0); VERSION equals base 1.2.3.0, so 1.2.3.0 moved only on lines this branch added and stayed on the base's own lines (${NOTICE}: 1 moved, 1 kept)`);
+    expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.3.0', 'dup'), '', '', '', row('1.2.4.0', 'dup')]));
+  });
+
+  test('a CRLF checkout (core.autocrlf, eol=crlf) whose diff is LF-normalized still finds the branch-added row', () => {
+    const repo = makeFixtureRepo({ prefix: 'restamp-mentions-crlf-', policy: policy(true) }); repos.push(repo);
+    write(repo, '.gitattributes', `${NOTICE} text eol=crlf\n`);
+    write(repo, NOTICE, notice([row('1.2.3.0', 'base_row')]));
+    repo.git('config', 'core.autocrlf', 'true');
+    repo.git('add', '-A'); repo.git('commit', '-qm', 'notice rows'); repo.git('push', '-q', 'origin', 'main');
+    makePr(repo, 'pr-mine');
+    write(repo, NOTICE, notice([row('1.2.3.0', 'base_row'), row('1.2.3.0', 'mine')]).replace(/\n/g, '\r\n'));
+    repo.git('commit', '-qam', 'my row');
+    expect(repo.git('diff', '--unified=0', 'origin/main', '--', NOTICE)).toContain("+  { since: '1.2.3.0', id: 'mine'");
+    const r = restamp(repo, ['--next']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(stageDetail(r.out, 'stamp_paths')![2]).toContain(`${NOTICE}: 1 moved, 1 kept`);
+    expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.3.0', 'base_row'), row('1.2.4.0', 'mine')]).replace(/\n/g, '\r\n'));
+  });
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('a stamp interrupted after VERSION was written retries as a stamp, not a noop: the journal restores the equal-base provenance', () => {
+    const repo = makeFixtureRepo({ prefix: 'restamp-mentions-retry-', policy: policy(true) }); repos.push(repo);
+    lostSlot(repo);
+    const dir = path.join(repo.work, path.dirname(NOTICE));
+    fs.chmodSync(dir, 0o555);
+    try {
+      const first = restamp(repo, ['--next']);
+      expect(first.status).not.toBe(EXIT.ok);
+      expect(first.err).toMatch(/EACCES|permission denied/i);
+    } finally { fs.chmodSync(dir, 0o755); }
+    expect(readFile(repo, 'VERSION')).toBe('1.2.5.0\n');
+    expect(readFile(repo, NOTICE)).toContain(row('1.2.4.0', 'mine'));
+    const again = restamp(repo, ['--next']);
+    expect(again.status).toBe(EXIT.ok);
+    expect(again.out).toContain('RESTAMP: 1.2.5.0 -> 1.2.5.0 (stamped;');
+    expect(stageDetail(again.out, 'stamp_paths')![2]).toContain(`${NOTICE}: 1 moved, 1 kept`);
+    expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.4.0', 'other'), row('1.2.3.0', 'base_row'), '', '', '', row('1.2.5.0', 'mine')]));
+    expect(JSON.parse(readFile(repo, '.gstack/tmp/restamp-journal.json')).status).toBe('complete');
   });
 
   test('--was still rewrites every line, the base\'s rows included: it is not the fix for this state', () => {

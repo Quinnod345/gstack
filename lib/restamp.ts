@@ -240,24 +240,40 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
   return files;
 }
 
-/** The lines a branch itself added, per stamp file: `git diff --unified=0 <since> -- <files>` in `cwd` against its working tree. */
-export function branchAddedLines(cwd: string, since: string, files: string[]): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
+/** The lines a branch itself added to one file: their text, and their 1-based positions in the working-tree file. */
+export interface AddedLines { text: Set<string>; at: Set<number> }
+
+/**
+ * The lines a branch itself added, per stamp file: `git diff --unified=0 <since> -- <files>` in `cwd`
+ * against its working tree. Positions come from each hunk's new-side start (no context under
+ * `--unified=0`, so a hunk's added lines are consecutive from there), so a base line whose text
+ * equals an added line, or a CRLF checkout whose diff is LF-normalized, is told apart by position.
+ */
+export function branchAddedLines(cwd: string, since: string, files: string[]): Map<string, AddedLines> {
+  const out = new Map<string, AddedLines>();
   if (files.length === 0) return out;
   const diff = git(cwd, ['diff', '--unified=0', '--no-color', '--no-ext-diff', since, '--', ...files]);
   for (const f of parseUnifiedDiff(diff.out)) {
-    const set = out.get(f.path) ?? new Set<string>();
-    for (const h of f.hunks) for (const a of h.added) set.add(a);
-    out.set(f.path, set);
+    const own = out.get(f.path) ?? { text: new Set<string>(), at: new Set<number>() };
+    for (const h of f.hunks) h.added.forEach((a, i) => { own.text.add(a); own.at.add(h.at + i); });
+    out.set(f.path, own);
   }
   return out;
 }
 
 const escapeRegExp = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const VERSION_RE = '(\\d+(?:\\.\\d+){1,3})(?![0-9.])';
-/** The built-in stamp forms, each with the version as group 1: `(was X)`, `since: X` (a quote may open X: `since: 'X'`, `(was "X")`) and `vX`. */
-const BUILT_IN_MENTION = new RegExp(`(?:\\(was ['"]?|since:\\s*['"]?|(?<![A-Za-z0-9.])v)${VERSION_RE}`, 'g');
-/** A policy `stamp_patterns` template (one `{version}` slot) as a scanner, the version as group 1 at a version boundary. */
+const VERSION_RE = '(?<v>\\d+(?:\\.\\d+){1,3})(?![0-9.])';
+/**
+ * The built-in stamp forms as scanners, the version in the `v` group: `(was X)`, `since: X` and `vX`.
+ * A quote may wrap X in the first two (`since: 'X'`, `(was "X")`); an opened quote must close right
+ * after X, so `since: '1.2.3-beta'` and `since: '1.2.3"` are not the form.
+ */
+const BUILT_IN_MENTIONS: readonly RegExp[] = [
+  new RegExp(`\\(was (['"]?)${VERSION_RE}(?=\\1\\))`, 'g'),
+  new RegExp(`since:\\s*(['"]?)${VERSION_RE}(?=\\1)`, 'g'),
+  new RegExp(`(?<![A-Za-z0-9.])v${VERSION_RE}`, 'g'),
+];
+/** A policy `stamp_patterns` template (one `{version}` slot) as a scanner, the version in the `v` group at a version boundary. */
 function templateMention(template: string): RegExp {
   const [pre, post] = template.split(VERSION_SLOT) as [string, string];
   return new RegExp(`${escapeRegExp(pre)}(?<![0-9.])${VERSION_RE}${escapeRegExp(post)}`, 'g');
@@ -275,13 +291,13 @@ export function tentativeMentions(added: Map<string, Set<string>>, forkVersion: 
   const fork = parseVersion(forkVersion);
   if (!fork) return [];
   const width = versionWidth(forkVersion);
-  const scanners = [BUILT_IN_MENTION, ...templates.map(templateMention)];
+  const scanners = [...BUILT_IN_MENTIONS, ...templates.map(templateMention)];
   const found = new Set<string>();
   for (const lines of added.values()) {
     for (const text of lines) {
       for (const re of scanners) {
         for (const m of text.matchAll(re)) {
-          const raw = m[1]!;
+          const raw = m.groups!.v!;
           const v = parseVersion(raw);
           if (!v || versionWidth(raw) !== width || raw === newVersion || cmpVersion(v, fork) <= 0) continue;
           found.add(raw);
@@ -305,14 +321,15 @@ export function forkVersion(repoRoot: string, baseRef: string, fallback: string)
  * `stamp_patterns` templates (one `{version}` slot, matched at a version
  * boundary); anything else in the file stays. A quote around X in the
  * `(was X)` and `since: X` forms (`since: 'X'`, `(was "X")`, the shape of a
- * quoted source row) is matched and kept as written; `vX` already accepts a
- * quote before the `v`.
+ * quoted source row) is matched and kept as written when it closes right after
+ * X (`since: '1.2.3-beta'` and `since: '1.2.3"` are not the form); `vX`
+ * already accepts a quote before the `v`.
  */
 export function rewriteStamps(text: string, oldVersion: string, newVersion: string, templates: readonly string[] = []): { text: string; count: number } {
   const v = escapeRegExp(oldVersion);
   const patterns: Array<[RegExp, (...m: string[]) => string]> = [
     [new RegExp(`\\(was (['"]?)${v}\\1\\)`, 'g'), (_, q) => `(was ${q}${newVersion}${q})`],
-    [new RegExp(`(since:\\s*['"]?)${v}(?![0-9.])`, 'g'), (_, pre) => `${pre}${newVersion}`],
+    [new RegExp(`(since:\\s*)(['"]?)${v}(?![0-9.])(?=\\2)`, 'g'), (_, pre, q) => `${pre}${q}${newVersion}`],
     [new RegExp(`(?<![A-Za-z0-9.])v${v}(?![0-9.])`, 'g'), () => `v${newVersion}`],
     ...templates.map(t => { const [pre, post] = t.split(VERSION_SLOT) as [string, string]; return [new RegExp(`${escapeRegExp(pre)}(?<![0-9.])${v}(?![0-9.])${escapeRegExp(post)}`, 'g'), () => `${pre}${newVersion}${post}`] as [RegExp, () => string]; }),
   ];
@@ -441,7 +458,7 @@ function rewriteStampPaths(o: RestampOptions, plan: Plan, staging: string, since
   }
   const added = branchAddedLines(staging, since, files);
   const explicit = new Set([...(o.was ? [o.was] : []), ...(plan.branchStamp ? [plan.branchStamp] : [])].filter(v => v !== plan.newVersion));
-  const tentative = new Set(tentativeMentions(added, plan.forkVersion, plan.newVersion, templates).filter(v => !explicit.has(v)));
+  const tentative = new Set(tentativeMentions(new Map([...added].map(([rel, own]) => [rel, own.text])), plan.forkVersion, plan.newVersion, templates).filter(v => !explicit.has(v)));
   const equalBase = !o.was && !plan.branchStamp && plan.baseVersion !== plan.newVersion ? plan.baseVersion : null;
   if (equalBase) tentative.add(equalBase);
   const moved = new Map<string, number>();
@@ -462,14 +479,15 @@ function rewriteStampPaths(o: RestampOptions, plan: Plan, staging: string, since
       if (r.count) moved.set(old, (moved.get(old) ?? 0) + r.count);
       return r.text;
     };
-    const out = fs.readFileSync(abs, 'utf8').split('\n').map(line => {
-      let text = line;
-      for (const old of explicit) text = rewrite(text, old);
-      if (own?.has(line)) for (const old of tentative) text = rewrite(text, old);
+    const out = fs.readFileSync(abs, 'utf8').split('\n').map((line, i) => {
+      const mine = own?.at.has(i + 1) ?? false;
       if (equalBase) {
         const n = rewriteStamps(line, equalBase, plan.newVersion, templates).count;
-        if (own?.has(line)) ownBase += n; else keptBase += n;
+        if (mine) ownBase += n; else keptBase += n;
       }
+      let text = line;
+      for (const old of explicit) text = rewrite(text, old);
+      if (mine) for (const old of tentative) text = rewrite(text, old);
       return text;
     }).join('\n');
     if (ownBase || keptBase) baseSide.push(`${rel}: ${ownBase} moved, ${keptBase} kept`);
@@ -480,9 +498,10 @@ function rewriteStampPaths(o: RestampOptions, plan: Plan, staging: string, since
   const equalNote = equalBase && baseSide.length
     ? `; VERSION equals base ${equalBase}, so ${equalBase} moved only on lines this branch added and stayed on the base's own lines (${baseSide.join('; ')})`
     : '';
+  const searched = explicit.size ? `no mention of ${[...explicit].join(', ')} in the stamp files and ` : '';
   sp.detail = olds.length
     ? `${total} mention(s) in ${touched} file(s) (${olds.join(', ')} -> ${plan.newVersion})${equalNote}`
-    : `no tentative mention newer than the fork version ${plan.forkVersion}${equalBase ? ` and none of base ${equalBase} on a line this branch added` : ''}${equalNote}`;
+    : `${searched}no tentative mention newer than the fork version ${plan.forkVersion}${equalBase ? ` and none of base ${equalBase} on a line this branch added` : ''}${equalNote}`;
 }
 
 function applyToBranch(o: RestampOptions, staging: string, wtree: string, files: string[], journal: Journal, journalPath: string): JournalWrite[] {
@@ -570,7 +589,9 @@ export function restamp(o: RestampOptions): RestampResult {
     if (!o.after && fs.existsSync(journalPath)) {
       try {
         const prior: Journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
-        if (prior.inputs?.new_version === plan.newVersion && prior.status !== 'complete' && prior.inputs.old_version !== plan.newVersion) { plan.oldVersion = prior.inputs.old_version; plan.branchStamp = prior.inputs.old_version !== plan.baseVersion ? prior.inputs.old_version : plan.branchStamp; }
+        // A retry after a partial apply sees the already-written VERSION as a branch stamp; the journal holds the
+        // original provenance (the branch's own stamp, or the base version when the branch had none), so restore it.
+        if (prior.inputs?.new_version === plan.newVersion && prior.status !== 'complete' && prior.inputs.old_version !== plan.newVersion) { plan.oldVersion = prior.inputs.old_version; plan.branchStamp = prior.inputs.old_version !== plan.baseVersion ? prior.inputs.old_version : null; }
       } catch {}
     }
 
