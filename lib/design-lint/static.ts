@@ -15,6 +15,7 @@ import { Reporter, type Finding } from './report';
 import { FAMILIES } from './rules';
 import { twVariants } from './tailwind';
 import { applyWaivers, findWaivers, resolveWaivers, suspectedRules, type WaiverSet } from './waivers';
+import { setTwTokens } from './tailwind';
 
 export interface StaticOptions {
   scope?: 'page' | 'component';
@@ -27,9 +28,14 @@ export interface StaticOptions {
 export interface StaticResult {
   files: string[];
   contexts: LintContext[];
-  /** Each context's resolved waivers, in context order, so the render tier can honour the same comments. */
-  waivers: WaiverSet[];
   findings: Finding[];
+}
+
+/** The static tier before waivers: every context with the findings its rule families reported, so a caller can add the render tier's findings and settle the page's waivers once over both. */
+export interface RawStaticResult {
+  files: string[];
+  contexts: LintContext[];
+  raw: Finding[][];
 }
 
 const BUILD_DIRS = new Set(['dist', 'build', 'coverage']);
@@ -65,7 +71,11 @@ export function resolveRef(href: string | null, from: string, root: string | nul
   if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
   const ref = href.split(/[?#]/)[0];
   if (!ref) return null;
-  if (ref.startsWith('/')) return root ? path.join(root, ref) : null;
+  if (ref.startsWith('/')) {
+    if (!root) return null;
+    const abs = path.join(root, ref);
+    return abs === root || abs.startsWith(root + path.sep) ? abs : null;
+  }
   return path.resolve(from, ref);
 }
 
@@ -126,7 +136,7 @@ function attachStylesheets(cssFiles: CssFile[], rules: CssRule[], pending: strin
   }
 }
 
-export function buildContext(key: string, cssList: string[], docList: Doc[], opts: StaticOptions, cache = new CssCache([], () => {})): LintContext {
+export function buildContext(key: string, cssList: string[], docList: Doc[], opts: StaticOptions, cache: CssCache): LintContext {
   const cssFiles: CssFile[] = [];
   const rules: CssRule[] = [];
   const inGroup = new Set<string>([...cssList, ...docList.map((d) => d.file)]);
@@ -249,28 +259,33 @@ export function shareProjects(contexts: LintContext[]): void {
       shared.reducedMotion = shared.reducedMotion || /prefers-reduced-motion/i.test(stripComments(c.allCss)) || tv.has('motion-reduce') || tv.has('motion-safe');
     }
     for (const c of list) c.shared = shared;
-    for (const c of parts) { c.twTokens = { ...tokens, ...c.tokens }; delete c.cache.tw; }
+    for (const c of parts) setTwTokens(c, { ...tokens, ...c.tokens });
   }
 }
 
-/** The waiver comments of a context, in its documents and its own stylesheets, weighed against what its rules found. */
+/** The waiver comments of a context, in its documents and every stylesheet it reads, weighed against what its rules found. A stylesheet's claims answer for that stylesheet on every page that links it. */
 export function contextWaivers(ctx: LintContext, cwd: string, findings: Finding[] = []): WaiverSet {
   const claims = [
     ...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)),
-    ...ctx.cssFiles.filter((c) => !c.attached).flatMap((c) => findWaivers(c.file, c.raw)),
+    ...ctx.cssFiles.flatMap((c) => findWaivers(c.file, c.raw)),
   ];
   return resolveWaivers(claims, ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
 }
 
-export function lintStatic(paths: string[], opts: StaticOptions = {}): StaticResult {
+/** A context's findings with its waivers applied: waived grades, refusals and the house-style note. */
+export function settleContext(ctx: LintContext, findings: Finding[], cwd: string): Finding[] {
+  return applyWaivers(findings, contextWaivers(ctx, cwd, findings));
+}
+
+/** Run every rule family over every context, without waivers. */
+export function lintStaticRaw(paths: string[], opts: StaticOptions = {}): RawStaticResult {
   const warn = opts.warn ?? ((l: string) => console.error(l));
   const cwd = opts.cwd ?? process.cwd();
   const files = collectFiles(paths, warn);
   const roots = paths.map((p) => path.resolve(p)).map((p) => { try { return fs.statSync(p).isDirectory() ? p : path.dirname(p); } catch { return null; } }).filter((p): p is string => p !== null);
   const contexts = groupContexts(files, opts, warn, roots);
   shareProjects(contexts);
-  const findings: Finding[] = [];
-  const waivers: WaiverSet[] = [];
+  const raw: Finding[][] = [];
   for (const ctx of contexts) {
     const reporter = new Reporter(ctx.scope, cwd);
     for (const family of FAMILIES) {
@@ -279,9 +294,13 @@ export function lintStatic(paths: string[], opts: StaticOptions = {}): StaticRes
         reporter.report('internal-error', ctx.docs[0]?.file ?? ctx.cssFiles[0]?.file ?? ctx.key, 1, `the ${family.name} rules threw and did not run: ${(e as Error).message}`);
       }
     }
-    const set = contextWaivers(ctx, cwd, reporter.findings);
-    waivers.push(set);
-    findings.push(...applyWaivers(reporter.findings, set));
+    raw.push(reporter.findings);
   }
-  return { files, contexts, waivers, findings };
+  return { files, contexts, raw };
+}
+
+export function lintStatic(paths: string[], opts: StaticOptions = {}): StaticResult {
+  const cwd = opts.cwd ?? process.cwd();
+  const { files, contexts, raw } = lintStaticRaw(paths, opts);
+  return { files, contexts, findings: contexts.flatMap((ctx, i) => settleContext(ctx, raw[i], cwd)) };
 }

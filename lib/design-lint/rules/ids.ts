@@ -46,6 +46,7 @@ export const RULES: Record<string, RuleMeta> = {
   'framework-palette': { tier: 'ask', gate: '74', title: 'a framework default palette (Tailwind indigo-500, slate-900 and kin) as a token or utility', fix: 'a colour mixed for the page in OKLCH' },
   // ── Type ──
   'overused-font': { tier: 'ask', gate: '1', title: 'a training-data display face (Inter, Roboto, Fraunces, Playfair Display, Space Grotesk and the rest of gstack\'s catalog) or a system stack as the display', fix: 'a display face chosen for the page' },
+  'banned-font': { tier: 'ask', gate: 'catalog', title: 'a face gstack bans in any role (Papyrus, Comic Sans, Impact, Lobster, Raleway, Courier New and the rest of lib/design-catalog.ts BANNED_FONTS)', fix: 'a face chosen for the page; the body face for body and labels' },
   'line-length': { tier: 'ask', gate: '25', title: 'running prose outside 45 to 75 characters a line', fix: 'max-width: 65ch', pageOnly: true },
   'font-family-count': { tier: 'ask', gate: '37', title: 'more than three font families', fix: 'display, body and one outlier' },
   'italic-word-in-heading': { tier: 'blocks', gate: '38i', title: 'one italic word inside an otherwise roman heading', fix: 'a line break, or the whole head set one way' },
@@ -174,7 +175,6 @@ export const RULES: Record<string, RuleMeta> = {
   'internal-error': { tier: 'ask', gate: 'lint', title: 'a rule family threw on this page, so its rules did not run', fix: 'report the error with the page that caused it; a page the lint could not read is not a pass' },
 };
 
-export const RULE_IDS = Object.keys(RULES);
 
 export function ruleMeta(id: string): RuleMeta | null {
   return Object.prototype.hasOwnProperty.call(RULES, id) ? RULES[id] : null;

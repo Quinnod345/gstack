@@ -3,8 +3,8 @@
  * the two-filled-buttons half of F4; Nutlope/hallmark, MIT, see NOTICE.md),
  * rewritten in gstack's voice. Rule ids: aphoristic-cadence,
  * generic-hero-copy, generic-cta-copy, em-dash-overuse, template-footer-line,
- * two-primary-buttons. Also holds the prose mask the chrome and finish
- * families share. Placeholder names, brands, lorem and buzzwords are the copy
+ * two-primary-buttons. The prose mask these rules read is maskedProse in
+ * ../html.ts. Placeholder names, brands, lorem and buzzwords are the copy
  * tier's (rules/copy.ts) and are not reported here.
  */
 import { styleFor, type LintContext } from '../context';

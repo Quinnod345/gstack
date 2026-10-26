@@ -456,6 +456,12 @@ export interface TwGroup {
 }
 
 /** Every class-bearing element, component tag and helper call in the context, parsed. */
+/** Give a component context the project's tokens and drop the Tailwind facts read before they were known. */
+export function setTwTokens(ctx: LintContext, tokens: Tokens): void {
+  ctx.twTokens = tokens;
+  delete ctx.cache.tw;
+}
+
 export function twGroup(ctx: LintContext): TwGroup {
   return memo(ctx, 'tw', () => {
     const tw: TwGroup = { items: [], variants: new Set<string>(), caret: false, scrollbar: false, motion: null, upperDisplay: false };

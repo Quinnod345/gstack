@@ -188,6 +188,13 @@ function focusAndStates(ctx: LintContext, r: Reporter): void {
   if (!has(':focus-visible') && !has(':focus') && !shared?.focus && ![...tv].some((v) => /^focus(?:-visible|-within)?$/.test(v)) && once(ctx, '26a')) {
     r.report('missing-focus-visible', file, 1, 'no :focus-visible style anywhere: keyboard users cannot see where they are');
   }
+  const ringDecl = (d: { prop: string; value: string }) => (/^outline(-style|-width|-color)?$/.test(d.prop) && !/^(none|0|0px)\b/i.test(d.value.trim())) || (d.prop === 'box-shadow' && !/^none\b/i.test(d.value.trim()));
+  const ringAnywhere = ctx.rules.some((rule) => /:focus/.test(rule.selector) && rule.decls.some(ringDecl)) || !!shared?.focus || [...tv].some((v) => /^focus(?:-visible|-within)?$/.test(v));
+  if (!ringAnywhere) {
+    const removed = ctx.rules.find((rule) => /:focus/.test(rule.selector) && rule.decls.some((d) => /^outline(-style)?$/.test(d.prop) && /^(none|0|0px)\b/i.test(d.value.trim())));
+    const outlineD = removed?.decls.find((d) => /^outline(-style)?$/.test(d.prop));
+    if (removed && outlineD && once(ctx, '26a:removed')) r.report('missing-focus-visible', removed.file, outlineD.line, `${outlineD.prop}: ${outlineD.value.trim()} on ${trunc(removed.selector, 40)} with nothing in its place: keyboard users cannot see where they are`, { fix: 'a :focus-visible ring at 3:1 or better, instant; never remove an outline without putting one back' });
+  }
   if (!has(':active') && !shared?.active && !tv.has('active') && once(ctx, '26b:active')) {
     r.report('missing-states', file, 1, 'no :active style anywhere', { fix: 'every state a control can be in: hover, active, focus-visible, disabled' });
   }

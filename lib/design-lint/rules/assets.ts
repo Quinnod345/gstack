@@ -123,7 +123,8 @@ function checkContrastPairs(ctx: LintContext, r: Reporter): void {
         const sizeD = rule.decls.find((d) => d.prop === 'font-size');
         const weightD = rule.decls.find((d) => d.prop === 'font-weight');
         const sizePx = sizeD ? pxOf(resolveVars(sizeD.value, ctx.tokens, local)) : null;
-        const weight = weightD ? parseInt(weightD.value, 10) || 400 : 400;
+        const weightRaw = weightD ? resolveVars(weightD.value, ctx.tokens, local).trim().toLowerCase() : '400';
+        const weight = /^(bold|bolder)$/.test(weightRaw) ? 700 : parseInt(weightRaw, 10) || 400;
         const large = sizePx != null && (sizePx >= 24 || (sizePx >= 18 && weight >= 700));
         const threshold = large ? 3.0 : 4.5;
         const ratio = contrastRatio(fg, bg);

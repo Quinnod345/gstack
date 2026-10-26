@@ -3,7 +3,7 @@
  * they @import), or one directory of component files. Rules read it, the
  * caches on it memoise the shared indexes.
  */
-import { buildStyleIndex, declValue, fontPxOf, mergeBySelector, stylesFor, trackingEmOf, type CssDecl, type CssRule, type MergedRule, type StyleEntry, type Tokens } from './css';
+import { buildStyleIndex, declValue, fontPxOf, mergeBySelector, stylesFor, trackingEmOf, type CssDecl, type CssRule, type MergedRule, type StyleIndex, type Tokens } from './css';
 import type { Doc } from './html';
 
 export interface CssFile {
@@ -48,7 +48,7 @@ export function memo<T>(ctx: LintContext, key: string, make: () => T): T {
 
 export const mergedRules = (ctx: LintContext): MergedRule[] => memo(ctx, 'merged', () => mergeBySelector(ctx.rules));
 
-export const styleIndex = (ctx: LintContext): StyleEntry[] => memo(ctx, 'styleIndex', () => buildStyleIndex(ctx.rules));
+export const styleIndex = (ctx: LintContext): StyleIndex => memo(ctx, 'styleIndex', () => buildStyleIndex(ctx.rules));
 
 /** Declarations applying to an element by its class attribute and tag; restingOnly drops state and pseudo-element rules. */
 export const styleFor = (ctx: LintContext, classAttr: string | null | undefined, tag: string, restingOnly = false): CssDecl[] =>

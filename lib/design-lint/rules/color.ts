@@ -41,6 +41,7 @@ function bannedGradient(hues: number[], tokens: Tokens): string | null {
   const cyan = hues.some((h) => hueIn(h, 170, 230));
   if (purple && blue) return 'purple-to-blue';
   if (purple && pink) return 'purple-to-pink';
+  if (new Set(hues.filter((h) => hueIn(h, 250, 330)).map((h) => Math.round(h / 4))).size >= 2) return 'indigo-to-violet';
   if (cyan && paperIsDark(tokens)) return 'cyan-on-dark';
   return null;
 }
@@ -240,8 +241,12 @@ function check74Tokens(ctx: LintContext, r: Reporter): void {
 
 const COLOR_LIT_TEST = /#[0-9a-fA-F]{3,8}\b|(?<![\w-])rgba?\(|(?<![\w-])hsla?\(|(?<![\w-])oklch\(/;
 
-// sloplint check48 (gate 48); hallmark's scaffold placeholder ("FILL ME") has no counterpart here
+// sloplint check48 (gate 48); hallmark's scaffold placeholder ("FILL ME") has no counterpart here.
+// hallmark lints pages its own skill scaffolded, which always carry a token block; gstack also meets
+// handwritten pages with no tokens at all, where a literal bypasses nothing, so the rule needs a
+// --color-* or --font-* token to exist before a literal counts as a bypass.
 function check48(ctx: LintContext, r: Reporter): void {
+  if (!Object.keys({ ...ctx.twTokens, ...ctx.tokens }).some((k) => /^--(color|font)-/.test(k))) return;
   for (const rule of ctx.rules) {
     if (isTokenRule(rule)) continue;
     for (const d of rule.decls) {

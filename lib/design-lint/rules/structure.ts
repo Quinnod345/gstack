@@ -10,6 +10,7 @@ import { mergedRules, type LintContext } from '../context';
 import { getAttr, innerOf, plainText, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
+import { heroIndexOf } from './chrome-copy';
 
 const SPACING_PROP = /^(padding|margin|gap|row-gap|column-gap)(-[a-z]+)?$/;
 
@@ -273,17 +274,6 @@ function doubleSticky(ctx: LintContext, r: Reporter): void {
   if (sticky.length < 2) return;
   const sels = sticky.map((m) => m.selector).join(' and ');
   r.report('double-sticky', sticky[1].file, sticky[1].line, `two elements stick at top: 0 (${trunc(sels, 52)}): the second slides under the first`);
-}
-
-// sloplint heroIndexOf (gate 58): the section or header enclosing the h1
-function heroIndexOf(doc: Doc, h1Idx: number): number {
-  for (let i = h1Idx - 1; i >= 0; i--) {
-    const t = doc.tags[i];
-    if (t.close || !/^(section|header)$/.test(t.name)) continue;
-    const inner = innerOf(doc, i);
-    if (inner && inner.endPos > doc.tags[h1Idx].pos) return i;
-  }
-  return -1;
 }
 
 const countWords = (t: string): number => t.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length;

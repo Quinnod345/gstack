@@ -30,7 +30,7 @@ async function lintPage(html: string, opts: { scope?: 'page' | 'component' } = {
   tmpDirs.push(dir);
   const file = path.join(dir, 'index.html');
   fs.writeFileSync(file, html);
-  return (await lint([file], { cwd: dir, scope: opts.scope, warn: () => {} })).findings;
+  return (await lint([file], { cwd: dir, scope: opts.scope, warn: (l: string) => { throw new Error(l); } })).findings;
 }
 
 const only = (findings: Finding[], rule: string) => findings.filter((f) => f.rule === rule);
@@ -232,7 +232,7 @@ describe('design-lint motion: content-hidden-at-rest (gate 62)', () => {
 
 describe('design-lint motion: the shared fixtures', () => {
   test('slopped.html trips the planted motion tells at their lines', async () => {
-    const f = (await lint([path.join(FIXTURES, 'slopped.html')], { cwd: ROOT, warn: () => {} })).findings;
+    const f = (await lint([path.join(FIXTURES, 'slopped.html')], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } })).findings;
     const mine = f.filter((x) => FAMILY.includes(x.rule)).map((x) => [x.rule, x.grade, x.line]);
     expect(mine).toEqual([
       ['focus-ring-fade', 'blocks', 85],
@@ -245,7 +245,7 @@ describe('design-lint motion: the shared fixtures', () => {
     ]);
   });
   test('the clean page raises no motion finding', async () => {
-    const f = (await lint([path.join(FIXTURES, 'clean')], { cwd: ROOT, warn: () => {} })).findings;
+    const f = (await lint([path.join(FIXTURES, 'clean')], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } })).findings;
     expect(f.filter((x) => FAMILY.includes(x.rule)).map(formatFinding)).toEqual([]);
   });
 });

@@ -37,6 +37,9 @@ export interface ReportOptions {
 
 export const trunc = (s: string, n = 120): string => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
+/** One printable line: control characters, line separators and runs of whitespace become one space, so no value a page controls can forge a LINT line or drive the terminal. */
+export const oneLine = (s: string): string => s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\s]+/g, ' ').trim();
+
 export const relPath = (file: string, cwd = process.cwd()): string =>
   /^https?:\/\//.test(file) ? file : path.isAbsolute(file) && file.startsWith(cwd + path.sep) ? file.slice(cwd.length + 1) : file;
 
@@ -53,9 +56,9 @@ export class Reporter {
     const tier: Tier = opts.suspected && meta.tier === 'blocks' ? 'ask' : meta.tier;
     this.findings.push({
       rule, tier, grade: tier,
-      file: relPath(file, this.cwd), line: line || 1,
-      evidence: trunc(String(evidence).replace(/\s+/g, ' ').trim()),
-      fix: trunc(String(opts.fix ?? meta.fix).replace(/\s+/g, ' ').trim(), 240),
+      file: oneLine(relPath(file, this.cwd)), line: line || 1,
+      evidence: trunc(oneLine(String(evidence))),
+      fix: trunc(oneLine(String(opts.fix ?? meta.fix)), 240),
       source: opts.source ?? (meta.render ? 'render' : 'static'),
     });
   }
@@ -74,8 +77,8 @@ export function finalize(findings: Finding[]): Finding[] {
   });
   return unique.sort((a, b) =>
     GRADE_RANK[a.grade] - GRADE_RANK[b.grade]
-    || a.rule.localeCompare(b.rule)
-    || a.file.localeCompare(b.file)
+    || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)
+    || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0)
     || a.line - b.line);
 }
 
@@ -94,7 +97,7 @@ export function summarize(findings: Finding[], render: string): Summary {
 
 export function formatFinding(f: Finding): string {
   const fix = f.grade === 'waived' ? `waived (${f.waiver ?? 'on the record'})` : f.fix;
-  return `LINT: ${f.grade} ${f.rule} ${f.file}:${f.line} ${f.evidence} | fix: ${fix}`;
+  return oneLine(`LINT: ${f.grade} ${f.rule} ${f.file}:${f.line} ${f.evidence} | fix: ${fix}`);
 }
 
 export function formatSummary(s: Summary): string {

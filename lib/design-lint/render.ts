@@ -25,7 +25,6 @@ import { ruleMeta } from './rules/ids';
 
 export interface RenderOptions {
   cwd?: string;
-  job?: string | null;
   scope?: 'page' | 'component';
   timeoutMs?: number;
   /** Replaces the engine choice (tests inject one); defaults to lib/aside-render's pickEngine. */
@@ -50,7 +49,11 @@ export async function lintRender(targets: string[], opts: RenderOptions = {}): P
   if (!choice.engine) return { findings: [], status: `skipped: ${choice.error}` };
   const run: Runner = (spec) => (choice.engine === 'browse' ? renderWithBrowse(spec, choice.bin) : render(spec));
   const r = new Reporter(opts.scope ?? 'page', opts.cwd ?? process.cwd());
-  for (const target of targets) await lintPage(target, r, run, opts.timeoutMs ?? 120_000);
+  for (const target of targets) {
+    try { await lintPage(target, r, run, opts.timeoutMs ?? 120_000); } catch (e) {
+      r.report('render', isUrl(target) ? target : path.resolve(target), 1, `the page could not be measured: ${(e as Error).message}`, { source: 'render' });
+    }
+  }
   return { findings: r.findings, status: 'ran' };
 }
 
@@ -198,7 +201,7 @@ async function confirmPixels(file: string, run: Runner, timeoutMs: number, textP
     for (const g of groups) {
       g.evalIdx = steps.length;
       steps.push(evalStep(`P.hide(P, ${JSON.stringify(g.items)})`, g.width, g.height));
-      steps.push({ kind: 'screenshot', out: g.shot, width: g.width, height: g.height, fullPage: true, type: 'png', mobile: false });
+      steps.push({ kind: 'screenshot', out: g.shot, width: g.width, height: g.height, deviceScaleFactor: 1, fullPage: true, type: 'png', mobile: false });
       steps.push(evalStep(`P.restore(P, ${JSON.stringify(g.items)})`, g.width, g.height));
     }
     const res = await run({ file, steps, timeoutMs });

@@ -45,7 +45,7 @@ if (opts.rules) {
 if (!paths.length && !opts.urls!.length) { console.error(USAGE); process.exit(3); }
 if (opts.urls!.some((u) => !/^https?:\/\//.test(u))) { console.error('--url takes an http or https address'); process.exit(3); }
 
-const result = await lint(paths, opts);
+const result = await lint(paths, opts).catch((e: Error) => { console.error(`gstack-design-lint: ${e.message}`); process.exit(3); });
 if (!result.files.length && !opts.urls!.length) {
   console.error('gstack-design-lint: no .html, .css, .jsx, .tsx, .vue, .svelte or .astro files found');
   process.exit(3);

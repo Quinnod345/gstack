@@ -204,6 +204,7 @@ export function clsLits(s: string, level = 0): string[] {
 
 const JS_EXPR_KW = new Set(['return', 'yield', 'await', 'case', 'default', 'else', 'do', 'throw', 'typeof', 'void', 'delete', 'in', 'of', 'new', 'instanceof']);
 export const CLASS_FNS = new Set(['cn', 'clsx', 'classNames', 'classnames', 'twMerge', 'twJoin', 'cva', 'cx', 'tv']);
+const CLASS_FN_CALL = new RegExp(`(?<![\\w$.])(?:${[...CLASS_FNS].join('|')})\\s*\\(`, 'g');
 
 /**
  * Turn a JSX/TSX module into pseudo-HTML of the same length: elements and
@@ -448,7 +449,7 @@ export function scriptSites(src: string, kind: DocKind): number[] {
   if (fm) ranges.push([0, fm[0].length]);
   const sites: number[] = [];
   for (const [a, b] of ranges) {
-    for (const m of src.slice(a, b).matchAll(/(?<![\w$.])(?:cn|clsx|classNames|classnames|twMerge|twJoin|cva|cx|tv)\s*\(/g)) sites.push(a + m.index!);
+    for (const m of src.slice(a, b).matchAll(CLASS_FN_CALL)) sites.push(a + m.index!);
   }
   return sites;
 }
@@ -520,7 +521,10 @@ export function directChildren(doc: Doc, idx: number): Child[] {
   return children;
 }
 
-/** For every open tag index, the names of its open ancestors, outermost first. */
+/** Elements whose end tag is optional: a new one closes the open one, so a list of unclosed <li> does not read as nested. */
+const IMPLICIT_CLOSE = new Set(['li', 'p', 'dt', 'dd', 'option', 'tr', 'td', 'th']);
+
+/** For every open tag index, the names of its open ancestors, outermost first. A close tag pops to its own open tag, so a stray or missing end tag does not deepen everything after it. */
 export function ancestorMap(doc: Doc): Map<number, string[]> {
   const cached = doc.cache.ancestors as Map<number, string[]> | undefined;
   if (cached) return cached;
@@ -528,7 +532,12 @@ export function ancestorMap(doc: Doc): Map<number, string[]> {
   const stack: string[] = [];
   for (let i = 0; i < doc.tags.length; i++) {
     const t = doc.tags[i];
-    if (t.close) { stack.pop(); continue; }
+    if (t.close) {
+      const at = stack.lastIndexOf(t.name);
+      if (at >= 0) stack.length = at;
+      continue;
+    }
+    if (IMPLICIT_CLOSE.has(t.name) && stack[stack.length - 1] === t.name) stack.pop();
     map.set(i, stack.slice());
     if (!t.selfClosing) stack.push(t.name);
   }

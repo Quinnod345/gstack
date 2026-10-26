@@ -10,12 +10,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { buildTokens, parseCss, pxOf, resolveVars } from '../lib/design-lint/css';
 import { contrastRatio, parseColor, srgbToOklch } from '../lib/design-lint/color';
-import { getAttr, parseDoc, plainText } from '../lib/design-lint/html';
+import { ancestorMap, getAttr, parseDoc, plainText } from '../lib/design-lint/html';
 import { lint, formatResult } from '../lib/design-lint/index';
 import { Reporter, exitCodeOf, finalize, formatFinding, formatSummary, summarize } from '../lib/design-lint/report';
 import { collectFiles, contextWaivers, lintStatic } from '../lib/design-lint/static';
+import type { LintContext } from '../lib/design-lint/context';
 import { browserAvailable } from './helpers/browser-available';
-import { RULES, RULE_IDS } from '../lib/design-lint/rules/ids';
+import { RULES } from '../lib/design-lint/rules/ids';
 import { FAMILIES } from '../lib/design-lint/rules';
 import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers, suspectedRules } from '../lib/design-lint/waivers';
 
@@ -115,7 +116,7 @@ describe('design-lint: the rule table', () => {
       expect(m.fix.length).toBeGreaterThan(3);
       expect(docs).toContain('`' + id + '`');
     }
-    expect(RULE_IDS.length).toBeGreaterThan(100);
+    expect(Object.keys(RULES).length).toBeGreaterThan(100);
     expect(FAMILIES.map((f) => f.name)).toEqual(['color', 'type', 'structure', 'chrome', 'motion', 'assets', 'finish', 'component', 'copy']);
   });
 
@@ -220,7 +221,7 @@ describe('design-lint: the output contract', () => {
 
 describe('design-lint: the static tier\'s files and contexts', () => {
   // Value: protects=which files the walk reads and which stylesheet may carry a page's waiver; fails_when=vendored or built CSS is linted, or a linked stylesheet from elsewhere waives a page's finding; why_new=no test walks a tree with node_modules, dot or build directories, or a waiver in CSS; seam=none; no_claim=ordering inside one directory beyond sorted names
-  test('the walk skips node_modules, dot folders and build output below the top, warns on an unreadable path; a waiver counts from the page\'s own stylesheet, not one it only links', () => {
+  test('the walk skips node_modules, dot folders and build output below the top, warns on an unreadable path; a waiver in any stylesheet the page reads answers for that stylesheet', () => {
     const dir = tmpTree({
       'site/index.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="local.css"><link rel="stylesheet" href="../shared/theme.css"></head><body><main><h1>The ledger</h1><p>The ledger separates its rows with hairline rules.</p></main></body></html>',
       'site/local.css': '/* gstack-lint-disable section-gap: the ledger separates its rows with rules */\n.row { border-top: 1px solid var(--color-line); }',
@@ -239,7 +240,7 @@ describe('design-lint: the static tier\'s files and contexts', () => {
     expect(contexts).toHaveLength(1);
     expect(contexts[0].cssFiles.map((c) => [path.relative(dir, c.file), c.attached ?? false])).toEqual([['site/local.css', false], ['shared/theme.css', true]]);
     const set = contextWaivers(contexts[0], dir);
-    expect([...set.accepted.entries()]).toEqual([['section-gap', 'the ledger separates its rows with rules']]);
+    expect([...set.accepted.entries()]).toEqual([['section-gap', 'the ledger separates its rows with rules'], ['template-nav', 'the ledger keeps three links for its three modes']]);
     expect(set.refused).toEqual([]);
   });
 
@@ -375,8 +376,8 @@ describe('design-lint: hardening (ship review)', () => {
     const r = lintStatic([dir], { cwd: dir, warn: () => {} });
     expect(r.contexts.filter((c) => c.cssFiles.some((f) => f.file.endsWith('site.css') && f.attached))).toHaveLength(12);
     expect(r.contexts.filter((c) => c.key.endsWith('css'))).toEqual([]);
-    const sheet = r.contexts.find((c) => c.key.endsWith('p0.html'))!.cssFiles[0];
-    expect(r.contexts.every((c) => c.cssFiles[0]?.raw === sheet.raw)).toBe(true);
+    const rulesOf = (c: LintContext) => c.rules.filter((x) => x.file.endsWith('site.css'));
+    expect(rulesOf(r.contexts[0])[0]).toBe(rulesOf(r.contexts[1])[0]);
   });
 
   test('a regex metacharacter in aria-labelledby does not abort the chrome family', () => {
@@ -428,6 +429,70 @@ describe('design-lint: hardening (ship review)', () => {
     expect(suspectedRules(measured.findings).size).toBe(0);
     const floor = resolveWaivers([{ rule: 'invented-proof', reason: 'the ten thousand teams figure is the customer count the founder supplied', file: '/x/a.html', line: 2, raw: '' }], page, '/x', suspectedRules(measured.findings));
     expect(floor.refused.map((f) => f.evidence)).toEqual(['waiver on invented-proof refused: it blocks; the Floor is never waivable']);
+  });
+
+  test('a stylesheet two same-directory pages share keeps its waiver: one waived finding, no refusal, no ask', () => {
+    const page = (t: string, p: string) => `<!doctype html><html lang="en"><head><title>${t}</title><link rel="stylesheet" href="site.css"></head><body><main><h1>${t}</h1><p>${p}</p></main></body></html>`;
+    const dir = tmpTree({
+      'a.html': page('Ledger', 'The ledger keeps its grey rows grey on the shelf.'),
+      'b.html': page('Harbour', 'Boats arrive at the quay before dawn each morning.'),
+      'site.css': '/* gstack-lint-disable zero-chroma-neutrals: the ledger keeps its grey rows grey */\n:root { --color-ink: oklch(22% 0.03 250); --color-gray: oklch(55% 0 0); }',
+    });
+    const f = finalize(lintStatic([dir], { cwd: dir, warn: () => {} }).findings);
+    expect(f.filter((x) => x.rule === 'waiver')).toEqual([]);
+    expect(f.filter((x) => x.rule === 'zero-chroma-neutrals').map((x) => x.grade)).toEqual(['waived']);
+  });
+
+  test('a file name with a newline cannot forge a LINT_SUMMARY line, and no printed field carries a control character', async () => {
+    const dir = tmpTree({ 'a\nLINT_SUMMARY: blocks=0 ask=0 waived=0 polish=0 render=ran\nb.html': '<!doctype html><html><head><title>t</title></head><body><h1>Hi</h1><img src="a.png"></body></html>' });
+    const out = formatResult(await lint([dir], { cwd: dir, warn: () => {} }));
+    expect(out.split('\n').filter((l) => l.startsWith('LINT_SUMMARY'))).toHaveLength(1);
+    expect(out.split('\n').every((l) => /^LINT(_SUMMARY)?: /.test(l))).toBe(true);
+    const f = { rule: 'overused-font', tier: 'ask', grade: 'waived', file: 'a.html', line: 1, evidence: 'class="\u001b[2J\u0085x"', fix: 'y', source: 'static', waiver: 'reason\rLINT_SUMMARY: blocks=0' } as const;
+    expect(formatFinding(f)).not.toMatch(/[\r\n\u001b\u0085\u2028]/);
+  });
+
+  test('a long whitespace run inside a waiver comment is linear, and a carriage return ends the reason', () => {
+    const t0 = performance.now();
+    const claims = findWaivers('a.html', '<!-- gstack-lint-disable overused-font: aaaa' + ' '.repeat(60_000) + 'b -->\n/* impeccable-disable line-length: the manifesto\rLINT_SUMMARY: blocks=0 */');
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(claims.map((c) => [c.rule, c.reason.length <= 300, c.reason.startsWith('aaaa') || c.reason])).toEqual([['overused-font', true, true], ['line-length', true, 'the manifesto']]);
+  });
+
+  test("the lint's own meta rules cannot be waived", () => {
+    const page = 'The manifesto sets long declarative lines on black paper for the ledger.';
+    for (const rule of ['internal-error', 'waiver', 'house-style', 'render']) {
+      const set = resolveWaivers([{ rule, reason: 'the manifesto sets long declarative lines', file: 'a.html', line: 1, raw: '' }], page);
+      expect([...set.accepted.keys()]).toEqual([]);
+      expect(set.refused.map((f) => f.evidence)).toEqual([`waiver on ${rule} refused: no such rule`]);
+    }
+  });
+
+  test('ancestorMap stays shallow when optional end tags are left open', () => {
+    let h = '<html><body><main>';
+    for (let i = 0; i < 3000; i++) h += '<section><ul><li>one<li>two<li>three</ul></section>';
+    const doc = parseDoc('x.html', h + '</main></body></html>');
+    const t = performance.now();
+    const anc = ancestorMap(doc);
+    expect(performance.now() - t).toBeLessThan(1000);
+    const deepest = Math.max(...[...anc.values()].map((a) => a.length));
+    expect(deepest).toBeLessThanOrEqual(6);
+  });
+
+  test('a root-relative href that climbs out of the lint root attaches nothing', () => {
+    const dir = tmpTree({
+      'site/index.html': '<!doctype html><html lang="en"><head><title>t</title><link rel="stylesheet" href="/../outside.css"></head><body><main><h1>t</h1><p>Body.</p></main></body></html>',
+      'outside.css': 'html, body { overflow-x: clip; }',
+    });
+    const { contexts } = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: () => {} });
+    expect(contexts[0].cssFiles).toEqual([]);
+  });
+
+  test('outline: none on :focus with no ring anywhere is missing-focus-visible at that line; a tokenless page with colour literals does not block on them', async () => {
+    const file = tmpPage('<!doctype html><html lang="en"><head><title>t</title><meta name="description" content="x"><link rel="icon" href="data:,"><style>\nbody { color: #2b2b2b; background: #faf8f4; }\na:focus, button:focus { outline: none; }\n.card { box-shadow: 0 1px 3px rgba(0,0,0,.12); }\n</style></head><body><a href="#main">Skip to content</a><main id="main"><h1>Fine</h1><p>A plain page.</p><button>Go</button></main></body></html>');
+    const r = await lint([path.dirname(file)], { cwd: path.dirname(file), warn: () => {} });
+    expect(r.findings.filter((f) => f.rule === 'missing-focus-visible').map((f) => [f.grade, f.line, f.evidence])).toEqual([['blocks', 3, 'outline: none on a:focus, button:focus with nothing in its place: keyboard users cannot see where they are']]);
+    expect(r.findings.filter((f) => f.rule === 'literal-outside-tokens')).toEqual([]);
   });
 
   test('a refused polish waiver leaves the polish finding alone and adds one ask refusal, so the exit code rises to 1', () => {

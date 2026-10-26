@@ -31,7 +31,7 @@ function tmpDir(files: Record<string, string>): string {
 
 async function lintFiles(files: Record<string, string>, opts: { scope?: 'page' | 'component' } = {}): Promise<Finding[]> {
   const dir = tmpDir(files);
-  const result = await lint([dir], { cwd: dir, warn: () => {}, ...opts });
+  const result = await lint([dir], { cwd: dir, warn: (l: string) => { throw new Error(l); }, ...opts });
   return result.findings;
 }
 
@@ -66,7 +66,7 @@ describe('design-lint tailwind: the reader', () => {
       'Card.vue': '<template>\n  <div :class="{ \'motion-reduce:transition-none\': true }" class="p-4"></div>\n</template>',
       'Band.astro': '---\nconst x = 1;\n---\n<div class:list={["bg-paper", { "disabled:opacity-50": true }]} class:active={x}></div>\n<p class="mt-2 {x ? \'text-sm\' : \'\'} tracking-wide">Hi</p>',
     });
-    const { contexts } = lintStatic([dir], { cwd: dir, warn: () => {} });
+    const { contexts } = lintStatic([dir], { cwd: dir, warn: (l: string) => { throw new Error(l); } });
     const ctx = contexts.find((c) => c.docs.length === 3)!;
     const tw = twGroup(ctx);
     const by = (tag: string) => tw.items.filter((i) => i.tag === tag).map((i) => i.toks.join(' '));
@@ -91,7 +91,7 @@ describe('design-lint tailwind: the reader', () => {
         '}',
       ].join('\n'),
     });
-    const result = await lint([dir], { cwd: dir, warn: () => {} });
+    const result = await lint([dir], { cwd: dir, warn: (l: string) => { throw new Error(l); } });
     expect(lines(result.findings, 'wide-tracking')).toEqual([2]);
     expect(only(result.findings, 'wide-tracking')[0].evidence).toContain('letter-spaced at 12px tracked 0.1em');
     expect(lines(result.findings, 'purple-blue-gradient')).toEqual([5]);
@@ -334,7 +334,7 @@ describe('design-lint tailwind: component text', () => {
 
 describe('design-lint tailwind: fixtures', () => {
   test('tailwind-fail: every utility tell planted in the fixture is found at its line', async () => {
-    const result = await lint([path.join(FIXTURES, 'tailwind-fail')], { cwd: ROOT, warn: () => {} });
+    const result = await lint([path.join(FIXTURES, 'tailwind-fail')], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } });
     const got = result.findings.filter((f) => MY_RULES.includes(f.rule)).map((f) => `${f.grade} ${f.rule} ${path.basename(f.file)}:${f.line}`).sort();
     expect(got).toEqual([
       'ask bounce-easing Feature.vue:7', 'ask bounce-easing Hero.tsx:29', 'ask bounce-easing index.html:39',
@@ -355,7 +355,7 @@ describe('design-lint tailwind: fixtures', () => {
 
   test('tailwind-pass and the clean page raise nothing from the component family', async () => {
     for (const fixture of ['tailwind-pass', 'clean']) {
-      const result = await lint([path.join(FIXTURES, fixture)], { cwd: ROOT, warn: () => {} });
+      const result = await lint([path.join(FIXTURES, fixture)], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } });
       expect(mine(result.findings)).toEqual([]);
     }
   });

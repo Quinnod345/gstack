@@ -408,7 +408,15 @@ export async function glOcclusion(P: Probes): Promise<ProbeFinding[]> {
   const { text, at } = P.H;
   const out: ProbeFinding[] = [];
   const vis = (el: Element) => { const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false; const r = el.getBoundingClientRect(); return r.width > 3 && r.height > 3; };
-  const pinned = (el: Element) => { for (let p: Element | null = el; p && p !== document.body; p = p.parentElement) if (/fixed|sticky/.test(getComputedStyle(p).position)) return true; return false; };
+  const pinnedMemo = new Map<Element, boolean>();
+  const pinned = (el: Element): boolean => {
+    const hit = pinnedMemo.get(el);
+    if (hit !== undefined) return hit;
+    let out = false;
+    for (let p: Element | null = el; p && p !== document.body; p = p.parentElement) if (/fixed|sticky/.test(getComputedStyle(p).position)) { out = true; break; }
+    pinnedMemo.set(el, out);
+    return out;
+  };
   const unseen = (el: Element) => { const cs = getComputedStyle(el); return parseFloat(cs.opacity) < 0.05 || (/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor) && cs.backgroundImage === 'none' && !text(el) && !/^(IMG|svg|CANVAS|VIDEO|PICTURE)$/.test(el.tagName) && !el.querySelector('img, svg, canvas, video')); };
   const runs: Array<{ t: Node; host: Element }> = [];
   const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

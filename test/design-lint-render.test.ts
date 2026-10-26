@@ -268,6 +268,28 @@ describe('design-lint render: hardening (ship review)', () => {
     expect(lineOf('<x>\n<a(b class="c">hi</a(b>', { tag: 'a(b', cls: 'c', text: 'hi' })).toBe(2);
   });
 
+  test.skipIf(!hasBrowser)('a waiver on low-contrast is refused once the render tier measures it: the measured finding blocks, nothing is waived', async () => {
+    const html = '<!-- gstack-lint-disable low-contrast: the faint paragraph is the ledger watermark for the paper -->\n' + pageWith('.faint { color: #b8b8b8; background: #fff; }', '<p class="faint">The faint paragraph nobody can read on the paper ledger.</p>');
+    const { dir } = tmpPage(html);
+    try {
+      const r = await lint([dir], { cwd: dir, render: true, warn: () => {}, engine });
+      expect(r.findings.filter((f) => f.rule === 'low-contrast' && f.source === 'render').map((f) => f.grade)).toEqual(['blocks']);
+      expect(r.findings.filter((f) => f.rule === 'waiver').map((f) => f.evidence)).toEqual(['waiver on low-contrast refused: it blocks; the Floor is never waivable']);
+      expect(r.summary.waived).toBe(0);
+      expect(r.exitCode).toBe(2);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test.skipIf(!hasBrowser)('a page whose script redefines the probes gets a blocking render finding, not a quiet pass', async () => {
+    const html = pageWith('', '<script>Object.defineProperty(window, "__gstackLint", { configurable: false, get() { return { setup: () => ({ lost: [] }), layout: () => [{ rule: "nope", grade: "fail", evidence: "x" }], contrast: () => [], accent: () => [], space: () => [], quality: () => [], occlusion: () => [], focus: () => [], hide: () => [], restore: () => 0 }; }, set() {} });</script>');
+    const { dir } = tmpPage(html);
+    try {
+      const r = await lint([dir], { cwd: dir, render: true, warn: () => {}, engine });
+      expect(r.findings.filter((f) => f.rule === 'render').map((f) => [f.grade, /does not know|could not be prepared|did not render|measurement/.test(f.evidence)])).toContainEqual(['blocks', true]);
+      expect(r.exitCode).toBe(2);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test.skipIf(!hasBrowser)('a page waiving section-gap sees its render section-gap finding at waived, not ask', async () => {
     const block = (n: number) => `<section class="gap${n}"><h2>Section ${n} of the close</h2><p>${WORDS(24)}.</p></section>`;
     const html = '<!-- gstack-lint-disable section-gap: the ledger separates its close sections with hairline rules, not air -->\n'

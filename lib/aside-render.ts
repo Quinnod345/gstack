@@ -13,6 +13,7 @@
  *   1. Aside refuses `file://` URLs ("Cannot navigate to a file URL without
  *      local file access"), so the HTML's directory is served over loopback
  *      with Bun.serve on an ephemeral port for the duration of ONE render.
+ *      An http(s) `file` is opened as it is and nothing is served.
  *   2. One `aside repl` process runs ONE generated script: open the page,
  *      wait, run the steps in order, close the tab. Nothing persists between
  *      `aside repl` calls and tabs die with the script, so a render is always
@@ -37,7 +38,8 @@
  * bookkeeping is best-effort: after a `cookie-import` the daemon refuses `js`
  * on other origins, and a pdf/screenshot-only spec must still print. Not
  * mirrored on this path: pageRanges/scale, screenshot quality, the 2x default
- * device scale.
+ * device scale, and an eval step's deviceScaleFactor and mobile (the browse
+ * daemon's `viewport` takes a size alone).
  *
  * Node builtins + Bun only (bun build --compile embeds this into make-pdf).
  */

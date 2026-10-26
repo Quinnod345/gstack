@@ -115,6 +115,7 @@ as `house-style`.
 | `cream-palette` | ask | 65 | the cream paper, serif display and terracotta accent look | move one axis: the accent first, the paper second, the display last |
 | `framework-palette` | ask | 74 | a framework default palette (Tailwind indigo-500, slate-900 and kin) as a token or utility | a colour mixed for the page in OKLCH |
 | `overused-font` | ask | 1 | a training-data display face (Inter, Roboto, Fraunces, Playfair Display, Space Grotesk and the rest of gstack's catalog) or a system stack as the display | a display face chosen for the page |
+| `banned-font` | ask | catalog | a face gstack bans in any role (Papyrus, Comic Sans, Impact, Lobster, Raleway, Courier New and the rest of lib/design-catalog.ts BANNED_FONTS) | a face chosen for the page; the body face for body and labels |
 | `line-length` | ask | 25 | running prose outside 45 to 75 characters a line | max-width: 65ch |
 | `font-family-count` | ask | 37 | more than three font families | display, body and one outlier |
 | `italic-word-in-heading` | blocks | 38i | one italic word inside an otherwise roman heading | a line break, or the whole head set one way |
@@ -237,6 +238,36 @@ ids are the lint's own: `waiver` (a refused waiver, ask), `house-style` (more
 than three waivers, polish), `render` (a page that did not render, blocks:
 an unrendered page is never a pass) and `internal-error` (a rule family that
 threw on a page, ask: the page is not a pass until the lint has read it).
+
+## Token names the rules read
+
+Several rules key on hallmark's token names, which are also the names
+`/design-html` writes: `--color-paper` (the ground; `cream-palette`,
+`cyan-on-dark` and the dark-paper checks read it), `--color-accent`
+(`accent-footprint`, `cream-palette`), `--font-display` / `--font-heading` /
+`--font-title` / `--font-hero` (`overused-font`), `--space-*` (`raw-spacing`,
+`off-scale-spacing`) and any `--color-*` or `--font-*` token
+(`literal-outside-tokens` fires only on a page that declares one, since a
+literal on a page with no tokens bypasses nothing). A project that names its
+tokens `--bg` or `--brand` gets none of those checks and no signal that they
+did not run; Phase 2 reads the roles from DESIGN.md.
+
+## What the lint does not cover
+
+A clean `LINT_SUMMARY` is not the whole design checklist. These checklist and
+catalog items stay with the LLM pass in `/design-review` and are not rules
+here: `!important` in new CSS (the parser drops the flag), an h1 past 6rem
+(`oversized-h1`), tracking below -0.04em (`extreme-negative-tracking`), body
+text under 16px in a static stylesheet (`tiny-text` here is hallmark's 12px
+running-text floor, measured by the render tier), the `theater-slop-phrase`
+list beyond "built for the modern", the pulsing dot, and a text container with
+no `max-width` (`line-length` reads a declared `ch` value). The copy tier
+reports at the document's first line with a count, because
+`gstack-design-craft` counts matches without positions; Phase 2 folds those
+patterns into the lint with lines. Where a rule id is shared with
+`lib/design-catalog.ts`, the tier here follows hallmark's gate (several
+catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
+catalog row is marked `detect: lint`.
 
 ## What is deliberately not ported
 

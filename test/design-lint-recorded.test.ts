@@ -31,10 +31,12 @@ describe('design-lint over the recorded review slop page', () => {
     try {
       const r = await lint([dir], { cwd: dir });
       const at = (rule: string) => r.findings.filter((f) => f.rule === rule).map((f) => [f.grade, path.basename(f.file), f.line]);
-      // Issue 1: the blacklisted face is a font literal outside the tokens
-      expect(at('literal-outside-tokens')).toContainEqual(['blocks', 'styles.css', 6]);
-      // Issue 5: the purple gradient's two stops are colour literals outside the tokens
-      expect(at('literal-outside-tokens').filter((f) => f[2] === 14)).toHaveLength(2);
+      // Issue 1: the blacklisted face (Papyrus) is a banned face in any role
+      expect(at('banned-font')).toEqual([['ask', 'styles.css', 6]]);
+      // Issue 5: the indigo-to-violet gradient is the banned gradient
+      expect(at('purple-blue-gradient')).toEqual([['blocks', 'styles.css', 14]]);
+      // The page declares no --color-* or --font-* token, so its literals bypass nothing and literal-outside-tokens stays quiet
+      expect(at('literal-outside-tokens')).toEqual([]);
       // Issue 3: outline: none with nothing in its place
       expect(at('missing-focus-visible')).toEqual([['blocks', 'styles.css', 1]]);
       // Issue 7: the three-column icon-tile grid and its coins
@@ -49,7 +51,7 @@ describe('design-lint over the recorded review slop page', () => {
       expect(at('skipped-heading')).toEqual([['polish', 'index.html', 21]]);
       expect(r.findings.some((f) => f.grade === 'waived')).toBe(false);
       expect(exitCodeOf(r.summary)).toBe(2);
-      expect(formatSummary(r.summary)).toMatch(/^LINT_SUMMARY: blocks=11 ask=\d+ waived=0 polish=4 render=skipped: not requested$/);
+      expect(formatSummary(r.summary)).toMatch(/^LINT_SUMMARY: blocks=5 ask=\d+ waived=0 polish=4 render=skipped: not requested$/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

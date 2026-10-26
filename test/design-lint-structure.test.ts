@@ -30,7 +30,7 @@ async function lintPage(html: string, opts: { scope?: 'page' | 'component'; name
   tmpDirs.push(dir);
   const file = path.join(dir, opts.name ?? 'index.html');
   fs.writeFileSync(file, html);
-  return (await lint([file], { cwd: dir, scope: opts.scope, warn: () => {} })).findings;
+  return (await lint([file], { cwd: dir, scope: opts.scope, warn: (l: string) => { throw new Error(l); } })).findings;
 }
 
 const only = (findings: Finding[], rule: string) => findings.filter((f) => f.rule === rule);
@@ -214,7 +214,7 @@ describe('design-lint structure: screen-word-budget (gate 58, static half)', () 
 
 describe('design-lint structure: the shared fixtures', () => {
   test('slopped.html trips the planted structure tells at their lines', async () => {
-    const f = (await lint([path.join(FIXTURES, 'slopped.html')], { cwd: ROOT, warn: () => {} })).findings;
+    const f = (await lint([path.join(FIXTURES, 'slopped.html')], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } })).findings;
     const mine = f.filter((x) => FAMILY.includes(x.rule)).map((x) => [x.rule, x.grade, x.line]);
     expect(mine).toEqual([
       ['bare-fr-track', 'blocks', 93],
@@ -226,7 +226,7 @@ describe('design-lint structure: the shared fixtures', () => {
     ]);
   });
   test('the clean page raises no structure finding', async () => {
-    const f = (await lint([path.join(FIXTURES, 'clean')], { cwd: ROOT, warn: () => {} })).findings;
+    const f = (await lint([path.join(FIXTURES, 'clean')], { cwd: ROOT, warn: (l: string) => { throw new Error(l); } })).findings;
     expect(f.filter((x) => FAMILY.includes(x.rule)).map(formatFinding)).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@
  *
  * Gate 75 (tiny text) is render-only and lives in the render tier.
  */
-import { OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
+import { BANNED_FONTS, OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
 import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
@@ -26,6 +26,31 @@ function tokenSite(ctx: LintContext, prop: string): { file: string; line: number
 
 /** gstack's own catalog of training-data display faces, plus the system stacks sloplint names. */
 const OVERUSED = [...OVERUSED_FONTS_DISPLAY, 'system-ui', '-apple-system', 'helvetica neue', 'segoe ui'].map((f) => famKey(f.toLowerCase()));
+
+/** gstack's catalog of faces banned in any role (Papyrus, Comic Sans, Impact and kin). */
+const BANNED = BANNED_FONTS.map((f) => famKey(f.toLowerCase()));
+
+/** The catalog names "Comic Sans" and "Brush Script"; a declaration says "Comic Sans MS" or "Brush Script MT". */
+const isBanned = (fam: string): boolean => { const k = famKey(fam); return BANNED.some((b) => k === b || k.startsWith(b)); };
+
+// gstack's own: a banned face anywhere, display or body (lib/design-catalog.ts BANNED_FONTS)
+function bannedFont(ctx: LintContext, r: Reporter): void {
+  const seen = new Set<string>();
+  const flag = (fam: string, file: string, line: number, where: string) => {
+    if (!isBanned(fam) || seen.has(fam + where)) return;
+    seen.add(fam + where);
+    r.report('banned-font', file, line, `"${fam}" (${where})`);
+  };
+  for (const [prop, val] of Object.entries(ctx.tokens)) {
+    if (!/^--font-/.test(prop)) continue;
+    const site = tokenSite(ctx, prop);
+    flag(firstFamily(resolveVars(val, ctx.tokens)), site.file, site.line, prop);
+  }
+  for (const rule of ctx.rules) {
+    if (isTokenRule(rule)) continue;
+    for (const d of rule.decls) if (d.prop === 'font-family' && !d.value.includes('var(')) flag(firstFamily(d.value), rule.file, d.line, rule.selector);
+  }
+}
 
 // sloplint check1 (gate 1)
 function check1(ctx: LintContext, r: Reporter): void {
@@ -365,6 +390,7 @@ function check67Html(ctx: LintContext, r: Reporter): void {
 
 export function run(ctx: LintContext, r: Reporter): void {
   check1(ctx, r);
+  bannedFont(ctx, r);
   check25(ctx, r);
   check37(ctx, r);
   check38a(ctx, r);

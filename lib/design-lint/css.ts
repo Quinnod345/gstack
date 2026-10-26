@@ -82,13 +82,8 @@ function nestSelector(sel: string, parent: string): string {
   return sel.split(/,(?![^(]*\))/).map((part) => part.includes('&') ? part.trim().replace(/&/g, p) : `${p} ${part.trim()}`).join(', ');
 }
 
-/**
- * Parse a stylesheet into flat rules. Nested rules, @media / @supports /
- * @layer / @container / @scope blocks, @keyframes, @font-face and Tailwind's
- * @theme are all walked; every other at-rule is skipped whole.
- */
 /** Faces that read as monospace, whether they arrive as a token, a utility or a declaration; one list so every check classifies a face the same way. */
-export const MONO_FACE = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
+export const MONO_FACE = /(?:^|[\s"'-])mono(?:space)?\b|\bcode\b|courier|silkscreen|jetbrains|plex mono|geist mono|\bcommit\b|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
 
 /** The tracked-caps label: tracking past this (em) on text at or under LABEL_PX reads as the reflex, in CSS and in Tailwind alike. */
 export const TRACKED_EM = 0.03;
@@ -97,6 +92,11 @@ export const LABEL_PX = 15;
 /** Real stylesheets nest a handful of levels; past this the rest reads as the parent's body instead of recursing. */
 const MAX_NESTING = 64;
 
+/**
+ * Parse a stylesheet into flat rules. Nested rules, @media / @supports /
+ * @layer / @container / @scope blocks, @keyframes, @font-face and Tailwind's
+ * @theme are all walked; every other at-rule is skipped whole.
+ */
 export function parseCss(source: string, file: string, lineOffset = 0): CssRule[] {
   const src = stripComments(source);
   const lineOf = lineIndex(src, lineOffset);
@@ -246,11 +246,16 @@ export function mergeBySelector(rules: CssRule[]): MergedRule[] {
   return [...map.values()];
 }
 
-export interface StyleEntry { classes: string[]; tag: string | null; decls: CssDecl[]; state: boolean }
+export interface StyleEntry { classes: string[]; tag: string | null; decls: CssDecl[]; state: boolean; seq: number }
+
+/** Entries in source order, plus the same entries keyed by their first class or, for class-less compounds, by tag, so a lookup reads only the entries that can match. */
+export type StyleIndex = StyleEntry[] & { byClass?: Map<string, StyleEntry[]>; byTag?: Map<string, StyleEntry[]> };
 
 /** The last compound of every selector, indexed by class and tag, so an element's resting styles can be looked up. */
-export function buildStyleIndex(rules: CssRule[]): StyleEntry[] {
-  const entries: StyleEntry[] = [];
+export function buildStyleIndex(rules: CssRule[]): StyleIndex {
+  const entries: StyleIndex = [];
+  const byClass = new Map<string, StyleEntry[]>();
+  const byTag = new Map<string, StyleEntry[]>();
   for (const r of rules) {
     if (r.keyframes || r.selector === '@font-face') continue;
     if (r.media && /max-width/i.test(r.media)) continue;
@@ -262,21 +267,31 @@ export function buildStyleIndex(rules: CssRule[]): StyleEntry[] {
       const tagM = /^([a-zA-Z][\w-]*)/.exec(cleaned);
       const tag = tagM ? tagM[1].toLowerCase() : null;
       if (!classes.length && !tag) continue;
-      entries.push({ classes, tag, decls: r.decls, state: /:(hover|active|focus|focus-visible|focus-within|disabled|checked|visited|target)\b|::?(before|after|marker|placeholder|selection|backdrop)\b/i.test(compound) });
+      const entry: StyleEntry = { classes, tag, decls: r.decls, state: /:(hover|active|focus|focus-visible|focus-within|disabled|checked|visited|target)\b|::?(before|after|marker|placeholder|selection|backdrop)\b/i.test(compound), seq: entries.length };
+      entries.push(entry);
+      const bucket = classes.length ? byClass : byTag;
+      const key = classes.length ? classes[0] : tag!;
+      if (!bucket.has(key)) bucket.set(key, []);
+      bucket.get(key)!.push(entry);
     }
   }
+  entries.byClass = byClass;
+  entries.byTag = byTag;
   return entries;
 }
 
-/** The declarations that apply to an element with this class attribute and tag; restingOnly drops state and pseudo-element rules. */
-export function stylesFor(index: StyleEntry[], classAttr: string | null | undefined, tagName: string, restingOnly = false): CssDecl[] {
+/** The declarations that apply to an element with this class attribute and tag, in source order; restingOnly drops state and pseudo-element rules. */
+export function stylesFor(index: StyleIndex, classAttr: string | null | undefined, tagName: string, restingOnly = false): CssDecl[] {
   const have = new Set(String(classAttr || '').split(/\s+/).filter(Boolean));
+  const candidates: StyleEntry[] = index.byClass
+    ? [...(index.byTag?.get(tagName) ?? []), ...[...have].flatMap((c) => index.byClass!.get(c) ?? [])].sort((a, b) => a.seq - b.seq)
+    : index;
   const decls: CssDecl[] = [];
-  for (const e of index) {
+  for (const e of candidates) {
     if (restingOnly && e.state) continue;
     if (e.tag && e.tag !== tagName) continue;
     if (!e.classes.every((c) => have.has(c))) continue;
-    decls.push(...e.decls);
+    for (const d of e.decls) decls.push(d);
   }
   return decls;
 }
