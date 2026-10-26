@@ -24,6 +24,8 @@ import { straysCheck } from './checks/strays';
 import { timingCheck } from './checks/timing';
 import { NON_DOWNGRADABLE, userPolicyAbsent } from './config';
 import { sha256, withFingerprint } from './context';
+import { baseBranchOf, describeSubstitution, substituteStampOnlyTree, type StampOnlySubstitution } from './remote-receipt';
+import { resolveBaseBranch } from '../ship-policy';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
 export const CHECKS: readonly CheckDef[] = [regenCheck, secretsCheck, straysCheck, literalsCheck, timingCheck, guardsCheck, lanesCheck];
@@ -138,7 +140,11 @@ export function verifyPregate(repoRoot: string, file: PregateFile, treeNow: Wtre
   const incomplete = file.checks.filter(c => c.status === 'incomplete' || c.status === 'not_installed');
   if (incomplete.length) return { ok: false, code: 'PREGATE_INCOMPLETE', message: `${incomplete.length} check(s) incomplete: ${incomplete.map(c => c.id).join(', ')}`, current, uncleared };
   if (uncleared.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${uncleared.length} requires-remote obligation(s) without a receipt: ${uncleared.map(r => r.lane).join(', ')}`, current, uncleared };
-  return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}`, current, uncleared };
+  // A receipt accepted from a stamp-only predecessor tree was accepted for one head tree; recorded for another, it clears nothing here.
+  const misapplied = (file.requires_remote ?? []).filter(r => r.substitution && r.substitution.accepted_for !== file.tree);
+  if (misapplied.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${misapplied.length} remote receipt(s) accepted for another tree: ${misapplied.map(r => `${r.lane} (accepted for ${r.substitution!.accepted_for.slice(0, 12)}, pregate.json is ${file.tree.slice(0, 12)})`).join(', ')}; clear again`, current, uncleared: misapplied };
+  const substituted = (file.requires_remote ?? []).filter(r => r.substitution).map(r => `${r.lane}: ${describeSubstitution(r.substitution!)}`);
+  return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}${substituted.length ? `; ${substituted.join('; ')}` : ''}`, current, uncleared };
 }
 
 /**
@@ -163,17 +169,21 @@ function userPolicyChange(file: PregateFile): string | null {
 }
 
 export interface ClearInput { runUrl?: string; bundleLane?: string; receiptPath?: string }
-export type ClearDecision = { receipt: string; attested: boolean } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string };
+export type ClearDecision = { receipt: string; attested: boolean; substitution?: StampOnlySubstitution } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string; fix?: string };
 
 /**
  * What `clear` may record for one obligation. A `pregate.json/remote_gate`
  * obligation needs the gate's own report (`--receipt <file>` holding its
  * PREGATE_REMOTE: line), validated as `--remote` validates it against the
- * tested tree; a run URL is not checkable there. A `test_backend/<backend>`
+ * tested tree; a run URL is not checkable there. With `repoRoot`, a report
+ * whose tree is a stamp-only predecessor of pregate.json's tree (the gate ran
+ * ahead of the stamp; lib/pregate/remote-receipt.ts) is accepted for this
+ * tree and the substitution recorded; without it, or when any differing path
+ * is not a stamp, the tree mismatch refuses as before. A `test_backend/<backend>`
  * obligation has no machine-checkable receipt, so its run URL is recorded as
  * attested. Platform lanes take a run URL or an evidence-bundle lane label.
  */
-export function clearDecision(file: PregateFile, lane: string, input: ClearInput): ClearDecision {
+export function clearDecision(file: PregateFile, lane: string, input: ClearInput, repoRoot?: string): ClearDecision {
   const list = file.requires_remote ?? [];
   const target = list.find(r => r.lane === lane);
   if (!target) return { refused: 'usage', message: `no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}` };
@@ -183,9 +193,17 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
     try { text = fs.readFileSync(input.receiptPath, 'utf8'); }
     catch (e: any) { return { refused: 'PREGATE_RECEIPT_INVALID', message: `cannot read ${input.receiptPath}: ${e.message}` }; }
     const report = parseRemoteReport(text);
-    const problem = report ? remoteReportProblem(report, file.tree) : `${input.receiptPath} has no PREGATE_REMOTE: line`;
+    if (!report) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${input.receiptPath} has no PREGATE_REMOTE: line; ${lane} stays uncleared` };
+    let substitution: StampOnlySubstitution | undefined;
+    if (report.tree !== file.tree && repoRoot) {
+      const s = substituteStampOnlyTree(repoRoot, baseBranchOf(file.base) ?? resolveBaseBranch(repoRoot), report.tree, file.tree);
+      if ('problem' in s) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${s.problem}; ${lane} stays uncleared`, fix: s.fix };
+      substitution = s.substitution;
+    }
+    const problem = remoteReportProblem(report, substitution ? report.tree : file.tree);
     if (problem) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${problem}; ${lane} stays uncleared` };
-    return { receipt: `remote-gate tree=${file.tree.slice(0, 12)} tests=${report!.tests} receipt=${path.resolve(input.receiptPath)} sha256=${createHash('sha256').update(text).digest('hex').slice(0, 12)}`, attested: false };
+    const accepted = substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${substitution.files.length}` : '';
+    return { receipt: `remote-gate tree=${report.tree.slice(0, 12)} tests=${report.tests}${accepted} receipt=${path.resolve(input.receiptPath)} sha256=${createHash('sha256').update(text).digest('hex').slice(0, 12)}`, attested: false, substitution };
   }
   if (input.receiptPath) return { refused: 'usage', message: `--receipt applies only to ${REMOTE_GATE_LANE}; clear ${lane} with --run-url <url>${target.workflow === 'test_backend' ? '' : ' or --bundle-lane <label>'}` };
   if (target.workflow === 'test_backend') {
@@ -197,12 +215,13 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
   return { receipt, attested: false };
 }
 
-/** Record the receipt that clears one obligation (a run URL or an evidence-bundle lane label). */
-export function clearObligation(file: PregateFile, lane: string, receipt: string, by: string): PregateFile {
+/** Record the receipt that clears one obligation (a run URL, an evidence-bundle lane label, or a remote gate report, with the stamp-only substitution when one was accepted). */
+export function clearObligation(file: PregateFile, lane: string, receipt: string, by: string, substitution?: StampOnlySubstitution): PregateFile {
   const list = file.requires_remote ?? [];
   const target = list.find(r => r.lane === lane);
   if (!target) throw new Error(`no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}`);
   target.receipt = receipt; target.cleared_by = by;
+  if (substitution) target.substitution = substitution; else delete target.substitution;
   file.verdict = verdictOf(file);
   return file;
 }

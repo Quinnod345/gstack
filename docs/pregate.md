@@ -333,7 +333,9 @@ the supervision above. Close the obligation one of two ways:
 
 - after running it, `gstack-pregate clear --remote pregate.json/remote_gate
   --receipt <file>` with the gate's output, validated as `--remote` validates it
-  (a run URL is refused, `PREGATE_RECEIPT_INVALID` for a bad receipt), or
+  (a run URL is refused, `PREGATE_RECEIPT_INVALID` for a bad receipt; a receipt
+  for a tree that differs from this one only by the repo's stamp rule is
+  accepted and recorded, see [below](#remote-gate-stamp-only)), or
   `gstack-pregate clear --remote test_backend/<backend> --run-url <url>`, which
   has no machine-checkable receipt and is recorded as `attested:<url>`; or
 - `gstack-pregate --stage tests --remote --spend-cap <usd> --allow-repo-commands`,
@@ -349,6 +351,67 @@ the supervision above. Close the obligation one of two ways:
   `$GSTACK_SPEND_CAP_USD`; there is no default spend. Spend prints as
   `spent, reserved, unknown`: a gate that prints no `spent=` is `unknown`,
   counted at the cap.
+
+<a id="remote-gate-stamp-only"></a>
+### A receipt from a stamp-only predecessor tree (gate ahead of the stamp)
+
+The receipt `clear --receipt` validates names the tree the gate tested, and
+pregate.json names the tree being published. A repo whose full gate runs before
+its turn in the queue ("gate ahead": the gate tests commit G, then /ship's
+restamp moves the version files, so the head H it publishes is G plus the
+stamp) could never clear the obligation with that run, and paid a second full
+gate on H for a diff that was nothing but stamps. `clear` now accepts that
+receipt for H when the two trees differ only as a stamp does:
+
+- gstack diffs the gated tree against pregate.json's tree
+  (`git diff --unified=0 <gated> <head>`, both trees as objects in this
+  repository: the gated commit's tree once it is fetched, and the head tree
+  `bin/gstack-wtree` wrote) and classifies every differing file with the tree
+  receipt's own rule, `lib/tree-receipt.ts` under `.gstack/ship-policy.json` on
+  `origin/<base>` ([ship-policy](ship-policy.md#tree-receipt)). That is the rule
+  `gstack-tree-receipt`, `gstack-pregate regate` and the train's
+  `verify --train` apply: with `stamp_files` set only those files can be
+  stamps, each hunk in them must be the exact old → new rewrite under
+  `stamp_patterns` (literal `{version}` templates) or the built-in forms
+  (`(was X)`, `since: X`, `vX`), and the version file, `package.json`'s
+  `version`, a lockfile's root version keys and a CHANGELOG re-heading have
+  their own built-in rules. There is no second list and no looser rule here:
+  the verdict `clear` reaches on a pair is the verdict `gstack-tree-receipt
+  --gated G --current H` reaches.
+- Accepted, the obligation's receipt reads `remote-gate tree=<gated>
+  tests=<n> accepted-for=<head> stamp-only=<files> receipt=<file>
+  sha256=<digest>`, and pregate.json records the substitution beside it:
+  `substitution: { gated_tree, accepted_for, policy, files: [{ path, rule }] }`,
+  the policy label (`origin/<base>@<sha>:.gstack/ship-policy.json`) and every
+  differing path with the rule that classed it (`version-file`,
+  `manifest-version`, `lockfile-root-version`, `changelog-heading`,
+  `stamp_files`, `stamp_paths`, `release_outputs`). `clear` prints the same
+  as `PREGATE_RECEIPT_SUBSTITUTED: …`, `verify` repeats it on its ok line, and
+  the ship receipt carries the receipt string. The gate's own tests, failed
+  and exit checks still apply to the receipt as before.
+- Refused, with `PREGATE_RECEIPT_INVALID` and a fix naming the offending
+  path: any differing path outside the rule (`lib/x.ts (stamp_files: not in the
+  repo's stamp_files allowlist, line 1)`), a stamp path whose hunk is not the
+  stamp rewrite (`plugin.json (stamp_files: "…description…" -> "…", line 4)`),
+  a gated tree that is not an object here (fetch the gated commit first), a
+  base branch whose policy cannot be read, or two trees at the same version
+  (a `stamp_files` hunk needs an old → new version to rewrite). The obligation stays uncleared; rerun
+  the gate on the head, or make the extra change a stamp under the repo's
+  rule.
+
+A consuming repo declares its stamp paths once, in `.gstack/ship-policy.json`
+on its base branch (`stamp_files`, `stamp_patterns`, `changelog`), the same
+file the tree receipt and restamp already read; nothing is declared in
+`.gstack/pregate.json` for this. gbrain's is in
+[gbrain worked configs](#gbrain-worked-configs). The sequence that reuses a
+gate-ahead run, on a machine under 8 cores:
+
+```bash
+git fetch origin <gated sha>                      # the gated commit's tree must be here
+gstack-pregate --allow-repo-commands              # on the stamped head: records pregate.json/remote_gate uncleared
+gstack-pregate clear --remote pregate.json/remote_gate --receipt <the gate's output for the gated tree>
+gstack-pregate verify                             # PREGATE_VERIFY: ok …; pregate.json/remote_gate: gated tree … accepted for tree …
+```
 
 gstack's own example: `.gstack/pregate.json` declares
 `"remote_gate": "bash scripts/ubicloud/pregate-remote.sh"`. With
