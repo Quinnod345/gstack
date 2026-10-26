@@ -423,6 +423,16 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     expect(r.stdout).toContain(`GSTACK_INSTALL_VERDICT=${files[0]}`);
     expect(r.stdout).toContain(`GSTACK_LAUNCH_FILE: ${files[0].replace(/\.json$/, '.env')}`);
     expect(fs.readFileSync(files[0].replace(/\.json$/, '.env'), 'utf8')).toContain(`export GSTACK_INSTALL_VERDICT='${files[0]}'`);
+    // /ship Step 7 value card. protects: with the certified Bun first on PATH (no GSTACK_LAUNCH_PATH)
+    // the launch file carries no PATH line, sources under POSIX sh, and leaves PATH exactly as it was;
+    // --check rewrites and prints it too. fails_when: the PATH guard is dropped (an empty prepend
+    // leaves ":"-led PATH), the file uses a bashism, or --check stops printing GSTACK_LAUNCH_FILE.
+    // why_existing_misses: the PATH-bearing case above is sourced by bash only, and the --check run
+    // below asserted only the GSTACK_LAUNCH line. seam=none.
+    const sourced = spawnSync('sh', ['-c', '. "$1" && printf "%s\\n" "$PATH" "$GSTACK_SESSION_KIND" "$GSTACK_CAPY" "$GSTACK_INSTALL_VERDICT"', '_', files[0].replace(/\.json$/, '.env')],
+      { encoding: 'utf8', timeout: 30_000, env: { PATH: '/usr/bin:/bin' } });
+    expect(sourced.status, sourced.stderr).toBe(0);
+    expect(sourced.stdout.trimEnd().split('\n')).toEqual(['/usr/bin:/bin', 'unattended', '1', files[0]]);
     const v = JSON.parse(fs.readFileSync(files[0], 'utf8'));
     expect(v).toMatchObject({ schema_version: 2, checkout: f.root, head: sh('git rev-parse HEAD', f.root).stdout.trim(), for: 'autoplan', ok: true, trailer: 'gstack: ok 1.2.3 for=autoplan',
       project: '', bun_path: path.join(f.stub, 'bun'), bun_version: '1.4.2', bun_rule: 'PATH' });
@@ -433,10 +443,39 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     expect(c.status, c.stdout + c.stderr).toBe(0);
     expect(f.calls().filter(l => l.startsWith('setup ')).length).toBe(setups);
     expect(c.stdout).toContain('GSTACK_LAUNCH: ');
+    expect(c.stdout).toContain(`GSTACK_LAUNCH_FILE: ${files[0].replace(/\.json$/, '.env')}`);
     expect(lastLine(c.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
     const failed = run(f, ['--check', '--for', 'autoplan'], { STUB_DOCTOR_FAIL: '1' });
     expect(failed.status).toBe(1);
     expect(JSON.parse(fs.readFileSync(files[0], 'utf8'))).toMatchObject({ ok: false, trailer: 'gstack: fail codex' });
+  });
+
+  // /ship Step 7 value card. protects: when the launch file cannot be written, the run says so,
+  // prints no GSTACK_LAUNCH_FILE line (a caller must never be handed an empty path to source),
+  // leaves no temp file behind, and keeps its exit code and trailer; the earlier launch file is
+  // untouched. fails_when: the `[ -n "$LAUNCH_FILE" ]` guard goes, the write failure changes RC or
+  // ordering, or the temp file is created outside the umask/cleanup path. why_existing_misses:
+  // every fixture's state root is writable. seam=none (filesystem permissions). no_claim: root.
+  test.skipIf(process.platform !== 'linux' || process.getuid?.() === 0)('a launch file that cannot be written is reported, prints no GSTACK_LAUNCH_FILE line, leaves no temp file and keeps the exit code and trailer', () => {
+    const f = fixture();
+    const first = run(f, ['--for', 'autoplan']);
+    expect(first.status, first.stdout + first.stderr).toBe(0);
+    const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    const before = fs.readFileSync(launchFile, 'utf8');
+    const dir = path.dirname(launchFile);
+    fs.chmodSync(dir, 0o555);
+    try {
+      const c = run(f, ['--check', '--for', 'autoplan']);
+      expect(c.status, c.stdout + c.stderr).toBe(0);
+      expect(c.stdout).toContain(`gstack-capy-install: could not write the launch file ${launchFile}`);
+      expect(c.stdout).toContain('GSTACK_LAUNCH: ');
+      expect(c.stdout).not.toMatch(/^GSTACK_LAUNCH_FILE:/m);
+      expect(lastLine(c.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+      expect(fs.readdirSync(dir).filter(n => n.includes('.tmp.'))).toEqual([]);
+      expect(fs.readFileSync(launchFile, 'utf8')).toBe(before);
+    } finally {
+      fs.chmodSync(dir, 0o755);
+    }
   });
 });
 
@@ -771,8 +810,23 @@ describe.skipIf(process.platform !== 'linux')('gstack-capy-install: the per-dire
     fs.mkdirSync(path.join(f.home, '.capy/system'), { recursive: true });
     const state = path.join(f.base, "it's state");
     realBun(path.join(state, `runtimes/bun/${BUN_DEFAULT}/bun`), BUN_DEFAULT);
-    expect(run(f, ['--for', 'autoplan'], { GSTACK_STATE_ROOT: state }, f.base).status).toBe(0);
+    const installed = run(f, ['--for', 'autoplan'], { GSTACK_STATE_ROOT: state, GSTACK_EPHEMERAL: '0' }, f.base);
+    expect(installed.status, installed.stdout + installed.stderr).toBe(0);
     expect(sh(`sh -n "${f.home}/.local/bin/bun"`).status).toBe(0);
+    // /ship Step 7 value card. protects: the launch file single-quotes every path it bakes in, so a
+    // state root, launch directory and verdict path holding a quote and a space source under POSIX
+    // sh (twice: the PATH prepend stays idempotent) and come back byte-identical, and the file
+    // carries the caller's GSTACK_EPHEMERAL rather than a hard-coded 1. fails_when: _sq is replaced
+    // by plain interpolation or double quotes, the case pattern loses its quoting, or GSTACK_EPHEMERAL
+    // is hard-coded. why_existing_misses: the sourced launch files above live under plain tmp paths
+    // with the default GSTACK_EPHEMERAL. seam=none.
+    const launchFile = installed.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    expect(launchFile.startsWith(`${state}/install-verdicts/`), launchFile).toBe(true);
+    expect(installed.stdout).toContain(`GSTACK_LAUNCH_PATH: ${state}/runtimes/bun/${BUN_DEFAULT}`);
+    const sourced = spawnSync('sh', ['-c', '. "$1" && . "$1" && printf "%s\\n" "$PATH" "$GSTACK_STATE_ROOT" "$GSTACK_EPHEMERAL" "$GSTACK_INSTALL_VERDICT"', '_', launchFile],
+      { encoding: 'utf8', timeout: 30_000, env: { PATH: '/usr/bin:/bin' } });
+    expect(sourced.status, sourced.stderr).toBe(0);
+    expect(sourced.stdout.trimEnd().split('\n')).toEqual([`${state}/runtimes/bun/${BUN_DEFAULT}:/usr/bin:/bin`, state, '0', launchFile.replace(/\.env$/, '.json')]);
     const r = fresh(f, f.base, 'bun --version && bunx --version', { GSTACK_BUN_SHIM_EXPLAIN: '1' });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.trim().split('\n')[0]).toBe(BUN_DEFAULT);
