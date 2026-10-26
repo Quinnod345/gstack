@@ -25,6 +25,8 @@ describe('craft resolvers', () => {
     expect(DESIGN_CRAFT_RULE(ctx, ['Claims come from the user'])).toStartWith('**Claims come from the user, never from you.**');
     expect(read('design-html', 'sections', 'craft.md')).toContain(motion);
     expect(() => DESIGN_CRAFT_RULE(ctx, ['No such lead'])).toThrow('No such lead');
+    expect(() => DESIGN_CRAFT_RULE(ctx, ['Claims'])).toThrow('0 paragraphs');
+    expect(() => DESIGN_CRAFT_RULE(ctx, ['Mot'])).toThrow('need exactly one');
     expect(() => DESIGN_CRAFT_RULE(ctx, [])).toThrow('requires the bold lead');
     expect(() => DESIGN_CRAFT_RULE(ctx)).toThrow('requires the bold lead');
   });
@@ -34,5 +36,16 @@ describe('craft resolvers', () => {
     expect(checks.split('\n').map(l => l.slice(0, 3))).toEqual(['1. ', '2. ', '3. ', '4. ', '5. ']);
     expect(read('design-review', 'sections', 'craft-audit.md')).toContain(checks);
     expect(read('plan-design-review', 'sections', 'review-sections.md')).toContain(checks);
+  });
+
+  test('the design-review craft audit settles each check outcome and exception kind, and keeps the saved page private', () => {
+    const audit = read('design-review', 'sections', 'craft-audit.md');
+    expect(audit).toContain('line is one category 9 finding under that id');
+    expect(audit).toContain('no `CRAFT_RESULT` line (framework source');
+    expect(audit).toContain('add `--accepted` with that screen\'s finalized.json');
+    expect(audit).toContain('a `CRAFT_ACCEPTED` line is a finding the user accepted, listed with its reason, not filed again, except `needs-proof` and `lorem`');
+    expect(audit).toContain('After a `cannot use exceptions` warning, file every line.');
+    expect(audit).toContain('On a live page, never mark or cut a claim');
+    expect(audit).toContain('never copy it to the report directory');
   });
 });

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { acceptFindings, BUZZWORDS, CRAFT_IDS, checkCraft, formatCraft, parseCraftExceptions, visibleText } from '../lib/design-craft';
 import { catalogEntry, DESIGN_SLOP_CATALOG, detectorSlopEntries, judgmentTellEntries, renderCatalog, selectCatalog } from '../lib/design-catalog';
-import { checklistSlopEntries } from '../scripts/resolvers/design-checklist';
+import { autoFixEntries, checklistSlopEntries } from '../scripts/resolvers/design-checklist';
 import { selectTests } from './helpers/test-selection';
 import { E2E_TOUCHFILES, LLM_JUDGE_TOUCHFILES } from './helpers/touchfiles-data';
 
@@ -64,7 +64,7 @@ describe('design-craft check', () => {
   test('checker-only catalog entries are craft ids that no rendered list carries; catalog entries with a fix still render', () => {
     const checkerOnly = DESIGN_SLOP_CATALOG.filter(e => e.checkerOnly);
     expect(checkerOnly.length).toBeGreaterThan(0);
-    const rendered = new Set([selectCatalog({}), detectorSlopEntries(), judgmentTellEntries(), checklistSlopEntries()].flat().map(e => e.id));
+    const rendered = new Set([selectCatalog({}), detectorSlopEntries(), judgmentTellEntries(), checklistSlopEntries(), autoFixEntries()].flat().map(e => e.id));
     const prose = renderCatalog({ kind: 'slop' });
     for (const e of checkerOnly) {
       expect(CRAFT_IDS, e.id).toContain(e.id);

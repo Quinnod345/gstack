@@ -751,10 +751,10 @@ do not launch the downstream skill or open a browser.`,
     // No section-loading paid case yet: a new periodic case would push the
     // periodic census past its 38-slice cap (test/paid-retry-supervision.test.ts).
     behavioral: 'none',
-    maxSkeletonBytes: 137_773, // measured 137773 (2026-10-25): the Section index the external-host carve test requires, its craft-audit row, and the STOP pointer (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
-    minUnionBytes: 143_300, // measured union 145082
-    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-craft', 'Proof beside each claim'],
-    maxSizeRatio: 1.3708, // first parity guard for design-review: measured 145082 / 105,842 = 1.3708 (2026-10-25), the skeleton's growth since v1.64.1.0 plus the craft audit (Garry 2026-10-25 'Do it' (GSTA-92)).
+    maxSkeletonBytes: 137_767, // measured 137767 (2026-10-26; 137773 on 2026-10-25 before the shorter craft-audit trigger): the Section index the external-host carve test requires, its craft-audit row, and the STOP pointer (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
+    minUnionBytes: 143_300, // measured union 145077 (2026-10-26)
+    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-craft', 'Proof beside each claim', 'holds session data'],
+    maxSizeRatio: 1.3708, // first parity guard for design-review: measured 145082 / 105,842 = 1.3708 (2026-10-25; 145077 after the /ship review fixes, 2026-10-26), the skeleton's growth since v1.64.1.0 plus the craft audit (Garry 2026-10-25 'Do it' (GSTA-92)).
   },
 
   // ── Token-reduction Phase 4 wave 4 (v1.69.x branch): design doctrine carve ──
