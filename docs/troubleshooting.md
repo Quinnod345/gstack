@@ -4231,6 +4231,58 @@ has incomplete coverage, never a clean result.
 **Fix.** Rerun the state-machines specialist on the same diff and check its
 output again.
 
+<a id="review-scope-input"></a>
+### `REVIEW_SCOPE_INPUT`
+
+**Meaning.** `gstack-review-scope` (the finding scope of /ship's review loop,
+[ship-policy.md#review-scope](ship-policy.md#review-scope)) was given input it
+cannot classify: the findings were not a JSON array of objects, `--pass` or
+`--policy` was outside its values, or a pass 2+ call came without
+`--range-base`. Nothing was classified, deferred or summarized.
+
+**Fix.** Pass the Step 9.3 findings as a JSON array (`--findings <file>` or
+stdin), `--pass <n>` from the invocation record, and from pass 2 on
+`--range-base <sha>`, the HEAD the previous pass saved when it started.
+
+<a id="review-scope-range"></a>
+### `REVIEW_SCOPE_RANGE`
+
+**Meaning.** `gstack-review-scope classify` could not read the diff it scopes
+findings against: `origin/<base>` or `--range-base` does not resolve, or the
+range base is not an ancestor of HEAD (history was rewritten since the previous
+pass).
+
+**Fix.** Fetch `origin/<base>`, check `--range-base` against the pass heads in
+the invocation record, and start a full pass (`--pass 1`) when the branch was
+rebased; /ship's own rule is to merge the base in, never rebase a reviewed head.
+
+<a id="receipt-carry-refused"></a>
+### `RECEIPT_CARRY_REFUSED`
+
+**Meaning.** `gstack-ship-receipt carry` could not carry the PR's /ship receipt
+to HEAD: the PR body has no valid receipt, the receipt's head is not an ancestor
+of HEAD (a rebase or force-push dropped it), or git could not compare the two
+product diffs. The receipt in the body is unchanged and still names the old
+head, so `gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
+
+**Fix.** Keep the reviewed head in HEAD's history (merge the base in instead of
+rebasing), then rerun `gstack-ship-receipt carry --pr <n>`. When the history is
+already rewritten, run /ship on the new head.
+
+<a id="receipt-carry-product-changed"></a>
+### `RECEIPT_CARRY_PRODUCT_CHANGED`
+
+**Meaning.** Between the receipt's head and HEAD the product diff against the
+base changed: at least one path that is neither a test, release metadata nor
+part of the base merge has a different patch than the reviewed head had. The
+reviewed verdict does not cover HEAD, so the receipt is not carried. The
+refusal names the changed product paths.
+
+**Fix.** Run /ship on the new head. The receipt carries only across a
+conflict-only base merge, a test-only change or release metadata, which the
+`carry` object in the carried receipt records with the product patch-id and
+the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
+
 ## gstack-error-capture
 
 `gstack-error-capture` runs one target CLI for `/devex-review` Step 3 with no

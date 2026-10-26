@@ -111,6 +111,23 @@ Not every workflow writes this line or a run directory today:
   parent pushes those commits itself, then reruns the receipt write, the body
   post and `result` at the pushed head: a receipt for an unpushed head is
   `QUEUE_RECEIPT_STALE` to the queue.
+  The receipt's `review_loop` object (`passes`, `blocking_found`, `deferred`,
+  `noted`, `fixed`, `scope`), written from `gstack-review-scope summary`, is
+  the review loop's machine-readable outcome, and the summary line a parent
+  reads prints it as `passes=<n> blocking_found=<k> deferred=<m>`; the PR body
+  lists the deferred issues under `## Deferred findings` and the below-floor
+  items under `## Review notes` ([review-policy.md](review-policy.md)).
+
+  When the parent merges the base in or fixes a test after the receipt was
+  written, it runs `gstack-ship-receipt carry --pr <n> --base <base>` instead
+  of another /ship: `CARRY: carried from <old> to <new> (<reason>)` plus the
+  `GSTACK_RESULT: skill=ship status=complete run=<dir>` line means the receipt
+  now names HEAD with a `carry` object holding the `git range-diff` evidence
+  (`ship-run.json` gains `carried_from` and `carry_reason`); `CARRY: current`
+  means nothing moved; `CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)` or
+  `(RECEIPT_CARRY_REFUSED)` with the refused result line means the product diff
+  changed or the reviewed head left HEAD's history, so /ship runs again
+  ([ship-policy.md](ship-policy.md#receipt-carry)).
 - **Every other workflow skill** (`/review`, `/qa`, `/design-review`,
   `/spec`, `/land-and-deploy` and the rest) gets the session rules above (no
   prompts, approvals stay pending, nothing published), but has no step that

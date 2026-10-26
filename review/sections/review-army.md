@@ -38,7 +38,7 @@ echo "TEST_FW: ${TEST_FW:-unknown}"
 
 ### Select specialists
 
-Based on the scope signals above, select which specialists to dispatch.
+Select specialists from the scope signals above.
 
 **Always-on (dispatch on every review with 50+ changed lines):**
 1. **Testing** — read `~/.claude/skills/gstack/review/specialists/testing.md`
@@ -59,13 +59,13 @@ Based on the scope signals above, select which specialists to dispatch.
 
 After scope-based selection, apply adaptive gating based on specialist hit rates:
 
-For each conditional specialist that passed scope gating, check the `gstack-specialist-stats` output above:
+For each conditional specialist that passed scope gating, read the `gstack-specialist-stats` output:
 - If tagged `[GATE_CANDIDATE]` (0 findings in 10+ dispatches): skip it. Print: "[specialist] auto-gated (0 findings in N reviews)."
 - If tagged `[NEVER_GATE]`: always dispatch regardless of hit rate.
 
 **Force flags:** `--<specialist>` (e.g. `--simplification`) or `--all-specialists` in the prompt force-includes it.
 
-Note which specialists were selected, gated, and skipped. Print the selection:
+Print the selection:
 "Dispatching N specialists: [names]. Skipped: [names] (scope not detected). Gated: [names] (0 findings in N+ reviews)."
 
 ---
@@ -78,7 +78,7 @@ so they run in parallel. Each subagent has fresh context — no prior review bia
 
 **Each specialist subagent prompt:**
 
-Construct the prompt for each specialist. The prompt includes:
+Each specialist prompt includes:
 
 1. The specialist's checklist path from the selection above (the subagent reads it; never paste its content)
 2. Stack context: "This is a {STACK} project."
@@ -101,20 +101,20 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
 `DIFF_BASE=$(git merge-base origin/<base> HEAD) && git diff "$DIFF_BASE"` to get the full diff. Apply the checklist against the diff.
 
-For each finding, output a JSON object on its own line:
+`NO FINDINGS` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line:
 {\"severity\":\"CRITICAL|INFORMATIONAL\",\"confidence\":N,\"path\":\"file\",\"line\":N,\"category\":\"category\",\"summary\":\"description\",\"fix\":\"recommended fix\",\"fingerprint\":\"path:line:category\",\"specialist\":\"name\"}
 
 Required fields: severity, confidence, path, category, summary, specialist.
 Optional: line, fix, fingerprint, evidence, test_stub, advisory, evidence_paths, helper_target.
+CRITICAL means a test that would fail, a production break, or a security or data-loss defect; everything else is INFORMATIONAL.
 
-Optional extraction advice belongs to the core shared-code check; do not duplicate its proposals. Report real defects in duplicated code independently. Preserve advisory metadata when returning structural advice, and never label a demonstrated defect advisory merely because sharing a helper could fix it.
+Leave extraction advice to the core shared-code check; report real defects in duplicated code independently, keep advisory metadata on structural advice, and never call a demonstrated defect advisory because a shared helper could fix it.
 
 If you can write a test that would catch this issue, include it in the `test_stub` field.
 Use the detected test framework ({TEST_FW}). Write a minimal skeleton — describe/it/test
 blocks with clear intent. Skip test_stub for architectural or design-only findings.
 
-If no findings: output `NO FINDINGS` and nothing else.
-Do not output anything else — no preamble, no summary, no commentary.
+Output nothing else: no preamble, no summary or commentary.
 
 Stack context: {STACK}
 Past learnings: {learnings or 'none'}"
@@ -138,9 +138,9 @@ their source labels: specialist scoring is not the final review's defect count.
 #### 1. Parse outputs
 
 After specialist attempts settle, collect their outputs, tagged by actual source.
-Successful `NO FINDINGS` is a completed empty result. Otherwise parse each JSON line and
-skip invalid lines. Missing or unusable output is incomplete coverage, not an
-empty success. Retain each specialist's returned findings for activity stats.
+`NO FINDINGS` is a completed, clean result, never a failed reviewer. Otherwise parse
+each JSON line and skip invalid lines. Missing or unusable output is incomplete
+coverage, not an empty success. Keep each specialist's returned findings for activity stats.
 
 #### 2. Validate severity
 
@@ -166,8 +166,7 @@ Compute identities for both core and specialist findings:
   or `{path}:{category}` when no line exists.
 
 Within the specialist list, merge matching identities in the same partition: keep
-the highest confidence and all source names. Confirmation by distinct specialists
-adds +1 (cap at 10) and `MULTI-SPECIALIST CONFIRMED ({specialist1} + {specialist2})`.
+the highest confidence and all source names. Confirmation by distinct specialists adds +1 (cap at 10) and `MULTI-SPECIALIST CONFIRMED ({specialist1} + {specialist2})`.
 Core findings never earn a specialist confidence boost. Preserve `advisory`,
 `evidence_paths` and `helper_target` through every merge.
 
@@ -212,7 +211,7 @@ PR Quality Score: X/10
   `Simplification: lean already — nothing to cut.`
 - If it was not dispatched, print neither line.
 
-Do not add core shared-code savings to this specialist footer. Explain any overlap once in the core proposal instead of presenting duplicate savings.
+Core shared-code savings never enter this footer; explain any overlap once in the core proposal.
 
 #### 6. Save specialist activity
 
@@ -253,11 +252,11 @@ The Red Team subagent receives:
 Prompt, after the defensive framing and fixture handling from item 4 of the specialist dispatch: "You are a red team reviewer. The code has already been reviewed by N specialists
 who found the following issues: {merged findings summary}. Your job is to find what they
 MISSED. Read the checklist at {red-team checklist path}, list changed files with `DIFF_BASE=$(git merge-base origin/<base> HEAD) && git diff --name-status "$DIFF_BASE"`, read them as that fixture handling says, and look for gaps.
-Output findings as JSON objects (same schema as the specialists). Focus on cross-cutting
+Output findings as JSON objects (same schema as the specialists), or `NO FINDINGS` alone, the expected result when they missed nothing. Focus on cross-cutting
 concerns, integration boundary issues, and failure modes that specialist checklists
 don't cover."
 
-If the Red Team finds additional issues, tag them `"specialist":"red-team"`.
+Tag Red Team findings `"specialist":"red-team"`.
 Add them to the original specialist outputs and rerun stages 1–7 of Step 4.6
 before Step 5 Fix-First; do not boost or count the earlier findings twice.
 
