@@ -11,6 +11,7 @@
  *   gstack-autoplan run     --out <dir> --plan <file> --native-model <id> --outside-model <id> [--runner codex-cli|api] [--native-runner api]
  *                           [--deadline <min>] [--spend-cap <usd>] [--estimate-usd <n>] [--json]      next in a loop; needs runners for both voices
  *   gstack-autoplan answer  --out <dir> --gate-rev <rev> --reply "<grammar>" --by <human|agent:<id>> [--owner-reply <text>|-] [--rec-hash <h>] [--json]
+ *   gstack-autoplan answer  --out <dir> --gate-rev <rev> --owner-standing rec --by agent:<id> [--branch <name>] [--json]   cite a standing approval
  *   gstack-autoplan recommend --out <dir> --gate-rev <n> --item <id> --option <k> --basis "<why>" [--by <who>]
  *   gstack-autoplan resume  --out <dir> [--from <checkpoint>] [--json]   take ownership; intent without a terminal record becomes EXECUTION_UNKNOWN
  *   gstack-autoplan status  --out <dir> [--json]        query: the manifest, no GSTACK_RESULT line
@@ -30,8 +31,10 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { amendmentSteps, answerGate, closeDeferred, finishGate, recommendGate } from '../lib/autoplan-gate';
-import { changeBudget, liftStop } from '../lib/autoplan-budget';
+import { amendmentSteps, answerGate, closeDeferred, finishGate, recommendGate, standingAnswer } from '../lib/autoplan-gate';
+import { gateCost, renderGateCost } from '../lib/autoplan-gate-cost';
+import { locate, standingRecApproval } from '../lib/approval-record';
+import { attemptEstimate, changeBudget, liftStop } from '../lib/autoplan-budget';
 import { ANSWERED_BY_RE } from '../lib/gate-list';
 import { checkpointLines, checkpointRun, restoreCheckpoint, type CheckpointMoment } from '../lib/autoplan-checkpoint';
 import { admit, touchInstallLease } from '../lib/autoplan-admission';
@@ -76,6 +79,9 @@ DRIVER: ${driverFile()}
   answer  --out <dir> --gate-rev <rev> --reply "<rec | rec except d3a | d3b uc1a | as-is>" --by <human|agent:<id>> [--json]
           --by agent:<id> needs --owner-reply "<owner's words>" (- reads stdin; --owner-reply-file <path>), stored verbatim;
           --rec-hash <h> binds a rec to the render the owner saw (required once recommend ran); accepted changes leave amend_pending
+          --owner-standing rec --by agent:<id> [--branch <name>]: answer rec by citing the newest gstack-approvals row with
+          --outcome standing whose scope names autoplan and whose words name the recommendations (any branch of this project);
+          refused when none exists (STANDING_APPROVAL_ABSENT) or the gate carries an urgent finding (STANDING_APPROVAL_INAPPLICABLE)
   recommend --out <dir> --gate-rev <n> --item <id> --option <k> --basis "<why>" [--by <who>]
           set one item's recommendation before relay (provenance recorded, p1 follows); re-render and relay afterwards
   resume  --out <dir> [--from <checkpoint>] [--json]   --from restores a hash-verified checkpoint into an empty --out first
@@ -185,17 +191,19 @@ function doNext(out: string, rest: string[], json: boolean): number {
   moment = fresh ? 'init' : r.attempts.some(a => a.new) || r.lines.some(l => l.startsWith('PHASE_DEFERRED: ')) ? 'transition' : undefined;
   const status = r.state.status;
   const lines = [...initLines, ...r.lines];
-  if (status === 'gate_pending') lines.push(...gateLines(r.state.gate_rev, out));
+  if (status === 'gate_pending') lines.push(...gateLines(r.state, out));
   if (status === 'running') lines.push(`NEXT: gstack-autoplan next --out ${out}`);
   lines.push(resultLineFor(status, out));
   emit(json, lines, { run: r.state.run, status, phase: r.phase ?? null, attempts: r.attempts, gate_rev: r.state.gate_rev ?? null, out });
   return EXIT.ok;
 }
 
-/** The gate pointer, plus the owner-facing render to relay under Capy (lib/captain-brief.ts). */
-function gateLines(gateRev: number | undefined, out: string): string[] {
+/** The gate pointer, its cost so far and the price of `rec` (lib/autoplan-gate-cost.ts), plus the owner-facing render to relay under Capy (lib/captain-brief.ts). */
+function gateLines(state: RunState, out: string): string[] {
   const relay = capyRelayLine(out);
-  return [`GATE: gate_rev=${gateRev} render with: gstack-gate render ${path.join(out, 'gate.json')}`, ...(relay ? [relay] : [])];
+  const gateFile = path.join(out, 'gate.json');
+  const cost = fs.existsSync(gateFile) ? renderGateCost(gateCost(out, JSON.parse(fs.readFileSync(gateFile, 'utf8')), state, { defaultPerVoiceUsd: attemptEstimate(state, undefined, process.env).usd })) : [];
+  return [`GATE: gate_rev=${state.gate_rev} render with: gstack-gate render ${gateFile}`, ...cost, ...(relay ? [relay] : [])];
 }
 
 function doSubmit(out: string, rest: string[], json: boolean): number {
@@ -211,7 +219,7 @@ function doSubmit(out: string, rest: string[], json: boolean): number {
     unavailable, failed, runner: flag(rest, '--runner'), usageUsd: num(rest, '--usage-usd'), reconcile: flag(rest, '--reconcile'), cwd: process.cwd() });
   const status = r.state.status;
   const lines = [...r.lines];
-  if (status === 'gate_pending') lines.push(...gateLines(r.state.gate_rev, out));
+  if (status === 'gate_pending') lines.push(...gateLines(r.state, out));
   if (status === 'running') lines.push(`NEXT: gstack-autoplan next --out ${out}`);
   lines.push(resultLineFor(status, out));
   emit(json, lines, { run: r.state.run, status, phase, voice, attempt: r.state.phases[phase]?.[voice]?.attempt ?? attempt ?? null, closed: r.closed, findings: r.findings, gate_rev: r.state.gate_rev ?? null, out });
@@ -242,7 +250,7 @@ function doClose(out: string, rest: string[], json: boolean): number {
   const r = closeDeferred(state, phase as Phase, { reason: reason.trim(), by, cause: 'owner' });
   moment = 'transition';
   const lines = [...r.lines, ...(stopped ? liftStop(state, `${phase} closed deferred by ${by}`) : [])];
-  if (!currentPhase(state)) { finishGate(state); lines.push(...gateLines(state.gate_rev, out)); }
+  if (!currentPhase(state)) { finishGate(state); lines.push(...gateLines(state, out)); }
   else { state.status = 'running'; lines.push(`NEXT: gstack-autoplan next --out ${out}`); }
   writeState(state);
   lines.push(resultLineFor(state.status, out));
@@ -339,14 +347,24 @@ async function main(argv: string[]): Promise<number> {
     }
     if (cmd === 'answer') {
       const rev = flag(rest, '--gate-rev'); const reply = flag(rest, '--reply'); const by = flag(rest, '--by');
-      if (reply === undefined) return usage('answer needs --reply "<text>"');
+      const standingFlag = flag(rest, '--owner-standing');
+      if (standingFlag !== undefined && standingFlag !== 'rec') return usage('--owner-standing takes only rec: a standing approval covers the recommendations, never a token list');
+      if (standingFlag !== undefined && (reply !== undefined || flag(rest, '--owner-reply') !== undefined || flag(rest, '--owner-reply-file') !== undefined || flag(rest, '--rec-hash') !== undefined)) return usage('--owner-standing rec replaces --reply, --owner-reply and --rec-hash: the cited row supplies the words');
+      if (reply === undefined && standingFlag === undefined) return usage('answer needs --reply "<text>" (or --owner-standing rec --by agent:<id>)');
       if (rev === undefined) { const s = readState(out); process.stderr.write(resultLine('gstack-autoplan answer', 'GATE_REV_STALE', `no --gate-rev given; current gate_rev=${s.gate_rev ?? 0}`) + '\n'); return EXIT.refused; }
       const replyFile = flag(rest, '--owner-reply-file'); const ownerFlag = flag(rest, '--owner-reply');
       if (replyFile !== undefined && ownerFlag !== undefined) return usage('--owner-reply and --owner-reply-file are exclusive');
       const ownerReply = replyFile !== undefined ? fs.readFileSync(replyFile, 'utf8') : ownerFlag === '-' ? fs.readFileSync(0, 'utf8') : ownerFlag;
+      let standing: ReturnType<typeof standingRecApproval>;
+      if (standingFlag !== undefined) {
+        const loc = locate({ cwd: process.cwd(), env: process.env, branch: flag(rest, '--branch') });
+        if ('code' in loc) { process.stderr.write(resultLine('gstack-autoplan answer', loc.code, loc.message) + '\n'); return EXIT.refused; }
+        standing = standingRecApproval(loc);
+        if (!standing) { process.stderr.write(resultLine('gstack-autoplan answer', 'STANDING_APPROVAL_ABSENT', `no standing approval covering autoplan recommendations in ${path.dirname(loc.file)}${loc.mirror ? ` or ${path.dirname(loc.mirror)}` : ''} (branch ${loc.branch})`) + '\n'); return EXIT.refused; }
+      }
       return mutating(out, json, () => {
         const state = readState(out);
-        const r = answerGate(state, Number(rev), reply, by, { recHash: flag(rest, '--rec-hash'), ownerReply });
+        const r = standing ? standingAnswer(state, Number(rev), by, standing) : answerGate(state, Number(rev), reply!, by, { recHash: flag(rest, '--rec-hash'), ownerReply });
         writeState(state);
         const lines = [...r.lines];
         if (r.outcome === 'reopened' || r.outcome === 'amend_pending') lines.push(nextLine(state, out));

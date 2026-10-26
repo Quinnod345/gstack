@@ -15,14 +15,18 @@
  * branch key being a readable prefix plus a hash of the exact ref (no two
  * branches share a file, and the key is always one contained path segment).
  * On Capy (GSTACK_CAPY=1) the state root is thrown away with the machine, so
- * every write is mirrored to the private project-user Drive folder
- * (`<drive>/approvals/<slug>/<branch key>.jsonl`) or to GSTACK_APPROVALS_DIR;
- * GSTACK_APPROVALS_MIRROR=0 turns the mirror off. Reads take the union of both.
- * Every field passes the secret scanner before anything is written.
+ * every write is mirrored: to GSTACK_APPROVALS_DIR when set, else to the
+ * directory the Captain named by creating `approvals/` in its drive
+ * (`~/.capy/drive/captain-<name>/approvals/<slug>/<branch key>.jsonl`, which every
+ * crew thread can read), else to the private project-user Drive folder
+ * (`<drive>/approvals/<slug>/<branch key>.jsonl`). GSTACK_APPROVALS_MIRROR=0
+ * turns the mirror off. Reads take the union of both. Every field passes the
+ * secret scanner before anything is written.
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { capyDriveFolder } from './autoplan-checkpoint';
 import { reviewedPlan } from './captain-brief';
@@ -40,7 +44,8 @@ export interface ApprovalRow {
   schema_version: 1; id: string; date: string; ask: string; words: string; by: string;
   scope: string; pending: string; outcome: Outcome; source: string; branch: string; recorded_at: string;
 }
-export interface StoreLocation { file: string; mirror?: string; branch: string; slug: string; ephemeral: boolean }
+export type MirrorSource = 'GSTACK_APPROVALS_DIR' | 'captain drive' | 'project-user drive';
+export interface StoreLocation { file: string; mirror?: string; mirror_source?: MirrorSource; branch: string; slug: string; ephemeral: boolean }
 export interface RecordError { code: ResultCodeName; message: string }
 export type Env = NodeJS.ProcessEnv;
 
@@ -71,15 +76,58 @@ export function locate(o: { cwd: string; env: Env; branch?: string }): StoreLoca
   const file = path.join(dir, `${branchKey(branch)}.jsonl`);
   if (!contained(stateRoot, file)) return { code: 'APPROVAL_RECORD_INVALID', message: `record path escapes the state root: ${file}` };
   let mirrorRoot: string | undefined;
-  if (o.env.GSTACK_APPROVALS_DIR) mirrorRoot = o.env.GSTACK_APPROVALS_DIR;
+  let mirror_source: MirrorSource | undefined;
+  if (o.env.GSTACK_APPROVALS_DIR) { mirrorRoot = o.env.GSTACK_APPROVALS_DIR; mirror_source = 'GSTACK_APPROVALS_DIR'; }
   else if (o.env.GSTACK_CAPY === '1' && o.env.GSTACK_APPROVALS_MIRROR !== '0') {
-    const top = git(o.cwd, ['rev-parse', '--show-toplevel']);
-    const folder = capyDriveFolder(o.env, top.status === 0 ? path.basename(top.stdout.trim()) : undefined);
-    if (folder) mirrorRoot = path.join(path.dirname(folder), 'approvals');
+    const captain = captainApprovalsDir(o.env);
+    if (captain) { mirrorRoot = captain; mirror_source = 'captain drive'; }
+    else {
+      const top = git(o.cwd, ['rev-parse', '--show-toplevel']);
+      const folder = capyDriveFolder(o.env, top.status === 0 ? path.basename(top.stdout.trim()) : undefined);
+      if (folder) { mirrorRoot = path.join(path.dirname(folder), 'approvals'); mirror_source = 'project-user drive'; }
+    }
   }
   const mirror = mirrorRoot ? path.join(mirrorRoot, slug, `${branchKey(branch)}.jsonl`) : undefined;
   if (mirror && !contained(mirrorRoot!, mirror)) return { code: 'APPROVAL_RECORD_INVALID', message: `mirror path escapes ${mirrorRoot}` };
-  return { file, mirror, branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1' };
+  return { file, mirror, ...(mirror ? { mirror_source } : {}), branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1' };
+}
+
+/**
+ * The approvals directory a Captain named for its crew: exactly one mounted Captain drive
+ * (`~/.capy/drive/captain-*`) holding an `approvals/` directory. Two Captains with one each
+ * is ambiguous, so neither is taken and the private project-user folder stays the mirror.
+ */
+export function captainApprovalsDir(env: Env): string | undefined {
+  if (env.GSTACK_CAPY !== '1') return undefined;
+  const drive = path.join(env.HOME || os.homedir(), '.capy', 'drive');
+  let found: string[];
+  try {
+    found = fs.readdirSync(drive).filter(d => d.startsWith('captain-')).map(d => path.join(drive, d, 'approvals')).filter(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+  } catch { return undefined; }
+  return found.length === 1 ? found[0] : undefined;
+}
+
+/** Standing approvals an agent may cite to answer an autoplan gate with `rec` (plan E21). */
+export const STANDING_REC_SCOPE_RE = /\bautoplan\b/i;
+export const STANDING_REC_WORDS_RE = /\b(rec|recommendations?|recommended)\b/i;
+export const coversAutoplanRec = (r: ApprovalRow): boolean =>
+  r.outcome === 'standing' && STANDING_REC_SCOPE_RE.test(`${r.ask} ${r.scope}`) && STANDING_REC_WORDS_RE.test(`${r.words} ${r.scope}`);
+
+/**
+ * The newest standing approval covering autoplan recommendations, from this branch's record
+ * and every other branch's record of the same project (local and mirror): a Captain records
+ * the owner's standing words once, on whatever branch it had checked out, and every lane cites it.
+ */
+export function standingRecApproval(loc: StoreLocation): ApprovalRow | undefined {
+  const rows: ApprovalRow[] = [];
+  for (const dir of [path.dirname(loc.file), loc.mirror ? path.dirname(loc.mirror) : undefined]) {
+    if (!dir) continue;
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir).filter(n => n.endsWith('.jsonl')); } catch { continue; }
+    for (const n of names) rows.push(...readRows(path.join(dir, n)));
+  }
+  const seen = new Set<string>();
+  return rows.filter(r => coversAutoplanRec(r) && !seen.has(r.id) && seen.add(r.id)).sort((a, b) => b.date.localeCompare(a.date) || b.recorded_at.localeCompare(a.recorded_at))[0];
 }
 
 function readRows(file: string | undefined): ApprovalRow[] {
@@ -197,7 +245,7 @@ export function renderRecord(read: ReadResult, loc: StoreLocation, o: { heading?
   return [...head, ...lines, '', `Source: gstack-approvals record for ${cell(loc.branch)} (display only; not an approval citation).`, ''].join('\n');
 }
 
-interface DecisionLike { id?: string; title?: string; status?: string; chosen?: string | null; recommended?: string | null; gate_rev?: number; answered_at?: string; answered_by?: string; reply?: string; owner_reply?: string; carried_from?: string; label?: string; chosen_text?: string }
+interface DecisionLike { id?: string; title?: string; status?: string; chosen?: string | null; recommended?: string | null; gate_rev?: number; answered_at?: string; answered_by?: string; reply?: string; owner_reply?: string; standing?: string; carried_from?: string; label?: string; chosen_text?: string }
 
 const stripRef = (t: string) => t.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
 
@@ -236,7 +284,7 @@ export function importAutoplan(runDir: string, branch: string, by?: string): App
     const changed = items.filter(r => r.chosen && r.recommended && r.chosen !== r.recommended);
     const stillPending = rows.filter(r => r.gate_rev === rev && r.status === 'pending');
     const answerer = first.answered_by ?? 'unknown';
-    const who = answerer === 'human' ? (by ? `${by}, typed at the gate` : 'the owner, typed at the gate') : `${by ?? 'the owner'}, relayed by ${answerer}`;
+    const who = answerer === 'human' ? (by ? `${by}, typed at the gate` : 'the owner, typed at the gate') : first.standing ? `${by ?? 'the owner'}, standing approval ${first.standing} cited by ${answerer}` : `${by ?? 'the owner'}, relayed by ${answerer}`;
     const scope = `the reviewed plan (sha256 ${planSha}), ${changed.length ? `${changed.length} recommendation(s) changed: ${changed.map(r => stripRef(r.title ?? '')).join('; ')}` : 'every recommendation taken'}`;
     const built = buildRow({
       ask: `Approve the plan "${planTitle}" (autoplan run ${runId}, ${items.length + (p1 ? 1 : 0)} decisions)`.slice(0, CAPS.ask),
@@ -246,7 +294,7 @@ export function importAutoplan(runDir: string, branch: string, by?: string): App
       pending: (stillPending.length ? `${stillPending.length} decision(s) unanswered: ${stillPending.map(r => stripRef(r.title ?? '')).join('; ')}` : outcome === 'pending' ? 'the plan approval itself' : 'none').slice(0, CAPS.pending),
       outcome,
       date: first.answered_at!.slice(0, 10),
-      source: `autoplan:${runId}@gate_rev=${rev}`,
+      source: `autoplan:${runId}@gate_rev=${rev}${first.standing ? ` standing=${first.standing}` : ''}`,
     }, branch, new Date(first.answered_at!));
     if ('code' in built) return built;
     out.push(built);

@@ -28,6 +28,7 @@ import { capyRelayLine } from './captain-brief';
 import { previousReview, reviewRows, settledIds } from './autoplan-confirm';
 import { phaseClose } from './autoplan-timing';
 import { ANSWERED_BY_RE, applyReply, decisionId, decisionRows, keepDirection, parseReply, pendingHint, recHash, validateGateList, type GateChoice, type GateItem, type GateList, type GateOption, type ParsedReply } from './gate-list';
+import type { ApprovalRow } from './approval-record';
 import type { FindingRow } from './headless-artifacts';
 import { readJsonl, sha256File } from './headless-artifacts';
 import { closeDraftDirectionsFile, loadBriefInputs } from './owner-brief';
@@ -321,6 +322,26 @@ export interface AnswerOptions {
   recHash?: string;
   /** The owner's verbatim words; required for every `--by agent:<id>` answer. */
   ownerReply?: string;
+  /** A standing approval the agent cites instead of a relayed reply (`answer --owner-standing rec`, plan E21): its words are the owner reply, its id lands on every row. */
+  standing?: Pick<ApprovalRow, 'id' | 'date' | 'by' | 'words' | 'scope' | 'source'>;
+}
+
+/**
+ * The standing-approval path (plan E21): the reply is `rec`, the owner's words are the standing
+ * row's, the rec_hash is the current one (nobody saw a render; the standing words pre-authorize
+ * the recommendations). Refused when the gate carries an urgent or outside-plan finding: a
+ * standing "take the recommendations" covers the plan under review, not news beyond it.
+ */
+export function standingAnswer(state: RunState, gateRev: number, answeredBy: string | undefined, standing: NonNullable<AnswerOptions['standing']>): AnswerResult {
+  if (!answeredBy?.startsWith('agent:')) throw new RunError('ANSWER_BY_REQUIRED', 'a standing approval is cited by an agent: pass --by agent:<id>', 3);
+  const findings = readJsonl(path.join(state.out, 'findings.jsonl')).rows as Array<Record<string, unknown>>;
+  const urgent = findings.filter(r => r.urgent === true || r.outside_plan === true);
+  if (urgent.length) throw new RunError('STANDING_APPROVAL_INAPPLICABLE', `${urgent.length} urgent or outside-plan finding(s) at this gate (${urgent.slice(0, 3).map(r => String(r.id ?? r.title ?? '?')).join(', ')}); the standing approval ${standing.id} covers the plan's recommendations, not these`, 3);
+  const gateFile = path.join(state.out, 'gate.json');
+  const list = fs.existsSync(gateFile) ? JSON.parse(fs.readFileSync(gateFile, 'utf8')) as GateList : undefined;
+  const r = answerGate(state, gateRev, 'rec', answeredBy, { recHash: list ? recHash(list) : undefined, ownerReply: standing.words, standing });
+  r.lines.unshift(`STANDING: ${standing.id} (${standing.date}, ${standing.by}; ${standing.source}) "${standing.words}" — scope: ${standing.scope}`);
+  return r;
 }
 
 /** How an accepted plan change is discharged: a packaging/ordering change settles without a plan edit. */
@@ -373,7 +394,7 @@ export function answerGate(state: RunState, gateRev: number, reply: string, answ
   if (parsed.mode === 'rec' && list.rec_rev === undefined && o.recHash === undefined) throw new RunError('GATE_REC_STALE', `this gate was written before \`rec\`/\`all\` took plan changes (gate.json has no rec_rev), so the owner saw a different meaning; render it again (gstack-gate render ${gateFile} --all), relay it, and answer with --rec-hash ${currentHash}, or reply with explicit <id><option> tokens`, 3);
   if (parsed.mode === 'rec' && (list.rec_rev ?? 0) > 0 && o.recHash === undefined) throw new RunError('GATE_REC_STALE', `recommend changed this gate (rec_rev=${list.rec_rev}); pass --rec-hash from the render the owner saw (current rec_hash=${currentHash})`, 3);
   const ownerParsed = o.ownerReply !== undefined ? checkOwnerReply(list, gateRev, prior, parsed, o.ownerReply) : undefined;
-  const provenance = o.ownerReply !== undefined ? { owner_reply: o.ownerReply, owner_reply_parsed: ownerParsed } : {};
+  const provenance = { ...(o.ownerReply !== undefined ? { owner_reply: o.ownerReply, owner_reply_parsed: ownerParsed } : {}), ...(o.standing ? { standing: o.standing.id } : {}) };
   const itemOf = (id: string) => list.items.find(i => i.id === id)!;
   const optionOf = (c: GateChoice) => itemOf(c.id).options.find(o => o.key === c.chosen)!;
   const plan = parsed.choices.find(c => c.id === 'p1');

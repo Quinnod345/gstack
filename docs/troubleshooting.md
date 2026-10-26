@@ -1683,8 +1683,9 @@ from "the record was lost with the old machine". `render` still prints the secti
 "Record unavailable on this machine" instead of "No approvals recorded". Exit 1.
 
 **Fix.** Run where the record lives, copy the rows back from the thread's report, or make
-the private Drive mirror resolvable (one `~/.capy/drive/project-user-*` folder, or
-`GSTACK_APPROVALS_DIR`).
+a Drive mirror resolvable: `GSTACK_APPROVALS_DIR`, an `approvals/` directory in the one
+mounted Captain drive (`~/.capy/drive/captain-*/approvals`, readable by the whole crew), or one
+`~/.capy/drive/project-user-*` folder. `gstack-approvals path` prints which rule chose the mirror.
 
 <a id="approval-record-write-failed"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_WRITE_FAILED)`
@@ -1703,6 +1704,34 @@ so there is nothing to import. Exit 3.
 
 **Fix.** Answer the gate (`gstack-autoplan answer ... --by human|agent:<id>`), then
 import again. Imports are idempotent, so a retry never records an answer twice.
+
+<a id="standing-approval-absent"></a>
+### `gstack-autoplan answer: ... (STANDING_APPROVAL_ABSENT)`
+
+**Meaning.** `answer --owner-standing rec` looked for a standing approval covering autoplan
+recommendations (a `gstack-approvals` row with outcome `standing`, scope or ask naming
+`autoplan`, words or scope naming `rec` or the recommendations) in this project's records,
+local and mirror, every branch, and found none. The gate stays pending; nothing was applied.
+Exit 3.
+
+**Fix.** Relay the gate to the owner (or Captain) and answer with their reply through
+`--reply` and `--owner-reply`. For the next gate, the Captain records the owner's standing
+words once: `gstack-approvals add --outcome standing --ask "autoplan gates" --words "<the
+owner's exact words>" --by "<who, where>" --scope "autoplan gates: take the recommendations"`;
+on Capy the row lands in the crew-readable mirror, so every lane's `--owner-standing rec`
+finds it.
+
+<a id="standing-approval-inapplicable"></a>
+### `gstack-autoplan answer: ... (STANDING_APPROVAL_INAPPLICABLE)`
+
+**Meaning.** The gate carries an urgent or outside-plan finding (`findings.jsonl` rows with
+`urgent` or `outside_plan`). Standing words that say "take the recommendations" cover the
+plan under review, not news beyond it, so the standing path refuses and nothing was applied.
+Exit 3.
+
+**Fix.** Relay the gate render (the `RELAY:` line) to the owner, including the
+`## URGENT, outside this plan` block, and answer with their reply through `--reply` and
+`--owner-reply`. The standing row still applies to later gates that carry no such finding.
 
 <a id="captain-brief-incomplete"></a>
 ### `gstack-owner-brief render --captain: ... (CAPTAIN_BRIEF_INCOMPLETE)`

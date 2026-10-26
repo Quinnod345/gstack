@@ -142,7 +142,10 @@ Missing/disabled voice = N/A, never CONFIRMED. Flag any single-voice critical fi
      skipping the analysis.
    - Write the test plan artifact to disk
 
-6. Section 4 (Performance): Evaluate N+1 queries, memory, caching, slow paths.
+6. Section 4 (Performance): Evaluate N+1 queries, memory, caching, slow paths. Then the
+   budget question: does the plan name a performance budget for the paths it changes (p95,
+   throughput, memory or bundle size) and a bench step that records it before and after?
+   A hot-path change with neither is a finding: recommend both as Test plan additions.
 
 **Mandatory outputs from Phase 3:**
 - "NOT in scope" section

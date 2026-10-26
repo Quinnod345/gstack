@@ -301,6 +301,8 @@ gstack_result_anchor() {
     APPROVAL_RECORD_UNAVAILABLE) printf '%s' 'approval-record-unavailable' ;;
     APPROVAL_RECORD_WRITE_FAILED) printf '%s' 'approval-record-write-failed' ;;
     APPROVAL_IMPORT_UNANSWERED) printf '%s' 'approval-import-unanswered' ;;
+    STANDING_APPROVAL_ABSENT) printf '%s' 'standing-approval-absent' ;;
+    STANDING_APPROVAL_INAPPLICABLE) printf '%s' 'standing-approval-inapplicable' ;;
     CAPTAIN_BRIEF_INCOMPLETE) printf '%s' 'captain-brief-incomplete' ;;
     PR_SHOTS_INPUT_NOT_FOUND) printf '%s' 'pr-shots-input-not-found' ;;
     PR_SHOTS_INPUT_REFUSED) printf '%s' 'pr-shots-input-refused' ;;
