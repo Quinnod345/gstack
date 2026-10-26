@@ -5,7 +5,7 @@
  *
  *   gstack-prose-lint <file>... [--unreleased | --base <ref> | --sections <a,b>] [--gate] [--json]
  *
- * Scans each file (fenced code, inline code, URLs and comments excluded) and
+ * Scans each file (fenced code, inline code, URLs, comments and quoted words excluded) and
  * prints one `PROSE:` line per finding, then `PROSE_LINT: ok | found=<n> | none`.
  * --unreleased reads only each file's `## [Unreleased]` CHANGELOG block,
  * --base <ref> only the lines the working tree adds since the merge base with
@@ -30,7 +30,9 @@ const HELP = `gstack-prose-lint — AI tells a regex can decide, over CHANGELOG 
   --gate         exit 1 when anything was found (default: report and exit 0)
   --json         findings as JSON instead of PROSE: lines
 
-Rules: vocabulary, not-just-but, metaphor-noun, mid-sentence-colon, inline-header-list, arrow, dropped-article.
+Rules: vocabulary, not-just-but, metaphor-noun, mid-sentence-colon, inline-header-list, arrow, dropped-article,
+and unclosed-block (a fence or HTML comment left open hid the text after it). Quoted words are never read.
+--sections with --gate exits 2 when a file has none of the headings, so a renamed heading cannot pass unread.
 
 ${exitTableHelp()}`;
 
@@ -54,6 +56,10 @@ function main(argv: string[]): number {
   let result;
   try { result = lintFiles(files, { unreleased: flags.has('--unreleased'), base, sections }); }
   catch (e: any) { process.stderr.write(`gstack-prose-lint: ${e.message}\n`); return EXIT.usage; }
+  if (sections && flags.has('--gate') && result.empty.length) {
+    process.stderr.write(`gstack-prose-lint: no "## <section>" heading from --sections in ${result.empty.join(', ')}; nothing would be gated\n`);
+    return EXIT.usage;
+  }
   if (flags.has('--json')) process.stdout.write(JSON.stringify({ findings: result.findings, scanned: result.scanned, empty: result.empty }, null, 2) + '\n');
   else process.stdout.write(renderProseLint(result));
   if (result.findings.length && flags.has('--gate')) {

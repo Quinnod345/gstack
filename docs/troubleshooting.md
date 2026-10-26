@@ -4470,14 +4470,16 @@ every flag and code.
 
 `bin/gstack-prose-lint` reads the prose /ship is about to publish, a CHANGELOG
 entry (Step 13) and the sections the author writes in the PR body (Step 19:
-`## What changed`, `## Why`, `## Summary` and `## Blast radius`, through
-`--sections`), and the quality-gate workflow runs it over `CHANGELOG.md`'s
-`[Unreleased]` block. It decides only what a
-regular expression can: autopilot vocabulary, "not just X, but Y", metaphor
-nouns, a colon used as a conjunction, a bold label that restates its line, an
-arrow or a dropped article standing in for a sentence. Fenced code, inline code,
-URLs and HTML comments are never read. Everywhere else (a template, a doc, this
-file) it is a report: run it, read it, keep your em dashes.
+`## Why`, `## Summary` and `## Blast radius`, through `--sections`; the
+`## What changed` captions and image text stay a report), and the quality-gate
+workflow runs it over `CHANGELOG.md`'s `[Unreleased]` block. It decides only
+what a regular expression can: autopilot vocabulary, "not just X, but Y",
+metaphor nouns, a colon used as a conjunction, a bold label that restates its
+line, an arrow or a dropped article standing in for a sentence, and a fence or
+HTML comment left open (`unclosed-block`), because nothing after it was read.
+Fenced code, inline code, URLs, HTML comments and quoted words are never read,
+so the problem quoted in `## Why` is the person's to phrase. Everywhere else (a
+template, a doc, this file) it is a report: run it, read it, keep your em dashes.
 
 <a id="prose-lint-found"></a>
 ### `PROSE_LINT_FOUND`
@@ -4487,7 +4489,8 @@ given. Each `PROSE: <file>:<line> <rule> "<match>" (<hint>)` line above the
 trailer names the rule and what to write instead; `PROSE_LINT: found=<n>` counts
 them. With `--unreleased` only the `## [Unreleased]` block was read; with
 `--base <ref>` only the lines the working tree added since the merge base; with
-`--sections <a,b>` only the text under those `## ` headings.
+`--sections <a,b>` only the text under those `## ` headings (under `--gate`, a
+file with none of them is exit 2, not a pass: the draft lost a heading).
 
 **Fix.** Rewrite each named line in the draft the way its hint says (a measurement
 such as `1.6740 → 1.7010` and the `before → after` heading are not findings), then

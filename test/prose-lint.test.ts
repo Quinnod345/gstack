@@ -52,6 +52,7 @@ describe('lintProse: each rule, positive and negative', () => {
     expect(rules('The gate reads three inputs: the head, the base and the receipt.')).toEqual([]);
     expect(rules('The run started at 12:30 and the following rules apply: no retries, no merges.')).toEqual([]);
     expect(rules('- **`gstack-post`**: the receipt is written first.')).toEqual([]);
+    expect(lintProse(['The parser stops at the end of a line here', 'see note: something else happens now'].join('\n'), 'x.md')).toEqual([]);
   });
 
   test('inline-header-list flags a bold label that restates its line and spares a label that adds detail', () => {
@@ -74,6 +75,7 @@ describe('lintProse: each rule, positive and negative', () => {
     expect(rules('The gate refuses a stale receipt and exits.')).toEqual([]);
     expect(rules('Garry approves the plan; Bun runs the tests.')).toEqual([]);
     expect(rules('Parser errors are rare.')).toEqual([]);
+    for (const s of ['Test runs now finish faster.', 'Error logs are rotated daily.', 'Tool calls take a while.', 'Merge commits stay.']) expect(rules(s), s).toEqual([]);
   });
 
   test('fenced code, inline code, URLs and HTML comments are never scanned, and line numbers hold', () => {
@@ -88,10 +90,27 @@ describe('lintProse: each rule, positive and negative', () => {
     ].join('\n');
     const f = lintProse(text, 'x.md');
     expect(f.map(x => [x.rule, x.line])).toEqual([['dropped-article', 7]]);
-    const masked = maskProse(text);
+    const { masked, unclosed } = maskProse(text);
+    expect(unclosed).toBeNull();
     expect(masked.split('\n').length).toBe(text.split('\n').length);
     expect(masked).not.toContain('substrate');
     expect(masked).not.toContain('vibrant');
+  });
+
+  // Value: protects=someone else's words are never the author's finding (the Capy `## Why` quotes the person's problem verbatim), and a double-backtick code span holding a single backtick is one code span; fails_when=a quoted tell gates the body, or the inner backtick splits the span and leaks its text; why_new=new masking; seam=none; no_claim=a quote spanning lines is read
+  test('quoted words and multi-backtick code spans are masked', () => {
+    expect(rules('"Please enhance the landscape view." The fix names the view.')).toEqual([]);
+    expect(rules('“Please enhance the landscape view.” The fix names the view.')).toEqual([]);
+    expect(rules('He asked to enhance the view.')).toEqual(['vocabulary']);
+    expect(rules('Use `` `name` showcases the result `` as the span.')).toEqual([]);
+    expect(rules('Rename --foo -> --bar in the flags.')).toEqual(['arrow']);
+  });
+
+  // Value: protects=a fence or comment left open is a finding instead of a silent mask of everything after it, and a fence closes only on a bare fence line; fails_when=an unclosed block reads as clean, or a fence line with an info string closes the block early; why_new=the fence test above pinned the fail-open behaviour; seam=none; no_claim=an indented code block is not a fence
+  test('an unclosed fence or comment is a finding at its opening line, and an info string never closes a fence', () => {
+    expect(lintProse(['Plain.', '```', 'showcasing a vibrant release'].join('\n'), 'x.md').map(f => [f.rule, f.line])).toEqual([['unclosed-block', 2]]);
+    expect(lintProse(['Plain. <!-- oops', 'It is crucial and pivotal.'].join('\n'), 'x.md').map(f => [f.rule, f.line])).toEqual([['unclosed-block', 1]]);
+    expect(lintProse(['```', 'foo', '```js', 'crucial', '```', 'done, and vibrant.'].join('\n'), 'x.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 6]]);
   });
 
   // Value: protects=a longer fence is closed only by a fence at least as long, so a quoted template in a PR body draft is never linted; fails_when=a shorter inner fence or a tilde fence closes the block early, or an unclosed fence stops masking; why_new=the case above uses one three-backtick fence; seam=none; no_claim=other fence syntaxes (indented code blocks) are not masked
@@ -108,7 +127,7 @@ describe('lintProse: each rule, positive and negative', () => {
       '```',
       'Showcasing a vibrant release.',
     ].join('\n');
-    expect(lintProse(text, 'x.md').map(f => [f.rule, f.line])).toEqual([['dropped-article', 5]]);
+    expect(lintProse(text, 'x.md').map(f => [f.rule, f.line])).toEqual([['dropped-article', 5], ['unclosed-block', 9]]);
   });
 
   test('findings are sorted by line and the render ends in the trailer', () => {
@@ -143,7 +162,12 @@ describe('selections', () => {
     expect(gated.code).toBe(1);
     expect(gated.out).toMatch(/^PROSE: \S+slopped-changelog\.md:16 /m);
     expect(gated.out).not.toMatch(/^PROSE: \S+slopped-changelog\.md:(5|8|9|10) /m);
-    expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', 'Nope', '--gate']).out).toContain('PROSE_LINT: none');
+    expect(run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', 'Nope']).out).toContain('PROSE_LINT: none');
+    const lost = run([path.join(FIXTURES, 'clean-changelog.md'), '--sections', 'Nope', '--gate']);
+    expect(lost.code).toBe(2);
+    expect(lost.err).toContain('nothing would be gated');
+    const commented = ['## Summary', 'Fine.', '<!--', '## Test plan', '-->', 'Still the summary, showcasing a vibrant tell.'].join('\n');
+    expect(lintProse(sectionsOnly(commented, ['Summary'])!, 'b.md').map(f => [f.rule, f.line])).toEqual([['vocabulary', 6], ['vocabulary', 6]]);
   });
 
   // Value: protects=an HTML comment that spans lines is never read, as the header promises; fails_when=the second line of a comment, or the text before its closing marker, produces a finding, or prose after the close is skipped; why_new=the mask test above covers one-line comments only; seam=none; no_claim=none beyond protects
@@ -181,22 +205,31 @@ describe('selections', () => {
       process.chdir(repo);
       try {
         const added = addedOnly('CHANGELOG.md', 'main')!;
-        expect(added.split('\n')[4]).toBe('Gate refuses stale receipt → exit 3.');
-        expect(added.split('\n')[8]).toBe('');
-        expect(lintProse(added, 'CHANGELOG.md').map(f => [f.rule, f.line])).toEqual([['arrow', 5], ['dropped-article', 5]]);
+        expect([...added.added!]).toEqual([3, 4, 5, 6]);
+        expect(added.text.split('\n')[8]).toBe('Old entry showcases a vibrant tapestry.');
         const gated = run(['CHANGELOG.md', '--base', 'main', '--gate'], repo);
         expect(gated.code).toBe(1);
         expect(gated.out).toMatch(/^PROSE: CHANGELOG\.md:5 arrow /m);
+        expect(gated.out).toMatch(/^PROSE: CHANGELOG\.md:5 dropped-article /m);
         expect(gated.out).not.toMatch(/^PROSE: CHANGELOG\.md:9 /m);
         expect(gated.err).toContain('PROSE_LINT_FOUND');
+        fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.0] - 2026-01-01\n\n```\nold line\nit delves into a vibrant example\n```\nOld entry showcases a vibrant tapestry.\n');
+        git('add', '.'); git('commit', '-q', '-m', 'base with a fence');
+        git('checkout', '-q', 'main'); git('merge', '-q', '--ff-only', 'feature'); git('checkout', '-q', 'feature');
+        fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.0] - 2026-01-01\n\n```\nold line\nit delves into a vibrant example\nadded line that showcases code\n```\nOld entry showcases a vibrant tapestry.\n');
+        const fenced = run(['CHANGELOG.md', '--base', 'main', '--gate'], repo);
+        expect(fenced.code).toBe(0);
+        expect(fenced.out).toBe('PROSE_LINT: ok files=1\n');
+        git('checkout', '-q', '--', 'CHANGELOG.md');
+        fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '# Changelog\n\n## [1.0.1] - 2026-01-02\n\nGate refuses stale receipt → exit 3.\n\n## [1.0.0] - 2026-01-01\n\n```\nold line\nit delves into a vibrant example\n```\nOld entry showcases a vibrant tapestry.\n');
         const badRef = run(['CHANGELOG.md', '--base', 'no-such-ref', '--gate'], repo);
         expect(badRef.code).toBe(2);
         expect(badRef.out).not.toContain('PROSE_LINT:');
         git('branch', 'orphan', git('commit-tree', git('write-tree'), '-m', 'unrelated history'));
         expect(() => git('merge-base', 'orphan', 'HEAD')).toThrow();
-        expect(addedOnly('CHANGELOG.md', 'orphan')).toBe(added);
+        expect([...addedOnly('CHANGELOG.md', 'orphan')!.added!]).toEqual([3, 4, 5, 6]);
         fs.writeFileSync(path.join(repo, 'NEW.md'), 'A vibrant note.\n');
-        expect(addedOnly('NEW.md', 'main')).toBe('A vibrant note.\n');
+        expect(addedOnly('NEW.md', 'main')).toEqual({ text: 'A vibrant note.\n', added: null });
         git('checkout', '-q', '--', 'CHANGELOG.md');
         expect(addedOnly('CHANGELOG.md', 'main')).toBeNull();
       } finally { process.chdir(cwd); }
@@ -274,7 +307,8 @@ describe('wiring', () => {
     expect(changelog).toContain('gstack-prose-lint CHANGELOG.md --base origin/<base> --gate');
     const prBody = read('ship/sections/pr-body.md.tmpl');
     const compose = prBody.slice(prBody.indexOf(': "${DOCS_SECTION_FILE:?'), prBody.indexOf('echo "PR_BODY_FILE: $PR_BODY_FILE"'));
-    expect(compose).toContain(`gstack-prose-lint "$BODY_TOP_FILE" --sections 'What changed,Why,Summary,Blast radius' --gate`);
+    expect(compose).toContain(`gstack-prose-lint "$BODY_TOP_FILE" --sections 'Why,Summary,Blast radius' --gate`);
+    expect(compose).not.toContain('What changed,');
     expect(compose).not.toContain('"$BODY_REST_FILE" --gate');
     expect(compose.indexOf('gstack-prose-lint')).toBeGreaterThan(compose.indexOf('is empty, so the body was never written'));
     expect(compose.indexOf('gstack-prose-lint')).toBeLessThan(compose.indexOf('{ awk 1 "$BODY_TOP_FILE"'));

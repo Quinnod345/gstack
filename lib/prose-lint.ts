@@ -4,7 +4,9 @@
  * pstack's unslop skill (Lauren Tan, MIT; NOTICE.md); the rule text is
  * gstack's and the word lists are facts. Everything else about voice stays
  * with the reader: this file never judges tone, length or metaphor it cannot
- * match. Fenced code, inline code, URLs and HTML comments are never scanned.
+ * match. Fenced code, inline code, URLs, HTML comments and quoted words (someone
+ * else's) are never scanned; a fence or comment left open is itself a finding,
+ * because the text after it went unread.
  * `bin/gstack-prose-lint` prints one line per finding and a
  * `PROSE_LINT: ok | found=<n> | none` trailer; it gates only when asked
  * (`--gate`), so templates and docs get a report and nothing more.
@@ -21,7 +23,8 @@ export type ProseRuleId =
   | 'mid-sentence-colon'
   | 'inline-header-list'
   | 'arrow'
-  | 'dropped-article';
+  | 'dropped-article'
+  | 'unclosed-block';
 
 export interface ProseFinding {
   rule: ProseRuleId;
@@ -71,7 +74,7 @@ const LANDSCAPE_RE = /\b(?:landscape|tapestry)\b(?!\s+(?:mode|orientation|image|
 const METAPHOR_RE = new RegExp(String.raw`\b(?:${METAPHOR_NOUNS.map(m => m.word.replace('-', '[- ]')).join('|')})s?\b`, 'gi');
 const NOT_JUST_BUT_RE = /(?:\bnot|n['’]t)\s+(?:just|only|merely|simply)\b[^.!?\n]{0,120}?\bbut\b/gi;
 /** A sentence of four or more words, a colon, then a lowercase clause: the colon is doing a conjunction's job. */
-const MID_COLON_RE = /(?:^[ \t]*(?:(?:[-*+]|\d+\.)[ \t]+)?|[.!?]\s+)((?:[A-Za-z][\w'’-]*[,\s]+){3,}[A-Za-z][\w'’-]*): ([a-z][\w'’-]*(?:\s+[\w'’-]+){2,})/gm;
+const MID_COLON_RE = /(?:^[ \t]*(?:(?:[-*+]|\d+\.)[ \t]+)?|[.!?][ \t]+)((?:[A-Za-z][\w'’-]*[ \t,]+){3,}[A-Za-z][\w'’-]*): ([a-z][\w'’-]*(?:[ \t]+[\w'’-]+){2,})/gm;
 const INLINE_HEADER_RE = /^\s*(?:[-*+]|\d+\.)\s+\*\*([^*\n]{1,60}?):?\*\*:?\s+(\S+)/;
 const ARROW_RE = /(\S{1,80})[ \t]*(→|->|=>|⇒)[ \t]*(\S{1,80})/g;
 const SENTENCE_START_RE = /(?:^|[.!?]\s+|^\s*(?:[-*+]|\d+\.)\s+)([A-Z][a-z]+)\s+([a-z]+s)\b(?=\s+[a-z])/gm;
@@ -87,38 +90,64 @@ const BARE_NOUNS = new Set([
   'endpoint', 'route', 'controller', 'service', 'container', 'image', 'cluster', 'node', 'deploy', 'install',
   'installer', 'upgrade', 'session', 'browser', 'tab', 'window', 'dialog', 'prompt', 'reply', 'answer', 'question',
 ]);
+/** Verbs that are rarely plural nouns: "Test runs", "Error logs" and "Merge commits" are compound nouns, so runs, logs, calls, checks, passes, builds, counts, records, reports and their kind are left out. */
 const VERBS = new Set([
-  'rejects', 'returns', 'fails', 'writes', 'reads', 'exits', 'runs', 'calls', 'prints', 'sends', 'takes', 'needs',
-  'uses', 'gets', 'sets', 'moves', 'keeps', 'stops', 'starts', 'checks', 'skips', 'drops', 'adds', 'removes', 'opens',
-  'closes', 'loads', 'saves', 'parses', 'builds', 'creates', 'deletes', 'updates', 'handles', 'passes', 'blocks',
-  'refuses', 'accepts', 'picks', 'finds', 'holds', 'emits', 'throws', 'catches', 'logs', 'records', 'marks', 'shows',
-  'hides', 'renders', 'resolves', 'binds', 'tracks', 'waits', 'retries', 'restarts', 'reports', 'asks', 'tells',
-  'validates', 'verifies', 'scans', 'lints', 'formats', 'compiles', 'installs', 'upgrades', 'merges', 'pushes',
-  'pulls', 'fetches', 'commits', 'stamps', 'reheads', 'owns', 'carries', 'gains', 'loses', 'wins', 'counts',
+  'rejects', 'refuses', 'accepts', 'emits', 'throws', 'renders', 'resolves', 'retries', 'restarts', 'tells',
+  'validates', 'verifies', 'scans', 'lints', 'compiles', 'installs', 'upgrades', 'fetches', 'stamps', 'reheads',
+  'owns', 'carries', 'loses', 'parses', 'creates', 'deletes', 'updates', 'handles', 'hides', 'keeps', 'skips',
+  'adds', 'removes', 'writes', 'reads', 'prints', 'sends', 'exits', 'fails', 'needs', 'takes', 'uses',
 ]);
-const NUMERIC_SIDE = /^[\d$£€.,%+-]|^v?\d|^CODE$|^URL$|^(?:before|after)$/i;
+const NUMERIC_SIDE = /^[$£€]?[+-]?\d|^v\d|^CODE$|^URL$|^(?:before|after)$/i;
 const LIST_INTRODUCER = /\b(?:examples?|following|these|this|below|measurements?|two|three|four|five|six)$/i;
 const trimSide = (s: string) => s.replace(/^[(\[`"'*_]+|[)\]`"'*_,.;:]+$/g, '');
 
-/** Replace fenced blocks, inline code, URLs and HTML comments (multi-line ones too) with same-length placeholders so line numbers hold. */
-export function maskProse(text: string): string {
-  const lines = text.split('\n');
+const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})/;
+const FENCE_CLOSE_RE = /^\s*(`{3,}|~{3,})\s*$/;
+const pad = (m: string) => ' '.repeat(m.length);
+
+/**
+ * Walk the lines once, tracking the fenced-block and HTML-comment state a Markdown
+ * renderer would. `inside` is true for a line that is wholly inside a fence or a
+ * comment; a line that opens or closes one is reported with the text outside it.
+ * A fence closes only on a bare fence line of the same kind and at least its length.
+ */
+function walkBlocks(text: string, visit: (line: string, inside: boolean, index: number) => void): { kind: 'fence' | 'comment'; line: number } | null {
   let fence: string | null = null;
+  let fenceLine = 0, commentLine = 0;
   let comment = false;
-  const out = lines.map((line) => {
-    const open = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (fence) { if (open && open[1]!.startsWith(fence[0]!) && open[1]!.length >= fence.length) fence = null; return ''; }
-    if (comment) { const end = line.indexOf('-->'); if (end < 0) return ''; comment = false; line = ' '.repeat(end + 3) + line.slice(end + 3); }
-    if (open) { fence = open[1]!; return ''; }
+  text.split('\n').forEach((raw, i) => {
+    if (fence) {
+      const close = FENCE_CLOSE_RE.exec(raw);
+      if (close && close[1]![0] === fence[0] && close[1]!.length >= fence.length) fence = null;
+      return visit(raw, true, i);
+    }
+    let line = raw;
+    if (comment) {
+      const end = line.indexOf('-->');
+      if (end < 0) return visit(raw, true, i);
+      comment = false;
+      line = ' '.repeat(end + 3) + line.slice(end + 3);
+    }
+    const open = FENCE_OPEN_RE.exec(line);
+    if (open) { fence = open[1]!; fenceLine = i + 1; return visit(raw, true, i); }
     line = line
-      .replace(/`[^`\n]*`/g, (m) => 'CODE' + ' '.repeat(Math.max(0, m.length - 4)))
+      .replace(/(`+)([^`\n](?:[^\n]*?[^`\n])?)\1(?!`)/g, (m) => 'CODE' + ' '.repeat(Math.max(0, m.length - 4)))
       .replace(/\]\([^)\s]+\)/g, (m) => ']' + ' '.repeat(m.length - 1))
-      .replace(/https?:\/\/\S+/g, (m) => 'URL' + ' '.repeat(Math.max(0, m.length - 3)));
+      .replace(/https?:\/\/(?:(?!-->)\S)+/g, (m) => 'URL' + ' '.repeat(Math.max(0, m.length - 3)));
     const tail = line.lastIndexOf('<!--');
-    if (tail >= 0 && line.indexOf('-->', tail) < 0) { comment = true; line = line.slice(0, tail); }
-    return line.replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length));
+    if (tail >= 0 && line.indexOf('-->', tail) < 0) { comment = true; commentLine = i + 1; line = line.slice(0, tail); }
+    visit(line.replace(/<!--[\s\S]*?-->/g, pad), false, i);
   });
-  return out.join('\n');
+  return fence ? { kind: 'fence', line: fenceLine } : comment ? { kind: 'comment', line: commentLine } : null;
+}
+
+/** Replace fenced blocks, inline code, links' targets, URLs, HTML comments and quoted words with same-length placeholders so line numbers hold. A fence or comment left open at the end is reported, since everything after it went unread. */
+export function maskProse(text: string): { masked: string; unclosed: { kind: 'fence' | 'comment'; line: number } | null } {
+  const out: string[] = [];
+  const unclosed = walkBlocks(text, (line, inside) => {
+    out.push(inside ? '' : line.replace(/(["“])[^"“”\n]{1,400}(["”])/g, pad));
+  });
+  return { masked: out.join('\n'), unclosed };
 }
 
 function excerpt(s: string): string {
@@ -128,11 +157,12 @@ function excerpt(s: string): string {
 
 /** Lint one text; `file` is only carried into the findings. Lines are 1-based from the text's own start plus `offset`. */
 export function lintProse(text: string, file: string, offset = 0): ProseFinding[] {
-  const masked = maskProse(text);
+  const { masked, unclosed } = maskProse(text);
   const lines = masked.split('\n');
   const findings: ProseFinding[] = [];
   const push = (rule: ProseRuleId, line: number, match: string, hint: string) => findings.push({ rule, file, line: line + offset, match: excerpt(match), hint });
   const lineAt = (index: number) => masked.slice(0, index).split('\n').length;
+  if (unclosed) push('unclosed-block', unclosed.line, unclosed.kind === 'fence' ? 'fence never closed' : 'HTML comment never closed', 'close it; nothing after it was read');
 
   lines.forEach((line, i) => {
     const n = i + 1;
@@ -150,7 +180,8 @@ export function lintProse(text: string, file: string, offset = 0): ProseFinding[
       if (label && label.length > 2 && label !== 'code' && first === label) push('inline-header-list', n, header[0], 'drop the label or make the line say something the label does not');
     }
     for (const m of line.matchAll(ARROW_RE)) {
-      if (NUMERIC_SIDE.test(trimSide(m[1]!)) && NUMERIC_SIDE.test(trimSide(m[3]!))) continue;
+      const left = trimSide(m[1]!), right = trimSide(m[3]!);
+      if (!left || !right || (NUMERIC_SIDE.test(left) && NUMERIC_SIDE.test(right))) continue;
       push('arrow', n, m[0], 'write the sentence the arrow stands for');
     }
   });
@@ -171,15 +202,13 @@ export function unreleasedBlock(text: string): { text: string; line: number } | 
 /** The text with every line outside the named `## ` sections blanked, so line numbers hold; null when none of them is present. */
 export function sectionsOnly(text: string, names: string[]): string | null {
   const wanted = new Set(names.map(n => n.trim().toLowerCase()).filter(Boolean));
+  const raw = text.split('\n');
   let keep = false, found = false;
-  let fence: string | null = null;
-  const out = text.split('\n').map((line) => {
-    const open = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (fence) { if (open && open[1]!.startsWith(fence[0]!) && open[1]!.length >= fence.length) fence = null; return keep ? line : ''; }
-    if (open) { fence = open[1]!; return keep ? line : ''; }
-    const h = /^##\s+(.+?)\s*$/.exec(line);
-    if (h) { keep = wanted.has(h[1]!.toLowerCase()); found ||= keep; return ''; }
-    return keep ? line : '';
+  const out: string[] = [];
+  walkBlocks(text, (line, inside, i) => {
+    const h = inside ? null : /^##\s+(.+?)\s*$/.exec(line);
+    if (h) { keep = wanted.has(h[1]!.toLowerCase()); found ||= keep; out.push(''); return; }
+    out.push(keep ? raw[i]! : '');
   });
   return found ? out.join('\n') : null;
 }
@@ -193,18 +222,18 @@ export interface LintFilesOptions {
   base?: string;
 }
 
-/** The file's text with every line the branch did not add blanked, so line numbers hold; null when nothing was added. */
-export function addedOnly(file: string, base: string): string | null {
+/** The file's whole text plus the 1-based lines the branch added, so fences and comments around an added line still mask it; `added` is null for an untracked file (read whole) and the result is null when nothing was added. */
+export function addedOnly(file: string, base: string): { text: string; added: Set<number> | null } | null {
   const run = (args: string[]) => spawnSync('git', args, { encoding: 'utf8', timeout: 30_000 });
-  if (run(['ls-files', '--error-unmatch', '--', file]).status !== 0) return fs.readFileSync(file, 'utf8');
+  const text = fs.readFileSync(file, 'utf8');
+  if (run(['ls-files', '--error-unmatch', '--', file]).status !== 0) return { text, added: null };
   const mb = run(['merge-base', base, 'HEAD']);
   const since = mb.status === 0 ? mb.stdout.trim() : base;
   const diff = run(['diff', '--unified=0', '--no-color', '--no-ext-diff', since, '--', file]);
   if (diff.status !== 0) throw new Error(`git diff ${since} -- ${file} failed: ${diff.stderr.trim()}`);
   const added = [...addedLines(diff.stdout).values()].flat();
   if (added.length === 0) return null;
-  const keep = new Set(added.map(l => l.line));
-  return fs.readFileSync(file, 'utf8').split('\n').map((l, i) => keep.has(i + 1) ? l : '').join('\n');
+  return { text, added: new Set(added.map(l => l.line)) };
 }
 
 export function lintFiles(files: string[], opts: LintFilesOptions = {}): ProseLintResult {
@@ -215,7 +244,7 @@ export function lintFiles(files: string[], opts: LintFilesOptions = {}): ProseLi
       const added = addedOnly(file, opts.base);
       if (added === null) { result.empty.push(file); continue; }
       result.scanned.push(file);
-      result.findings.push(...lintProse(added, file));
+      result.findings.push(...lintProse(added.text, file).filter(f => !added.added || added.added.has(f.line)));
       continue;
     }
     if (opts.sections) {
