@@ -190,7 +190,8 @@ cross-family subagent; `codex` for completed Codex CLI output, as
 `outside_provider` (the provider the host would have used, as the generated
 prose names it), `outside_status` (`completed` for a finished outside pass;
 `unavailable` when neither the CLI nor a subagent completed, the cause on the
-`OUTSIDE_STATUS` line rather than in the row; `disabled` under
+`gstack-outside-voice run:` stderr line and in `<out>.meta.json` rather than
+in the row; `disabled` under
 `codex_reviews: disabled`), `status`
 (`clean`, `issues_found` or `unavailable`), `completed`, `converged`, and the
 subagent's model recorded with the pass (`gstack-outside-voice run --runner
