@@ -43,8 +43,15 @@ const PROSE_REF = /`(references\/[^`<>]+\.md)`/g;
 const ROUTER_KEYS = new Set(["name", "description", "version", "allowed-tools", "triggers", "preamble-tier"]);
 // Skill-shaped files other hosts drop into scanner scope.
 const FOREIGN_SKILL_FILE = /^(skill\.(ya?ml|json)|agents?\.md|\.cursorrules|\.windsurfrules)$/i;
-/** Directory entries one walkMd call may examine before it refuses the tree. */
+/** Directory entries one walkMd or findSkillDirs call may examine before it refuses the tree. */
 const WALK_ENTRY_CAP = 200_000;
+
+function entryCapError(dir: string, cap: number): Error {
+  return new Error(
+    `${dir} has more than ${cap} entries to walk; a symlink in it probably points at a large tree. ` +
+      `Nothing was billed or sent. Remove or narrow that link and run again.`,
+  );
+}
 
 /**
  * Bytes per token, per content class, fitted to real count_tokens measurements.
@@ -283,12 +290,7 @@ export function walkMd(dir: string, opts: { billedRoot?: string; skipNestedSkill
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
-      if (++entryCount > WALK_ENTRY_CAP) {
-        throw new Error(
-          `${dir} has more than ${WALK_ENTRY_CAP} entries to walk; a symlink in it probably points at a large tree. ` +
-            `Nothing was billed or sent. Remove or narrow that link and run again.`,
-        );
-      }
+      if (++entryCount > WALK_ENTRY_CAP) throw entryCapError(dir, WALK_ENTRY_CAP);
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const p = path.join(current, e.name);
       const kind = entryKind(p, e);
@@ -441,10 +443,11 @@ export function parseSkill(
  * A realpath seen-set breaks cycles, a link to a directory that encloses the
  * root is never followed, and every returned path stays under the root.
  */
-export function findSkillDirs(root: string): string[] {
+export function findSkillDirs(root: string, entryCap: number = WALK_ENTRY_CAP): string[] {
   const out: string[] = [];
   const visited = new Set<string>();
   const rootDir = path.resolve(root);
+  let entryCount = 0;
   let rootReal: string;
   try {
     rootReal = fs.realpathSync(rootDir);
@@ -474,6 +477,7 @@ export function findSkillDirs(root: string): string[] {
     if (visited.has(real)) return;
     visited.add(real);
     for (const e of entries) {
+      if (++entryCount > entryCap) throw entryCapError(rootDir, entryCap);
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const child = path.join(dir, e.name);
       if (entryKind(child, e) !== "dir") continue;

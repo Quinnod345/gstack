@@ -391,6 +391,15 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("refuses skill discovery past its entry cap instead of walking on", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-discovery-cap-"));
+    fs.mkdirSync(path.join(root, "vendor"));
+    for (let i = 0; i < 10; i++) fs.mkdirSync(path.join(root, "vendor", `d${i}`));
+    expect(() => findSkillDirs(root, 5)).toThrow(/more than 5 entries to walk/);
+    expect(findSkillDirs(root)).toEqual([]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it("bills a subdirectory whose SKILL.md is a directory to its container, as discovery does not count it as a skill", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-skilldir-"));
     fs.writeFileSync(path.join(root, "SKILL.md"), "---\nname: c\ndescription: d\n---\n# c\n");
