@@ -1292,6 +1292,39 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(bill.skills[0].totalMdBytes).toBe(skillMd.length + "CHECKOUT-FLOW".length + "PRIVATE-DIARY".length);
   });
 
+  it("labels a bill with any estimated item as mixed, in --json and in text", async () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-mixed-"));
+    const outside = path.join(tmp, "outside", "ext");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "SKILL.md"), "---\nname: ext\ndescription: d\n---\n" + "e".repeat(6_000));
+    const skills = path.join(tmp, "skills");
+    fs.mkdirSync(path.join(skills, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(outside, path.join(skills, "ext"));
+    const run = async (args: string[]) => {
+      const stdout = capture();
+      const code = await contextBillMain([skills, "--exact", ...args], {
+        stdout: stdout.stream,
+        stderr: capture().stream,
+        apiKey: "sk-test",
+        fetchImpl: fakeFetch(),
+        egressHome,
+      });
+      return { code, out: stdout.text() };
+    };
+    const json = await run(["--json"]);
+    const text = await run([]);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(json.code).toBe(0);
+    const bill = JSON.parse(json.out);
+    expect(bill.tokenSource).toStartWith("mixed: count_tokens");
+    expect(bill.tokenSource).toContain("estimated offline");
+    expect(bill.tokenEstimateErrorPct).toBeGreaterThan(0);
+    expect(text.out).toContain("Token counts are MIXED");
+    expect(text.out).not.toContain("Token counts measured with");
+  });
+
   async function exactRun(skills: string) {
     const calls: { body: string }[] = [];
     const stderr = capture();

@@ -568,10 +568,12 @@ export interface Bill {
 
 export function buildBill(
   root: string,
-  { tokensOf = estimateTokensOf, tokenSource, calibration }: {
+  { tokensOf = estimateTokensOf, tokenSource, calibration, missedKeys }: {
     tokensOf?: TokensOf;
     tokenSource?: string;
     calibration?: Calibration;
+    /** Keys a measured tokensOf had to estimate; filled while the bill is priced. */
+    missedKeys?: ReadonlySet<string>;
   } = {},
 ): Bill {
   const resolved = path.resolve(root);
@@ -581,12 +583,17 @@ export function buildBill(
   );
   const total = skills.reduce((n, s) => n + s.totalMdBytes, 0);
   const totalTokens = skills.reduce((n, s) => n + s.totalMdTokens, 0);
+  const estimated = tokenSource ? (missedKeys?.size ?? 0) : 0;
   return {
     root: resolved,
     // Named so a reader never has to guess whether a figure was measured.
-    tokenSource: tokenSource ?? "estimate: calibrated bytes/token per content class",
+    tokenSource: !tokenSource
+      ? "estimate: calibrated bytes/token per content class"
+      : estimated
+        ? `mixed: ${tokenSource}, with ${estimated} item(s) estimated offline`
+        : tokenSource,
     tokenEstimate: TOKEN_DIVISORS,
-    tokenEstimateErrorPct: tokenSource ? 0 : TOKEN_ESTIMATE_ERROR_PCT,
+    tokenEstimateErrorPct: tokenSource && !estimated ? 0 : TOKEN_ESTIMATE_ERROR_PCT,
     // Present only under --exact: how far the offline estimate was off, per file.
     ...(calibration ? { calibration } : {}),
     skills,
@@ -768,6 +775,12 @@ export function renderBill(bill: Bill, { skill }: { skill?: string } = {}): stri
 export function tokenDisclaimer(bill: Pick<Bill, "tokenEstimateErrorPct" | "tokenSource">): string {
   if (bill.tokenEstimateErrorPct === 0) {
     return `Token counts measured with ${bill.tokenSource}. Bytes are exact.`;
+  }
+  if (bill.tokenSource.startsWith("mixed: ")) {
+    return (
+      `Token counts are MIXED (${bill.tokenSource.slice("mixed: ".length)}). Any figure that includes an estimated ` +
+      `item can be off by up to ${bill.tokenEstimateErrorPct}% for that item. Bytes are always exact.`
+    );
   }
   const per = Object.entries(TOKEN_DIVISORS).map(([k, v]) => `${k} /${v}`).join(", ");
   return (
@@ -1211,6 +1224,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
   const exactFor = async (tree: string, set: ExactSendSet | undefined): Promise<{
     tokensOf?: TokensOf;
     tokenSource?: string;
+    missedKeys?: ReadonlySet<string>;
     calibration?: Calibration;
     onDone?: () => void;
   }> => {
@@ -1260,6 +1274,7 @@ export async function contextBillMain(argv: string[], options: MainOptions = {})
       return {
         tokensOf: measured.tokensOf,
         tokenSource: measured.tokenSource,
+        missedKeys: measured.missedKeys,
         calibration: calibrationTable(measured.counts, tree, measured.realOf),
         onDone: () => {
           if (measured.missedKeys.size) {
