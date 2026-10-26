@@ -436,7 +436,7 @@ prints `CAPY: on` and a `capy-asks` block: decisions go through Capy (a crew
 thread asks its Captain, otherwise the person), plan approvals are rendered
 with `gstack-owner-brief render --captain`, answers are recorded with
 `gstack-approvals`, and /ship's PR body opens with before/after images
-(`gstack-pr-shots`), Why and Approvals. The guide is
+(`gstack-pr-shots`), Why, Blast radius and Approvals. The guide is
 [`capy/skill/gstack/captain.md`](../capy/skill/gstack/captain.md);
 `GSTACK_CAPY_ASKS=0` drops the block for one session. The controller's side (the
 READY contract, merge trains, the digest, the daily flaky pass, with templates for the
