@@ -492,9 +492,14 @@ _dc_check_floor() {
     _dc_row SKIP floor "$project declares none ($GSTACK_PROJECT_FLOOR_FILE absent; set $GSTACK_PROJECT_FLOOR_FIELD there to require a gstack version)"
     return
   fi
-  floor=$(sed -n 's/.*"'"$GSTACK_PROJECT_FLOOR_FIELD"'"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$file" 2>/dev/null | head -1 | clamp '0-9.' 32)
+  # Whitespace-insensitive: the value may sit on the line after its field.
+  floor=$(tr '\n\r\t' '   ' < "$file" 2>/dev/null | sed -n 's/.*"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"\([0-9][0-9.]*\)".*/\1/p' | head -1 | clamp '0-9.' 32)
   if [ -z "$floor" ]; then
-    _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_FIELD (null or absent)"
+    if tr '\n\r\t' '   ' < "$file" 2>/dev/null | grep -q '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"'; then
+      _dc_row SKIP floor "$file sets $GSTACK_PROJECT_FLOOR_FIELD to something other than a dotted version (gstack-ship-queue rejects it)"
+    else
+      _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_FIELD (null or absent)"
+    fi
     return
   fi
   installed=$(head -1 "$ROOT/VERSION" 2>/dev/null | clamp '0-9A-Za-z.+-' 40)

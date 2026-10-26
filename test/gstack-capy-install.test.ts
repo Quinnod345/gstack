@@ -287,7 +287,8 @@ describe('gstack-capy-install', () => {
     const busy = { GSTACK_CAPY_BEHIND: '3', GSTACK_CAPY_BEHIND_TO: '1.2.6', GSTACK_CAPY_BEHIND_FIX: `${f.root}/bin/gstack-upgrade`, GSTACK_CAPY_BEHIND_BLOCKED: 'live gstack sessions hold this installation: pid 379 (124m dbus-daemon); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle (UPGRADE_BUSY)' };
     const r = run(f, [], busy);
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(lastLine(r.stdout)).toBe('gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: live gstack sessions hold this installation: pid 379 (124m dbus-daemon) (UPGRADE_BUSY); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle)');
+    // The trailer's fix is the session's one runnable command; the refusal's own prose (and its GSTACK_UPGRADE_FORCE=1 escape hatch) stays on the WARN row.
+    expect(lastLine(r.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: live gstack sessions hold this installation: pid 379 (124m dbus-daemon) (UPGRADE_BUSY); fix: ${f.root}/bin/gstack-upgrade)`);
     expect(r.stdout).toMatch(/^WARN behind — installed 1\.2\.3 is 3 commits behind origin \(latest 1\.2\.6\) and the session-start upgrade was skipped: live gstack sessions hold this installation: pid 379 \(124m dbus-daemon\); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle \(UPGRADE_BUSY; .*#upgrade-busy\)$/m);
     expect(r.stdout).toMatch(/^GSTACK_LAUNCH_FILE: /m);
     const bare = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'gstack-upgrade exit 9' });
@@ -296,7 +297,7 @@ describe('gstack-capy-install', () => {
     // A code the installer does not know collapses to UPGRADE_SKIPPED, whose anchor exists; the reason and fix are kept.
     const other = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'origin unreachable; fix: retry when online (UPGRADE_FETCH_FAILED)' });
     expect(other.status).toBe(0);
-    expect(lastLine(other.stdout)).toBe('gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: origin unreachable (UPGRADE_SKIPPED); fix: retry when online)');
+    expect(lastLine(other.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: origin unreachable (UPGRADE_SKIPPED); fix: ${f.root}/bin/gstack-upgrade)`);
     expect(other.stdout).toMatch(/^WARN behind — .*; fix: retry when online \(UPGRADE_SKIPPED; .*#upgrade-skipped\)$/m);
     expect(lastLine(run(f, [], { ...busy, STUB_DOCTOR_FAIL: '1' }).stdout)).toBe('gstack: fail codex');
   });

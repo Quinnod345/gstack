@@ -612,7 +612,10 @@ fi
 if [ -n "${GSTACK_CAPY_BEHIND:-}" ]; then
   note "behind=$GSTACK_CAPY_BEHIND (latest: ${GSTACK_CAPY_BEHIND_TO:-${REMOTE_VERSION:-unknown}})"
   [ -n "$BLOCKED" ] && note "upgrade skipped: $BLOCKED_REASON ($BLOCKED_CODE)"
-  FIX_NOTE="${BLOCKED:+$BLOCKED_FIX}"; FIX_NOTE="${FIX_NOTE:-${GSTACK_CAPY_BEHIND_FIX:-bash <skill>/scripts/install.sh}}"
+  # The trailer's fix is always one runnable command (the session's: the rerun
+  # or bin/gstack-upgrade, which prints its own refusal); the refusal's own
+  # prose stays on the WARN behind row.
+  FIX_NOTE="${GSTACK_CAPY_BEHIND_FIX:-${BLOCKED:+$ROOT/bin/gstack-upgrade}}"; FIX_NOTE="${FIX_NOTE:-bash <skill>/scripts/install.sh}"
 elif [ -n "$REMOTE_VERSION" ] && [ "$REMOTE_VERSION" != "$INSTALLED" ] \
    && [ "$(printf '%s\n%s\n' "$INSTALLED" "$REMOTE_VERSION" | sort -V | head -1)" = "$INSTALLED" ]; then
   note "latest: $REMOTE_VERSION available"
