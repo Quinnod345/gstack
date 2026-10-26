@@ -209,6 +209,7 @@ quality gates that produce better results than answering inline.
 - User asks to audit the live developer experience, time-to-hello-world → invoke `/devex-review`
 - User asks to ship, deploy, push, create a PR, "let's land this", "send it" → invoke `/ship`
 - User asks to merge + deploy + verify as one flow → invoke `/land-and-deploy`
+- User asks to rebase or revive an old PR, "modernize this PR", whether a stale PR is still worth landing → invoke `/modernize`
 - User asks to configure deployment for the project → invoke `/setup-deploy`
 - User asks to monitor prod after shipping, post-deploy checks → invoke `/canary`
 - User asks to update docs after shipping → invoke `/document-release`

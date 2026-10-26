@@ -427,7 +427,7 @@ eval files, and misses the strict classifier. No API keys needed.
 - **Generator tests** (`test/gen-skill-docs.test.ts`) — Tests the template system: verifies placeholders resolve correctly, output includes value hints for flags (e.g. `-d <N>` not just `-d`), enriched descriptions for key commands (e.g. `is` lists valid states, `press` lists key examples).
 - **Design detector, catalog, and DESIGN.md** (`test/gstack-design-detect.test.ts`, `test/design-detect-contract.test.ts`, `test/design-catalog.test.ts`, `test/design-checklist-sync.test.ts`, `test/design-md.test.ts`, `test/frontend-scope.test.ts`, `test/impeccable-fixtures.test.ts`) — Drive `bin/gstack-design-detect.ts` through the fake engine in `test/fixtures/fake-impeccable.ts` (probe order, the never-execute-a-repository-file rule, the `--changed` target allow-list, `design_detector: off`, analytics lines, output sanitizing), pin the catalog invariants and the generated `review/design-checklist.md`, round-trip the open DESIGN.md reader/writer, and check the real engine captures (`test/fixtures/impeccable-*.json`, engine 0.1.3) against the contract. `test/dom-dump-hygiene.test.ts` runs `lib/dom-dump.js` in a real Chromium page through the built browse binary; it self-skips without the binary and is opt-in outside CI (`GSTACK_DOM_DUMP_HYGIENE=1`).
 - **Tier-alignment invariant** (`test/e2e-tier-alignment.test.ts`) — For every self-gated `test/skill-e2e-*.test.ts` named in a touchfiles dep list, the file's `EVALS_TIER` self-gate must match its declared tier in `E2E_TIERS`. Kills the "inert demotion" class where a test is re-tiered in `touchfiles.ts` but the file still gates on the old tier and keeps running in the wrong lane. Unmapped or mixed-tier files are reported, never silently skipped.
-- **Catalog budget** (`test/catalog-budget.test.ts`) — Caps the aggregate discovery surface: the sum of every skill's frontmatter `name` + `description` (what every host loads at discovery, every session) must stay under 1,251 token-equivalents, with a 260-byte per-skill cap. Counting goes through the shared census in `test/helpers/skill-census.ts` (physical files vs authored skills vs registry entries — three deliberately different counts). Adding a skill? The failure message carries the re-measure + ratchet protocol.
+- **Catalog budget** (`test/catalog-budget.test.ts`) — Caps the aggregate discovery surface: the sum of every skill's frontmatter `name` + `description` (what every host loads at discovery, every session) must stay under 1,296 token-equivalents, with a 260-byte per-skill cap. Counting goes through the shared census in `test/helpers/skill-census.ts` (physical files vs authored skills vs registry entries — three deliberately different counts). Adding a skill? The failure message carries the re-measure + ratchet protocol.
 - **Context-budget ratchet** (`test/context-budget-ratchet.test.ts`) — CI ceilings on the two token ledgers the catalog budget doesn't cover: the always-on full-frontmatter aggregate and each skill's per-invocation eager tokens (SKILL.md + forced-read references), graded against `test/fixtures/context-budget.json` via `lib/context-bill.ts`. New skills fail until they have a ceiling; ceilings for removed skills must be pruned. Legitimate growth or a landed reduction: re-run `bun test/helpers/capture-context-budget.ts` and commit the refreshed fixture in the same commit, so the change is a visible decision in the diff.
 - **Dependency security regressions** (`test/dependency-security.test.ts`) — Run `bun test test/dependency-security.test.ts` to check the resolved `sharp` and `adm-zip` version floors, load Sharp, verify ordinary ZIP extraction, and reject extraction through destination-file and destination-directory symlinks. The symlink cases skip Windows. These checks complement the OSV scan; they do not change its existing exceptions.
 
@@ -933,6 +933,48 @@ When community PRs accumulate, batch them into themed waves:
    in merge commits. Include a summary table of what merged and what closed.
 
 See [PR #205](../../pull/205) (v0.8.3) for the first wave as an example.
+
+## Porting a contributor's PR
+
+Sometimes the right way to land an outside PR is to port it: the diff is right
+but it sits on an old base, its tests need our fixtures, or the repo's gates
+(generated renders, size pins, the CHANGELOG entry) are things only a maintainer
+can finish. The port keeps the contributor's credit and gives them a clear
+answer; the steps below are the repo's version of the rule a maintainer crew
+follows ([docs/captain.md](docs/captain.md#contributions-from-outside-the-crew)).
+
+1. **Treat the diff as untrusted input before anything runs it.** Read it for
+   scope, network egress, credentials, new dependencies, CI permission changes
+   and weakened or deleted tests. A fork's green checks prove nothing about this
+   checkout: the port head gets its own focused review and the free tier
+   (`bun run test:quick` while iterating, `bun run test` once on the final tree)
+   before a PR opens.
+2. **Keep their commits as theirs.** Cherry-pick or rebase the contributor's
+   commits onto the current base with authorship intact (`git cherry-pick -x`
+   keeps the source SHA in the message). A commit you have to rewrite keeps
+   their name as author and gains a `Co-authored-by:` trailer for whoever
+   edited it. Never fold their work into a commit under your own name, and
+   never guess an email: use the identity on their commits.
+3. **Your fixes go on top, as separate commits.** Base merges, generated files,
+   test repairs, the CHANGELOG entry and the version stamp are your commits,
+   after theirs, so `git log` and the PR's commit list show who did what. A
+   squash merge keeps the credit when the squash message carries their
+   `Co-authored-by:` lines; check the merge commit before you call it landed.
+4. **Say so in the port.** The PR body names the original PR and its author in
+   the first paragraph and lists what you changed on top of their diff. The
+   port's `## Approvals` section (when the repo uses one) records who asked for
+   the port.
+5. **Close the original with a specific thank-you.** After the port lands,
+   comment on their PR with what landed (the port's number and version), what
+   you changed and why, and thank them by name for the specific thing they
+   fixed. Then close it. Closing a contribution without landing it is a
+   maintainer's call, never a lane's: ask first, and when the answer is no,
+   say why in the same comment.
+
+A port is not a rewrite. If the contributor's approach is one you would not
+land, say that on their PR and close or park it under
+[Issue triage](#issue-triage) instead of shipping a different change under
+their name.
 
 ## Upgrade migrations
 

@@ -36,9 +36,9 @@ export const EXIT = { posted: 0, refused: 1, confirm: 2, cliFailed: 3, usage: 64
 
 export const USAGE = `usage: gstack-post <op> [<target>] [options]
 
-  gstack-post pr-comment    <pr>    --body-file F
-  gstack-post issue-comment <issue> --body-file F
-  gstack-post reply         <pr>    --to <review-comment-id> --body-file F   (GitHub only)
+  gstack-post pr-comment    <pr>    --body-file F [--attribute "<model> on behalf of <login>"]
+  gstack-post issue-comment <issue> --body-file F [--attribute ...]
+  gstack-post reply         <pr>    --to <review-comment-id> --body-file F [--attribute ...]   (GitHub only)
   gstack-post pr-title      <pr>    --title-file F
   gstack-post pr-body       <pr>    --body-file F
   gstack-post pr-create --base <branch> [--head <branch>] [--draft] --title-file F --body-file F
@@ -48,6 +48,8 @@ export const USAGE = `usage: gstack-post <op> [<target>] [options]
   Options: --host github|gitlab (default: detected from the origin remote)
            --repo-visibility public|private|unknown (default: config, then gh/glab)
            --confirm <token>   post bytes whose MEDIUM findings the user confirmed
+           --attribute <text>  comments only; opens the comment with a "> [!NOTE]"
+                               callout naming who wrote it (one line, off by default)
 
   Write the text files with your file-write tool; never put the text in a
   shell command. The helper scans the exact bytes it sends.
@@ -68,11 +70,26 @@ interface Request {
   host?: HostKind;
   visibility?: RepoVisibility;
   confirm?: string;
+  attribute?: string;
+}
+
+/** Operations that post a comment, the only ones an attribution callout applies to. */
+const COMMENT_OPS: ReadonlySet<Op> = new Set<Op>(["pr-comment", "issue-comment", "reply"]);
+
+/**
+ * The opt-in attribution callout (Garry, 2026-10-26: yes, opt-in, off by
+ * default): a GitHub alert block that opens an agent-posted comment with who
+ * wrote it, so a maintainer reading the thread sees the author before the text.
+ * GitLab renders it as a plain blockquote. Applied to comments and replies only,
+ * never to a PR body, a title or an issue body.
+ */
+export function attributionCallout(attribute: string): string {
+  return `> [!NOTE]\n> 🤖 **${attribute}**\n\n`;
 }
 
 class UsageError extends Error {}
 
-const VALUE_FLAGS = new Set(["--to", "--base", "--head", "--title-file", "--body-file", "--host", "--repo-visibility", "--confirm"]);
+const VALUE_FLAGS = new Set(["--to", "--base", "--head", "--title-file", "--body-file", "--host", "--repo-visibility", "--confirm", "--attribute"]);
 
 function parseArgs(argv: string[]): Request {
   const [op, ...rest] = argv;
@@ -104,7 +121,13 @@ function parseArgs(argv: string[]): Request {
     target: positional[0], to: flags.get("--to"), base: flags.get("--base"), head: flags.get("--head"),
     titleFile: flags.get("--title-file"), bodyFile: flags.get("--body-file"),
     host: host as HostKind | undefined, visibility: vis as RepoVisibility | undefined, confirm: flags.get("--confirm"),
+    attribute: flags.get("--attribute")?.trim(),
   };
+  if (req.attribute !== undefined) {
+    if (!COMMENT_OPS.has(req.op)) throw new UsageError("--attribute applies to pr-comment, issue-comment and reply only");
+    if (!req.attribute || /[\r\n\u0000-\u001f]/.test(req.attribute)) throw new UsageError("--attribute needs one line of text, like \"<model> on behalf of <login>\"");
+    if (req.attribute.length > 200) throw new UsageError("--attribute must be 200 characters or fewer");
+  }
   const creates = req.op === "pr-create" || req.op === "issue-create";
   if (positional.length > (creates ? 0 : 1)) throw new UsageError(`unexpected argument "${positional[creates ? 0 : 1]}"`);
   if (!creates && !req.target) throw new UsageError(`${req.op} needs a target (a number or a URL)`);
@@ -333,7 +356,7 @@ function send(env: PostEnv, kind: HostKind, req: Request, n: string | undefined,
     }
   }
   if (r.stdout.trim()) env.out(r.stdout.endsWith("\n") ? r.stdout : r.stdout + "\n");
-  env.out(`POSTED: ${req.op}${n ? ` ${n}` : ""}\n`);
+  env.out(`POSTED: ${req.op}${n ? ` ${n}` : ""}${req.attribute ? ` (attributed: ${req.attribute})` : ""}\n`);
   return EXIT.posted;
 }
 
@@ -348,7 +371,8 @@ export function runPost(argv: string[], env: PostEnv, configBin = "gstack-config
     if (req.op === "reply" && remote.kind !== "github") throw new UsageError("reply is supported on GitHub only");
     const n = req.target === undefined ? undefined : targetNumber(req.target, req.op, remote);
     const title = req.titleFile ? readText(env, req.titleFile, "title") : undefined;
-    const body = req.bodyFile ? readText(env, req.bodyFile, "body") : undefined;
+    const written = req.bodyFile ? readText(env, req.bodyFile, "body") : undefined;
+    const body = written !== undefined && req.attribute ? attributionCallout(req.attribute) + written : written;
     const parts: Array<[Part, string]> = [];
     if (title !== undefined) parts.push(["title", title]);
     if (body !== undefined) parts.push(["body", body]);
@@ -371,7 +395,7 @@ export function runPost(argv: string[], env: PostEnv, configBin = "gstack-config
     const medium = found.filter(m => m.finding.severity === "MEDIUM");
     if (medium.length) {
       const token = confirmationToken(
-        { op: req.op, host: remote.kind, repo: [remote.host, ...remote.segments].join("/"), target: n ?? null, to: req.to ?? null, base: req.base ?? null, head: req.head ?? null, draft: req.draft },
+        { op: req.op, host: remote.kind, repo: [remote.host, ...remote.segments].join("/"), target: n ?? null, to: req.to ?? null, base: req.base ?? null, head: req.head ?? null, draft: req.draft, attribute: req.attribute ?? null },
         parts, medium);
       if (req.confirm !== token) {
         for (const m of medium) env.out(line(m));
