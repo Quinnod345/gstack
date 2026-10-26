@@ -41,6 +41,8 @@ export interface RenderResult {
 
 const WIDTHS = [320, 375, 414, 768, 1024, 1280, 1920];
 const LAPTOP = { width: 1440, height: 900 };
+/** The viewport of the contrast walk and of the pixel pass that confirms it. */
+const CONTRAST_VIEW = { width: 1280, height: 800 };
 const RING_FLOOR = 2.95;
 const RENDER_TIMEOUT_MS = 120_000;
 
@@ -78,10 +80,10 @@ interface Measure { label: string; width: number; height: number; call: string }
 
 /** The first pass: one eval per viewport, the 1280 one carrying the fold, contrast and accent walks. */
 function measures(): Measure[] {
-  const m: Measure[] = WIDTHS.map((w) => ({ label: `${w}px`, width: w, height: 800, call: w === 1280 ? 'P.layout(P, true).concat(P.contrast(P), P.accent(P))' : 'P.layout(P, false)' }));
-  m.push({ label: '1440px', ...LAPTOP, call: 'P.space(P, true)' });
+  const m: Measure[] = WIDTHS.map((w) => ({ label: `${w}px`, width: w, height: CONTRAST_VIEW.height, call: w === CONTRAST_VIEW.width ? 'P.layout(P, true).concat(P.contrast(P), P.accent(P))' : 'P.layout(P, false)' }));
+  m.push({ label: `${LAPTOP.width}px`, ...LAPTOP, call: 'P.space(P, true)' });
   m.push({ label: '1920px', width: 1920, height: 1080, call: 'P.space(P, false)' });
-  for (const call of ['P.quality(P)', 'P.occlusion(P)', 'P.focus(P)']) m.push({ label: '1440px', ...LAPTOP, call });
+  for (const call of ['P.quality(P)', 'P.occlusion(P)', 'P.focus(P)']) m.push({ label: `${LAPTOP.width}px`, ...LAPTOP, call });
   return m;
 }
 
@@ -105,16 +107,19 @@ function parsed<T>(text: string | undefined): Parsed<T> {
   }
 }
 
-/** The source line of the element a finding names: its tag, first class, a distinguishing attribute and its opening text. Best effort; 1 when nothing matches. */
+/** A probe's locator field: a string no longer than a class name or an opening line could be; anything else locates nothing. */
+const SHORT = (v: unknown): v is string => typeof v === 'string' && v.length <= 400;
+
+/** The source line of the element a finding names: its tag, first class, a distinguishing attribute and its opening text. Best effort; 1 when nothing matches, or when the locator is not shaped like one the probes emit. */
 export function lineOf(src: string | null, at?: ProbeAt, lineAt: (i: number) => number = src ? lineIndex(src) : () => 1): number {
-  if (!src || !at || typeof at.tag !== 'string' || typeof at.text !== 'string') return 1;
-  const cls = typeof at.cls === 'string' && at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${escapeRe(at.cls)}(?:\\s[^"']*)?["']`, 'i') : null;
-  const attr = typeof at.attr === 'string' && at.attr ? at.attr : null;
+  if (!src || !at || !SHORT(at.tag) || !/^[a-z]/i.test(at.tag) || !SHORT(at.text)) return 1;
+  const cls = SHORT(at.cls) && at.cls ? at.cls : null;
+  const attr = SHORT(at.attr) && at.attr ? at.attr : null;
   const want = at.text.toLowerCase();
   let fallback = -1;
   for (const m of src.matchAll(new RegExp(`<${escapeRe(at.tag)}\\b[^>]*>`, 'gi'))) {
     const pos = m.index ?? 0;
-    if (cls && !cls.test(m[0])) continue;
+    if (cls && !(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(m[0]) ?? ['', '']).slice(1).join(' ').split(/\s+/).includes(cls)) continue;
     if (attr && !m[0].includes(attr)) continue;
     if (!want) { fallback = pos; break; }
     if (plainText(src.slice(pos + m[0].length, pos + m[0].length + 600)).toLowerCase().startsWith(want)) { fallback = pos; break; }
@@ -197,7 +202,7 @@ async function lintPage(target: string, r: Reporter, run: Runner): Promise<void>
     for (const f of rest) found.splice(found.indexOf(f), 1);
   }
   const bare = rings.filter((x) => x.bare);
-  if (bare.length) report({ rule: 'missing-focus-visible', grade: 'fail', evidence: `[1440px] nothing shows keyboard focus on ${bare.slice(0, 4).map((x) => x.key).join(', ')}`, fix: 'give every control a :focus-visible ring; never remove an outline without putting one back', at: bare[0].at }, src);
+  if (bare.length) report({ rule: 'missing-focus-visible', grade: 'fail', evidence: `[${LAPTOP.width}px] nothing shows keyboard focus on ${bare.slice(0, 4).map((x) => x.key).join(', ')}`, fix: 'give every control a :focus-visible ring; never remove an outline without putting one back', at: bare[0].at }, src);
 
   const textProbes = found.filter((f) => f.probe);
   const weakRings = rings.filter((x) => x.ratio != null && x.ratio < RING_FLOOR);
@@ -212,7 +217,7 @@ async function lintPage(target: string, r: Reporter, run: Runner): Promise<void>
   for (const f of found) if (!(f.probe && dropped.has(f.probe.path))) report(f, src);
   for (const ring of weakRings) {
     const real = confirmed?.ring.get(ring.path) ?? ring.ratio!;
-    if (real < RING_FLOOR) report({ rule: 'missing-focus-visible', grade: 'fail', evidence: `[1440px] focus ring ${real.toFixed(2)}:1 against what is behind it on ${ring.key}`, fix: 'a ring at 3:1 or better against the surface it is drawn over', at: ring.at }, src);
+    if (real < RING_FLOOR) report({ rule: 'missing-focus-visible', grade: 'fail', evidence: `[${LAPTOP.width}px] focus ring ${real.toFixed(2)}:1 against what is behind it on ${ring.key}`, fix: 'a ring at 3:1 or better against the surface it is drawn over', at: ring.at }, src);
   }
 }
 
@@ -225,7 +230,7 @@ async function confirmPixels(file: string, run: Runner, textProbes: Found[], wea
     const textItems: PixelItem[] = [...new Map(textProbes.map((f) => [f.probe!.path, { path: f.probe!.path, kind: 'text' as const }])).values()];
     const ringItems: PixelItem[] = weakRings.map((x) => ({ path: x.path, kind: 'ring' as const, pad: x.pad }));
     const groups: Array<{ items: PixelItem[]; width: number; height: number; shot: string; evalIdx: number }> = [];
-    if (textItems.length) groups.push({ items: textItems, width: 1280, height: 800, shot: path.join(dir, 'text.png'), evalIdx: -1 });
+    if (textItems.length) groups.push({ items: textItems, ...CONTRAST_VIEW, shot: path.join(dir, 'text.png'), evalIdx: -1 });
     if (ringItems.length) groups.push({ items: ringItems, width: LAPTOP.width, height: LAPTOP.height, shot: path.join(dir, 'ring.png'), evalIdx: -1 });
     const steps: RenderStep[] = openingSteps();
     for (const g of groups) {

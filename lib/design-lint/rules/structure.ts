@@ -8,7 +8,7 @@
 import { COLOR_LITERAL, oklchOf, parseColor } from '../color';
 import { isTokenRule, pxOf, resolveVars, type MergedRule } from '../css';
 import { memo, mergedRules, type LintContext } from '../context';
-import { getAttr, innerOf, textOf, treeOf, wordsOf, type Doc } from '../html';
+import { getAttr, innerOf, stripTags, textOf, treeOf, wordsOf, type Doc } from '../html';
 import { trunc, type Reporter } from '../report';
 import { twGroup } from '../tailwind';
 import { heroIndexOf } from './chrome-copy';
@@ -258,7 +258,7 @@ function displayHeadUnwrapped(ctx: LintContext, r: Reporter): void {
       if (!/^h[12]$/.test(t.name) && !/hero__(title|display)|section__title|__display/.test(cls)) continue;
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const text = inner.inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const text = stripTags(inner.inner).replace(/\s+/g, ' ').trim();
       const risky = text.split(' ').find((word) => word.split('-').some((seg) => seg.replace(/[^\w]/g, '').length >= 16));
       if (risky && !wrapCovered(cls, t.name)) {
         r.report('display-head-unwrapped', doc.file, t.line, `the display head holds "${trunc(risky, 30)}" with no overflow-wrap: at 320px that word overflows`);
@@ -351,13 +351,13 @@ function minWidthPx(media: string | null): number | null {
 /** How many columns a grid-template-columns value lays down; null when the count depends on the viewport (auto-fit, auto-fill) or on a var. */
 function columnCount(value: string): number | null {
   if (/auto-fi(t|ll)|var\(/.test(value)) return null;
-  let v = value;
-  for (const m of value.matchAll(/repeat\(\s*(\d+)\s*,\s*((?:[^()]|\([^()]*\))*)\)/g)) {
-    const inner = m[2].replace(/\([^()]*\)/g, 'X').trim().split(/\s+/).length;
-    v = v.replace(m[0], Array(parseInt(m[1], 10) * inner).fill('X').join(' '));
-  }
+  let repeated = 0;
+  const v = value.replace(/repeat\(\s*(\d+)\s*,\s*((?:[^()]|\([^()]*\))*)\)/g, (_, count: string, tracks: string) => {
+    repeated += parseInt(count, 10) * tracks.replace(/\([^()]*\)/g, 'X').trim().split(/\s+/).length;
+    return ' ';
+  });
   if (/repeat\(/.test(v)) return null;
-  return v.replace(/\([^()]*\)/g, 'X').replace(/\[[^\]]*\]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+  return repeated + v.replace(/\([^()]*\)/g, 'X').replace(/\[[^\]]*\]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
 }
 
 /** Whether some container is capped: a max-width paired with auto margins, a max-width of 900px or more, or a Tailwind container or max-w utility. */

@@ -6,7 +6,7 @@
  * emoji icons and template punctuation (30a, 63) in component text.
  */
 import type { LintContext } from '../context';
-import { oneLine, relPath, trunc, type Reporter } from '../report';
+import { oneLine, relPath, trunc, type Finding, type Reporter } from '../report';
 import { compInner, twEyebrow, twGlow, twGradient, twGroup, twMonoIsMaterial, twPlain, twText, twTiles, twTokens, twTrackedCaps, twWhere, twDataText, type TwItem } from '../tailwind';
 
 const EMOJI_ICON = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
@@ -93,7 +93,6 @@ function checkTailwind(ctx: LintContext, r: Reporter): void {
 // sloplint checkComponentText (gates 63 30a)
 function checkComponentText(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
-    const file = oneLine(relPath(doc.file, r.cwd));
     for (let c = 0; c < doc.comps.length; c++) {
       const t = doc.comps[c];
       if (t.close || t.selfClosing) continue;
@@ -104,7 +103,8 @@ function checkComponentText(ctx: LintContext, r: Reporter): void {
       if (/(?:link|button|btn|cta)$/i.test(t.name) && /(→|->|›|»|⟶)\s*$/.test(text)) r.report('template-punctuation', doc.file, t.line, `arrow glued to the label "${trunc(text, 40)}" (<${t.name}>)`, { fix: 'a verb as the label; the link already says it goes somewhere' });
       if ((text.match(/\s[·•]\s/g) || []).length >= 2) r.report('template-punctuation', doc.file, t.line, `middle-dot meta string "${trunc(text, 50)}"`, { fix: 'line breaks, columns or hairlines; one dot in a byline at most' });
       if (text.length <= 4 && EMOJI_ICON.test(text)) {
-        const outer = r.findings.findIndex((f) => f.rule === 'emoji-decoration' && f.file === file && f.evidence.includes(`"${text}"`));
+        const icon = (doc.cache.emojiIcons as Map<string, Finding> | undefined)?.get(text);
+        const outer = icon ? r.findings.indexOf(icon) : -1;
         if (outer >= 0) r.findings.splice(outer, 1);
         r.report('emoji-decoration', doc.file, t.line, `emoji icon "${text}" in <${t.name}>`, { fix: 'one icon library or custom SVG' });
       }

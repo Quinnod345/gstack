@@ -15,8 +15,9 @@
  * which a waiver answers like any ask); a reason under 24 characters,
  * boilerplate ("by design", "intentional"), reused word for word on another
  * waiver, or sharing no word of four letters or more with the page's own
- * text; a second waiver of one rule. More than three waivers on one page is a
- * house style and belongs in DESIGN.md: reported at polish.
+ * text; a second waiver of one rule; a claim on one of the lint's own rules
+ * (waiver, house-style, render, internal-error). More than three waivers on
+ * one page is a house style and belongs in DESIGN.md: reported at polish.
  *
  * Adapted from Nutlope/hallmark's sloplint.mjs applyWaivers (MIT, see
  * NOTICE.md); the guard evidence field is dropped because gstack has no theme

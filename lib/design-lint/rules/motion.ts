@@ -162,7 +162,7 @@ function tooltipDelay(ctx: LintContext, r: Reporter): void {
   const delayed = (sel: RegExp): { file: string; line: number } | null => {
     for (const rule of tips) {
       if (!sel.test(rule.selector)) continue;
-      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && /(\d{3,})ms|([1-9][\d.]*)s\b/.test(x.value));
+      const d = rule.decls.find((x) => /^transition(-delay)?$/.test(x.prop) && /(?<![\d.])(?:\d{3,}ms|[1-9]\d*(?:\.\d+)?s)\b/.test(x.value));
       if (d) return { file: rule.file, line: d.line };
     }
     return null;
@@ -329,12 +329,14 @@ function controlHeight(ctx: LintContext, r: Reporter): void {
 const HIDE_OK = /tooltip|popover|menu|dropdown|modal|dialog|toast|overlay|backdrop|sheet|drawer|panel|:hover|:focus|:checked|:target|\[open|\[aria-(?:expanded|selected|current|pressed)|::before|::after|\.is-|\[hidden|\[aria-hidden|sr-only|visually-hidden|skip|placeholder|::marker|\[data-slot/i;
 const REVEALISH = /reveal|fade|animate|aos|in-view|inview|appear|enter|rise|slide|stagger|observe|lazy/i;
 
-// sloplint startingStyleText (gate 62): every @starting-style block with the selector it sits under
+// sloplint startingStyleText (gate 62): every @starting-style block with the selector it sits under; a block inside one already taken is part of it, so an unclosed block costs the rest of the sheet once
 function startingStyleText(css: string): string {
-  let out = '';
+  let out = '', taken = 0;
   for (const m of css.matchAll(/@starting-style\s*\{/gi)) {
+    if (m.index! < taken) continue;
     let depth = 1, k = m.index! + m[0].length;
     while (k < css.length && depth > 0) { if (css[k] === '{') depth++; else if (css[k] === '}') depth--; k++; }
+    taken = k;
     out += css.slice(m.index!, k) + ' ';
     const open = css.lastIndexOf('{', m.index! - 1), close = css.lastIndexOf('}', m.index! - 1);
     if (open > close) out += css.slice(Math.max(close + 1, 0), open) + ' ';

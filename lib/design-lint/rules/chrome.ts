@@ -125,18 +125,15 @@ const TICKER = /marquee|ticker|tape|crawl/i;
 function checkTemplatePunctuation(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     const dotLines = new Set<number>(), arrowLines = new Set<number>();
-    const tickerRanges: Array<[number, number]> = [];
+    const { parent } = treeOf(doc);
+    const inTicker = new Uint8Array(doc.tags.length);
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
-      if (t.close || t.selfClosing || !TICKER.test(getAttr(t.attrs, 'class') || '')) continue;
-      const inner = innerOf(doc, i);
-      if (inner) tickerRanges.push([t.pos, inner.endPos]);
+      inTicker[i] = (parent[i] >= 0 && inTicker[parent[i]]) || (!t.close && !t.selfClosing && TICKER.test(getAttr(t.attrs, 'class') || '') ? 1 : 0);
     }
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
-      if (t.close || t.selfClosing || !TEXT_TAGS.has(t.name)) continue;
-      const cls = getAttr(t.attrs, 'class') || '';
-      if (TICKER.test(cls) || tickerRanges.some(([a, b]) => t.pos > a && t.pos < b)) continue;
+      if (t.close || t.selfClosing || !TEXT_TAGS.has(t.name) || inTicker[i]) continue;
       const inner = innerOf(doc, i);
       if (!inner || /<(p|div|li|section|article|ul|ol|table)\b/i.test(inner.inner)) continue;
       const text = textOf(doc, i);

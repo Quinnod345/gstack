@@ -9,22 +9,24 @@
 import { contrastRatio, oklchOf, parseColor, type Color } from '../color';
 import { mergedRules, type LintContext } from '../context';
 import { CONTRAST_SLACK, isTokenRule, resolveVars, pxOf, type MergedRule, type Tokens } from '../css';
-import { ancestorsOf, getAttr, hasAttr, innerOf, textOf, treeOf } from '../html';
-import { trunc, type Reporter } from '../report';
+import { ancestorsOf, getAttr, hasAttr, innerOf, stripTags, textOf, treeOf } from '../html';
+import { trunc, type Finding, type Reporter } from '../report';
 
 const EMOJI = /(?![©®™‼⁉←-⇿])\p{Extended_Pictographic}/u;
-const GLYPH = /(?![©®™‼⁉←-⇿✓-✖])(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)/u;
+const GLYPH = /(?![©®™‼⁉←-⇿✓-✖])(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F)/u;
 
 // sloplint check30 (gate 30a)
 function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
   for (const doc of ctx.docs) {
     const lines = new Set<number>();
     let n = 0;
-    const flag = (line: number, what: string): void => {
-      if (lines.has(line) || n >= 8) return;
+    const icons = (doc.cache.emojiIcons ??= new Map<string, Finding>()) as Map<string, Finding>;
+    const flag = (line: number, what: string): boolean => {
+      if (lines.has(line) || n >= 8) return false;
       lines.add(line);
       n++;
       r.report('emoji-decoration', doc.file, line, what);
+      return true;
     };
     for (let i = 0; i < doc.tags.length; i++) {
       const t = doc.tags[i];
@@ -33,9 +35,9 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
       const iconish = /icon|card|step|tier|feature|value|prop|badge/i.test(cls);
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const content = inner.inner.replace(/<[^>]*>/g, '').trim();
+      const content = stripTags(inner.inner).replace(/\s+/g, ' ').trim();
       if (content && content.length <= 4 && EMOJI.test(content) && (iconish || !/<[a-z]/.test(inner.inner))) {
-        flag(t.line, 'an emoji icon "' + content + '" in <' + t.name + ' class="' + trunc(cls, 28) + '">');
+        if (flag(t.line, 'an emoji icon "' + content + '" in <' + t.name + ' class="' + trunc(cls, 28) + '">')) icons.set(content, r.findings[r.findings.length - 1]);
         lines.add(doc.lineOf(t.end + inner.inner.search(EMOJI)));
         continue;
       }
@@ -47,9 +49,9 @@ function checkEmojiIcons(ctx: LintContext, r: Reporter): void {
     }
     const raw = doc.raw;
     const body = doc.masked;
-    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
+    for (const m of body.matchAll(/>\s*((?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F)[^<>{}\n]{0,40})/gu)) flag(doc.lineOf(m.index! + m[0].length - m[1].length), 'text opens with an emoji: "' + trunc(m[1].trim(), 32) + '"');
     for (const m of body.matchAll(/placeholder\s*=\s*["']([^"']*)["']/g)) if (GLYPH.test(m[1])) flag(doc.lineOf(m.index!), 'an emoji in a placeholder "' + trunc(m[1], 28) + '"');
-    if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}️?)‍?){1,3})\s*\1/gu)) flag(doc.lineOf(m.index!), 'an emoji passed as an icon: ' + m[2]);
+    if (doc.kind !== 'html') for (const m of raw.matchAll(/(["'`])\s*((?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F?)\u200D?){1,3})\s*\1/gu)) flag(doc.lineOf(m.index!), 'an emoji passed as an icon: ' + m[2]);
   }
 }
 
@@ -76,7 +78,7 @@ function iconSurfaces(ctx: LintContext): string {
     }
     for (const call of doc.virtuals) out.push(call.toks.join(' '));
     for (const toks of doc.classAt.values()) out.push(toks.join(' '));
-    for (const m of doc.scripts.matchAll(/\b(?:import|require|from)\b[^\n;]*['"]([^'"]+)['"]/g)) out.push(m[1]);
+    for (const m of doc.scripts.matchAll(/\b(?:import\s*\(?\s*|require\s*\(\s*|from\s+)['"]([^'"\n]+)['"]/g)) out.push(m[1]);
   }
   for (const f of ctx.cssFiles) for (const m of f.raw.matchAll(/@import\s+(?:url\()?['"]?([^'")\s;]+)|url\(\s*['"]?([^'")]+)/g)) out.push(m[1] ?? m[2]);
   return out.join('\n');
@@ -205,7 +207,7 @@ function checkWrappingLabels(ctx: LintContext, r: Reporter): void {
       if (!button && !link) continue;
       const inner = innerOf(doc, i);
       if (!inner) continue;
-      const label = inner.inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const label = stripTags(inner.inner).replace(/\s+/g, ' ').trim();
       if (label.length <= 24 || covered(cls, t.name)) continue;
       if (button) r.report('button-label-wraps', doc.file, t.line, 'the long label "' + trunc(label, 36) + '" on <' + t.name + '> can wrap, and nothing sets nowrap', { suspected: true });
       else r.report('link-wraps', doc.file, t.line, 'the long link "' + trunc(label, 36) + '" can wrap, and nothing sets nowrap');

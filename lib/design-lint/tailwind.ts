@@ -373,9 +373,7 @@ export function twTokensOf(doc: Doc, t: Tag): string[] {
     if (q === '"' || q === "'") { const e = tag.indexOf(q, i + 1); val = tag.slice(i + 1, e < 0 ? tag.length : e); }
     else if (q === '{') { val = tag.slice(i + 1, braceEnd(tag, i)); dyn = true; }
     else val = (/^[^\s>]*/.exec(tag.slice(i)) || [''])[0];
-    if (dyn) out.push(...clsLits(val));
-    else if (val.includes('{')) out.push(...twInterp(val));
-    else out.push(...val.split(/\s+/));
+    for (const t of dyn ? clsLits(val) : val.includes('{') ? twInterp(val) : val.split(/\s+/)) out.push(t);
   }
   for (const d of tag.matchAll(/(?:^|\s)class:(?!list\b)([\w-]+)/g)) out.push(d[1]);
   return out.filter(Boolean);
@@ -491,18 +489,27 @@ export function twWhere(it: TwItem): string {
   return it.virtual ? `${it.tag}() class string` : `<${it.tag} class="${trunc(it.info.classes.join(' '), 32)}">`;
 }
 
-/** The source between a component tag and its matching close. */
-export function compInner(doc: Doc, c: number): string {
-  const open = doc.comps[c];
-  if (open.selfClosing) return '';
-  let depth = 1;
-  for (let i = c + 1; i < doc.comps.length; i++) {
+/** Component tags paired once per document: for each open tag the index of its own close tag, -1 when none closes it. */
+function compCloses(doc: Doc): Int32Array {
+  const cached = doc.cache.compCloses as Int32Array | undefined;
+  if (cached) return cached;
+  const closes = new Int32Array(doc.comps.length).fill(-1);
+  const open = new Map<string, number[]>();
+  for (let i = 0; i < doc.comps.length; i++) {
     const t = doc.comps[i];
-    if (t.name !== open.name || t.selfClosing) continue;
-    if (!t.close) depth++;
-    else if (--depth === 0) return doc.src.slice(open.end, t.pos);
+    if (t.selfClosing) continue;
+    if (!t.close) { const s = open.get(t.name); if (s) s.push(i); else open.set(t.name, [i]); continue; }
+    const s = open.get(t.name);
+    if (s?.length) closes[s.pop()!] = i;
   }
-  return '';
+  doc.cache.compCloses = closes;
+  return closes;
+}
+
+/** The source between a component tag and its matching close; empty when nothing closes it. */
+export function compInner(doc: Doc, c: number): string {
+  const k = compCloses(doc)[c];
+  return k < 0 ? '' : doc.src.slice(doc.comps[c].end, doc.comps[k].pos);
 }
 
 /** Visible text of a fragment, with template expressions blanked in Vue, Svelte and Astro files. */

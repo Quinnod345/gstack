@@ -15,15 +15,7 @@ import { lineIndex } from './css';
 
 export type DocKind = 'html' | 'jsx' | 'vue' | 'svelte' | 'astro';
 
-export interface Tag {
-  close: boolean;
-  name: string;
-  attrs: string;
-  pos: number;
-  end: number;
-  selfClosing: boolean;
-  line: number;
-}
+export interface Tag { close: boolean; name: string; attrs: string; pos: number; end: number; selfClosing: boolean; line: number }
 
 /** A string as a literal inside a RegExp source. */
 export const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -70,10 +62,11 @@ interface Span { start: number; bodyStart: number; bodyEnd: number; end: number 
 
 /**
  * Every `open … close` span of lower in one linear pass, so a file of
- * unclosed openers costs its length and not its square. An opener with no
- * closer after it is left alone, which is what the lazy regex it replaces did.
- * For an element, open is `<name`, which must end the name, and the span runs
- * from that open tag through `</name>` (spaces before the `>` allowed).
+ * unclosed openers costs its length and not its square. An unclosed comment
+ * runs to the end of the file, as a browser reads it; an element opener with
+ * no closer after it is left alone, as a tag. For an element, open is
+ * `<name`, which must end the name, and the span runs from that open tag
+ * through `</name>` (spaces before the `>` allowed).
  */
 function spansOf(lower: string, open: string, close: string, element: boolean): Span[] {
   const out: Span[] = [];
@@ -84,7 +77,7 @@ function spansOf(lower: string, open: string, close: string, element: boolean): 
     const after = start + open.length;
     if (!element) {
       const c = lower.indexOf(close, after);
-      if (c < 0) break;
+      if (c < 0) { out.push({ start, bodyStart: after, bodyEnd: lower.length, end: lower.length }); break; }
       out.push({ start, bodyStart: after, bodyEnd: c, end: c + close.length });
       i = c + close.length;
       continue;
@@ -140,19 +133,25 @@ const MAX_UNQUOTED_ATTRS = 8192;
  * `</name>`, with quoted attribute values skipped whole. A `<` that never
  * reaches a `>`, or a quote that never closes, is text; a `<` that opens a
  * tag inside unquoted attribute text starts the next tag instead, as a
- * browser reads `<a <b>`.
+ * browser reads `<a <b>`. Every `<` that starts no tag is a stray, except
+ * a `<!` or `<?` (a doctype, a declaration) with some `>` after it.
  */
 function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string, pos: number, end: number) => void, strays?: number[]): void {
   const n = s.length;
   const noQuoteFrom: Record<string, number> = { '"': n, "'": n };
-  let i = 0;
+  let i = 0, nextGt = -1;
   while (i < n) {
     const lt = s.indexOf('<', i);
     if (lt < 0) break;
     let j = lt + 1;
     const close = s[j] === '/';
     if (close) j++;
-    if (!/[a-zA-Z]/.test(s[j] || '')) { i = lt + 1; continue; }
+    if (!/[a-zA-Z]/.test(s[j] || '')) {
+      if (nextGt < lt) { const g = s.indexOf('>', lt); nextGt = g < 0 ? n : g; }
+      if (!/[!?]/.test(s[j] || '') || nextGt >= n) strays?.push(lt);
+      i = lt + 1;
+      continue;
+    }
     let k = j + 1;
     while (k < n && /[a-zA-Z0-9-]/.test(s[k])) k++;
     let p = k, unquoted = 0, next = lt + 1, gt = -1;
@@ -176,7 +175,7 @@ function scanTags(s: string, onTag: (close: boolean, name: string, attrs: string
   }
 }
 
-/** The text with each stray `<` (a tag-shaped start the scanner found no `>` for) replaced by a space, so a `<tag\b[^>]*>` regex over it always finds its `>` within the tag and a page whose tail is ten thousand unclosed `<img ` costs its length. */
+/** The text with each stray `<` replaced by a space, so every `<` left starts a tag with its own `>`, a `<[^>]*>` regex over it costs its length, and a page whose tail is ten thousand unclosed `<img ` or `<1` costs its length. */
 function blankStrays(s: string, strays: number[]): string {
   let out = '', from = 0;
   for (const i of strays) { out += s.slice(from, i) + ' '; from = i + 1; }

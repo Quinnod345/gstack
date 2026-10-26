@@ -293,13 +293,14 @@ export function shareProjects(contexts: LintContext[]): void {
 
 /**
  * The waiver comments of a context, in its documents and every stylesheet it reads, weighed against what its rules found.
- * A stylesheet's claims answer for that stylesheet on every page that links it. In a directory of components (under
- * either scope) each file's claims answer for that file alone, weighed against its own text and its own suspected
- * rules, with the house-style count per file.
+ * A stylesheet's claims answer for that stylesheet on every page that links it. A context that is one html page keeps
+ * page semantics under either scope: its claims answer for the page and the stylesheets it links. In a directory of
+ * components (under either scope) each file's claims answer for that file alone, weighed against its own text and its
+ * own suspected rules, with the house-style count per file.
  */
 export function contextWaivers(ctx: LintContext, cwd: string, findings: Finding[] = []): WaiverSet {
   const sheets = ctx.cssFiles.flatMap((c) => findWaivers(c.file, c.raw));
-  if (ctx.scope !== 'component' && ctx.docs.length <= 1) return resolveWaivers([...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)), ...sheets], ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
+  if (ctx.docs.length <= 1 && ctx.docs.every((d) => d.kind === 'html')) return resolveWaivers([...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)), ...sheets], ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
   const sets = [
     ...ctx.docs.map((d) => { const file = oneLine(relPath(d.file, cwd)); return resolveWaivers(findWaivers(d.file, d.raw), d.text, cwd, suspectedRules(findings.filter((f) => f.file === file)), true); }),
     resolveWaivers(sheets, '', cwd, suspectedRules(findings)),
