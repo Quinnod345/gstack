@@ -24,6 +24,7 @@
 # GSTACK_CHROMIUM_NO_SANDBOX=1 for the probe. Bash 3.2 plus POSIX tools.
 BASH_COMPAT=50
 set -u
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || { echo "gstack-browser-ensure: cannot resolve the install root" >&2; exit 1; }
 DOCS="https://github.com/garrytan/gstack/blob/main/docs/troubleshooting.md#browser-ensure-failed"
@@ -58,7 +59,7 @@ probe() {
     else PROBE_OUT=$(cd "$ROOT" && node -e "$PROBE" </dev/null 2>&1); PROBE_RC=$?; fi
   elif command -v bun >/dev/null 2>&1; then
     ENGINE=bun
-    PROBE_OUT=$(cd "$ROOT" && bun --no-env-file --config=/dev/null -e "$PROBE" </dev/null 2>&1); PROBE_RC=$?
+    PROBE_OUT=$(cd "$ROOT" && bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "$PROBE" </dev/null 2>&1); PROBE_RC=$?
   else
     fail "neither node nor bun is on PATH to launch Chromium" "install Node.js (https://nodejs.org) or Bun, then re-run $0"
   fi

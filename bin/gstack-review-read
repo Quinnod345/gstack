@@ -9,6 +9,7 @@
 # rows using review_freshness; legacy or uncaptured diff evidence cannot fall
 # back to HEAD equality. Plan rows are unchanged.
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && SCRIPT_DIR="$(cygpath -m "$SCRIPT_DIR")" ;;
@@ -19,7 +20,7 @@ gstack_state_root_select
 GSTACK_HOME="$_gstack_sr_root"
 WTREE=$("$SCRIPT_DIR/gstack-wtree" 2>/dev/null || echo "unknown")
 if [ -f "$GSTACK_HOME/projects/$SLUG/$BRANCH-reviews.jsonl" ]; then
-  GSTACK_REVIEW_LIB="$SCRIPT_DIR/../lib/review-evidence.ts" GSTACK_REVIEW_WTREE="$WTREE" bun --no-env-file --config=/dev/null -e '
+  GSTACK_REVIEW_LIB="$SCRIPT_DIR/../lib/review-evidence.ts" GSTACK_REVIEW_WTREE="$WTREE" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e '
     const { reviewFreshness } = await import(process.env.GSTACK_REVIEW_LIB);
     for (const line of (await Bun.stdin.text()).split("\n").filter(Boolean)) {
       try {

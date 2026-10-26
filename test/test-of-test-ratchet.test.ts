@@ -60,6 +60,7 @@ const BASELINE = [
   'test/codex-carve-fixture.test.ts',
   'test/codex-eval-recording.test.ts',
   'test/codex-resume-flag-semantics.test.ts',
+  'test/context-restore-fragment-verdict.test.ts', // GSTA-91: replays three captured false reds (0/3 on main cb99df4) through the paid context-restore-fragment-match case's fragmentRestoreVerdict
   'test/cookie-workflow-judge-input.test.ts', // slices test/skill-llm-eval.test.ts source (recorded 2026-10 when the ratchet learned paid-source slicing)
   'test/cso-ntfs-fixture.test.ts',
   'test/cso-windows-build-contract.test.ts',

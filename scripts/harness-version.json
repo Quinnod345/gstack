@@ -29,7 +29,7 @@
     "test/helpers/eval-budgets.ts": {"blob":"667d0e09b20fe5d7366f57b77b5fb9b04baa37ef","since":6},
     "test/helpers/eval-store.ts": {"blob":"a50ea2c28f508ad9f35ea9353dd2f502ee0dcfc2","since":6,"nonBehavioral":"credential rejections are classed infra instead of assertion: no case's pass or fail changes; only failed trials whose provider rejected the run's key move class, so no rerun spends on a rejected key"},
     "test/helpers/hermetic-env.ts": {"blob":"cc072895461dc52ea317d1beff72121342420d30","since":6},
-    "test/helpers/llm-judge.ts": {"blob":"d0bc6bbbe9f478603d11a1ece95e66c812ad34e6","since":6},
+    "test/helpers/llm-judge.ts": {"blob":"a3177665b662932ce485ccc976c2b36a1531a0bb","since":6,"nonBehavioral":"callJudge rewrites only the message of a JSON parse failure (names the judge output, stop reason, length and the retained llm-judge-response-parse-error event); it still throws a SyntaxError before any score is parsed, the request is unchanged, and no case's pass or fail changes"},
     "test/helpers/paid-test-set.ts": {"blob":"ff9bfe43c43ec2bdd11114f7b8ec7c5736116f75","since":6},
     "test/helpers/pty-screen.ts": {"blob":"4f77569f9ce11f9cee9f347216e468cd7c956820","since":6},
     "test/helpers/pty/auq.ts": {"blob":"16e5ea2bb5b9f28f44808a1a09024dbd3e6f28c4","since":6},

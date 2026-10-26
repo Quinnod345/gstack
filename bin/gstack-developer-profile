@@ -28,6 +28,7 @@
 # docs/designs/PLAN_TUNING_V0.md). Event file: ~/.gstack/projects/{SLUG}/
 # question-events.jsonl.
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -70,7 +71,7 @@ do_migrate() {
   TMPOUT=$(mktemp "$GSTACK_HOME/developer-profile.json.tmp.XXXXXX")
   trap 'rm -f "$TMPOUT"' EXIT
 
-  cat "$LEGACY_FILE" | bun --no-env-file --config=/dev/null -e "
+  cat "$LEGACY_FILE" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const lines = (await Bun.stdin.text()).trim().split('\n').filter(Boolean);
     const sessions = [];
     const signalsAcc = {};
@@ -127,7 +128,7 @@ do_migrate() {
   mv "$LEGACY_FILE" "$LEGACY_FILE.migrated-$TS"
 
   local COUNT
-  COUNT=$(PROFILE_FILE_PATH="$PROFILE_FILE" bun --no-env-file --config=/dev/null -e "console.log(JSON.parse(require('fs').readFileSync(process.env.PROFILE_FILE_PATH,'utf-8')).sessions.length)" 2>/dev/null || echo "?")
+  COUNT=$(PROFILE_FILE_PATH="$PROFILE_FILE" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "console.log(JSON.parse(require('fs').readFileSync(process.env.PROFILE_FILE_PATH,'utf-8')).sessions.length)" 2>/dev/null || echo "?")
   echo "MIGRATE: ok — migrated $COUNT sessions from builder-profile.jsonl"
 }
 
@@ -175,7 +176,8 @@ EOF
 # and update aggregates (signals_accumulated, resources_shown, topics).
 # Fix for #1671: the writer side of the v1.0.0.0 migration. Reader and
 # writer now share the same file.
-# Silent skip on invalid input (matches gstack-timeline-log:22-26 pattern).
+# Invalid input is skipped silently; a Bun failure is reported and returned,
+# as in gstack-timeline-log (#3415).
 # -----------------------------------------------------------------------
 do_log_session() {
   local INPUT="${1:-}"
@@ -184,12 +186,23 @@ do_log_session() {
   fi
 
   # Validate: input must be parseable JSON with required fields (date, mode).
-  if ! printf '%s' "$INPUT" | bun --no-env-file --config=/dev/null -e "
-    const j = JSON.parse(await Bun.stdin.text());
-    if (!j.date || !j.mode) process.exit(1);
-  " 2>/dev/null; then
-    return 0
+  # The validator prints its verdict; a non-zero exit means Bun itself failed.
+  local VALIDATE_RC=0 VALIDATE_OUT
+  VALIDATE_OUT=$(printf '%s' "$INPUT" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
+    const text = await Bun.stdin.text();
+    let j;
+    try { j = JSON.parse(text); } catch {}
+    console.log(j && j.date && j.mode ? 'valid' : 'invalid');
+  ") || VALIDATE_RC=$?
+  if [ "$VALIDATE_RC" -ne 0 ]; then
+    echo "gstack-developer-profile: bun exited $VALIDATE_RC before the session was validated; nothing was logged" >&2
+    return "$VALIDATE_RC"
   fi
+  case "$VALIDATE_OUT" in
+    valid) ;;
+    invalid) return 0 ;;
+    *) echo "gstack-developer-profile: bun printed no verdict while validating the session; nothing was logged" >&2; return 1 ;;
+  esac
 
   ensure_profile
 
@@ -197,7 +210,7 @@ do_log_session() {
   TMPOUT=$(mktemp "$GSTACK_HOME/developer-profile.json.tmp.XXXXXX")
   trap 'rm -f "$TMPOUT"' EXIT
 
-  PROFILE_FILE_PATH="$PROFILE_FILE" RECORD_INPUT="$INPUT" TMPOUT_PATH="$TMPOUT" bun --no-env-file --config=/dev/null -e "
+  PROFILE_FILE_PATH="$PROFILE_FILE" RECORD_INPUT="$INPUT" TMPOUT_PATH="$TMPOUT" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const fs = require('fs');
     const entry = JSON.parse(process.env.RECORD_INPUT);
     if (!entry.ts) entry.ts = new Date().toISOString();
@@ -244,7 +257,7 @@ do_reconcile() {
   TMPOUT=$(mktemp "$GSTACK_HOME/developer-profile.json.tmp.XXXXXX")
   trap 'rm -f "$TMPOUT"' EXIT
 
-  PROFILE_FILE_PATH="$PROFILE_FILE" PROJECTS_DIR="$GSTACK_HOME/projects" TMPOUT_PATH="$TMPOUT" bun --no-env-file --config=/dev/null -e "
+  PROFILE_FILE_PATH="$PROFILE_FILE" PROJECTS_DIR="$GSTACK_HOME/projects" TMPOUT_PATH="$TMPOUT" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const fs = require('fs');
     const path = require('path');
     const profile = JSON.parse(fs.readFileSync(process.env.PROFILE_FILE_PATH, 'utf-8'));
@@ -314,7 +327,7 @@ do_reconcile() {
 # -----------------------------------------------------------------------
 do_read() {
   ensure_profile
-  cat "$PROFILE_FILE" | bun --no-env-file --config=/dev/null -e "
+  cat "$PROFILE_FILE" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const p = JSON.parse(await Bun.stdin.text());
     const sessions = p.sessions || [];
 
@@ -388,7 +401,7 @@ do_profile() {
 # -----------------------------------------------------------------------
 do_gap() {
   ensure_profile
-  cat "$PROFILE_FILE" | bun --no-env-file --config=/dev/null -e "
+  cat "$PROFILE_FILE" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const p = JSON.parse(await Bun.stdin.text());
     const declared = p.declared || {};
     const inferred = (p.inferred && p.inferred.values) || {};
@@ -417,7 +430,7 @@ do_derive() {
   fi
 
   cd "$ROOT_DIR"
-  PROFILE_FILE_PATH="$PROFILE_FILE" EVENTS_PATH="$EVENTS" bun --no-env-file --config=/dev/null -e "
+  PROFILE_FILE_PATH="$PROFILE_FILE" EVENTS_PATH="$EVENTS" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     import('./scripts/question-registry.ts').then(async (regmod) => {
       const sigmod = await import('./scripts/psychographic-signals.ts');
       const fs = require('fs');
@@ -504,7 +517,7 @@ do_trace() {
     return 0
   fi
   cd "$ROOT_DIR"
-  EVENTS_PATH="$EVENTS" TRACE_DIM="$DIM" bun --no-env-file --config=/dev/null -e "
+  EVENTS_PATH="$EVENTS" TRACE_DIM="$DIM" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     import('./scripts/question-registry.ts').then(async (regmod) => {
       const sigmod = await import('./scripts/psychographic-signals.ts');
       const fs = require('fs');
@@ -542,7 +555,7 @@ do_trace() {
 # -----------------------------------------------------------------------
 do_check_mismatch() {
   ensure_profile
-  cat "$PROFILE_FILE" | bun --no-env-file --config=/dev/null -e "
+  cat "$PROFILE_FILE" | bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     const p = JSON.parse(await Bun.stdin.text());
     const declared = p.declared || {};
     const inferred = (p.inferred && p.inferred.values) || {};
@@ -586,7 +599,7 @@ do_narrative() {
 do_vibe() {
   ensure_profile
   cd "$ROOT_DIR"
-  cat "$PROFILE_FILE" | PROFILE_DATA="$(cat "$PROFILE_FILE")" bun --no-env-file --config=/dev/null -e "
+  cat "$PROFILE_FILE" | PROFILE_DATA="$(cat "$PROFILE_FILE")" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
     import('./scripts/archetypes.ts').then(async (mod) => {
       const p = JSON.parse(process.env.PROFILE_DATA);
       const dims = (p.inferred && p.inferred.values) || {
