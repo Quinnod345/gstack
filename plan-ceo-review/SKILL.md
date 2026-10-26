@@ -447,7 +447,7 @@ Make this plan extraordinary. Match posture:
 * SELECTIVE EXPANSION: Harden current scope; neutrally offer each expansion's opportunity, effort and risk. Accepted items govern later sections; rejected ones go to "NOT in scope."
 * HOLD SCOPE: Preserve scope; trace failures, edge cases, error paths, tests and observability.
 * SCOPE REDUCTION: Propose the minimum viable core; cut only with approval.
-* COMPLETENESS IS COVERAGE: Prefer the approach that covers the whole requirement (tests, edge cases, error paths) over a 90% shortcut, add no code beyond the requirement, and at equal coverage choose the smaller diff.
+* COMPLETENESS IS COVERAGE: Prefer the approach that covers the whole requirement (tests, edge cases, error paths) over a 90% shortcut, add no code beyond the accepted scope, and at equal coverage choose the smaller diff.
 Approval is required for each scope change. Raise concerns in Step 0, then commit: no arguing for less in EXPANSION, silent SELECTIVE additions/cuts, or scope restored to REDUCTION.
 Review only. Do not change code or implement.
 
