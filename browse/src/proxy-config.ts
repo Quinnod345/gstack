@@ -240,13 +240,22 @@ export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefine
 }
 
 /**
- * The daemon's launch log line for a direct connection (#3440 item 8). Direct
- * is enforced with `--proxy-server=direct://` (see BrowserManager.proxyLaunchArgs),
- * so this names each standard variable Chromium would otherwise have read.
+ * The Chromium switch that makes a direct connection explicit (#3440 item 8).
+ * Launched without --proxy-server, Chromium reads HTTPS_PROXY, HTTP_PROXY and
+ * ALL_PROXY (Linux) or the system proxy settings itself. Not --no-proxy-server:
+ * chrome-headless-shell, the default headless build, ignores that switch and
+ * still took HTTPS_PROXY (measured on Playwright 1.62.1); the full Chromium
+ * honors both, and direct:// works on both.
+ */
+export const DIRECT_PROXY_ARG = '--proxy-server=direct://';
+
+/**
+ * The daemon's launch log line for a direct connection: the switch Chromium
+ * was given, then each standard variable it would otherwise have read.
  */
 export function directProxyLogLine(env: NodeJS.ProcessEnv): string {
   const ignored = STANDARD_PROXY_VARS.filter(name => env[name]);
-  return `[browse] [proxy] none: direct connection (--proxy-server=direct://${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
+  return `[browse] [proxy] none: direct connection (${DIRECT_PROXY_ARG}${ignored.length ? `; ignoring ${ignored.join(', ')}` : ''})`;
 }
 
 /**

@@ -25,6 +25,7 @@ import { TabSession, type RefEntry } from './tab-session';
 import { resolveChromiumProfile, cleanSingletonLocks, resolveConfig } from './config';
 import { ensureProjectProfile } from './chromium-profiles';
 import { launchWithXProtectHeal } from './xprotect-heal';
+import { DIRECT_PROXY_ARG } from './proxy-config';
 import { readPidStartTime, shouldSpawnXvfb, spawnFreeXvfb, xvfbInstallHint, type XvfbHandle } from './xvfb';
 import { withCdpSession } from './cdp-bridge';
 import { resultLine } from '../../lib/result-codes';
@@ -615,20 +616,14 @@ export class BrowserManager {
   }
 
   /**
-   * Chromium picks its own proxy when it is launched without --proxy-server:
-   * HTTPS_PROXY, HTTP_PROXY and ALL_PROXY on Linux, the system proxy settings
-   * on macOS and Windows. Playwright passes a configured proxy explicitly as
-   * --proxy-server, so only a session browse resolved to direct was exposed:
-   * `BROWSE_PROXY_URL=direct` on a machine with HTTPS_PROXY set still routed
-   * every `goto` through that proxy (#3440 item 8). Direct now means
-   * `--proxy-server=direct://` on every launch path (headless, headed,
-   * handoff). Not `--no-proxy-server`: chrome-headless-shell (the default
-   * headless build) only reads --proxy-server and still took HTTPS_PROXY
-   * with --no-proxy-server set, measured on Playwright 1.62.1; the full
-   * Chromium honors both.
+   * Playwright passes a configured proxy explicitly as --proxy-server, so only
+   * a session browse resolved to direct was exposed: `BROWSE_PROXY_URL=direct`
+   * on a machine with HTTPS_PROXY set still routed every `goto` through that
+   * proxy (#3440 item 8). Direct now means DIRECT_PROXY_ARG on every launch
+   * path (headless, the extension context, headed, handoff).
    */
   private proxyLaunchArgs(): string[] {
-    return this.proxyConfig ? [] : ['--proxy-server=direct://'];
+    return this.proxyConfig ? [] : [DIRECT_PROXY_ARG];
   }
 
   /**
