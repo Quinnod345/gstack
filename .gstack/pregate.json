@@ -5,7 +5,6 @@
   "dependencies": {
     ".github/workflows/**": ["test/pregate-selection.test.ts", "test/free-tests-workflow-wiring.test.ts"],
     "scripts/gen-ship-goldens.ts": ["test/host-config.test.ts"],
-    "lib/diagram-render/dist/BUILD_INFO.json": ["test/diagram-render-drift.test.ts"],
     "bun.lock": [],
     ".gitignore": [],
     ".gitattributes": [],
