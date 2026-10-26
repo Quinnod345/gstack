@@ -244,13 +244,18 @@ describe('proxyMismatchLines', () => {
   const state = (extra: Record<string, unknown> = {}) => ({ pid: 1, port: 1, token: 't', startedAt: '', serverPath: '', mode: 'launched' as const, configHash: 'x', ...extra });
   const proxied = { proxy: 'http://proxy.example:3128/', proxySource: 'HTTPS_PROXY', proxyBypass: 'localhost,127.0.0.1,[::1]' };
 
-  test('an env proxy meeting a direct daemon names the variable and offers stop or direct', () => {
-    const lines = proxyMismatchLines(extractGlobalFlags(['text'], { HTTPS_PROXY: 'http://proxy.example:3128' }), state(), {})!;
+  test('an env proxy meeting a direct daemon names the variable and offers stop, then direct on Linux or unsetting the variable elsewhere', () => {
+    const env = { HTTPS_PROXY: 'http://proxy.example:3128' };
+    const lines = proxyMismatchLines(extractGlobalFlags(['text'], env, 'linux'), state(), {}, 'linux')!;
     expect(lines[0]).toContain('(HTTPS_PROXY differs)');
     expect(lines[1]).toBe('  daemon:  no proxy');
     expect(lines[2]).toBe('  session: proxy http://proxy.example:3128/ from HTTPS_PROXY, bypassing localhost,127.0.0.1,[::1]');
     expect(lines[3]).toBe("fix: run 'browse stop' to restart the daemon with this session's proxy settings, or set BROWSE_PROXY_URL=direct to use the running daemon without a proxy.");
     expect(lines[4]).toBe('see https://github.com/garrytan/gstack/blob/main/BROWSER.md#proxy-from-environment');
+    for (const platform of ['darwin', 'win32'] as const) {
+      const other = proxyMismatchLines(extractGlobalFlags(['text'], env, platform), state(), {}, platform)!;
+      expect(other[3], platform).toBe("fix: run 'browse stop' to restart the daemon with this session's proxy settings, or unset HTTPS_PROXY to use the running daemon with the system proxy settings.");
+    }
   });
 
   test('a direct session meeting an env-proxied daemon names the daemon variable', () => {
