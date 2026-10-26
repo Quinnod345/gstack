@@ -1311,7 +1311,8 @@ at a current Chrome only helps if that build itself drops the root. The bundled
 build does not enforce Certificate Transparency. That matters most for the
 commands that put real sessions and credentials into the browser, including
 `cookie-import-browser`, `cookie-import`, `cookie`, `header`, `state load`,
-`fill`/`type` and `handoff`, and a paired agent using `fill`/`type`. Aside
+`storage set`, `fill`/`type`, `upload` and `handoff`, and a paired agent using
+`fill`/`type`. Aside
 uses your own browser's trust store and updates.
 
 **Known gap: the compromised eMudhra intermediates
@@ -1326,11 +1327,18 @@ still trust them, so
 fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
 the first Playwright release whose Chromium carries the removal. Until then,
 don't do signed-in work in this engine on a network you do not trust (sessions
-imported earlier persist in the headed profile and in saved state), and prefer
-Aside for signed-in work where you have it. To check a build, run `$B stop`,
-then the same `goto` in the default headless mode with `BROWSE_EXTENSIONS_DIR` unset and
+imported earlier persist in the headed profile, the `BROWSE_EXTENSIONS_DIR`
+profile, `state save` files and, with `BROWSE_PERSIST_STATE=1`, the headless
+session state), and prefer Aside for signed-in work where you have it.
+
+To check a build, run `$B stop`, then the same `goto` in the default headless
+mode with `BROWSE_EXTENSIONS_DIR` unset, `BROWSE_PROXY_URL=direct` (so no proxy
+from `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` is used) and
 `GSTACK_CHROMIUM_PATH` unset (the bundled build) or set to the build you want
-to check: only `ERR_CERT_AUTHORITY_INVALID` means its root store no longer
+to check. First confirm that a known-good HTTPS site such as
+`$B goto https://example.com/` loads in the same session, because a captive
+portal or an intercepting proxy fails every site with the same error. Then only
+`ERR_CERT_AUTHORITY_INVALID` on the test host means the root store no longer
 trusts them. `ERR_CERT_REVOKED` only shows that the session has a CRLSet, and a
 DNS, network or other error proves nothing.
 
