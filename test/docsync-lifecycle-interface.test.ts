@@ -213,6 +213,39 @@ describe.skipIf(process.platform === 'win32')('candidate call at a missing binar
     } finally { fs.rmSync(missing, { recursive: true, force: true }); }
   });
 
+  // Gate 40323989742 slice 3 (ship-docsync-store): the parent read the usage at the
+  // declared path, mistyped the shard-rooted path on a second --help (exit 127), and
+  // went straight on to compare at the declared path. A help probe reads nothing the
+  // agent still has to recover, so the declared --help may precede the slip.
+  describe('captured run 40323989742 ship-docsync-store: a mistyped --help after the declared usage was read', () => {
+    const store = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/docsync-help-not-found-public.json'), 'utf8')) as
+      { calls: SkillTestResult['toolCalls'] };
+    const storeFailures = (calls: SkillTestResult['toolCalls']) => docsToolFailures(replay(calls), current, [publish], true);
+    const slip = () => store.calls.findIndex(call => call.output.startsWith('Exit code 127'));
+    const declaredHelp = () => store.calls.findIndex(call => /gstack-docs-candidate --help$/.test(call.input.command ?? '') && call.output.startsWith('usage'));
+
+    test('the capture passes; the mistyped --help alone is outside the interface', () => {
+      expect(slip()).toBeGreaterThan(declaredHelp());
+      expect(fill(store.calls[slip()].input.command)).toBe(`${missing}/.claude/skills/gstack/bin/gstack-docs-candidate --help`);
+      expect(docsCommandAllowed(fill(store.calls[slip()].input.command), current, [publish])).toBe(false);
+      expect(storeFailures(store.calls)).toEqual([]);
+    });
+
+    test('without any declared --help run, or with a failed one, the slip still fails', () => {
+      expect(storeFailures(store.calls.filter((_, index) => index !== declaredHelp()))).toContain('command outside declared docs observation interface');
+      const failed = store.calls.map((call, index) => index === declaredHelp() ? { ...call, output: 'Exit code 1\nboom' } : call);
+      expect(storeFailures(failed)).toContain('command outside declared docs observation interface');
+    });
+
+    test('an earlier declared run excuses only --help, never snapshot or compare', () => {
+      const compare = store.calls.findIndex(call => / compare /.test(call.input.command ?? '') && !call.output.startsWith('Exit code'));
+      const wrongCompare = { tool: 'Bash', input: { command: store.calls[compare].input.command.replace('{home}/.claude', '{shard}/.claude') },
+        output: notFound('{shard}/.claude/skills/gstack/bin/gstack-docs-candidate') };
+      expect(storeFailures([...store.calls, wrongCompare])).toContain('command outside declared docs observation interface');
+      expect(storeFailures([...store.calls.slice(0, compare), wrongCompare, ...store.calls.slice(compare)])).toEqual([]);
+    });
+  });
+
   test('only a candidate binary at an absolute literal path qualifies', () => {
     const declared = current.skills.split(path.sep).join('/');
     const skillEnd = `${missing}/.claude/skills/gstack/bin/gstack-skill-start --help`;
