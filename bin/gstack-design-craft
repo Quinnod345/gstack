@@ -1,0 +1,37 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+// gstack-design-craft — free craft check for a generated page (/design-html Step 4).
+//
+// Usage: gstack-design-craft <file.html>
+//
+// Prints one "CRAFT_CHECK: <id> <count> <fix>" line per tell, then
+// "CRAFT_RESULT: clean" (exit 0) or "CRAFT_RESULT: <n> issue(s)" (exit 1).
+// Exit 2: usage error, a non-HTML file, an unreadable or empty file. Head and
+// navigation rules run only on a full HTML document; a fragment gets the copy
+// and code rules alone.
+
+import { readFileSync } from 'fs';
+import { checkCraft, formatCraft } from '../lib/design-craft';
+
+const file = process.argv[2];
+if (!file) {
+  console.error('Usage: gstack-design-craft <file.html>');
+  process.exit(2);
+}
+if (!/\.html?$/i.test(file)) {
+  console.error(`gstack-design-craft: ${file} is not an HTML file; check the rendered HTML preview instead`);
+  process.exit(2);
+}
+let source: string;
+try {
+  source = readFileSync(file, 'utf-8');
+} catch (err) {
+  console.error(`gstack-design-craft: cannot read ${file}: ${(err as Error).message}`);
+  process.exit(2);
+}
+if (source.trim() === '') {
+  console.error(`gstack-design-craft: ${file} is empty; nothing was checked`);
+  process.exit(2);
+}
+const findings = checkCraft(source);
+console.log(formatCraft(findings));
+process.exit(findings.length === 0 ? 0 : 1);
