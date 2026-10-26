@@ -580,7 +580,32 @@ record_verdict "$TRAILER" "$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
 [ "$CHECK_ONLY" -eq 1 ] || [ "$PROFILE" -eq 1 ] || write_shim
 printf '%s\n' "$OUT" | grep -v '^gstack: '
 say "total: $(( $(now) - T0 ))s"
+# The launch file: the same assignments as a sourceable script, mode 0600,
+# beside the verdict. `. <file>` applies them without ever printing them; the
+# line carries no secret, but a caller that re-typed it as `export $(...)`
+# ran a bare `export` when the substitution came back empty and dumped the
+# whole environment, API keys included, into its tool output (GSTA-96).
+LAUNCH_FILE="${VERDICT%.json}.env"
+_sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+write_launch_file() {
+  local tmp
+  mkdir -p "$(dirname "$LAUNCH_FILE")" || return 1
+  tmp=$(umask 077 && mktemp "$LAUNCH_FILE.tmp.XXXXXX") || return 1
+  {
+    echo "# gstack launch environment, written by gstack-capy-install; mode 0600."
+    echo "# Apply it with: . $(_sq "$LAUNCH_FILE")"
+    echo "# Never print it or the environment: no \`export \$(...)\`, \`env\`, \`printenv\` or bare \`set\` in a tool fence."
+    [ -n "$LAUNCH_DIR" ] && echo "case \":\$PATH:\" in *:$(_sq "$LAUNCH_DIR"):*) ;; *) PATH=$(_sq "$LAUNCH_DIR"):\"\$PATH\" ;; esac; export PATH"
+    echo "export GSTACK_SESSION_KIND=unattended"
+    echo "export GSTACK_STATE_ROOT=$(_sq "$GSTACK_STATE_ROOT")"
+    echo "export GSTACK_EPHEMERAL=$(_sq "${GSTACK_EPHEMERAL:-1}")"
+    echo "export GSTACK_CAPY=1"
+    echo "export GSTACK_INSTALL_VERDICT=$(_sq "$VERDICT")"
+  } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$LAUNCH_FILE"
+}
+write_launch_file || { rm -f "$LAUNCH_FILE".tmp.* 2>/dev/null; say "could not write the launch file $LAUNCH_FILE"; LAUNCH_FILE=""; }
 echo "GSTACK_LAUNCH: ${LAUNCH_DIR:+PATH=$LAUNCH_DIR:\$PATH }GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=$GSTACK_STATE_ROOT GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-1} GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=$VERDICT"
 [ -n "$LAUNCH_DIR" ] && echo "GSTACK_LAUNCH_PATH: $LAUNCH_DIR"
+[ -n "$LAUNCH_FILE" ] && echo "GSTACK_LAUNCH_FILE: $LAUNCH_FILE"
 printf '%s\n' "$TRAILER"
 exit "$RC"

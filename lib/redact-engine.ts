@@ -75,6 +75,15 @@ export interface ScanOptions {
    * literal: in a TypeScript/JSX file `session: SessionState,` is a type.
    */
   sourcePath?: string;
+  /**
+   * The environment whose credential-named variables (`*_KEY`, `*_TOKEN`,
+   * `*_SECRET`, `*_PASSWORD`) are scanned for BY VALUE: wherever one of those
+   * values appears in the text it is an `env.value` HIGH finding, whatever its
+   * shape, so a value that reached the text (a dumped environment in a tool
+   * output, GSTA-96) never reaches a PR body, receipt, report or Drive file.
+   * Defaults to `process.env`; pass `{}` to scan without one.
+   */
+  processEnv?: Record<string, string | undefined>;
 }
 
 export interface ScanResult {
@@ -460,6 +469,40 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
     }
   }
 
+  // Environment values, by exact value: a credential that is already in the
+  // process environment needs no shape to be recognized.
+  for (const { name, value } of credentialEnvValues(opts.processEnv ?? process.env)) {
+    if (allow.has(value)) continue;
+    let from = 0;
+    let normOffset: number;
+    while ((normOffset = normalized.indexOf(value, from)) !== -1) {
+      from = normOffset + value.length;
+      const origOffset = map[Math.min(normOffset, map.length - 1)] ?? 0;
+      const key = `env.value:${origOffset}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      starts ??= lineStarts(input);
+      const { line, col } = lineColAt(starts, input, origOffset);
+      const finding: Finding = {
+        id: "env.value",
+        tier: "HIGH",
+        severity: "HIGH",
+        category: "secret",
+        description: `Value of the ${name} environment variable`,
+        line,
+        col,
+        preview: maskPreview(value),
+        autoRedactable: false,
+        repoVisibility,
+      };
+      findings.push(finding);
+      if (spans) {
+        const end = spanEnds?.[normOffset + value.length - 1];
+        if (end !== undefined && end > origOffset) spans.set(finding, { start: origOffset, end });
+      }
+    }
+  }
+
   // Stable order: by line, then col, then id.
   findings.sort((a, b) => a.line - b.line || a.col - b.col || a.id.localeCompare(b.id));
 
@@ -467,6 +510,25 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
   for (const f of findings) counts[f.severity] += 1;
 
   return { findings, counts, repoVisibility, oversize: false };
+}
+
+const CREDENTIAL_ENV_NAME = /(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD)$/i;
+const MIN_ENV_VALUE_LENGTH = 8;
+
+/**
+ * The (name, value) pairs of `env` worth scanning for by value: credential-named
+ * variables whose value is long enough to be a credential and is not a
+ * placeholder. A short or placeholder value would match ordinary prose.
+ */
+export function credentialEnvValues(env: Record<string, string | undefined>): Array<{ name: string; value: string }> {
+  const out: Array<{ name: string; value: string }> = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (!CREDENTIAL_ENV_NAME.test(name)) continue;
+    if (!value || value.trim().length < MIN_ENV_VALUE_LENGTH) continue;
+    if (isPlaceholderSpan(value)) continue;
+    out.push({ name, value });
+  }
+  return out;
 }
 
 function withFlags(flags: string): string {

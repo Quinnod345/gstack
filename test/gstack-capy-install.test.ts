@@ -340,6 +340,20 @@ describe('gstack-capy-install: launch PATH, Bun reuse, CI pins, setup skip, verd
     expect(first.status, first.stdout + first.stderr).toBe(0);
     expect(first.stdout).toContain(`GSTACK_LAUNCH: PATH=${bunDir}:$PATH GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=${path.join(f.home, '.gstack-state')} GSTACK_EPHEMERAL=1 GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=`);
     expect(first.stdout).toContain(`GSTACK_LAUNCH_PATH: ${bunDir}`);
+    // GSTA-104: the same assignments as a sourceable, mode-0600 file beside the verdict. Sourcing it
+    // twice prepends the launch PATH once; nothing in it is printed by sourcing. A caller hands a
+    // child this path, never `export $(...)` (an empty substitution leaves a bare `export`, which
+    // dumps the environment: that is how GSTA-96's docs-audit child leaked three API keys).
+    const launchFile = first.stdout.match(/^GSTACK_LAUNCH_FILE: (.+)$/m)?.[1] ?? '';
+    const verdictFile = first.stdout.match(/GSTACK_INSTALL_VERDICT=(\S+)/)?.[1] ?? '';
+    expect(launchFile).toBe(verdictFile.replace(/\.json$/, '.env'));
+    expect(fs.statSync(launchFile).mode & 0o777).toBe(0o600);
+    const sourced = sh(`. "${launchFile}" && . "${launchFile}" && printf '%s\\n' "$PATH" "$GSTACK_SESSION_KIND" "$GSTACK_STATE_ROOT" "$GSTACK_EPHEMERAL" "$GSTACK_CAPY" "$GSTACK_INSTALL_VERDICT"`);
+    expect(sourced.status, sourced.stderr).toBe(0);
+    const [sourcedPath, ...rest] = sourced.stdout.trimEnd().split('\n');
+    expect(sourcedPath.split(':').filter(p => p === bunDir)).toHaveLength(1);
+    expect(sourcedPath.startsWith(`${bunDir}:`)).toBe(true);
+    expect(rest).toEqual(['unattended', path.join(f.home, '.gstack-state'), '1', '1', verdictFile]);
     const second = run(f, ['--for', 'autoplan'], { STUB_CURL_ZIP: zip });
     expect(second.status, second.stdout + second.stderr).toBe(0);
     expect(second.stdout).toContain(`bun ${BUN_DEFAULT} at ${bunDir}/bun`);

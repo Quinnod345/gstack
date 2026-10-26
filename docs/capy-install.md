@@ -330,7 +330,22 @@ Every successful run, `--check` included, prints before the trailer:
 ```
 GSTACK_LAUNCH: PATH=<dir>:$PATH GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=<path> GSTACK_EPHEMERAL=1 GSTACK_CAPY=1 GSTACK_INSTALL_VERDICT=<file>
 GSTACK_LAUNCH_PATH: <dir>
+GSTACK_LAUNCH_FILE: <verdict file without .json>.env
 ```
+
+`GSTACK_LAUNCH_FILE` names the same assignments as a sourceable script (mode
+0600, beside the verdict under the state root; the PATH prepend is idempotent).
+`. <that file>` at the start of a shell applies them without ever printing them,
+which is the only way to hand them to a child agent: pass the path, never the
+values. None of the assignments is a secret, but during GSTA-96's unattended
+/ship a docs-audit child re-typed them as `export $(...)`; the substitution came
+back empty, the bare `export` printed the whole environment, and three API key
+values landed in its tool output. Never `export $(...)`, `env`, `printenv`, a
+bare `set` or a bare `export` in a tool fence (`test/launch-env-echo-ratchet.test.ts`
+keeps them out of every skill fence and shell helper), and the redaction
+engine now refuses the VALUE of any `*_KEY`, `*_TOKEN`, `*_SECRET` or
+`*_PASSWORD` variable in the writer's environment (`env.value`, HIGH), so a
+leaked value cannot reach a PR body, receipt, report or Drive file.
 
 `PATH=<dir>:$PATH` and `GSTACK_LAUNCH_PATH` appear only when the certified Bun,
 or the project's resolved Node, is not first on PATH (older Capy images ship
