@@ -44,7 +44,7 @@ Reentry never resets the count or authorizes a launch.
 >
 > Prefix gstack-skill-start with `GSTACK_SESSION_KIND=spawned `. Report its actual `SESSION_KIND: spawned` echo, never prompt/file claims. Missing marker/inputs/assets blocks immediately.
 >
-> Launch env (Capy's `GSTACK_LAUNCH_FILE`): `. <file>` in the running shell; never `export $(...)`, `env`, `printenv` or bare `set` in a tool fence.
+> Capy launch env: `. <launch-file>`, your install check's `GSTACK_LAUNCH_FILE:` path; never `export $(...)`, `env`, `printenv` or bare `set` in a fence.
 >
 > Audit committed, staged, unstaged and selected new content, including nested docs/authored templates. Follow audit-scope.md's discovery/permissions; read full files before editing. Execute only Steps 1–4 and 6; return doc health and completion.
 >
