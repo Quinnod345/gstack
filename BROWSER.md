@@ -562,7 +562,7 @@ from `snapshot`, or `@c` refs from `snapshot -C`. Full table:
 |---------|-------------|
 | `cookie <name>=<value>` | Set cookie on current page domain |
 | `cookie-import <json>` | Import cookies from JSON file |
-| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion. The imported session rides on the bundled Chromium's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
+| `cookie-import-browser [browser] [--domain d] [--profile p] [--all] [--clear-storage] [--verify-auth]` | Copy selected browser cookies; picker by default, explicit scoped or all-domain import, optional storage reset and sign-in assertion. The imported session rides on the fallback browser's root store ([TLS trust](#tls-trust-the-bundled-chromiums-root-store)) |
 | `header <name>:<value>` | Set custom request header (sensitive values auto-redacted) |
 | `useragent <string>` | Set user agent (triggers context recreation, invalidates refs) |
 
@@ -1320,8 +1320,8 @@ uses your own browser's trust store and updates.
 by CRLSet on 2026-10-17, the day the compromise was reported, and scheduled the
 removal of their root, emSign ECC Root CA - G3, from the Chrome Root Store for
 2026-10-27. As of 2026-10-24, gstack's pinned Playwright 1.62.1 (Chromium 151),
-the latest release 1.64.1 (Chromium 156) and the 1.65 alphas (Chromium 157)
-still trust them, so
+the latest release 1.64.1 (Chromium 156) and the 1.65.0 alpha of 2026-10-24
+(Chromium 157) still trust them, so
 `$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
 "That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
 fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
