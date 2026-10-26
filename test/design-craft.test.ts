@@ -205,6 +205,7 @@ describe('accepted craft exceptions (finalized.json craft_exceptions)', () => {
         const bad = run(page, '--accepted', path.join(dir, name));
         expect(bad).toMatchObject({ code: 2, out: run(page).out });
         expect(bad.err).toContain('checked with none accepted');
+        expect(bad.err).toContain('cannot use exceptions');
       }
       fs.writeFileSync(page, CLEAN);
       expect(run(page, '--accepted', path.join(dir, 'broken.json'))).toMatchObject({ code: 2, out: 'CRAFT_RESULT: clean\n' });
