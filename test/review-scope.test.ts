@@ -104,7 +104,7 @@ describe('scope decisions', () => {
     const p2 = by(scopeFindings(findings, { policy: 'diff-plus-blocking', pass: 2, diffHunks: diff, rangeHunks: range }));
     expect(p2['lib/legacy.ts:7:data-loss']).toBe('outside/defect/blocking/fix');
     expect(p2['src/auth.ts:42:naming']).toBe('diff/defect/below/note');
-    expect(Object.values(p2).some(v => v.endsWith('/defer'))).toBe(false);
+    expect(Object.values(p2).some(v => String(v).endsWith('/defer'))).toBe(false);
   });
 
   test('frozen pass 2+: only blocking findings in the range or the diff are fixed; everything below the floor is a note', () => {

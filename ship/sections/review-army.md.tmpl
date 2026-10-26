@@ -1,8 +1,8 @@
 ## Step 9: Pre-Landing Review
 
-On first entry only: set CYCLES to 0 and PASS to 1, save
-`REVIEW_SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)` and the `ship: review_scope` policy
-line (Step 3). Every entry saves `PASS_HEAD=$(git rev-parse HEAD)`; from pass 2 on,
+Set CYCLES to 0 on first entry only, with PASS set to 1,
+`REVIEW_SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)` saved and the `ship: review_scope`
+policy line (Step 3) kept. Every entry saves `PASS_HEAD=$(git rev-parse HEAD)`; from pass 2 on,
 `RANGE_BASE` is the previous pass's PASS_HEAD. Keep existing approvals; changed
 finding scope needs a new decision. Order: checklist/design, specialists (9.1),
 Red Team (9.2), QA (9.2.1), dedup (9.3), scope, fixes and logging (9.4).
@@ -81,7 +81,8 @@ but missing dispatched output still blocks continuation, even with a QA exceptio
    code is `fix`, never `defer`; under `all` everything is `fix`. Save the `REVIEW_SCOPE:` line.
    A `REVIEW_SCOPE_INPUT` or `REVIEW_SCOPE_RANGE` refusal is a STOP until repaired.
 
-1. **Classify only `scope: fix` findings as AUTO-FIX or ASK** per the Fix-First Heuristic in
+1. **Classify only unmatched or reopened findings as AUTO-FIX or ASK** when the
+   classified output marks them `scope: fix`, per the Fix-First Heuristic in
    checklist.md. Critical findings lean toward ASK; informational lean toward AUTO-FIX.
 
 2. **Auto-fix all AUTO-FIX items.** Apply each fix. Output one line per fix:
