@@ -12,7 +12,7 @@
 import type { LintContext } from './context';
 import { memo } from './context';
 import { COLOR_LITERAL, hueIn, oklchOf, parseColor, type Color } from './color';
-import { MONO_FACE, GENERIC_FAMILIES, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
+import { GENERIC_FAMILIES, LABEL_PX, MONO_FACE, TRACKED_EM, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
 import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, type Doc, type Tag } from './html';
 import { trunc } from './report';
 
@@ -619,13 +619,13 @@ export interface TwTrackedCaps { what: string; size: number | null; em: number |
 /** The tracked-caps label: small text set uppercase, small caps or letter-spaced past 0.03em, outside logos, code and display heads. */
 export function twTrackedCaps(it: TwItem, tw: TwGroup): TwTrackedCaps | null {
   const f = it.info, fr = it.frame;
-  if (!(f.upper || f.smallCaps || (f.trackingEm != null && f.trackingEm > 0.03))) return null;
+  if (!(f.upper || f.smallCaps || (f.trackingEm != null && f.trackingEm > TRACKED_EM))) return null;
   if (fr.logo || fr.logoSelf || fr.noLabel) return null;
   const size = fr.size, em = fr.em;
   if ((size != null && size >= 24) || (size == null && /^h[1-6]$/.test(it.tag))) return null;
   const caps = fr.upper || fr.caps;
-  const small = size != null && size <= 15;
-  const tracked = em != null && em > 0.03;
+  const small = size != null && size <= LABEL_PX;
+  const tracked = em != null && em > TRACKED_EM;
   const control = /^(?:button|input)$/.test(it.tag) || /(?:button|btn|cta)$/i.test(it.tag) || (it.tag === 'a' && f.fill && f.padded) || /role\s*=\s*["']?button/i.test(it.attrs);
   if (tw.upperDisplay && control && (em == null || em <= 0.04)) return null;
   if (!((caps && (small || tracked)) || (tracked && small))) return null;
@@ -638,7 +638,7 @@ export interface TwEyebrow { text: string; next: string; signal: string }
 export function twEyebrow(it: TwItem): TwEyebrow | null {
   const f = it.info, fr = it.frame, doc = it.doc;
   if (it.idx < 0 || !/^(?:p|span|div|small)$/.test(it.tag) || fr.eyeSkip) return null;
-  if (!(f.upper || (f.trackingEm != null && f.trackingEm > 0.03) || f.accent)) return null;
+  if (!(f.upper || (f.trackingEm != null && f.trackingEm > TRACKED_EM) || f.accent)) return null;
   if (fr.size == null || fr.size > 14) return null;
   const t = doc.tags[it.idx];
   if (/role\s*=\s*["']?status|aria-live|aria-current|aria-hidden\s*=\s*["']?true/i.test(t.attrs)) return null;
@@ -650,7 +650,7 @@ export function twEyebrow(it: TwItem): TwEyebrow | null {
   const href = /<a\b[^>]*\shref\s*=\s*["']([^"']*)["']/i.exec(inner);
   if (href && !/^#?$/.test(href[1].trim())) return null;
   const text = twPlain(doc, inner);
-  const signal = [f.upper ? 'uppercase' : null, f.trackingEm != null && f.trackingEm > 0.03 ? `tracked ${Math.round(f.trackingEm * 1000) / 1000}em` : null, f.accent].filter(Boolean).join(', ');
+  const signal = [f.upper ? 'uppercase' : null, f.trackingEm != null && f.trackingEm > TRACKED_EM ? `tracked ${Math.round(f.trackingEm * 1000) / 1000}em` : null, f.accent].filter(Boolean).join(', ');
   if (!text) return doc.kind !== 'html' && c > it.idx && doc.raw.slice(t.end, doc.tags[c].pos).includes('{') ? { text: '', next: nx.name, signal } : null;
   const words = text.split(/[\s·/|\u2014\u2013]+/).filter(Boolean);
   if (words.length > 7 || text.length > 56 || /[\w/-]+\.[a-z]{1,4}$/i.test(text)) return null;

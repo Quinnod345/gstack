@@ -90,6 +90,10 @@ function nestSelector(sel: string, parent: string): string {
 /** Faces that read as monospace, whether they arrive as a token, a utility or a declaration; one list so every check classifies a face the same way. */
 export const MONO_FACE = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
 
+/** The tracked-caps label: tracking past this (em) on text at or under LABEL_PX reads as the reflex, in CSS and in Tailwind alike. */
+export const TRACKED_EM = 0.03;
+export const LABEL_PX = 15;
+
 /** Real stylesheets nest a handful of levels; past this the rest reads as the parent's body instead of recursing. */
 const MAX_NESTING = 64;
 
@@ -125,8 +129,10 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
       const blockStart = j + 1;
       let depth = 1, k = blockStart;
       while (k < end && depth > 0) {
-        if (src[k] === '{') depth++;
-        else if (src[k] === '}') depth--;
+        const ch = src[k];
+        if (ch === '"' || ch === "'") { const q = src.indexOf(ch, k + 1); k = q < 0 || q >= end ? end : q + 1; continue; }
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
         k++;
       }
       const blockEnd = Math.max(blockStart, k - 1);

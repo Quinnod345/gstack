@@ -7,7 +7,7 @@
 import { OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
-import { MONO_FACE, famKey, firstFamily, GENERIC_FAMILIES, HEADING_SEL, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
+import { GENERIC_FAMILIES, HEADING_SEL, LABEL_PX, MONO_FACE, TRACKED_EM, famKey, firstFamily, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
 import { ancestorMap, getAttr, innerOf, plainText } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
@@ -272,7 +272,7 @@ function caps67(ctx: LintContext, bySel: MergedRule[], rule: MergedRule): Caps67
   const ownSmallCaps = rule.decls.some((d) => isSmallCaps67(d.prop, resolveVars(d.value, ctx.tokens)));
   const px = fontSizePxOf(rule, ctx);
   const ownEm = trackingEm(ctx, rule.decls, px || 16);
-  if (!(ownUpper === true || ownSmallCaps || (ownEm != null && ownEm > 0.03))) return null;
+  if (!(ownUpper === true || ownSmallCaps || (ownEm != null && ownEm > TRACKED_EM))) return null;
   const upper = ownUpper != null ? ownUpper : isUpper(inherited67(bySel, rule.selector, 'text-transform'));
   const smallCaps = ownSmallCaps || ['font-variant', 'font-variant-caps', 'font-feature-settings'].some((prop) => {
     const v = inherited67(bySel, rule.selector, prop);
@@ -298,7 +298,7 @@ function check67(ctx: LintContext, r: Reporter): void {
     const caps = caps67(ctx, bySel, rule);
     if (!caps) continue;
     const { upper, smallCaps, em, px } = caps;
-    const tracked = em != null && em > 0.03;
+    const tracked = em != null && em > TRACKED_EM;
     const subject = rule.selector.split(',').map((p) => baseSelector(p).split(/[\s>+~]+/).filter(Boolean).pop() || '');
     const bigToken = rule.decls.some((d) => d.prop === 'font-size' && /--text-(display|section|title)|clamp\(\s*(?:[2-9]|\d{2,})(?:\.\d+)?rem/.test(d.value));
     const labelish = subject.some((s) => LABEL67.test(s)) ? !((px != null && px >= 28) || bigToken)
@@ -307,7 +307,7 @@ function check67(ctx: LintContext, r: Reporter): void {
     if (HEADING_SEL.test(rule.selector) && !labelish && !control) continue;
     const key = baseSelector(rule.selector);
     if (seen.has(key)) continue;
-    const small = px != null && px <= 15;
+    const small = px != null && px <= LABEL_PX;
     const at = px != null ? ` at ${Math.round(px)}px` : '';
     const tracking = tracked ? ` tracked ${em3(em)}em` : '';
     if (control && !labelish) {
@@ -352,8 +352,8 @@ function check67Html(ctx: LintContext, r: Reporter): void {
       const decls = styleFor(ctx, cls, t.name);
       const px = fontPx(ctx, decls);
       const em = trackingEm(ctx, decls, px || 16);
-      const tracked = em != null && em > 0.03;
-      if (!((px != null && px <= 15) || tracked)) continue;
+      const tracked = em != null && em > TRACKED_EM;
+      if (!((px != null && px <= LABEL_PX) || tracked)) continue;
       const key = cls || t.name;
       if (seen.has(key)) continue;
       seen.add(key);

@@ -47,7 +47,7 @@ function reportItem(ctx: LintContext, r: Reporter, it: TwItem, monoOk: boolean):
 }
 
 /** The tells a file carries as a whole: a default palette, hover scale everywhere, a vh hero, three icon tiles. */
-function reportFile(ctx: LintContext, r: Reporter, list: TwItem[]): void {
+function reportFile(r: Reporter, list: TwItem[]): void {
   const doc = list[0].doc;
   const pal = new Map<string, TwItem>();
   let palAt: TwItem | null = null;
@@ -78,7 +78,7 @@ function checkTailwind(ctx: LintContext, r: Reporter): void {
     byDoc.get(it.file)!.push(it);
     reportItem(ctx, r, it, monoOk);
   }
-  for (const list of byDoc.values()) reportFile(ctx, r, list);
+  for (const list of byDoc.values()) reportFile(r, list);
 }
 
 // sloplint checkComponentText (gates 63 30a)

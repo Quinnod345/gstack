@@ -3,13 +3,16 @@
  * strings in HTML, JSX, Vue, Svelte and Astro, helper calls, shared tokens)
  * and the rules it feeds, each with a negative control and a planted tell.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { lint, formatFinding, type Finding } from '../lib/design-lint/index';
 import { lintStatic } from '../lib/design-lint/static';
 import { twGroup, twParse, twVariants } from '../lib/design-lint/tailwind';
+
+const tmpDirs: string[] = [];
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'design-lint');
@@ -18,6 +21,7 @@ const MY_RULES = ['layout-transition', 'bounce-easing', 'purple-blue-gradient', 
 
 function tmpDir(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-tw-'));
+  tmpDirs.push(dir);
   for (const [name, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), text);

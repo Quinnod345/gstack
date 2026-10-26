@@ -4,7 +4,7 @@
  * (test/design-lint-<family>.test.ts); the render tier is
  * test/design-lint-render.test.ts.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -19,6 +19,9 @@ import { RULES, RULE_IDS } from '../lib/design-lint/rules/ids';
 import { FAMILIES } from '../lib/design-lint/rules';
 import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers, suspectedRules } from '../lib/design-lint/waivers';
 
+const tmpDirs: string[] = [];
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN = path.join(ROOT, 'bin', 'gstack-design-lint');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'design-lint');
@@ -30,6 +33,7 @@ function runBin(args: string[], cwd = ROOT) {
 
 function tmpPage(html: string, name = 'index.html'): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-'));
+  tmpDirs.push(dir);
   const file = path.join(dir, name);
   fs.writeFileSync(file, html);
   return file;
@@ -38,6 +42,7 @@ function tmpPage(html: string, name = 'index.html'): string {
 /** A temporary tree: each key is a relative path (parent directories are created), each value the file's text. */
 function tmpTree(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-tree-'));
+  tmpDirs.push(dir);
   for (const [rel, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), text);

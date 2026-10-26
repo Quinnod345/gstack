@@ -1,9 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { formatFinding, type Finding } from '../lib/design-lint/report';
 import { lintStatic } from '../lib/design-lint/static';
+
+const tmpDirs: string[] = [];
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'design-lint');
@@ -31,6 +34,7 @@ const page = (css: string, body = '<h1>Ledger</h1><p>The books close on the firs
 
 function lintPage(html: string, name = 'index.html'): { html: string; findings: Finding[]; dir: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-color-'));
+  tmpDirs.push(dir);
   const file = path.join(dir, name);
   fs.writeFileSync(file, html);
   return { html, dir, findings: lintStatic([file], { cwd: dir, warn: (l) => { throw new Error(l); } }).findings };

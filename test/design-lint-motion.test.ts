@@ -3,11 +3,14 @@
  * planted positive with its line and grade, and a negative control at the edge of the threshold. The shared fixtures
  * (slopped.html, clean/) are checked for this family's rules too.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { formatFinding, lint, type Finding } from '../lib/design-lint/index';
+
+const tmpDirs: string[] = [];
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'design-lint');
@@ -24,6 +27,7 @@ function page(css: string, body: string, opts: { states?: boolean; reduce?: bool
 
 async function lintPage(html: string, opts: { scope?: 'page' | 'component' } = {}): Promise<Finding[]> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-motion-'));
+  tmpDirs.push(dir);
   const file = path.join(dir, 'index.html');
   fs.writeFileSync(file, html);
   return (await lint([file], { cwd: dir, scope: opts.scope, warn: () => {} })).findings;

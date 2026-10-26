@@ -3,13 +3,16 @@
  * chrome-copy.ts, chrome-eyebrow.ts): for every rule id, one page that is
  * clean for it and one with the tell planted, checked by id, grade and line.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { lint } from '../lib/design-lint/index';
 import { formatFinding, type Finding } from '../lib/design-lint/report';
 import { lintStatic } from '../lib/design-lint/static';
+
+const tmpDirs: string[] = [];
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'design-lint');
@@ -29,6 +32,7 @@ const lineOf = (html: string, needle: string): number => {
 
 function run(html: string, opts: { job?: string | null; scope?: 'page' | 'component'; files?: Record<string, string> } = {}): Finding[] {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-chrome-'));
+  tmpDirs.push(dir);
   const { files = {}, ...rest } = opts;
   fs.writeFileSync(path.join(dir, 'index.html'), html);
   for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
