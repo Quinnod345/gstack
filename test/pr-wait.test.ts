@@ -63,10 +63,11 @@ interface Script {
   behind?: GhResult;
 }
 function fakeGh(script: Script) {
-  const queue = <T>(value: T | T[] | undefined): T[] => (value === undefined ? [] : Array.isArray(value) ? [...value] : [value]);
+  // Function declarations, not generic arrows: pregate's import scanner reads tests as TSX, where `<T>(x) =>` is a tag.
+  function queue<T>(value: T | T[] | undefined): T[] { return value === undefined ? [] : Array.isArray(value) ? [...value] : [value]; }
+  function next<T>(q: T[]): T | undefined { return q.length > 1 ? q.shift() : q[0]; }
   const prs = queue(script.pr).map(ok);
   const checks = queue(script.checks);
-  const next = <T>(q: T[]): T | undefined => (q.length > 1 ? q.shift() : q[0]);
   const calls: string[][] = [];
   const gh = (args: string[]): GhResult => {
     calls.push(args);
