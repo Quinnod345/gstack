@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**Four more principles, and three places gstack stops asking what it could observe (pstack absorb, lane C3, GSTA-124).** Ideas from Lauren Tan's pstack (MIT), written in gstack's words; NOTICE.md and the ETHOS.md credit line say so.
+
+### Added
+- **ETHOS.md principles 5 to 8**: Attack the Premise (two fixes that share a premise and fail the same gate indict the premise; write it down and falsify it before a third fix), Separate Before Serializing Shared State (a lock is a smell to check; remove the race before refereeing it), Make Operations Idempotent (design for the run that happens twice; ask what happens if the previous run died at every point), Explain the Number (a measurement carries what was measured, the limiter it moved and the run-to-run variation; a gap inside the variation is no difference). "How They Work Together" gains one line each and a Credits section names the source.
+- **`/eval-plan` Step 1c, candidate-side blinding**: three preregistration rules (no eval word anywhere the candidate can read; project-shaped fixture roots; the judge sees `A`/`B` labels and grades chain-following from the files the transcript shows the candidate opened). `prereg --check` does not read fixture trees, and the step says so. `docs/TESTING_INTERNALS.md#candidate-side-blinding` states the same rules for gstack's own fixtures and lists the fixture directory names on the word list (no fixture is renamed here).
+- **Observable questions are not the user's to answer**: a rule in `/plan-tune`'s Important Rules and a section in `docs/proactive.md`. A question a command, render or measurement can settle is settled that way and reported; only product and preference calls reach the user, with the observation already made. The question-log audit treats an observable question as a defect in the asking skill rather than a preference to tune.
+
+### Changed
+- **AGENTS.md validation discipline step 4**: one sentence on measured deltas: name the limiter that moved and the run-to-run variation; a gap smaller than that variation is no difference. `agents-digest/gstack-AGENTS.md` is generated from `scripts/gen-agents-digest.ts` and `VERSION`, not from AGENTS.md, so the regenerated digest is unchanged.
+
+### Gate integrity
+- No threshold, trial count, case kind or judge prompt changed. Prose-only change: `plan-tune` and `eval-plan` are unpinned skills; sizes measured in the PR body.
+
 ## [1.91.256.0] - 2026-10-26
 
 **The /ship review loop converges, and a receipt survives a base merge.** Five Captains' /ship runs hit the review cap on the same PR shape: every pass re-reviewed the whole diff, reviewers answered an empty range with an invented advisory, and each advisory earned another full pass; four more re-ran /ship on product code they had not changed because a conflict-only main merge or a test fix moved the head the receipt named. The loop now fixes blocking findings in the diff on pass 1, reads only the range since the previous pass afterwards, caps at three passes, and counts `passes=<n> blocking_found=<k> deferred=<m>` in the ship receipt; the receipt carries to the new head when the product patch-id is unchanged. The blocking floor is the owner's call (Garry, 2026-10-26: "Ok set it at that"), and the policy lives in gstack rather than in any one team's rules (Garry, 2026-10-26: "Gstack should be the actual holder of how to do things not one off Capy files"): `docs/review-policy.md` is the canonical statement, the skills carry it as their written policy, and a crew rule can be one line pointing at it.
