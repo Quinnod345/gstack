@@ -332,9 +332,28 @@ describe('gstack-developer-profile --derive', () => {
   });
 
   test('contributing_events is all zero when no answer matches a signal', () => {
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'not-a-mapped-option', session_id: 's1' });
     runDev('--derive');
-    const p = readProfile() as { inferred: { contributing_events: Record<string, number> } };
-    expect(Object.values(p.inferred.contributing_events)).toEqual([0, 0, 0, 0, 0]);
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; sample_size: number } };
+    expect(p.inferred.sample_size).toBe(1);
+    expect(p.inferred.contributing_events).toEqual({
+      scope_appetite: 0,
+      risk_tolerance: 0,
+      detail_preference: 0,
+      autonomy: 0,
+      architecture_care: 0,
+    });
+  });
+
+  test('a choice named after an Object.prototype member is ignored, not fatal', () => {
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'constructor', session_id: 's1' });
+    logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: 's2' });
+    const r = runDev('--derive');
+    expect(r.status).toBe(0);
+    const p = readProfile() as { inferred: { contributing_events: Record<string, number>; signal_events: number } };
+    expect(p.inferred.signal_events).toBe(1);
+    expect(p.inferred.contributing_events.architecture_care).toBe(1);
+    expect(runDev('--trace', 'architecture_care').stdout).toContain('1 events for architecture_care');
   });
 });
 
@@ -357,6 +376,7 @@ describe('gstack-developer-profile per-session bound', () => {
     for (let i = 0; i < 5; i++) arch('one-review', 'fix-now', i);
     runDev('--derive');
     expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(CAP).toFixed(3));
+    expect(inferred().values.risk_tolerance).toBe(+normalizeToDimensionValue(-CAP).toFixed(3));
     expect(inferred().contributing_events.architecture_care).toBe(5);
   });
 
@@ -368,6 +388,14 @@ describe('gstack-developer-profile per-session bound', () => {
 
   test('rows without a session_id each count as their own session', () => {
     for (let i = 0; i < 3; i++) arch(undefined, 'fix-now', i);
+    runDev('--derive');
+    expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
+  });
+
+  test('rows with an empty session_id each count as their own session', () => {
+    for (let i = 0; i < 3; i++) {
+      logQuestion({ skill: 'plan-eng-review', question_id: 'plan-eng-review-arch-finding', question_summary: 'arch?', user_choice: 'fix-now', session_id: '' });
+    }
     runDev('--derive');
     expect(inferred().values.architecture_care).toBe(+normalizeToDimensionValue(3 * 0.05).toFixed(3));
   });
@@ -388,6 +416,16 @@ describe('gstack-developer-profile per-session bound', () => {
     expect(r.stdout).toContain('session one-review: +0.250 capped to +0.060');
     expect(r.stdout).not.toContain('session later');
     expect(r.stdout).toContain(`TOTAL: +0.040 (each session capped at ±${CAP}) → ${inferred().values.architecture_care.toFixed(3)}`);
+    const risk = runDev('--trace', 'risk_tolerance');
+    expect(risk.stdout).toContain('session one-review: -0.100 capped to -0.060');
+  });
+
+  test('--trace replaces control characters in logged fields', () => {
+    for (let i = 0; i < 5; i++) arch('a\nTOTAL: +9.999 \u001b[31mforged', 'fix-now', i);
+    const r = runDev('--trace', 'architecture_care');
+    expect(r.stdout.split('\n').filter((l) => l.startsWith('TOTAL:'))).toHaveLength(1);
+    expect(r.stdout).toContain('session a?TOTAL: +9.999 ?[31mforged: +0.250 capped to +0.060');
+    expect(/[\x00-\x08\x0b-\x1f\x7f]/.test(r.stdout)).toBe(false);
   });
 });
 

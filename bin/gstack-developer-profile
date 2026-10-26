@@ -412,7 +412,11 @@ do_gap() {
 # moves a dimension at most as far as one strong answer. Without the bound
 # a single /plan-eng-review (about five answers) moved a dimension by 0.25
 # and about eight sessions pinned it at 1.0 (#2623). A row without a
-# session_id is its own session.
+# session_id is its own session. The bound keys on the writer's session_id,
+# which differs between the PostToolUse hook and the agent's own log call.
+# The body is a single-quoted bash string: its JS must not contain a single
+# quote (use double quotes or backticks), or the assignment ends early and
+# every subcommand fails to parse.
 # -----------------------------------------------------------------------
 ACCUMULATE_SIGNALS_JS='
 function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
@@ -438,9 +442,10 @@ function accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, dims) {
     skills.add(e.skill);
     qids.add(e.question_id);
     if (e.ts) days.add(String(e.ts).slice(0, 10));
-    const def = QUESTIONS[e.question_id];
-    const deltas = (def && def.signal_key && SIGNAL_MAP[def.signal_key]?.[e.user_choice]) || [];
-    if (deltas.length === 0) continue;
+    const def = Object.hasOwn(QUESTIONS, e.question_id) ? QUESTIONS[e.question_id] : undefined;
+    const byChoice = def && def.signal_key && Object.hasOwn(SIGNAL_MAP, def.signal_key) ? SIGNAL_MAP[def.signal_key] : {};
+    const deltas = Object.hasOwn(byChoice, e.user_choice) ? byChoice[e.user_choice] : [];
+    if (!Array.isArray(deltas) || deltas.length === 0) continue;
     signalEvents++;
     const session = typeof e.session_id === "string" && e.session_id ? e.session_id : "row-" + count;
     const sums = sessions.get(session) || {};
@@ -565,15 +570,16 @@ do_trace() {
       const acc = accumulateSignals(lines, QUESTIONS, SIGNAL_MAP, ALL_DIMENSIONS);
       const rows = acc.rows.filter((r) => r.dim === target);
       const signed = (n, digits) => (n > 0 ? '+' : '') + (digits === undefined ? String(n) : n.toFixed(digits));
+      const clean = (s) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f]/g, '?');
       if (rows.length === 0) {
         console.log('TRACE: no events contribute to ' + target);
       } else {
         console.log('TRACE: ' + rows.length + ' events for ' + target);
         for (const r of rows) {
-          console.log('  ' + (r.ts || '').slice(0,19) + '  ' + r.question_id + '  → ' + r.choice + '  (' + signed(r.delta) + ')');
+          console.log('  ' + clean(r.ts).slice(0,19) + '  ' + clean(r.question_id) + '  → ' + clean(r.choice) + '  (' + signed(r.delta) + ')');
         }
         for (const c of acc.capped.filter((c) => c.dim === target)) {
-          console.log('  session ' + c.session + ': ' + signed(c.sum, 3) + ' capped to ' + signed(c.bounded, 3));
+          console.log('  session ' + clean(c.session) + ': ' + signed(c.sum, 3) + ' capped to ' + signed(c.bounded, 3));
         }
         const total = acc.totals[target] ?? 0;
         console.log('TOTAL: ' + signed(total, 3) + ' (each session capped at ±' + acc.cap + ') → ' + normalizeToDimensionValue(total).toFixed(3));
