@@ -256,7 +256,7 @@ describe('ready under a train policy: the screen choice', () => {
     fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 3 } }; });
     const live = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(live.status).toBe(EXIT.ok);
-    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 103 .*not following run 102 planned 0 cases \(concluded success\)/);
+    expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 103 .*not following run 102 planned no cases \(an empty plan manifest; concluded success\)/);
     const followed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(followed.status).toBe(EXIT.ok);
     expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
@@ -266,6 +266,11 @@ describe('ready under a train policy: the screen choice', () => {
     fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });
     const runningBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
     expect([runningBuild.status, line(runningBuild.out, 'ORDER:'), line(runningBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success' }; d.artifacts['103']['paid-plan'] = { reuse: 'confirmed' }; });
+    const unreadable = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
+    expect([unreadable.status, line(unreadable.out, 'ORDER:'), line(unreadable.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan manifest.json is unreadable; counted as screened, unverified"]);
+    const stillFollowed = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
+    expect(line(stillFollowed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
   }, 120_000);
 });
 

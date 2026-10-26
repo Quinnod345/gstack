@@ -85,7 +85,8 @@ async function dispatchScreen(env: TrainEnv, o: ReadyOptions, mergeSha: string, 
   if (!slug) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: 'gh repo view could not name the repository' }, [], `${Q} ready --pr ${o.pr} --screen`, 'none');
   const exec = execFor(env.ctx);
   const existing = findDuplicateRun(listDispatchRuns(dispatch.workflow, exec, slug) ?? [], dedupeKey('pr', mergeSha, baseSha, scope));
-  const hollow = existing ? hollowScreen(env.ctx, slug, existing.databaseId) : null;
+  const plan = existing ? hollowScreen(env.ctx, slug, existing.databaseId) : null;
+  const hollow = plan?.kind === 'hollow' ? plan.reason : null;
   if (existing && !hollow) return { choice: { choice: 'screen', policy, nonce: /eval-bg (\S+?)\]/.exec(existing.displayTitle)?.[1] ?? nonce, run: existing.databaseId, merge_sha: mergeSha }, line: `SCREEN_DISPATCH: following run ${existing.databaseId} (same merge SHA, base and policy; no duplicate)` };
   const found = dispatchWorkflow(dispatch, env.ctx.base, exec, slug) ? await awaitNonceRun(dispatch.workflow, nonce, exec, slug) : null;
   if (!found) return outPending({ code: 'QUEUE_TRAIN_DISPATCH_UNKNOWN', message: `no ${dispatch.workflow} run named ${nonce} appeared after the screen dispatch` }, [], `${Q} ready --pr ${o.pr} --screen${o.broad ? ' --broad' : ''} (adopts the run by its key once it appears)`, 'none');

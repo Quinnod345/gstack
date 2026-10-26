@@ -27,8 +27,8 @@ export const TRAIN_POLICY = { ...BASE_POLICY, train: TRAIN_BLOCK, min_gstack_ver
 export interface Rule {
   fail?: boolean; silent?: boolean; failButCreate?: boolean; status?: string; conclusion?: string | null; event?: string; headSha?: string;
   record?: { panels: unknown[]; census?: unknown; verdict?: 'GREEN' | 'RED'; nonce?: string };
-  /** The run's paid-plan manifest: planned entries (default 1); null uploads no paid-plan artifact, as a superseded screen does. */
-  plan?: { planned: number } | null;
+  /** The run's paid-plan manifest: planned entries (default 1), or a raw manifest object; null uploads no paid-plan artifact, as a superseded screen does. */
+  plan?: { planned: number } | { manifest: unknown } | null;
   check?: string | null;
   bisect?: { prefixes: string[]; patterns: Record<string, string>; costUsd?: number };
 }
@@ -157,7 +157,7 @@ function shimSource(): string {
     "  const run = { databaseId: id, workflow: w, headBranch: ref, headSha: head, status: rule.status || 'completed', conclusion: rule.conclusion === undefined ? 'success' : rule.conclusion,",
     "    url: 'https://example.invalid/runs/' + id, event: rule.event || 'workflow_dispatch', displayTitle: inputs.nonce ? 'E2E Evals [eval-bg ' + inputs.nonce + ']' : w, inputs };",
     "  d.runs.push(run); d.artifacts[id] = {};",
-    "  if (rule.plan !== null) d.artifacts[id]['paid-plan'] = { tier: 'gate', sliceCount: 1, entries: Array.from({ length: rule.plan ? rule.plan.planned : 1 }, (_, i) => ({ file: 'test/case-' + i + '.test.ts', status: 'planned' })) };",
+    "  if (rule.plan !== null) d.artifacts[id]['paid-plan'] = rule.plan && rule.plan.manifest ? rule.plan.manifest : { tier: 'gate', sliceCount: 1, entries: Array.from({ length: rule.plan ? rule.plan.planned : 1 }, (_, i) => ({ file: 'test/case-' + i + '.test.ts', status: 'planned' })) };",
     "  if (rule.record && !inputs.prefix_shas) d.artifacts[id][d.artifact] = { schema: 1, kind: 'train-gate', nonce: rule.record.nonce || inputs.nonce, head_sha: head, tree: rev(head + '^{tree}'),",
     "    verdict: rule.record.verdict || 'GREEN', census: rule.record.census, panels: rule.record.panels };",
     "  if (rule.check && !inputs.prefix_shas) (d.checks[head] = d.checks[head] || []).push({ name: 'gstack/full-gate', status: 'completed', conclusion: rule.check });",
@@ -176,11 +176,12 @@ function shimSource(): string {
     "if (a[0] === 'run' && a[1] === 'view') { const r = d.runs.find(x => String(x.databaseId) === a[2]); if (!r) fail('run not found'); out(r); }",
     "if (a[0] === 'run' && a[1] === 'download') {",
     "  const art = (d.artifacts[a[2]] || {})[opt('-n')]; if (!art) fail('no artifact matches');",
-    "  fs.mkdirSync(opt('-D'), { recursive: true }); fs.writeFileSync(path.join(opt('-D'), 'record.json'), JSON.stringify(art)); save(); process.exit(0);",
+    "  fs.mkdirSync(opt('-D'), { recursive: true }); fs.writeFileSync(path.join(opt('-D'), opt('-n') === 'paid-plan' ? 'manifest.json' : 'record.json'), JSON.stringify(art));",
+    "  if (opt('-n') === 'paid-plan') fs.writeFileSync(path.join(opt('-D'), 'gate-reuse.json'), '{\"reuse\":\"confirmed\"}'); save(); process.exit(0);",
     "}",
     "if (a[0] === 'api') {",
-    "  const arts = /actions\\/runs\\/(\\d+)\\/artifacts/.exec(a[1] || '');",
-    "  if (arts) { const names = Object.keys(d.artifacts[arts[1]] || {}); out({ total_count: names.length, artifacts: names.map(name => ({ name, expired: false })) }); }",
+    "  const arts = /actions\\/runs\\/(\\d+)\\/artifacts(?:\\?name=([^&]+))?/.exec(a[1] || '');",
+    "  if (arts) { const names = Object.keys(d.artifacts[arts[1]] || {}).filter(n => !arts[2] || n === decodeURIComponent(arts[2])); out({ total_count: names.length, artifacts: names.map(name => ({ name, expired: false })) }); }",
     "  const named = /commits\\/([0-9a-f]+)\\/check-runs\\?check_name=([^&]+)/.exec(a[1] || '');",
     "  if (named) { const list = (d.checks[named[1]] || []).filter(c => c.name === decodeURIComponent(named[2])); out({ total_count: list.length, check_runs: list }); }",
     "  const paged = /commits\\/([0-9a-f]+)\\/(check-runs|status)\\?.*page=(\\d+)/.exec(a[1] || '');",

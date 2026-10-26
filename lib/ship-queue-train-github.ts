@@ -57,15 +57,15 @@ export function asRun(summary: RunSummary): { id: number; url: string } {
   return { id: summary.databaseId, url: summary.url };
 }
 
-/** One JSON artifact of a run (the first .json file it holds); null when it is missing or unreadable. */
-export function downloadJson(ctx: QueueContext, slug: string, run: number, name: string, scratch: string): unknown {
+/** One JSON artifact of a run (the named file, else the first .json file it holds); null when it is missing or unreadable. */
+export function downloadJson(ctx: QueueContext, slug: string, run: number, name: string, scratch: string, file?: string): unknown {
   const dir = path.join(scratch, `${run}-${name}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   try {
     if (!ctx.gh(['run', 'download', String(run), '--repo', slug, '-n', name, '-D', dir]).ok) return null;
-    const file = fs.readdirSync(dir).find(f => f.endsWith('.json'));
-    return file ? JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) : null;
+    const pick = file ?? fs.readdirSync(dir).find(f => f.endsWith('.json'));
+    return pick && fs.existsSync(path.join(dir, pick)) ? JSON.parse(fs.readFileSync(path.join(dir, pick), 'utf8')) : null;
   } catch { return null; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -74,23 +74,27 @@ export function downloadJson(ctx: QueueContext, slug: string, run: number, name:
  * ref it was dispatched for was superseded, evals.yml skips plan-slices and
  * concludes success (GSTA-95 on #3431). A screen run uploads no train record,
  * so the evidence is the plan itself: no `paid-plan` artifact, or a manifest
- * with nothing planned. Returns the reason when the run is hollow, null when
- * it is live, still running, or its plan cannot be read.
+ * with nothing planned. `hollow` carries the reason; `live` is a screen that
+ * planned cases or is still running; `unknown` names what could not be read
+ * (the caller decides, and says, how it counts).
  */
-export function hollowScreen(ctx: QueueContext, slug: string, run: number): string | null {
+export type ScreenPlan = { kind: 'hollow'; reason: string } | { kind: 'live' } | { kind: 'unknown'; reason: string };
+export function hollowScreen(ctx: QueueContext, slug: string, run: number): ScreenPlan {
+  if (!Number.isSafeInteger(run) || run <= 0) return { kind: 'unknown', reason: `screen run id ${String(run).slice(0, 40)} is not a run number` };
   const view = runView(ctx, slug, run);
-  if (!view || view.status !== 'completed') return null;
-  const list = json<{ artifacts?: Array<{ name?: string; expired?: boolean }> }>(ctx.gh(['api', `repos/${slug}/actions/runs/${run}/artifacts?per_page=100`]));
-  if (!Array.isArray(list?.artifacts)) return null;
+  if (!view) return { kind: 'unknown', reason: `run ${run} is unreadable` };
+  if (view.status !== 'completed') return { kind: 'live' };
+  const list = json<{ artifacts?: Array<{ name?: string; expired?: boolean }> }>(ctx.gh(['api', `repos/${slug}/actions/runs/${run}/artifacts?name=${PLAN_ARTIFACT}&per_page=10`]));
+  if (!Array.isArray(list?.artifacts)) return { kind: 'unknown', reason: `run ${run}'s artifact list is unreadable` };
   const plan = list.artifacts.find(a => a.name === PLAN_ARTIFACT);
-  if (!plan) return `run ${run} planned no cases (no ${PLAN_ARTIFACT} artifact; concluded ${view.conclusion ?? 'unknown'})`;
-  if (plan.expired) return null;
+  if (!plan) return { kind: 'hollow', reason: `run ${run} planned no cases (no ${PLAN_ARTIFACT} artifact; concluded ${view.conclusion ?? 'unknown'})` };
+  if (plan.expired) return { kind: 'unknown', reason: `run ${run}'s ${PLAN_ARTIFACT} artifact has expired` };
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-screen-'));
   let manifest: { entries?: Array<{ status?: unknown }> } | null;
-  try { manifest = downloadJson(ctx, slug, run, PLAN_ARTIFACT, scratch) as typeof manifest; } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
-  if (!Array.isArray(manifest?.entries)) return null;
+  try { manifest = downloadJson(ctx, slug, run, PLAN_ARTIFACT, scratch, 'manifest.json') as typeof manifest; } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+  if (!Array.isArray(manifest?.entries)) return { kind: 'unknown', reason: `run ${run}'s ${PLAN_ARTIFACT} manifest.json is unreadable` };
   const planned = manifest.entries.filter(e => e?.status === 'planned').length;
-  return planned === 0 ? `run ${run} planned 0 cases (concluded ${view.conclusion ?? 'unknown'})` : null;
+  return planned === 0 ? { kind: 'hollow', reason: `run ${run} planned no cases (an empty plan manifest; concluded ${view.conclusion ?? 'unknown'})` } : { kind: 'live' };
 }
 
 /** The plan manifest every evals.yml run that planned anything uploads (plan-slices); a superseded screen never reaches that job. */
