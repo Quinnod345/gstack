@@ -7,7 +7,7 @@
 ### Fixed
 - **`browse/test/dotenv-isolation.test.ts`** (Free Tests 39902683183 and 40322888041, shard 2, "JSON Parse error: Unexpected EOF" at the `agent-env.json` read): the probe writes its result to a temp file and renames it into place, and `waitForFile` waits for content, not only for the file. A new test feeds the old race (an empty file filled 150 ms later) and runs the probe source itself.
 - **`test/claude-code-runner.test.ts`** (Free Tests 39694715116, shard 13, `running(pid)` false at the timeout case): the descendant publishes `descendant.pid` by rename, and the test polls `publishedPid()`, a positive integer, instead of the file's existence, so an empty read can no longer become pid 0.
-- **`test/cso-git-hardening.test.ts`** (Free Tests 40288142343, shard 17, `fs.cpSync` threw in `fixture()` with an empty message and passed on the serial retry): every fixture builds its own repository with Git instead of copying a shared template; the `beforeAll` still pays the cold macOS Git spawns once, on a throwaway repository. No timeout changed.
+- **`test/cso-git-hardening.test.ts`** (Free Tests 40288142343, shard 17, `fs.cpSync` threw in `fixture()` with an empty message and passed on the serial retry): every fixture builds its own repository with Git instead of copying a shared template, with auto-maintenance off (`maintenance.auto=false`, `gc.auto=0`) so the detached `git maintenance run` a commit starts no longer touches `.git` while a test walks or removes it; the `beforeAll` still pays the cold macOS Git spawns once, on a throwaway repository. No timeout changed.
 
 ## [1.91.246.0] - 2026-10-26
 

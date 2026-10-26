@@ -12,10 +12,15 @@ afterEach(()=>{for(const root of roots.splice(0))fs.rmSync(root,{recursive:true,
 const fixtureGit=(repo:string,home:string)=>(...args:string[])=>{const result=spawnSync('/usr/bin/git',['-C',repo,...args],{encoding:'utf8',env:{HOME:home,PATH:'/usr/bin:/bin'},timeout:30_000});if(result.status)throw new Error(result.stderr);return result.stdout;};
 // Each fixture builds its own repository from Git; nothing is copied from a shared
 // template (Free Tests 40288142343 shard 17: fs.cpSync of the template threw inside
-// its directory walk once and passed on the serial retry).
+// its directory walk once and passed on the serial retry). Auto-maintenance is off
+// because `git commit` otherwise starts a detached `git maintenance run --auto` that
+// creates and deletes .git/objects/maintenance.lock after the commit returns, under
+// the tests' own .git reads and the afterEach rmSync (docs/TESTING_INTERNALS.md,
+// Free-suite flake rules); fixtureGit's replacement env never sees the shard backstop.
 function seedRepo(repo:string,home:string){
   const git=fixtureGit(repo,home);fs.mkdirSync(repo);
   git('init','-q');git('config','user.email','fixture@example.test');git('config','user.name','Fixture');
+  git('config','maintenance.auto','false');git('config','gc.auto','0');
   fs.writeFileSync(path.join(repo,'tracked.ts'),'export const tracked = true\n');git('add','tracked.ts');git('commit','-qm','base');
   return git;
 }
