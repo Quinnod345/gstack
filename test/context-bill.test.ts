@@ -1059,6 +1059,57 @@ describe("--exact (opt-in measurement; offline here via an injected fetch)", () 
     expect(calls.length).toBe(4);
   });
 
+  it("sends only the files the walk approved, even when links or files change during --diff", async () => {
+    if (process.platform === "win32") return;
+    const run = async (swap: (store: string, qa: string) => void) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-swap-"));
+      for (const tree of ["a", "b"]) {
+        fs.mkdirSync(path.join(tmp, tree, "qa"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, tree, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+      }
+      const store = path.join(tmp, "store");
+      fs.mkdirSync(store);
+      fs.writeFileSync(path.join(store, "safe.md"), "safe");
+      fs.writeFileSync(path.join(store, "secret.env"), "SYNTHETIC_PRIVATE_NONMARKDOWN");
+      const qa = path.join(tmp, "b", "qa");
+      fs.symlinkSync(path.join(store, "safe.md"), path.join(qa, "ref.md"));
+      const calls: { body: string }[] = [];
+      const inner = fakeFetch(calls) as unknown as (u: string, i: { body: string }) => Promise<unknown>;
+      let swapped = false;
+      const fetchImpl = (async (u: string, i: { body: string }) => {
+        if (!swapped) {
+          swapped = true;
+          swap(store, qa);
+        }
+        return inner(u, i);
+      }) as never;
+      const err = capture();
+      const code = await contextBillMain(["--diff", path.join(tmp, "a"), path.join(tmp, "b"), "--exact", "--json"], {
+        stdout: capture().stream,
+        stderr: err.stream,
+        apiKey: "sk-test",
+        fetchImpl,
+        egressHome,
+      });
+      fs.rmSync(tmp, { recursive: true, force: true });
+      return { code, calls, err: err.text() };
+    };
+
+    const retargeted = await run((store, qa) => {
+      fs.unlinkSync(path.join(qa, "ref.md"));
+      fs.symlinkSync(path.join(store, "secret.env"), path.join(qa, "ref.md"));
+    });
+    expect(retargeted.calls.some((c) => c.body.includes("SYNTHETIC_PRIVATE"))).toBe(false);
+
+    const replaced = await run((store) => {
+      fs.unlinkSync(path.join(store, "safe.md"));
+      fs.symlinkSync(path.join(store, "secret.env"), path.join(store, "safe.md"));
+    });
+    expect(replaced.calls.some((c) => c.body.includes("SYNTHETIC_PRIVATE"))).toBe(false);
+    expect(replaced.code).toBe(1);
+    expect(replaced.err).toContain("changed after it was walked");
+  });
+
   it("names a missing tree, without a raw ENOENT or any request", async () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-missing-"));
     const out = capture();

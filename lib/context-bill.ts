@@ -815,9 +815,15 @@ async function countTokens(text: string, { model, apiKey, fetchImpl }: CountToke
   return json.input_tokens;
 }
 
+export interface ExactFile extends WalkedFile {
+  /** The walked file's identity; --exact reads only that same file. */
+  dev: number;
+  ino: number;
+}
+
 export interface ExactSendSet {
   /** Each real file once, under the first lexical path a skill's walk reaches it by. */
-  files: WalkedFile[];
+  files: ExactFile[];
   /** Realpaths of the SKILL.md files whose frontmatter the bill prices. */
   frontmatter: Set<string>;
 }
@@ -833,7 +839,7 @@ export interface ExactSendSet {
 export function exactSendSet(root: string): ExactSendSet {
   const resolved = path.resolve(root);
   if (!fs.existsSync(resolved)) throw new Error(`No such tree: ${resolved}`);
-  const files: WalkedFile[] = [];
+  const files: ExactFile[] = [];
   const frontmatter = new Set<string>();
   const seen = new Set<string>();
   for (const dir of findSkillDirs(resolved)) {
@@ -841,10 +847,34 @@ export function exactSendSet(root: string): ExactSendSet {
     for (const file of walkMdFiles(dir, { billedRoot: resolved, skipNestedSkills: true })) {
       if (seen.has(file.real)) continue;
       seen.add(file.real);
-      files.push(file);
+      const { dev, ino } = fs.statSync(file.real);
+      files.push({ ...file, dev, ino });
     }
   }
   return { files, frontmatter };
+}
+
+/**
+ * Reads the exact file the walk approved: its realpath, opened without
+ * following a final link, and only if it is still the same regular file. A
+ * link retargeted or a file swapped for a link after the walk is refused, so
+ * nothing the bill did not walk can be sent.
+ */
+function readWalkedFile(real: string, dev: number, ino: number, file: string, root: string): string {
+  const changed = () => new Error(`${file} changed after it was walked; nothing from ${root} was sent. Run again.`);
+  let fd: number;
+  try {
+    fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  } catch {
+    throw changed();
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || st.dev !== dev || st.ino !== ino) throw changed();
+    return fs.readFileSync(fd, "utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 export interface ExactMeasurement {
@@ -894,8 +924,8 @@ export async function measureExactTokens(
   // real file back to the one key that was measured.
   const lexicalOf = new Map<string, string>();
   const { files, frontmatter } = sendSet ?? exactSendSet(root);
-  for (const { path: file, real } of files) {
-    const text = fs.readFileSync(real, "utf8");
+  for (const { path: file, real, dev, ino } of files) {
+    const text = readWalkedFile(real, dev, ino, file, root);
     texts.set(file, text);
     lexicalOf.set(real, file);
     if (!frontmatter.has(real)) continue;
