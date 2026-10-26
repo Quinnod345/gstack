@@ -69,7 +69,8 @@ Parameters: `REPO=<owner/name>` · `BASE=<main>` · `REQUIRED_CHECKS=<check name
     scratch worktree; version files take `BASE`'s side and the CHANGELOG merges by
     section, so a stale branch or a CHANGELOG-only conflict is not your problem. Merge
     `BASE` only when the controller tells you `train build` refused your PR on real
-    code. Then merge (never rebase), run the free suite, and READY again.
+    code (then merge, never rebase, run the free suite, and READY again) or as part of
+    the stamp commit at your slot call (rule 6).
 
 15. **CHANGELOG entry under `## [Unreleased]` before READY.** Leave the version files at
     `BASE`'s version; the stamp at your slot moves the entry under the allocated version.

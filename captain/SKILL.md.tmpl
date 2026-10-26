@@ -51,8 +51,9 @@ the top of the digest needs.
 - The controller merges; a lane never merges, enables auto-merge, or uses a merge queue
   the controller does not drive. A lane's job ends at an unstamped READY.
 - The controller never commits to a lane's branch. It calls slots; the lane stamps.
-- Nothing merges outside a train except a one-PR `--urgent` train. Every merge outside a
-  train costs a backstop gate.
+- Nothing merges outside a train; a single PR takes a one-PR `--urgent` train, and a
+  repair under a freeze takes `train build --repair`. Every merge outside a train costs a
+  backstop gate.
 - The owner's decisions arrive through the controller, in the owner's exact words, and
   are recorded before the work they approve starts.
 - Paid evidence is read, never rejudged: no thresholds, trial counts, case kinds or
@@ -108,7 +109,7 @@ and adds the lines the tool cannot know. Validate every field before the pin goe
 | `ci` | every `REQUIRED_CHECKS` name green at the pin, with counts (`passed=… failed=0 pending=0`) | a pending or failed required check, or a run on another head |
 | `PREGATE` | `pass` for the pin's tree, remote lanes cleared with that head's own CI runs | `incomplete`, or a pass for another tree |
 | `gate` | the paid evidence the lane offers: its own focused cases (named, with results), or the screen it asks for | "ran the cheap tier" offered as merge evidence |
-| `SHIP_RECEIPT` | `pr=<n> head=<pin>` written by /ship at the pin | `none`, or a receipt head that is not the pin |
+| `SHIP_RECEIPT` | `pr=<n> head=<pin's first 12>` written by /ship at the pin | `none`, `invalid`, or a receipt head that is not the pin |
 | `screen` | `--no-screen` with the focused cases that passed, or `--screen` with the reason | no choice, or `--no-screen` with no cases named |
 | `READY_RECEIPT` | the receipt path the tool wrote (local and on the notes ref) | missing |
 | flaky cases | each one already in the ledger, with both runs | a rerun that is not logged, or a second failure called a flake |

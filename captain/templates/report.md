@@ -12,7 +12,7 @@ Written by the lane when it finishes. The controller reads this before chat.
 |---|---|---|---|---|
 | #<n> | <sha40> | <unstamped or vX> | <passed=… failed=0 pending=0> | <nonce slot i, or waiting> |
 
-READY block sent: <yes, date> · SHIP_RECEIPT: pr=<n> head=<sha40> · screen: <choice and why>
+READY block sent: <yes, date> · SHIP_RECEIPT: pr=<n> head=<sha12 of the pin, as the tool prints it> · screen: <choice and why>
 
 ## Needs
 

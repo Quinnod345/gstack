@@ -32,7 +32,9 @@ by a daily pass; nothing is retried into green.
   slots, relays asks to the owner in the three shapes, runs the flaky pass, and decides
   everything that needs no access, credentials, spend over cap or a cited approval.
 - **A lane** (a crew thread) owns named files, builds on its own branch and machine,
-  runs /ship, sends one READY block, stamps on call, writes one report, and never merges.
+  runs /ship, sends one READY block, stamps on call (merging the base into its pin only
+  as part of that stamp commit, or when the controller names a real-code conflict),
+  writes one report, and never merges a PR.
 - **The controller never commits to a lane's branch**, and a lane never pushes to another
   lane's. One committer per shared tree.
 
@@ -133,7 +135,8 @@ loop, per train:
 
 A red train: `train bisect` on the red cases over every prefix. An attributed PR leaves
 the train and goes back to its lane; red on the base branch itself is fixed forward
-through an urgent one-PR train; all prefixes green earns exactly one unchanged rebuild;
+through an urgent one-PR train (or `train build --repair` while the queue is frozen, which
+refuses `--urgent`); all prefixes green earns exactly one unchanged rebuild;
 anything else goes to a repair lane. An infra-only census earns one re-dispatch. A
 backstop gate runs on every push to the base branch and freezes the queue when it finds
 a tree no green train covered; one repair PR at its exact head clears the freeze.
@@ -143,14 +146,16 @@ stamp on the bare pin leaves the PR conflicting on the CHANGELOG. The lane merge
 into its pin first (expect a CHANGELOG-only conflict; resolve it with `mergeChangelogs`
 from `lib/changelog-check.ts`, the `bun -e` one-liner in
 [ship-policy.md](ship-policy.md#run-a-merge-train), never by hand, and grep for conflict
-markers before stamping), then restamps, then commits only the merge and the stamp files. In practice slot 1 needs the same merge whenever the base moved
-after the pin was taken. A stamp commit with one extra byte freezes the queue for every
+markers before stamping), then restamps, then commits only the merge and the stamp
+files. In practice slot 1 needs the same merge whenever the base moved after the pin was
+taken. A stamp commit with one extra byte freezes the queue for every
 lane behind it.
 
 Options the controller writes into CREW.md rather than inheriting: squash versus merge
 commits; lane stamps versus controller stamps; gate-ahead (slot i+1 gates on slot i's
-head while i merges); the severe race (a slot called for several severe PRs, first
-complete READY wins); whether a READY also carries a gate run id and tree hash.
+head while i merges); the severe race (several severe lanes told at once that the next
+urgent train is theirs, first complete READY takes it; never a race for a slot inside a
+built train); whether a READY also carries a gate run id and tree hash.
 
 ## Approvals: three shapes
 
