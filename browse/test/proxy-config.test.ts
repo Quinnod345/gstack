@@ -220,9 +220,12 @@ describe('explicitDirect (#3440 item 8)', () => {
       .toBe(computeConfigHash({ proxyUrl: 'http://p:1', headed: false }));
   });
 
-  test('the daemon reads the opt-out from its own environment for the state file', () => {
-    expect(serverProxyEnv({ BROWSE_PROXY_URL: 'direct' }).direct).toBe(process.platform !== 'linux');
-    expect(serverProxyEnv({}).direct).toBe(false);
+  test('the daemon reads the opt-out from its own environment for the state file, on the platforms where it matters', () => {
+    expect(serverProxyEnv({ BROWSE_PROXY_URL: 'direct' }, 'darwin').direct).toBe(true);
+    expect(serverProxyEnv({ BROWSE_PROXY_URL: 'direct' }, 'win32').direct).toBe(true);
+    expect(serverProxyEnv({ BROWSE_PROXY_URL: 'direct' }, 'linux').direct).toBe(false);
+    expect(serverProxyEnv({}, 'darwin').direct).toBe(false);
+    expect(serverProxyEnv({ BROWSE_PROXY_URL: 'http://p:1' }, 'darwin').direct).toBe(false);
   });
 });
 

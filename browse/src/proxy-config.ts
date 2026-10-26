@@ -235,12 +235,12 @@ export function withLoopbackBypass(rules: string[]): string {
  * caller other than the CLI set only BROWSE_PROXY_URL), and whether an
  * explicit direct bypasses the system proxy settings here (explicitDirect).
  */
-export function serverProxyEnv(env: NodeJS.ProcessEnv): { url: string | undefined; source: string; bypass: string; direct: boolean } {
+export function serverProxyEnv(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): { url: string | undefined; source: string; bypass: string; direct: boolean } {
   return {
     url: env.BROWSE_PROXY_URL === 'direct' ? undefined : env.BROWSE_PROXY_URL || undefined,
     source: env.BROWSE_PROXY_SOURCE || 'BROWSE_PROXY_URL',
     bypass: env.BROWSE_PROXY_BYPASS || withLoopbackBypass(noProxyToChromiumRules(env.NO_PROXY || env.no_proxy)),
-    direct: explicitDirect(env),
+    direct: explicitDirect(env, platform),
   };
 }
 

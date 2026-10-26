@@ -552,7 +552,7 @@ export function buildRestartEnv(
  * the same port, watchdog setting, proxy and config hash. Pure + exported for tests.
  */
 export function buildHeadedServerEnv(
-  globalFlags: Pick<GlobalFlags, 'proxyUrl' | 'configHash'> & Partial<Pick<GlobalFlags, 'proxySource' | 'proxyBypass'>>,
+  globalFlags: Pick<GlobalFlags, 'proxyUrl' | 'configHash' | 'explicitDirect'> & Partial<Pick<GlobalFlags, 'proxySource' | 'proxyBypass'>>,
 ): Record<string, string> {
   return {
     BROWSE_HEADED: '1',

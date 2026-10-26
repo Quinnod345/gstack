@@ -970,7 +970,8 @@ first one set wins:
 3. `HTTPS_PROXY`, then `https_proxy`
 4. `HTTP_PROXY`, then `http_proxy`
 5. `ALL_PROXY`, then `all_proxy`
-6. no proxy (a direct connection)
+6. no proxy configured by `$B` (a direct connection on Linux; the system proxy
+   settings on macOS and Windows)
 
 Whatever `$B` resolves is what Chromium gets, explicitly: a proxy is passed
 as `--proxy-server=<url>`, and a direct connection as
@@ -985,8 +986,9 @@ never reads those variables; it follows the system proxy settings (PAC and
 WPAD included), and step 6 leaves it to them, so GStack Browser.app behind a
 corporate proxy keeps working. `BROWSE_PROXY_URL=direct` bypasses the system
 settings too, on every platform; on macOS and Windows it is part of the
-daemon's settings, so a running daemon started without it is not reused (the
-refusal below names `BROWSE_PROXY_URL`) and a crash restart keeps it. The
+daemon's settings, so a running daemon started without it is not reused (for
+a headless daemon the refusal below names `BROWSE_PROXY_URL`; a `connect`
+daemon gets the generic flags refusal) and a crash restart keeps it. The
 daemon log (`browse-daemon.log` next to the state file) records the
 effective mode each time the daemon starts, as `[proxy] using <url> from
 <source>`, `[proxy] none: direct connection (--proxy-server=direct://;
