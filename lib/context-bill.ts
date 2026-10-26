@@ -221,7 +221,7 @@ function entryKind(p: string, e: fs.Dirent): "file" | "dir" | null {
  */
 function encloses(outer: string, inner: string): boolean {
   const rel = path.relative(outer, inner);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /**

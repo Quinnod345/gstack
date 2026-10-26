@@ -299,6 +299,8 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.symlinkSync(tmp, path.join(root, "parent"));
     fs.symlinkSync(path.join(root, "qa"), path.join(root, "qa", "references", "loop"));
     fs.symlinkSync(tmp, path.join(root, "qa", "references", "up"));
+    // A loop to a directory below the walk root: only the ancestor guard stops it.
+    fs.symlinkSync(path.join(root, "qa", "references"), path.join(root, "qa", "references", "again"));
 
     expect(findSkillDirs(root).map((d) => path.relative(root, d))).toEqual(["qa"]);
     expect(walkMd(path.join(root, "qa")).map((f) => path.relative(root, f)).sort()).toEqual([
@@ -307,6 +309,21 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     ]);
     const bill = buildBill(root);
     expect(bill.totals.totalMdBytes).toBe(fileBytes(root, "qa", "SKILL.md") + fileBytes(root, "qa", "references", "guide.md"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("refuses a parent link when the root's own name starts with '..'", () => {
+    if (process.platform === "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-dotdot-"));
+    fs.mkdirSync(path.join(tmp, "outside"));
+    fs.writeFileSync(path.join(tmp, "outside", "SKILL.md"), "---\nname: outside\ndescription: d\n---\n# o\n");
+    const root = path.join(tmp, "..skills");
+    fs.mkdirSync(path.join(root, "qa"), { recursive: true });
+    fs.writeFileSync(path.join(root, "qa", "SKILL.md"), "---\nname: qa\ndescription: d\n---\n# qa\n");
+    fs.symlinkSync(tmp, path.join(root, "up"));
+
+    expect(findSkillDirs(root).map((d) => path.relative(root, d))).toEqual(["qa"]);
+    expect(walkMd(root).map((f) => path.relative(root, f))).toEqual([path.join("qa", "SKILL.md")]);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
