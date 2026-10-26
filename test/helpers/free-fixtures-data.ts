@@ -60,6 +60,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/codex-sandbox/**': ['test/codex-eval-recording.test.ts', 'test/codex-model-probe.test.ts', 'test/outside-review-result.test.ts', 'test/outside-voice-invocation.test.ts'],
   'test/fixtures/context-bill/**': ['test/context-bill.test.ts', 'test/context-budget-ratchet.test.ts'],
   'test/fixtures/context-budget.json': ['test/helpers/capture-context-budget.ts', 'test/test-value-bar.test.ts'],
+  'test/fixtures/context-restore-fragment-match-captures.json': ['test/context-restore-fragment-verdict.test.ts'],
   'test/fixtures/coverage-audit-cd-chain.json': ['test/coverage-audit-evidence.test.ts'],
   'test/fixtures/coverage-audit-parallel-column.json': ['test/coverage-audit-evidence.test.ts'],
   'test/fixtures/coverage-audit-separator-collision.json': ['test/coverage-audit-evidence.test.ts'],

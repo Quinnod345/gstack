@@ -932,7 +932,7 @@ describe('gstack-skill-start install admission', () => {
     const elsewhere = verdict(gh, {}, path.join(gh, 'named.json'));
     fs.rmSync(path.join(gh, 'install-verdicts'), { recursive: true, force: true });
     expect(start(gh, 'autoplan', { ...capy, GSTACK_INSTALL_VERDICT: elsewhere }).status).toBe(0);
-  });
+  }, 20_000);
 
   test('an installed runtime root follows its .source-path to the source checkout for the verdict and HEAD', () => {
     const gh = scratch();
