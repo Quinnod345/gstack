@@ -2280,7 +2280,6 @@ describe('preamble routing injection (bin/gstack-skill-start emission layer)', (
     expect(SKILL_START_SCRIPT).toContain(
       'if [ "$_HAS_ROUTING" = "no" ] && [ "$_ROUTING_DECLINED" = "false" ] && [ "$_PROACTIVE_PROMPTED" = "yes" ] && [ "$_PROACTIVE_OFF" = "no" ]; then',
     );
-    expect(SKILL_START_SCRIPT).toContain('case "$_PROACTIVE" in off) _PROACTIVE_OFF="yes" ;; *) _PROACTIVE_OFF="no" ;; esac');
   });
 
   test('routing section content includes key routing rules', () => {

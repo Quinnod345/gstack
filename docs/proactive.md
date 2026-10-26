@@ -39,7 +39,7 @@ already in CLAUDE.md stays; delete it yourself). Under `core` the offered
 section still lists every routing rule and tells the host to invoke any
 matching skill. If you accepted it before the `core` default, trim that section
 to the four core rules (or delete it and let gstack offer it again); making the
-offered section follow `core` is tracked as a follow-up.
+offered section follow `core` is tracked in #3446.
 
 gstack asks once, after the telemetry question, which of the three you want.
 "Say stop suggesting" in a session runs `gstack-config set proactive off` for you.

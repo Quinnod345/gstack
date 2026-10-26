@@ -746,6 +746,8 @@ $_gstack_legacy_root"
       VALUE="default"
     fi
     if [ "$KEY" = "proactive" ]; then
+      # Case-insensitive, like gstack-skill-start's read of a hand-edited value.
+      VALUE=$(printf '%s' "$VALUE" | tr '[:upper:]' '[:lower:]')
       case "$VALUE" in
         core|all|off|true|false) ;;
         *)

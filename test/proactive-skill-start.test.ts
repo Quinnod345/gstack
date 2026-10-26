@@ -116,7 +116,7 @@ describe('gstack-skill-start PROACTIVE status line', () => {
     for (const [config, shown] of cases) {
       const state = freshState(config);
       const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-proactive-ss-repo-'));
-      execFileSync('git', ['init', '-q'], { cwd: repo });
+      execFileSync('git', ['init', '-q'], { cwd: repo, timeout: 30_000 });
       try {
         const first = runStart(path.join(BIN, 'gstack-skill-start'), state, repo);
         expect(first, config).toContain('FIRST_TASK: greenfield');

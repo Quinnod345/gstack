@@ -51,6 +51,13 @@ describe('gstack-config proactive', () => {
     expect(run(['get', 'proactive']).stdout).toBe('false');
   });
 
+  test('an upper-case opt-out stores off, not core (set is case-insensitive like skill-start)', () => {
+    const r = run(['set', 'proactive', 'OFF']);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+    expect(run(['get', 'proactive']).stdout).toBe('off');
+  });
+
   test('an unknown value warns and stores core (negative control: on is not a value)', () => {
     run(['set', 'proactive', 'off']);
     const junk = run(['set', 'proactive', 'on']);
