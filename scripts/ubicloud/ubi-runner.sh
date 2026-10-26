@@ -602,7 +602,10 @@ cmd_pack() {
       gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
       git clone -q --bare --no-local --single-branch --branch "$branch" "$gitdir" "$tmp/.git"
       git -C "$tmp/.git" config core.bare false
-      cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+      # The worktree's index rides along so the VM's status matches, except a
+      # split index, whose shared half lives only in the original git dir.
+      [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" = true ] \
+        || cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
     fi
     (
       cd "$src"
