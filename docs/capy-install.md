@@ -254,8 +254,8 @@ through the `bun` shim beside it.
 - `GSTACK_BUN_SHIM=0` at install time writes no shim.
 - Removing it: delete `~/.local/bin/bun` and `~/.local/bin/bunx`. gstack
   replaces only a missing file or a file carrying the marker; a foreign file
-  or a dangling link there is left untouched with a note, and the
-  `GSTACK_LAUNCH` prefix stays the way to reach the certified Bun.
+  or a dangling link there is left untouched with a note, and sourcing the
+  launch file (`. <GSTACK_LAUNCH_FILE>`) stays the way to reach the certified Bun.
 - The doctor's `runtime` row notes the shim; the resolver never treats a
   shim-marked file as a Bun candidate.
 
@@ -448,6 +448,6 @@ Wrapper 2 only adds optional exports (the trailer's `latest:` note and the
 | Exit | Meaning |
 |-----:|---------|
 | 0 | `gstack: ok` — every required component passed |
-| 1 | `gstack: fail <ids>` — a required component failed; each row has a fix |
+| 1 | `gstack: fail <ids>` — a required component failed; each row has a fix. Also `gstack: fail launch-file …` when a passing run could not write its launch file ([LAUNCH_FILE_UNWRITABLE](troubleshooting.md#capy-install-launch-file-unwritable)) |
 | 2 | usage error |
 | 3 | preflight stopped before `./setup` (`INSTALL_PREFLIGHT_FAILED`, `RUNTIME_PIN_CONFLICT`); nothing was installed |
