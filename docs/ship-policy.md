@@ -194,8 +194,11 @@ which passes because the dispatched check runs attach to the commit; the
 `ci-hint:` line then says those non-pull_request runs count. The `ci-hint:` line is
 advisory text for the lane; nothing parses it, and a PR whose head is on a fork
 gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
-PR is `QUEUE_SCREEN_STALE_REF` (there is no merge ref to screen), so it READYs
-with `--no-screen` after the skill's own paid cases ran focused.
+PR refuses, because there is no merge ref to screen (`QUEUE_NOT_READY`, `<remote>
+has no refs/pull/<n>/merge`; #3438 names it `QUEUE_SCREEN_STALE_REF`); that
+refusal's "merge <base> into the branch" advice does not apply to a
+CHANGELOG-only conflict, so the lane READYs with `--no-screen` after the skill's
+own paid cases ran focused.
 
 `ci:` counts the latest run per check (one app's check name), as GitHub's
 rollup does: a check that was re-run or superseded on the same commit (a
@@ -505,7 +508,7 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 | Line | Effect |
 |---|---|
 | `ship: history merge-only: …` | never rebase, squash or force-push; `check-history --plan <merge\|squash\|rebase>` refuses a rewrite plan (`HISTORY_POLICY_VIOLATION`, exit 3) |
-| `ship: queue_mode stamp-at-merge: …` | Step 12 items 1–4 are replaced by `gstack-restamp --next --base <base> --pr <n> --expect-base <sha>` when the PR is next, `--after <predecessor-pr>` when it is not; the restamp's own `next:` line says what follows: under a train, `commit and push only the stamp diff above (FILES), with no edit of your own` and the merge's expected head (the stamp commit holds restamp's output alone); under the per-PR queue, NEW_VERSION and the CHANGELOG entry text |
+| `ship: queue_mode stamp-at-merge: …` | Step 12 items 1–4 are replaced by `gstack-restamp --next --base <base> --pr <n> --expect-base <sha>` when the PR is next, `--after <predecessor-pr>` when it is not; the restamp's own `next:` line says what follows: under `stamp-at-merge`, `commit and push only the stamp diff above (FILES), with no edit of your own` and the merge's expected head (the stamp commit holds restamp's output alone); under the per-PR queue, NEW_VERSION and the CHANGELOG entry text |
 | `ship: shared merge queue: …` | in a coordinator-run queue, `gstack-ship-queue ready`, `gate-ahead` and `stamp` replace the restamp calls; see [Run a shared merge queue](#run-a-shared-merge-queue) |
 | `ship: gate-ahead: …` | with `.gstack/tmp/gate-ahead.json` present, Step 16 reuses only the lanes `gstack-tree-receipt … --json > .gstack/tmp/tree-receipt.json` marks reusable; stamp-sensitive and not-eligible lanes run live; `--force-gate <reason>` is the coordinator's call |
 | `ship: bump patch: …` | Step 12 never asks for MINOR or MAJOR; PATCH or MICRO by size |
