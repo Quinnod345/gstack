@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**New `/ubicloud` skill: the Ubicloud runner moves into gstack with the discipline a shared vCPU quota needs.** Crews ran heavy suites on Ubicloud through a user-scope skill and per-lane wrappers, and paid for it in stray VMs after a machine slept, a project quota at 528 of 512 vCPUs when lanes verified in parallel, verifies that hung for an hour before anyone noticed, and a stale wrapper that skipped a service start. `scripts/ubicloud/ubi-runner.sh` now carries the fixes and `ubicloud/SKILL.md` (entry point `bin/gstack-ubi`) teaches the watched launch; `bun run test:ubicloud` and the remote pregate are unchanged.
+
+### Added
+- **`ubicloud/SKILL.md.tmpl`, `bin/gstack-ubi`**: the skill: set/unset prerequisite checks (never `env`), `UBI_OWNER` on every machine, a watched launch (a waited-on background operation or `gstack-detach`), the quoted recovery line, one committed verify per repository, how to read exit 124 and a quota refusal, and the resume checklist. Classified `CLAUDE_ONLY` in `lib/doctor-components.ts`; routed from the root `SKILL.md`; listed in README, AGENTS.md, docs/skills.md and docs/PROJECT_STRUCTURE.md.
+- **TTL names and a reaper**: a generated VM name ends in `-t<hours>` (`UBI_TTL_HOURS`, default 4; 0 omits it). `reap` destroys every VM in the project whose TTL ended more than ten minutes ago, whichever owner created it, and every `up` runs it first (`UBI_REAP=0` skips it). Names without a TTL, including the ones `pregate-remote.sh` builds, are never reaped.
+- **Quota preflight**: `up` adds the size's vCPUs to the project's running VMs and refuses before the create request when that exceeds the known ceiling (`UBI_QUOTA_VCPUS`, or the maximum the last API refusal printed, remembered in the state root); `UBI_QUOTA_WAIT=<seconds>` polls for room instead of refusing. The per-owner `usage` table is printed either way.
+- **Watchdog and heartbeat**: `run`, `verify` and `ssh NAME COMMAND` stream the remote output (both streams kept in the VM's state dir) through a watchdog: a heartbeat every `UBI_HEARTBEAT` seconds (300), and a command silent for `UBI_IDLE_TIMEOUT` seconds (1800) or older than `UBI_RUN_TIMEOUT` (0, unlimited) is killed in its own session with exit 124 and its last 40 lines on stderr. `run` also prints the VM's TTL and its `down` recovery command as soon as the VM is ready.
+- **`verify`**: runs the repository's committed `.gstack/ubicloud.json` (setup, command, size, location, storage, image, env, pass, pull; flags and a trailing `-- COMMAND` override it; a relative setup path resolves against `--src`) and refuses without the file or a command, so every lane runs one definition instead of its own wrapper.
+
+### Tests
+- `test/ubicloud-runner.test.ts`: against the fake API, `up` reaps an expired other-owner VM, names its own VM `-t4`, and the preflight refuses with no create call; `UBI_REAP=0` and `UBI_TTL_HOURS=0`; `reap` leaves unexpired and TTL-less names alone. Against a fake `ssh`, the watchdog returns 124 with the last output and the heartbeat line appears. `verify` refuses a missing file, a missing command, a missing setup script (resolved against `--src`) and invalid JSON, all before any API call.
+- `test/catalog-budget.test.ts` ratchet 1,197 → 1,235 token-equivalents (ubicloud adds 150 bytes); `test/fixtures/context-budget.json` gains the `ubicloud` ceiling only.
+
 ## [1.91.248.0] - 2026-10-26
 
 **`$B` in direct mode no longer lets Chromium pick a proxy from the environment (#3440 item 8).** `BROWSE_PROXY_URL=direct` (and an unparseable `HTTPS_PROXY`) only stopped gstack from configuring a proxy. The daemon inherits the whole environment and the launch passed no proxy switch, so Chromium read `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` itself and every `goto` still went through that proxy while `$B` reported a direct connection. That made the BROWSER.md precedence list false and any certificate check on a proxied machine unreliable. Reproduced on Linux with Playwright 1.62.1: a logging CONNECT proxy in `HTTPS_PROXY` received `CONNECT <host>:443` with `BROWSE_PROXY_URL=direct` set.

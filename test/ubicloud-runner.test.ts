@@ -202,6 +202,87 @@ esac
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   });
 
+  test('up reaps expired TTL VMs of any owner first, names its own VM with -t<hours>, and the quota preflight refuses before any create request', () => {
+    const listed = 'eu-central-h1 ubirun-other-1000000000-bbbb-t1\neu-central-h1 ubirun-peer-9999999999-cccc\n';
+    const f = fakeApi({ destroy: 200, listed });
+    try {
+      const r = Bun.spawnSync(['bash', join(DIR, 'ubi-runner.sh'), 'up'], { env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, UBICLOUD_API_KEY: 'offline', UBI_RUNNER_STATE: join(f.root, 'state'), UBI_POLL_SECONDS: '1', UBI_VM_RECORD: f.record, UBI_OWNER: 'thrd1', UBI_QUOTA_VCPUS: '31' }, timeout: 90_000 });
+      expect(r.exitCode).toBe(1);
+      const err = r.stderr.toString();
+      expect(err).toMatch(/reaping expired eu-central-h1\/ubirun-other-1000000000-bbbb-t1 \(owner other; its TTL ended \d+ min ago\)/);
+      expect(err).toMatch(/quota preflight refused eu-central-h1\/ubirun-thrd1-\d{10}-[0-9a-f]{8}-t4 \(standard-16\): it needs 16 vCPUs and the project's VMs already use 16 of 31/);
+      expect(err).toContain('create refused before any request: vCPU quota full');
+      const destroyed = f.calls().split('\n').filter(l => l.includes('destroy'));
+      expect(destroyed).toHaveLength(1);
+      expect(destroyed[0]).toContain('ubirun-other-1000000000-bbbb-t1');
+      expect(f.calls()).not.toContain('"create"');
+      expect(existsSync(f.record)).toBe(false);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
+  test('UBI_REAP=0 skips the reap and UBI_TTL_HOURS=0 names the VM without a TTL; reap alone never touches unexpired or TTL-less names', () => {
+    const listed = 'eu-central-h1 ubirun-other-1000000000-bbbb-t1\neu-central-h1 ubirun-thrd1-9999999999-dddd-t1\neu-central-h1 ubirun-thrd1-1000000000-aaaa\neu-central-h1 ubirun-1000000000-cccc\n';
+    const f = fakeApi({ destroy: 200, listed });
+    try {
+      const up = Bun.spawnSync(['bash', join(DIR, 'ubi-runner.sh'), 'up'], { env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, UBICLOUD_API_KEY: 'offline', UBI_RUNNER_STATE: join(f.root, 'state'), UBI_POLL_SECONDS: '1', UBI_VM_RECORD: f.record, UBI_OWNER: 'thrd1', UBI_QUOTA_VCPUS: '64', UBI_REAP: '0', UBI_TTL_HOURS: '0' }, timeout: 90_000 });
+      expect(up.exitCode).toBe(1);
+      expect(up.stderr.toString()).toMatch(/quota preflight refused eu-central-h1\/ubirun-thrd1-\d{10}-[0-9a-f]{8} \(standard-16\): it needs 16 vCPUs and the project's VMs already use 64 of 64/);
+      expect(f.calls()).not.toContain('destroy');
+      const reap = f.run('reap');
+      expect(reap.exitCode).toBe(0);
+      const destroyed = f.calls().split('\n').filter(l => l.includes('destroy'));
+      expect(destroyed).toHaveLength(1);
+      expect(destroyed[0]).toContain('ubirun-other-1000000000-bbbb-t1');
+      expect(f.run('reap').stderr.toString()).toContain('reap: no expired VMs');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
+  test('the watchdog kills a silent remote command with exit 124 and the last output, and the heartbeat reports progress', () => {
+    const f = fakeApi({ destroy: 200, listed: 'eu-central-h1 vm-a\n' });
+    try {
+      const ssh = join(f.root, 'bin/ssh');
+      writeFileSync(ssh, '#!/usr/bin/env bash\necho "line one"; echo "warn one" >&2; sleep 15\n');
+      chmodSync(ssh, 0o755);
+      const env = { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, UBICLOUD_API_KEY: 'offline', UBI_RUNNER_STATE: join(f.root, 'state'), UBI_POLL_SECONDS: '1', UBI_OWNER: 'thrd1' };
+      const hung = Bun.spawnSync(['bash', join(DIR, 'ubi-runner.sh'), 'ssh', 'vm-a', 'sleep 15'], { env: { ...env, UBI_IDLE_TIMEOUT: '2' }, timeout: 60_000 });
+      expect(hung.exitCode).toBe(124);
+      expect(hung.stdout.toString()).toBe('line one\n');
+      const err = hung.stderr.toString();
+      expect(err).toContain('warn one');
+      expect(err).toMatch(/watchdog: ssh printed nothing for \d+s \(UBI_IDLE_TIMEOUT=2\); killing it. Last output:/);
+      expect(err.indexOf('line one')).toBeGreaterThan(err.indexOf('Last output:'));
+      expect(readFileSync(join(f.root, 'state/vm-a/ssh.log'), 'utf8')).toContain('line one');
+      writeFileSync(ssh, '#!/usr/bin/env bash\nfor i in 1 2 3 4 5 6; do echo "tick $i"; sleep 0.5; done\n');
+      const beating = Bun.spawnSync(['bash', join(DIR, 'ubi-runner.sh'), 'ssh', 'vm-a', 'true'], { env: { ...env, UBI_IDLE_TIMEOUT: '0', UBI_HEARTBEAT: '1' }, timeout: 60_000 });
+      expect(beating.exitCode).toBe(0);
+      expect(beating.stdout.toString()).toContain('tick 6');
+      expect(beating.stderr.toString()).toMatch(/heartbeat: ssh \d+s elapsed, last output \d+s ago/);
+      expect(f.calls()).toBe('');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  test('verify runs only a committed .gstack/ubicloud.json and resolves its setup script against --src, before any API call', () => {
+    const f = fakeApi({ destroy: 200, listed: '' });
+    try {
+      const src = join(f.root, 'repo');
+      mkdirSync(join(src, '.gstack'), { recursive: true });
+      const missing = f.run('verify', '--src', src);
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr.toString()).toContain(`verify: no ${src}/.gstack/ubicloud.json; commit one`);
+      writeFileSync(join(src, '.gstack/ubicloud.json'), JSON.stringify({ setup: 'scripts/boot.sh' }));
+      const noCommand = f.run('verify', '--src', src);
+      expect(noCommand.exitCode).toBe(1);
+      expect(noCommand.stderr.toString()).toContain('names no command and none was given after --');
+      writeFileSync(join(src, '.gstack/ubicloud.json'), JSON.stringify({ setup: 'scripts/boot.sh', command: 'make verify', size: 'standard-8' }));
+      const noSetup = f.run('verify', '--src', src);
+      expect(noSetup.exitCode).toBe(1);
+      expect(noSetup.stderr.toString()).toContain(`setup script not found: ${src}/scripts/boot.sh`);
+      writeFileSync(join(src, '.gstack/ubicloud.json'), '{');
+      expect(f.run('verify', '--src', src).stderr.toString()).toContain('is not valid JSON');
+      expect(f.calls()).toBe('');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
   test('up records the VM in the scratch file before the create request is sent', () => {
     const runner = read('scripts/ubicloud/ubi-runner.sh');
     const create = runner.indexOf('cli "${args[@]}" >/dev/null 2>"$dir/create.err"');

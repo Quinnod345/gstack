@@ -977,6 +977,27 @@ sweep only this owner's VMs older than that. For other commands, use the runner
 directly: `scripts/ubicloud/ubi-runner.sh run --setup <script> -- '<command>'`,
 or its `up` / `ssh` / `sync` / `pull` / `down` steps (`--help` lists them).
 
+The runner is also the `/ubicloud` skill's engine (`bin/gstack-ubi` execs it).
+A generated name ends in `-t<hours>` (`UBI_TTL_HOURS`, default 4; 0 omits it),
+the creator's own statement of how long the VM may live: `reap` destroys every
+VM in the project whose TTL ended more than ten minutes ago, whichever owner
+made it, and every `up` runs it first (`UBI_REAP=0` skips it); names without a
+TTL, such as the ones pregate-remote.sh builds itself, are never reaped. The
+quota preflight adds the size's vCPUs to the project's running VMs and refuses
+before the create request when that exceeds the known ceiling
+(`UBI_QUOTA_VCPUS`, or the maximum the last refusal printed, remembered in the
+state root; `UBI_QUOTA_WAIT=<seconds>` waits for room instead). `run`, `verify`
+and `ssh NAME COMMAND` stream the remote output through a watchdog: a heartbeat
+line every `UBI_HEARTBEAT` seconds (300), and a command silent for
+`UBI_IDLE_TIMEOUT` seconds (1800) or older than `UBI_RUN_TIMEOUT` (0, unlimited)
+is killed with exit 124 and its last 40 lines on stderr, so a hung verify fails
+fast instead of holding the VM until its TTL. `verify` runs a repository's
+committed `.gstack/ubicloud.json` (setup, command, size, location, storage,
+image, env, pass, pull; flags and a trailing `-- COMMAND` override it) and
+refuses without the file, so every lane runs one definition. All of this is
+pinned offline in `test/ubicloud-runner.test.ts` against a fake API and a fake
+`ssh`.
+
 Under 8 cores (`gstack-doctor`'s `cores` row says so), run the full unit and
 E2E tiers on a remote gate: `gstack-config set test_backend ubicloud` records
 the choice and the row names the runner. Resume checklist after a wake or a

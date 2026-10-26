@@ -38,6 +38,29 @@
 # Stale-VM sweeps are off by default. With UBI_GC_HOURS set to a positive
 # number, every `up` first destroys this owner's VMs older than that; `gc HOURS`
 # runs the same sweep on demand. Neither ever touches another owner's VMs.
+#
+# TTL and reaper: a name this script generates ends in -t<hours> (UBI_TTL_HOURS,
+# default 4; 0 omits it), the creator's own declaration of how long the VM may
+# live. `reap` destroys every VM in the project whose TTL expired more than ten
+# minutes ago, whichever owner made it, and every `up` runs it first (UBI_REAP=0
+# skips it), so a runner killed by a sleeping machine leaves nothing behind for
+# longer than its TTL. Names without a TTL are never reaped.
+#
+# Quota preflight: when the project's vCPU ceiling is known (UBI_QUOTA_VCPUS, or
+# the maximum a refusal printed, cached in $STATE_ROOT/quota-max), `up` adds the
+# size's vCPUs to the project's running VMs and refuses before any create when
+# that exceeds it; UBI_QUOTA_WAIT=<seconds> waits for room instead.
+#
+# Watchdog: `run`, `verify` and `ssh NAME COMMAND` stream the remote output
+# through a watchdog that logs a heartbeat every UBI_HEARTBEAT seconds (300)
+# and kills a command silent for UBI_IDLE_TIMEOUT seconds (1800) or older than
+# UBI_RUN_TIMEOUT seconds (0, unlimited), exiting 124 with the last 40 lines,
+# so a hung verify fails fast instead of holding the VM until its TTL.
+#
+# `verify` is the one entry point for a repository's full remote verify: it
+# reads .gstack/ubicloud.json (setup, command, size, location, env, pass, pull)
+# and runs it through `run`, so lanes share one committed definition instead of
+# per-lane wrappers.
 set -euo pipefail
 # Keep heredoc bodies on temp files, not the pipe window (test/heredoc-pipe-deadlock.test.ts).
 BASH_COMPAT=50
@@ -52,6 +75,14 @@ CREATE_GRACE="${UBI_CREATE_GRACE:-180}"
 DOWN_TIMEOUT="${UBI_DOWN_TIMEOUT:-900}"
 POLL="${UBI_POLL_SECONDS:-5}"
 ALLOWED_STORAGE="${UBI_ALLOWED_STORAGE:-320 640}"
+TTL_HOURS="${UBI_TTL_HOURS:-4}"
+REAP="${UBI_REAP:-1}"
+REAP_GRACE=600
+IDLE_TIMEOUT="${UBI_IDLE_TIMEOUT:-1800}"
+RUN_TIMEOUT="${UBI_RUN_TIMEOUT:-0}"
+HEARTBEAT="${UBI_HEARTBEAT:-300}"
+QUOTA_VCPUS="${UBI_QUOTA_VCPUS:-}"
+QUOTA_WAIT="${UBI_QUOTA_WAIT:-0}"
 PREFIX="ubirun"
 if [ -n "${UBI_VM_RECORD:-}" ]; then VM_RECORD="$UBI_VM_RECORD"
 elif [ -d "$HOME/.capy/work" ]; then VM_RECORD="$HOME/.capy/work/ubi-runner/vms.tsv"
@@ -65,6 +96,11 @@ for bin in curl python3 ssh ssh-keygen tar; do
 done
 UBICLOUD_API_KEY="${UBICLOUD_API_KEY:-${UBICLOUD_API_TOKEN:-}}"
 [[ "$GC_HOURS" =~ ^[0-9]+$ ]] || die "UBI_GC_HOURS must be a whole number of hours (unset or 0 disables the sweep)"
+[[ "$TTL_HOURS" =~ ^[0-9]+$ ]] || die "UBI_TTL_HOURS must be a whole number of hours (0 names VMs without a TTL)"
+for v in IDLE_TIMEOUT RUN_TIMEOUT HEARTBEAT QUOTA_WAIT; do
+  [[ "${!v}" =~ ^[0-9]+$ ]] || die "UBI_$v must be a whole number of seconds (0 disables it)"
+done
+[ -z "$QUOTA_VCPUS" ] || [[ "$QUOTA_VCPUS" =~ ^[0-9]+$ ]] || die "UBI_QUOTA_VCPUS must be a whole number of vCPUs"
 
 owner_id() {
   local raw=${UBI_OWNER:-} file="$STATE_ROOT/owner-id" tmp
@@ -141,18 +177,84 @@ remote() {
   ssh $(ssh_opts) "ubi@$IP" "umask 022; $*"
 }
 
-# vm_rows: "location name owner" for every VM in the project; owner is
-# "-" for untagged ubirun-<epoch>-* names and "." for VMs this runner did not name.
-vm_rows() {
-  cli vm list -N -f location,name | while read -r loc name; do
-    if [[ "$name" =~ ^${PREFIX}-([a-z][a-z0-9]{0,11})-[0-9]{10}- ]]; then
-      echo "$loc $name ${BASH_REMATCH[1]}"
-    elif [[ "$name" =~ ^${PREFIX}-[0-9]{10}- ]]; then
-      echo "$loc $name -"
-    else
-      echo "$loc $name ."
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+
+# watched NAME PHASE COMMAND: run COMMAND on the VM, streaming its output and
+# keeping a copy of both streams in the VM's state dir, with a heartbeat every HEARTBEAT
+# seconds and a watchdog that kills it after IDLE_TIMEOUT seconds of silence or
+# RUN_TIMEOUT seconds in total: exit 124, reason and the last 40 lines on
+# stderr. The ssh runs in its own session (python3's setsid) so the watchdog
+# kills it and anything it started, not just the shell that launched it.
+watched() {
+  local name=$1 phase=$2 cmd=$3 out pid rc=0 start now last_beat idle elapsed why=""
+  load "$name"
+  out="$(state_dir "$name")/$phase.log"
+  : >"$out"
+  # shellcheck disable=SC2046
+  ( exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+      ssh $(ssh_opts) "ubi@$IP" "umask 022; $cmd" ) > >(tee -a "$out") 2> >(tee -a "$out" >&2) &
+  pid=$!
+  start=$(date +%s)
+  last_beat=$start
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$POLL"
+    now=$(date +%s)
+    elapsed=$(( now - start ))
+    idle=$(( now - $(mtime "$out") ))
+    if [ "$IDLE_TIMEOUT" -gt 0 ] && [ "$idle" -ge "$IDLE_TIMEOUT" ]; then
+      why="printed nothing for ${idle}s (UBI_IDLE_TIMEOUT=$IDLE_TIMEOUT)"
+    elif [ "$RUN_TIMEOUT" -gt 0 ] && [ "$elapsed" -ge "$RUN_TIMEOUT" ]; then
+      why="ran ${elapsed}s (UBI_RUN_TIMEOUT=$RUN_TIMEOUT)"
+    fi
+    if [ -n "$why" ]; then
+      log "watchdog: $phase $why; killing it. Last output:"
+      tail -n 40 "$out" >&2
+      kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    if [ "$HEARTBEAT" -gt 0 ] && [ $(( now - last_beat )) -ge "$HEARTBEAT" ]; then
+      log "heartbeat: $phase ${elapsed}s elapsed, last output ${idle}s ago"
+      last_beat=$now
     fi
   done
+  wait "$pid" || rc=$?
+  return "$rc"
+}
+
+# vm_rows: "location name owner expires" for every VM in the project; owner is
+# "-" for untagged ubirun-<epoch>-* names and "." for VMs this runner did not
+# name; expires is the epoch the name's -t<hours> TTL ends at, or "-".
+vm_rows() {
+  local loc name owner created expires
+  cli vm list -N -f location,name | while read -r loc name; do
+    owner=. created="" expires=-
+    if [[ "$name" =~ ^${PREFIX}-([a-z][a-z0-9]{0,11})-([0-9]{10})- ]]; then
+      owner=${BASH_REMATCH[1]} created=${BASH_REMATCH[2]}
+    elif [[ "$name" =~ ^${PREFIX}-([0-9]{10})- ]]; then
+      owner=- created=${BASH_REMATCH[1]}
+    fi
+    if [ -n "$created" ] && [[ "$name" =~ -t([0-9]+)$ ]]; then
+      expires=$(( created + BASH_REMATCH[1] * 3600 ))
+    fi
+    echo "$loc $name $owner $expires"
+  done
+}
+
+# reap: destroy every VM whose name carries a TTL that ended more than
+# REAP_GRACE seconds ago, whichever owner created it (the TTL is that owner's
+# own declaration). Names without a TTL are never touched.
+cmd_reap() {
+  local now loc name owner expires n=0
+  now=$(date +%s)
+  while read -r loc name owner expires; do
+    [ "$expires" != - ] || continue
+    [ "$now" -ge $(( expires + REAP_GRACE )) ] || continue
+    n=$(( n + 1 ))
+    log "reaping expired $loc/$name (owner $owner; its TTL ended $(( (now - expires) / 60 )) min ago)"
+    cmd_down "$name" -l "$loc" || log "failed to reap $loc/$name"
+  done < <(vm_rows)
+  [ "$n" -gt 0 ] || log "reap: no expired VMs"
 }
 
 cmd_gc() {
@@ -160,7 +262,7 @@ cmd_gc() {
   [[ "$hours" =~ ^[0-9]+$ ]] || die "gc: HOURS must be a whole number (or set UBI_GC_HOURS)"
   if [ "$hours" -eq 0 ]; then log "gc: no sweep (give HOURS > 0 or set UBI_GC_HOURS); nothing listed, nothing destroyed"; return 0; fi
   now=$(date +%s)
-  vm_rows | while read -r loc name owner; do
+  vm_rows | while read -r loc name owner _; do
     [ "$owner" = "$OWNER" ] || continue
     [[ "$name" =~ -([0-9]{10})- ]] || continue
     if [ $(( (now - BASH_REMATCH[1]) / 3600 )) -ge "$hours" ]; then
@@ -182,7 +284,7 @@ cmd_list() {
 cmd_usage() {
   local tmp loc name owner i=0
   tmp=$(mktemp -d)
-  while read -r loc name owner; do
+  while read -r loc name owner _; do
     i=$(( i + 1 ))
     cli vm "$loc/$name" show 2>/dev/null | sed -n "s/^size: /$owner /p" >"$tmp/$i" &
     [ $(( i % 8 )) -ne 0 ] || wait
@@ -226,7 +328,38 @@ cmd_records() {
   awk -F'\t' '{ printf "%-40s %-14s %-12s %-20s %s\n", $1, $2, $3, $4, $5 }' "$VM_RECORD"
 }
 
-new_name() { echo "$PREFIX-$OWNER-$(date +%s)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
+new_name() {
+  local ttl=""
+  [ "$TTL_HOURS" -eq 0 ] || ttl="-t$TTL_HOURS"
+  echo "$PREFIX-$OWNER-$(date +%s)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')$ttl"
+}
+
+# vcpus SIZE: the vCPU count a Ubicloud size name carries (standard-16 -> 16).
+vcpus() { [[ "$1" =~ -([0-9]+)$ ]] && echo "${BASH_REMATCH[1]}"; }
+
+# quota_preflight LOCATION NAME SIZE: refuse (or wait UBI_QUOTA_WAIT seconds)
+# before the create request when the project's running VMs plus this size
+# exceed the known vCPU ceiling. The ceiling comes from UBI_QUOTA_VCPUS or the
+# maximum the last refusal printed; without either the API's own refusal rules.
+quota_preflight() {
+  local location=$1 name=$2 size=$3 need max used wait_until
+  need=$(vcpus "$size") || return 0
+  max=${QUOTA_VCPUS:-$(cat "$STATE_ROOT/quota-max" 2>/dev/null || true)}
+  [[ "$max" =~ ^[0-9]+$ ]] || return 0
+  wait_until=$(( $(date +%s) + QUOTA_WAIT ))
+  while :; do
+    used=$(cmd_usage 2>/dev/null | awk '$1=="total" {print $3}')
+    [[ "$used" =~ ^[0-9]+$ ]] || return 0
+    [ $(( used + need )) -gt "$max" ] || return 0
+    if [ "$(date +%s)" -ge "$wait_until" ]; then
+      log "quota preflight refused $location/$name ($size): it needs $need vCPUs and the project's VMs already use $used of $max (ceiling from UBI_QUOTA_VCPUS or the last refusal; other usage such as managed runners counts on top)"
+      cmd_usage >&2 || true
+      die "create refused before any request: vCPU quota full; wait for running VMs to finish (UBI_QUOTA_WAIT=<seconds> waits here), run $0 reap, or use a smaller size"
+    fi
+    log "quota: $used of $max vCPUs in use and $need needed; waiting up to $(( wait_until - $(date +%s) ))s more for room"
+    sleep 30
+  done
+}
 
 valid_name() { [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; }
 
@@ -254,9 +387,13 @@ cmd_up() {
   done
   [ -n "$name" ] || name=$(new_name)
   valid_name "$name" || die "invalid VM name '$name' (Ubicloud allows 1-63 of a-z, 0-9 and '-', starting and ending with a letter or digit)"
+  if [ "$REAP" != 0 ]; then
+    cmd_reap || log "reap failed; continuing"
+  fi
   if [ "$GC_HOURS" -gt 0 ]; then
     cmd_gc "$GC_HOURS" || log "stale-VM cleanup failed; continuing"
   fi
+  quota_preflight "$location" "$name" "$size"
 
   local dir create_at
   dir=$(state_dir "$name")
@@ -287,6 +424,7 @@ cmd_up() {
       die "create failed"
     fi
     read -r need used max <<<"$refusal"
+    echo "$max" >"$STATE_ROOT/quota-max"
     log "quota refused $location/$name ($size): it needs $need vCPUs and the project already uses $used of $max"
     log "VMs in the project by owner (the rest of the used count is other usage, such as managed GitHub runners):"
     cmd_usage >&2 || true
@@ -468,6 +606,11 @@ cmd_run() {
   trap 'trap "" INT TERM HUP QUIT; cmd_down "$RUN_VM" || log "WARNING: failed to destroy $RUN_VM; run: $0 down $RUN_VM"' EXIT
   trap 'exit 130' INT TERM HUP QUIT
   cmd_up "${up_args[@]}" >/dev/null
+  if [[ "$name" =~ -t([0-9]+)$ ]]; then
+    log "$name carries a ${BASH_REMATCH[1]}h TTL (any later run of this script reaps it); if this process dies first: $0 down $name"
+  else
+    log "$name has no TTL; if this process dies before its teardown line, destroy it with: $0 down $name"
+  fi
   if [ "$keep" = 1 ]; then
     trap - EXIT
     log "--keep: leaving $name running; destroy with: $0 down $name"
@@ -483,13 +626,13 @@ cmd_run() {
   if [ -n "$setup" ]; then
     remote "$name" 'cat > ~/.ubirun-setup.sh' <"$setup"
     log "running setup $(basename "$setup")"
-    remote "$name" "cd $qdest && . ~/.ubirun-env && bash -l ~/.ubirun-setup.sh" || die "setup failed"
+    watched "$name" setup "cd $qdest && . ~/.ubirun-env && bash -l ~/.ubirun-setup.sh" || die "setup failed (exit $?)"
   fi
 
   local start rc=0
   start=$(date +%s)
   log "running on $name: $*"
-  remote "$name" "cd $qdest && . ~/.ubirun-env && bash -lc $(printf %q "$*")" || rc=$?
+  watched "$name" command "cd $qdest && . ~/.ubirun-env && bash -lc $(printf %q "$*")" || rc=$?
   log "command exited $rc after $(( $(date +%s) - start ))s"
 
   local p
@@ -499,6 +642,45 @@ cmd_run() {
   return "$rc"
 }
 
+# verify [run opts] [-- COMMAND]: run the repository's committed remote verify.
+# .gstack/ubicloud.json under --src (default .) supplies setup, command, size,
+# location, storage, image, env, pass and pull; flags given here and a trailing
+# -- COMMAND override it. Without the file it refuses, so every lane runs the
+# one committed definition instead of its own wrapper.
+cmd_verify() {
+  local src=. i j cfg cfg_setup cfg_cmd user_pre=() user_cmd=()
+  for (( i = 1; i <= $#; i++ )); do
+    [ "${!i}" = -- ] && break
+    if [ "${!i}" = --src ]; then j=$(( i + 1 )); src=${!j}; fi
+  done
+  cfg="$src/.gstack/ubicloud.json"
+  [ -f "$cfg" ] || die "verify: no $cfg; commit one ({\"setup\": \"scripts/ubicloud/bootstrap.sh\", \"command\": \"bash scripts/ubicloud/verify.sh\"}) so every lane runs the same verify instead of its own wrapper"
+  local cfg_args=() parsed
+  parsed=$(python3 -c '
+import json, shlex, sys
+c = json.load(open(sys.argv[1]))
+q = lambda s: shlex.quote(str(s))
+args = []
+for key, flag in (("size", "-s"), ("location", "-l"), ("storage", "-S"), ("image", "-b")):
+    if key in c: args += [flag, q(c[key])]
+for key, flag in (("env", "--env"), ("pass", "--pass"), ("pull", "--pull")):
+    for item in c.get(key, []): args += [flag, q(item)]
+print("cfg_args=(" + " ".join(args) + ")")
+print("cfg_setup=" + q(c.get("setup", "")))
+print("cfg_cmd=" + q(c.get("command", "")))
+' "$cfg" 2>/dev/null) || die "verify: $cfg is not valid JSON"
+  eval "$parsed"
+  while [ $# -gt 0 ]; do
+    if [ "$1" = -- ]; then shift; user_cmd=("$@"); break; fi
+    user_pre+=("$1"); shift
+  done
+  [ -z "$cfg_setup" ] || [[ "$cfg_setup" = /* ]] || cfg_setup="$src/$cfg_setup"
+  [ ${#user_cmd[@]} -gt 0 ] || [ -n "$cfg_cmd" ] || die "verify: $cfg names no command and none was given after --"
+  [ ${#user_cmd[@]} -gt 0 ] || user_cmd=("$cfg_cmd")
+  log "verify: $cfg"
+  cmd_run ${cfg_args[@]+"${cfg_args[@]}"} ${cfg_setup:+--setup "$cfg_setup"} --src "$src" ${user_pre[@]+"${user_pre[@]}"} -- "${user_cmd[@]}"
+}
+
 usage() {
   cat <<EOF
 usage: ubi-runner.sh <command> [args]
@@ -506,6 +688,8 @@ usage: ubi-runner.sh <command> [args]
   run [up opts] [--src DIR] [--dest PATH] [--setup FILE] [--env K=V]...
       [--pass NAME]... [--pull REMOTE_GLOB:LOCAL_DIR]... [--keep] -- COMMAND
                          up + sync + setup + command + pull + destroy; exits with COMMAND's status
+  verify [run opts] [-- COMMAND]
+                         run the repository's committed verify (.gstack/ubicloud.json under --src)
   up [-s SIZE] [-l LOCATION] [-n NAME] [-S STORAGE_GIB] [-b IMAGE]
                          create a VM and wait for SSH; prints its name
                          (STORAGE_GIB: one of $ALLOWED_STORAGE)
@@ -521,12 +705,18 @@ usage: ubi-runner.sh <command> [args]
   owner                  print this caller's owner tag ($OWNER)
   records                VMs this machine created and has not confirmed gone ($VM_RECORD)
   gc HOURS               destroy this owner's VMs older than HOURS (never other owners')
+  reap                   destroy every VM whose -t<hours> TTL has ended (any owner; TTL-less names never)
   cli ARGS...            raw Ubicloud CLI passthrough (e.g. cli vm list)
 
-VMs are named $PREFIX-<owner>-<epoch>-<suffix>; set UBI_OWNER (e.g. your thread
-code) to tag them, otherwise a per-machine id is used.
+VMs are named $PREFIX-<owner>-<epoch>-<suffix>-t<ttl hours>; set UBI_OWNER (e.g. your
+thread code) to tag them, otherwise a per-machine id is used.
 defaults: size=$DEFAULT_SIZE location=$DEFAULT_LOCATION (env UBI_SIZE, UBI_LOCATION)
-env: UBI_GC_HOURS (unset/0: no sweep on up), UBI_CREATE_GRACE (${CREATE_GRACE}s),
+env: UBI_TTL_HOURS (${TTL_HOURS}h in the name; 0 omits it), UBI_REAP (0: up skips the reap),
+     UBI_IDLE_TIMEOUT (${IDLE_TIMEOUT}s of silence kills the remote command, exit 124; 0 disables),
+     UBI_RUN_TIMEOUT (${RUN_TIMEOUT}s wall clock; 0 unlimited), UBI_HEARTBEAT (${HEARTBEAT}s between heartbeat lines),
+     UBI_QUOTA_VCPUS (project vCPU ceiling for the preflight; else the last refusal's maximum),
+     UBI_QUOTA_WAIT (${QUOTA_WAIT}s to wait for quota room instead of refusing),
+     UBI_GC_HOURS (unset/0: no sweep on up), UBI_CREATE_GRACE (${CREATE_GRACE}s),
      UBI_DOWN_TIMEOUT (${DOWN_TIMEOUT}s), UBI_API_TIMEOUT (${API_TIMEOUT}s), UBI_VM_RECORD (scratch VM-id file),
      UBI_ALLOWED_STORAGE (the -S sizes Ubicloud accepts; default "320 640")
 EOF
@@ -540,12 +730,13 @@ case $cmd in
 esac
 case $cmd in
   run) cmd_run "$@" ;;
+  verify) cmd_verify "$@" ;;
   up) trap 'trap "" INT TERM HUP QUIT; [ -z "$UP_NAME" ] || [ -n "$UP_READY" ] || cmd_down "$UP_NAME" || log "WARNING: failed to destroy $UP_NAME; run: $0 down $UP_NAME"' EXIT
       trap 'exit 130' INT TERM HUP QUIT
       cmd_up "$@" ;;
   ssh) name=$1; shift; load "$name"
        # shellcheck disable=SC2046
-       if [ $# -eq 0 ]; then exec ssh -t $(ssh_opts) "ubi@$IP"; else remote "$name" "bash -lc $(printf %q "$*")"; fi ;;
+       if [ $# -eq 0 ]; then exec ssh -t $(ssh_opts) "ubi@$IP"; else watched "$name" ssh "bash -lc $(printf %q "$*")"; fi ;;
   sync) cmd_sync "$@" ;;
   pack) cmd_pack "$@" ;;
   unpack) cmd_unpack "$@" ;;
@@ -556,6 +747,7 @@ case $cmd in
   owner) echo "$OWNER" ;;
   records) cmd_records ;;
   gc) cmd_gc "$@" ;;
+  reap) cmd_reap ;;
   cli) cli "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; exit 2 ;;
