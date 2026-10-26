@@ -4134,11 +4134,103 @@ merge ref at all, it refuses with the same code and a `could not list …` or
 `could not fetch …` message whose NEXT line says to check the remote, not to
 resolve a conflict.
 
-**Fix.** Resolve the conflict with the base branch (or wait for GitHub to
-recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
---screen` again. Under crew rule 14 a CHANGELOG-only conflict is left to the
-train, so a lane that cannot get a fresh merge ref READYs `--no-screen` only
-after its own focused paid cases passed (rule 6).
+**Fix.** Since the scratch-merge screen landed, a lagging merge ref is no
+longer a refusal: `ready --screen` builds the merge of the PR head onto
+`origin/<base>` itself with the train's merge rules (version files take the
+base's side, the CHANGELOG merges by section), pushes it as
+`screen/<pr>-<head12>` and dispatches the screen on that commit, printing
+`SCREEN_MERGE: scratch merge …`. The code now means a real conflict: the
+message lists the conflicting paths. Resolve those with the base branch,
+push, and run `gstack-ship-queue ready --pr <n> --screen` again. A
+CHANGELOG-only or stamp-file-only conflict never refuses. `train prune
+--stale` deletes the scratch branches of merged or closed PRs.
+
+<a id="queue-screen-red"></a>
+### `QUEUE_SCREEN_RED`
+
+**Meaning.** The screen run dispatched for this PR head finished RED. The
+verdict is read from the run itself, never from a lane's report: the
+`gate-binding-a<attempt>` artifact evals.yml's report job uploads (verdict,
+reconcile exit, flaky cases) and the `report-verdict-a<attempt>` artifact's
+`collector-outcomes.json` (the panels that failed the lane and the rule-16
+flaky lines). A case the binding calls red already failed twice inside the
+run (rule 16 reruns a first failure once), so the red is real. `ready`
+refuses with this code when the head's recorded screen run is red, whichever
+of `--screen` or `--no-screen` it is given, and never dispatches another
+screen at the same merge SHA; `train build` refuses to seat the pin and its
+`NEXT:` names the build without it; `verify --pr <n> --screen` prints
+`SCREEN_VERDICT: #<n> run <id> RED red=<cases> flaky=<cases>` and one
+`FLAKY:` line per flaky case. The verdict is recorded in the READY receipt
+(`screen.verdict`), locally and in `refs/notes/gstack-trains`.
+
+**Fix.** Read the red cases from the `SCREEN_VERDICT:` line, repair, push a
+new head, run /ship and `gstack-ship-queue ready --pr <n> --screen` again
+(the new head gets its own screen). A GREEN screen with flaky cases is green:
+the flaky cases are listed for the ledger and need no rerun.
+
+<a id="queue-train-stack-red"></a>
+### `QUEUE_TRAIN_STACK_RED`
+
+**Meaning.** `gstack-ship-queue train build --dry-run --stack-tests` ran a PR's
+new test files (files the PR adds relative to the base under a test directory
+or named `*.test.*` / `*.spec.*`) on the integrated prefix that includes it,
+T<k> (the base plus every slot up to and including that PR), in a scratch
+worktree, and they failed. The `STACK_TESTS: #<pr> T<k> <n> new test file(s)
+FAIL (<files>): <failing assertion>` line names the files and the runner's
+failing lines. Those tests pass on the PR head alone only because nothing
+before it in the train had changed what they read (a PR stacked on another
+PR's test files or fixtures hit this on 2026-10-26). Nothing was written,
+pushed or dispatched; the ordinary dry run (without `--stack-tests`) does not
+run them.
+
+**Fix.** Fix the PR's tests against that prefix, or reorder the train with
+`--order` so the PR they depend on comes first, then rerun the dry run. Pass
+`--stack-tests-command "<cmd>"` when the repo's tests run under something
+other than `bun test`; the files are appended to the command.
+
+<a id="queue-post-merge-red"></a>
+### `QUEUE_POST_MERGE_RED`
+
+**Meaning.** `gstack-ship-queue verify --post-merge <sha>` watched the check
+runs attached to a commit the train merged onto the base branch (the push
+workflows: free tests, the Windows subset, the main backstop) until none was
+still running, and at least one concluded `failure`, `timed_out`,
+`cancelled` or another non-success. A `neutral` or `skipped` check (the
+backstop superseding itself when main moved on) is counted as skipped, never
+red. The command keeps no process state: it polls gh until the checks settle
+or `--timeout` (default 2700 s) passes, prints `POST_MERGE: <sha12>
+green|red|pending|none (passed= failed= pending= skipped=)` and one
+`CHECK: <name> <conclusion|status>` line per check, and a timeout is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`, so rerunning it after
+an interruption continues the watch.
+
+**Fix.** Read the red run named on its `CHECK:` line. Repair on a new PR or
+roll back the merge; `gstack-ship-queue train status` names the freeze if the
+backstop filed one.
+
+<a id="queue-screen-not-run"></a>
+### `QUEUE_SCREEN_NOT_RUN`
+
+**Meaning.** The screen run dispatched for this PR concluded `success` but
+ran no slice. evals.yml's `route` job plans nothing when
+`scripts/eval-readiness.ts wait` finds the PR head superseded (a push landed
+between `ready --screen` and the plan) or when the plan selects no case; the
+run then uploads no `paid-plan` artifact (or an empty manifest), every slice
+job is skipped and GitHub shows a green check. On 2026-10-26, 18 of 41 PR
+screens ended this way. The verdict is read from the run (`lib/ship-queue-screen.ts`),
+so such a run is `NOT-RUN`: `verify --pr <n> --screen` prints
+`SCREEN_VERDICT: #<n> run <id> NOT-RUN (<why>)` and refuses with this code, the
+READY receipt records `screen.verdict.outcome: NOT_RUN`, `ready --screen` never
+follows the run (its `SCREEN_DISPATCH:` line says `not following … a screen
+that planned nothing is not a screen`) and `train build` seats the pin unscreened
+with `SCREEN: #<n> run <id> planned no cases …; counted as not-run, the slot
+rides unscreened`.
+
+**Fix.** `gstack-ship-queue ready --pr <n> --screen` at the current head
+dispatches a fresh screen. A head that moved since the dispatch needs a fresh
+READY anyway (`QUEUE_TRAIN_MOVED`); a head that did not move and still plans
+nothing has nothing diff-relevant to screen, and `--no-screen` with the
+focused cases named in the READY block is the honest choice.
 
 <a id="ready-screen-choice-required"></a>
 ### `READY_SCREEN_CHOICE_REQUIRED`

@@ -186,14 +186,20 @@ READY PR as conflicting each time main stamps; the train merges the CHANGELOG
 by section, so the lane never merges main for it. The conflict does mean GitHub
 has no merge ref for the PR, so no `pull_request` CI runs on the head and
 `ready` prints `ci: none at <head12>` with a `ci-hint:` line. The lane then
-dispatches the free workflows on the branch (`gh workflow run free-tests.yml
---ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>`),
-clears the requires-remote pregate lanes with those runs
-(`gstack-pregate clear --remote <lane> --run-url <run>`) and reruns `ready`,
-which passes because the dispatched check runs attach to the commit; the
-`ci-hint:` line then says those non-pull_request runs count. The `ci-hint:` line is
-advisory text for the lane; nothing parses it, and a PR whose head is on a fork
-gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
+runs `ready … --dispatch-ci free-tests.yml,windows-free-tests.yml [--timeout
+<s>]` (under a train policy): it dispatches each named workflow on the branch
+(`gh workflow run <wf> --ref <branch>`, skipped when a run at this head already
+concluded), waits for the runs (`CI_DISPATCH: <wf> --ref <branch> run <id> <url>
+<conclusion>`), clears every requires-remote pregate lane whose workflow is one
+of them with the run URL (`PREGATE_CLEARED: <lane> <url>`; a lane of another
+workflow stays uncleared and is named in the refusal), and then reads the head
+as usual, which passes because the dispatched check runs attach to the commit;
+the `ci-hint:` line then says those non-pull_request runs count. A red run
+clears no lane and refuses (`QUEUE_NOT_READY`); a fork head is never dispatched
+here (`QUEUE_TRAIN_UNTRUSTED`). By hand the same four steps are `gh workflow
+run <wf> --ref <branch>`, wait, `gstack-pregate clear --remote <lane> --run-url
+<run>`, rerun `ready`. The `ci-hint:` line is advisory text for the lane;
+nothing parses it. `ready --screen` on such a
 PR refuses, because there is no merge ref to screen (`QUEUE_SCREEN_STALE_REF`,
 `<remote> has no refs/pull/<n>/merge`); that refusal's "merge <base> into the
 branch" advice does not apply to a CHANGELOG-only conflict, so the lane READYs
@@ -544,9 +550,68 @@ It runs the normal free tests, full gate and verification on main plus the
 repair. When verify confirms the repair merged, it prints `FREEZE: cleared`
 and `NEXT:` builds a train of the PRs still unmerged.
 
+**5b. Coordinator: after the merge.** `gstack-ship-queue verify --post-merge
+<sha> [--timeout <s>]` watches every check run attached to the merged commit
+(the push workflows: free tests, the Windows subset, the main backstop) until
+none is still running, prints one `CHECK: <name> <conclusion>` per check and
+`POST_MERGE: <sha12> green|red|pending|none (passed= failed= pending= skipped=)`.
+Green needs at least one completed check and no failure; `neutral` and
+`skipped` (the backstop superseding itself) count as skipped. A failure is
+`QUEUE_POST_MERGE_RED` naming the checks; a timeout (default 2700 s) is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`. It keeps no process
+state, so rerunning it after a machine restart continues the watch.
+
 **6. Clean up.** `gstack-ship-queue train prune [--train <nonce>] [--dry-run]`
 deletes the `train/<nonce>` branches of merged, superseded and dropped trains
-(`WOULD-DELETE:`, `DELETED:`, `GONE:`).
+(`WOULD-DELETE:`, `DELETED:`, `GONE:`). `train prune --stale` also settles a
+`merging` or `green` train whose every PR is MERGED or CLOSED on GitHub (its
+PRs landed through another train or by hand): it logs each PR's state on a
+`STALE:` line, marks the record `stale`, deletes its branch and any
+`screen/<pr>-*` scratch branches of those PRs; a train with an OPEN PR is kept
+(`KEEP: … still needs the train`). `train forget --train <nonce> | --receipt
+<pr>@<sha> [--dry-run]` removes one record (a settled train with its attempts,
+or one READY receipt) from local state and from `refs/notes/gstack-trains`
+with an exact lease on the notes ref, printing `FORGET:` then `FORGOTTEN:`; a
+merging, gate-pending or free-pending train is refused.
+
+**Following a train without a daemon.** `gstack-ship-queue train watch --train
+<nonce> [--timeout <s>]` is the one resumable follow command: it reads the
+record, runs the step its state asks for (`train build --train` to push, run
+the free tests and dispatch the gate; `train status` to settle an unconfirmed
+dispatch), waits for the pending run by polling gh, reads the verdict and
+prints the last step's `NEXT:`. It never dispatches anything the record would
+not dispatch on its own, so rerunning it after an interruption continues from
+the record (`WATCH:` lines say what it did; a timeout, default 7200 s, is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`).
+
+**Screens are read from the run.** `ready --screen` and `verify --pr <n>
+--screen` read a dispatched screen's verdict from the run's own artifacts
+(`gate-binding-a<attempt>`, `report-verdict-a<attempt>`), never from a lane's
+prose, and record it in the READY receipt (`screen.verdict`): `SCREEN_VERDICT:
+#<n> run <id> GREEN|RED|NOT-RUN|INCOMPLETE [red=…] [flaky=…]` plus one
+`FLAKY:` line per rule-16 flaky case. A RED screen refuses `ready` under
+either choice and is never re-dispatched at the same merge SHA
+(`QUEUE_SCREEN_RED`); a run that concluded success with no slice (its route
+job found the head superseded or the plan selected nothing) is `NOT-RUN`:
+`verify --screen` refuses with `QUEUE_SCREEN_NOT_RUN`, `ready --screen`
+dispatches afresh instead of following it, and `train build` seats the pin
+unscreened with a `SCREEN: … counted as not-run` line. When GitHub's
+`refs/pull/<n>/merge` lags the PR head or is missing, `ready --screen` plans
+the screen on a scratch merge of the head onto the base, pushed as
+`screen/<pr>-<head12>` (`SCREEN_MERGE:` names it; `prune --stale` deletes it
+once the PR merged); only a real conflict with the base is
+`QUEUE_SCREEN_STALE_REF`.
+
+**Stacked tests before the gate.** `train build --prs … --dry-run --stack-tests
+[--stack-tests-command "<cmd>"]` runs each PR's new test files (added relative
+to the base, under a test directory or named `*.test.*`/`*.spec.*`) on the
+integrated prefix that includes it, T<k>, in a scratch worktree, and prints
+`STACK_TESTS: #<pr> T<k> <n> new test file(s) pass|FAIL (<files>)` or `no new
+test files`. A failure is `QUEUE_TRAIN_STACK_RED` (nothing written, pushed or
+dispatched): the tests pass on the PR head alone only because nothing before
+it in the train had changed what they read, so fix them against that prefix or
+reorder with `--order`. The default command is `bun --no-env-file
+--config=/dev/null test` with the files appended.
 
 **Escape hatches.** Remove the `train` block on the base branch to return
 every lane to the per-PR queue at once. `--urgent` ships one PR alone,
