@@ -8,8 +8,10 @@
 // loads <page>?capture, and for each frame advances the clock by whole
 // milliseconds averaging 1000/60, calls window.__start() on frame PRE and
 // window.__tick(dt) from then on inside the same evaluate, seeks every CSS
-// animation to the fake clock, and screenshots. Output in <dir>: frames/%05d.png,
-// still.png (<page>?still at the capture scale), mask.png with --mask, and
+// animation to the fake clock from window.__mark (the page sets it when its
+// state classes change; 0 when absent), and screenshots. Output in <dir>:
+// frames/%05d.png, still.png (<page>?still at the capture scale, CSS animations
+// finished), mask.png with --mask, and
 // capture.json (sizes, window, per-frame clock and loop time) for
 // gstack-motion-encode. --still renders <page>?still alone (--scale 2 for the
 // fidelity reference).
@@ -63,7 +65,7 @@ async function openPage(mode: 'capture' | 'still', scale: number) {
     await document.fonts.ready;
     await Promise.all([...document.images].map(img => img.decode().catch(() => undefined)));
   });
-  await page.clock.pauseAt(10_000);
+  await page.clock.pauseAt(Math.max(10_000, await page.evaluate(() => Date.now()) + 1_000));
   return page;
 }
 
@@ -71,13 +73,15 @@ try {
   if (opts.still) {
     const page = await openPage('still', opts.scale ?? captureScale(opts.width, opts.height));
     fs.mkdirSync(path.dirname(path.resolve(opts.still)), { recursive: true });
-    await page.screenshot({ path: opts.still });
+    await page.screenshot({ path: opts.still, animations: 'disabled' });
     console.log(`STILL_OK ${opts.still}`);
   } else {
     const out = path.resolve(opts.out!);
     const scale = captureScale(opts.width, opts.height);
     const plan = planCapture({ cycleSeconds: opts.cycle!, pre: opts.pre, tail: opts.tail });
-    fs.rmSync(path.join(out, 'frames'), { recursive: true, force: true });
+    for (const stale of ['frames', 'capture.json', 'still.png', 'mask.png', 'contact-sheet.png']) {
+      fs.rmSync(path.join(out, stale), { recursive: true, force: true });
+    }
     fs.mkdirSync(path.join(out, 'frames'), { recursive: true });
     const page = await openPage('capture', scale);
     const contract = await page.evaluate(() => typeof (window as any).__start === 'function' && typeof (window as any).__tick === 'function');
@@ -101,10 +105,10 @@ try {
       await page.screenshot({ path: path.join(out, 'frames', `${String(i).padStart(5, '0')}.png`) });
     }
     const still = await openPage('still', scale);
-    await still.screenshot({ path: path.join(out, 'still.png') });
+    await still.screenshot({ path: path.join(out, 'still.png'), animations: 'disabled' });
     if (opts.mask) {
       await still.addStyleTag({ content: maskCss(opts.mask) });
-      await still.screenshot({ path: path.join(out, 'mask.png') });
+      await still.screenshot({ path: path.join(out, 'mask.png'), animations: 'disabled' });
     }
     const manifest = {
       schema: 1, target: opts.target, width: opts.width, height: opts.height, scale, fps: FPS, cycle: opts.cycle!,

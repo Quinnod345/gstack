@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { clockMs, planCapture } from '../lib/motion-capture';
 import {
-  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, mp4Args, parsePsnrStats, planChecks, psnrArgs,
+  compareArgs, contactSheetArgs, cropError, judgeCheck, loopGifArgs, mp4Args, padError, parsePsnrStats, planChecks, psnrArgs,
   resolveFfmpeg, smallGifArgs, FFMPEG_MISSING, type CaptureManifest, type CheckJob, type CheckOptions,
 } from '../lib/motion-encode';
 
@@ -53,6 +53,18 @@ describe('export recipes', () => {
     expect(cropError('801:500:0:0')).toBeNull();
     expect(cropError('1000:1000:0:0')).toContain('width 1600');
     expect(cropError('1600x1000')).toContain('w:h:x:y');
+  });
+
+  // Value: protects=values that reach the ffmpeg filter graph (--pad, compare's --crop) are plain colours and w:h:x:y;
+  //   fails_when=a value with ',' or ';' reaches the graph and adds filters or inputs; why_new=pad and compare's crop were unvalidated;
+  //   seam=none; no_claim=validators only; the CLI refusal rows are in the exit-2 test below
+  test('filter-graph values are validated: a hex pad and a w:h:x:y crop', () => {
+    expect(padError('#f4f1ea')).toBeNull();
+    expect(padError('f4f1eaff')).toBeNull();
+    expect(padError('#fff')).toContain('hex colour');
+    expect(padError('#ffffff,hue=s=0')).toContain('hex colour');
+    expect(cropError('1000:1000:0:0', { ratio: false })).toBeNull();
+    expect(cropError('100:100:0:0,hue=s=0', { ratio: false })).toContain('w:h:x:y');
   });
 
   test('the contact sheet tiles twelve frames from the first to the last of the window', () => {
@@ -175,5 +187,50 @@ describe('ffmpeg is optional and named when missing', () => {
     const r = Bun.spawnSync([BIN, 'encode'], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000, env: { ...process.env, GSTACK_FFMPEG: '/nonexistent/ffmpeg' } });
     expect(r.exitCode).toBe(2);
     expect(r.stderr.toString()).toContain('Usage: gstack-motion-encode check');
+  });
+
+  // Value: protects=an unreadable capture, a bad --layout, impossible phases, a missing --name and a non-1.6:1 crop exit 2 before any ffmpeg run;
+  //   fails_when=a guard is dropped and ffmpeg runs on bad input or the CLI exits 0/1; why_new=only the no-subcommand usage path was tested; seam=none;
+  //   no_claim=a stand-in file satisfies GSTACK_FFMPEG resolution and is never executed, so real ffmpeg is not exercised
+  test('bad captures and bad options exit 2 once ffmpeg resolves, before it runs', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-encode-usage-'));
+    try {
+      const fake = path.join(dir, 'fake-ffmpeg');
+      fs.writeFileSync(fake, '');
+      const cli = (...args: string[]) => {
+        const r = Bun.spawnSync([BIN, ...args], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000, env: { ...process.env, GSTACK_FFMPEG: fake } });
+        return { code: r.exitCode, err: r.stderr.toString() };
+      };
+      const empty = path.join(dir, 'empty');
+      fs.mkdirSync(empty);
+      const missing = cli('check', empty);
+      expect(missing.code).toBe(2);
+      expect(missing.err).toContain('capture.json');
+      expect(missing.err).toContain('capture first with gstack-motion-capture.ts');
+      const cap = path.join(dir, 'cap');
+      fs.mkdirSync(cap);
+      fs.writeFileSync(path.join(cap, 'capture.json'), JSON.stringify(manifest()));
+      expect(cli('check', cap, '--layout', 'grid')).toEqual({ code: 2, err: '--layout must be app or cards\n' });
+      const phases = cli('check', cap, '--dissolve-at', '13');
+      expect(phases.code).toBe(2);
+      expect(phases.err).toContain('intro-end < dissolve-at <= empty-from < cycle');
+      const name = cli('export', cap, '--name', 'Bad Name');
+      expect(name.code).toBe(2);
+      expect(name.err).toContain('--name <kebab-case-name> is required');
+      const crop = cli('export', cap, '--name', 'ok', '--crop', '1000:1000:0:0');
+      expect(crop.code).toBe(2);
+      expect(crop.err).toContain('is not 1.6:1');
+      // Value: protects=unknown flags, unknown formats, a non-hex pad, a malformed compare crop and missing frames exit 2 before ffmpeg;
+      //   fails_when=a typo'd threshold or format is ignored, or export encodes a truncated capture and prints EXPORT_OK;
+      //   why_new=these guards are new; seam=none; no_claim=the stand-in ffmpeg is never executed
+      expect(cli('check', cap, '--dissolveat', '10').err).toContain("unknown option '--dissolveat' for check");
+      expect(cli('check', cap, '--dissolveat', '10').code).toBe(2);
+      expect(cli('export', cap, '--name', 'ok', '--formats', 'mp4,gif')).toMatchObject({ code: 2, err: expect.stringContaining("got 'gif'") });
+      expect(cli('export', cap, '--name', 'ok', '--pad', '#ffffff,hue=s=0')).toMatchObject({ code: 2, err: expect.stringContaining('--pad must be a hex colour') });
+      expect(cli('compare', 'a.png', 'b.png', '--crop', '1:1:0:0,hue=s=0')).toMatchObject({ code: 2, err: expect.stringContaining('--crop must be w:h:x:y') });
+      expect(cli('export', cap, '--name', 'ok')).toMatchObject({ code: 2, err: expect.stringContaining('the capture is incomplete') });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

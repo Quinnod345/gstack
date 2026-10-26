@@ -4,8 +4,8 @@ Use this path only when `FIGMA_TOKEN` (or `FIGMA_ACCESS_TOKEN`) is set and the s
 
 ```bash
 _FT="${FIGMA_TOKEN:-$FIGMA_ACCESS_TOKEN}"
-curl -fsS -H "X-Figma-Token: $_FT" "https://api.figma.com/v1/files/<figma-file-key>/nodes?ids=<figma-node-id>&geometry=paths" -o "$_MOTION_DIR/figma-nodes.json"
-curl -fsS -H "X-Figma-Token: $_FT" "https://api.figma.com/v1/images/<figma-file-key>?ids=<figma-node-id>&format=png&scale=2" -o "$_MOTION_DIR/figma-ref.json"
+curl -fsS -H "X-Figma-Token: $_FT" "https://api.figma.com/v1/files/<figma-file-key>/nodes?ids=<figma-node-id>&geometry=paths" -o "<motion-dir>/figma-nodes.json"
+curl -fsS -H "X-Figma-Token: $_FT" "https://api.figma.com/v1/images/<figma-file-key>?ids=<figma-node-id>&format=png&scale=2" -o "<motion-dir>/figma-ref.json"
 ```
 
 The nodes response gives the tree, bounds, fills, effects and radii; the images response gives a URL for the **reference frame**, saved as `reference.png`. Every layer position is its absolute bounds minus the frame's origin. Figma's image CDN sometimes resets connections: retry each download and check each PNG's size before using it.

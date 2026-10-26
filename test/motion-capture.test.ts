@@ -47,6 +47,11 @@ describe('capture timing', () => {
     expect(Math.floor(1440 * captureScale(1440, 990))).toBe(1745);
     expect(captureScale(1920, 1080)).toBe(1);
     expect(captureScale(600, 400)).toBe(3);
+    // Value: protects=a portrait frame scales its long side to 1920 and short side within 1200, like a landscape one;
+    //   fails_when=the scale again treats width as the long side and under-scales phone frames; why_new=every case above is landscape;
+    //   seam=none; no_claim=scale math only; the capture's screenshot size is covered by test/motion-pipeline.test.ts
+    expect(captureScale(390, 844)).toBeCloseTo(1920 / 844, 10);
+    expect(captureScale(1080, 1920)).toBe(1);
   });
 });
 
@@ -74,6 +79,17 @@ describe('capture arguments', () => {
     expect(err(['p.html', '--size', '640x400', '--fps', '30'])).toContain("unknown option '--fps'");
     expect(err(['p.html', 'q.html', '--size', '640x400'])).toContain("unexpected argument 'q.html'");
     expect(err(['p.html', '--size'])).toContain('needs a value');
+    // Value: protects=a degenerate frame, a zero cycle and a fractional tail are refused at parse time with exit-2 wording;
+    //   fails_when=the size floor, the >0 check or the tail integer check is dropped; why_new=no row hit these three guards; seam=none;
+    //   no_claim=parser only; Chromium's behaviour on such a frame is not exercised
+    expect(err(['p.html', '--size', '10x10', '--still', 's.png'])).toContain('--size 10x10 is too small');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '0', '--out', 'c'])).toContain("--cycle must be a positive number, got '0'");
+    expect(err(['p.html', '--size', '640x400', '--cycle', '4', '--out', 'c', '--tail', '2.5'])).toContain('--tail must be a whole number');
+    // Value: protects=a cycle that is not a whole number of 60 fps frames is refused with the nearest valid cycle;
+    //   fails_when=the guard is dropped and the seam frame lands off one cycle, failing the seam check spuriously; why_new=new guard;
+    //   seam=none; no_claim=parser only
+    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('--cycle must be a whole number of 60 fps frames');
+    expect(err(['p.html', '--size', '640x400', '--cycle', '6.01', '--out', 'c'])).toContain('nearest: 6.0167');
   });
 
   test('modes keep the existing query and fragment', () => {

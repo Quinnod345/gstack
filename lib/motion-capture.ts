@@ -31,9 +31,9 @@ export function clockMs(i: number, pre: number, fps = FPS): number {
   return Math.round((i + 1) * 1000 / fps) - Math.round(pre * 1000 / fps);
 }
 
-/** Device scale factor that puts the frame's long side on X's 1920x1200 limit. */
-export function captureScale(width: number, height: number, maxW = MAX_LONG, maxH = MAX_SHORT): number {
-  return Math.min(maxW / width, maxH / height);
+/** Device scale factor that puts the frame's long side on X's 1920x1200 limit (1200x1920 for a portrait frame). */
+export function captureScale(width: number, height: number, maxLong = MAX_LONG, maxShort = MAX_SHORT): number {
+  return Math.min(maxLong / Math.max(width, height), maxShort / Math.min(width, height));
 }
 
 export interface CapturePlan {
@@ -116,6 +116,9 @@ export function parseCaptureArgs(argv: string[]): CaptureOptions | { error: stri
   if (still && out) return { error: 'use --still or --out, not both' };
   if (!still && !out) return { error: '--out <dir> is required for a capture (or --still <out.png> for one still frame)' };
   if (out && nums['--cycle'] === undefined) return { error: '--cycle <seconds> is required for a capture' };
+  if (nums['--cycle'] !== undefined && Math.abs(nums['--cycle'] * FPS - Math.round(nums['--cycle'] * FPS)) > 1e-6) {
+    return { error: `--cycle must be a whole number of ${FPS} fps frames, got '${nums['--cycle']}' (nearest: ${Number((Math.round(nums['--cycle'] * FPS) / FPS).toFixed(4))})` };
+  }
   if (still && !/\.png$/i.test(still)) return { error: '--still must name a .png file' };
   if (still && flags.has('--mask')) return { error: '--mask belongs to a capture (--out), not a single still' };
   if (out && flags.has('--scale')) return { error: '--scale belongs to --still; a capture always uses the 1920x1200 scale' };

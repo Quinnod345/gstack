@@ -28,7 +28,7 @@ allowed-tools:
 # /design-motion: Showcase Loops from an Approved Design
 
 You turn a finished design into a loop that proves it is alive. The viewer must
-see the exact design, and see that it works: the frame loads from empty, each
+see the exact design working: the frame loads from empty, each
 visual acts out what it does, and the loop returns to the design and repeats
 without a seam.
 
@@ -44,10 +44,10 @@ without a seam.
 
 - **Showcase or website decides the motion budget.** A showcase is an artifact: the motion is the content, so every visual gets its story. On a website gstack's rule holds: **one authored motion moment per page.** Animate the one section whose visual most needs explaining; ask before animating a second.
 - **Content never hides behind animation timing.** On a website the section renders complete with no script, under reduced motion, and before the intro fires. The intro is an enhancement that starts on an IntersectionObserver, never an opacity-0 block waiting for scroll.
-- **Only what the design has moves.** No added loading lines, glows, gradients or gradient text, no new copy. Helpers a story needs (a cursor, a duplicate row) match the design and are absent from the still.
+- **Only what the design has moves.** No added loading lines, glows, gradients or gradient text, no new copy (showcase accents excepted). Helpers a story needs (a cursor, a duplicate row) match the design and are absent from the still.
 - **No bounce.** Curves never pass 1 (the catalog's bounce-easing tell). Never `scale(0)` an object; only lines and bars grow from zero.
 - **Pulses, marquees and blinking carets are showcase-only accents** on elements that are live indicators, inputs or logo rows in the design. A shipped website keeps none of them running (catalog: pulsing-dot, marquee, blinking-cursor).
-- **Animate `transform`, `opacity`, `filter` and `clip-path` only.** Blur stays at 14 px or less. Website transitions stay in gstack's 50 to 700 ms range; showcase timing is slower on purpose.
+- **Animate `transform`, `opacity`, `filter` and `clip-path` only** (plus a mask angle or `stroke-dashoffset` for sweeps). Blur stays at 14 px or less. Website transitions stay in gstack's 50 to 700 ms range; showcase timing is slower on purpose.
 
 ## Step 0: Setup and source detection
 
@@ -61,7 +61,7 @@ _FINALIZED=$(ls -t "$GSTACK_STATE_ROOT/projects/$SLUG/designs/"*/finalized.html 
 [ -n "$_FINALIZED" ] && echo "FINALIZED: $_FINALIZED" || echo "NO_FINALIZED"
 [ -f DESIGN.md ] && echo "DESIGN_MD: exists" || echo "NO_DESIGN_MD"
 [ -n "${FIGMA_TOKEN:-}${FIGMA_ACCESS_TOKEN:-}" ] && echo "FIGMA_TOKEN: set" || echo "NO_FIGMA_TOKEN"
-command -v ffmpeg >/dev/null 2>&1 && echo "FFMPEG: $(command -v ffmpeg)" || echo "NO_FFMPEG"
+[ -e "${GSTACK_FFMPEG:-$(command -v ffmpeg)}" ] && echo "FFMPEG: ready" || echo "NO_FFMPEG"
 {{BIN_DIR}}/gstack-browser-ensure --quiet
 ```
 
@@ -74,7 +74,7 @@ command -v ffmpeg >/dev/null 2>&1 && echo "FFMPEG: $(command -v ffmpeg)" || echo
 
 Nothing found and nothing named: ask once which design to animate, offering /design-shotgun or /design-html to make one.
 
-`BROWSER_UNAVAILABLE` from the browser check: capture cannot run; tell the user its fix line and stop after Step 3. `NO_FFMPEG`: say ffmpeg is needed for the checks and exports (macOS `brew install ffmpeg`, Debian/Ubuntu `sudo apt-get install -y ffmpeg`, Windows `winget install Gyan.FFmpeg`), build the page anyway, and stop before Step 6.
+`BROWSER_UNAVAILABLE`: nothing can render; give its fix line, build `page.html` and stop before the first capture call. `NO_FFMPEG`: say ffmpeg is needed for the checks and exports (macOS `brew install ffmpeg`, Debian/Ubuntu `sudo apt-get install -y ffmpeg`, Windows `winget install Gyan.FFmpeg`), build the page, render its Step 3 still for a visual check, and stop.
 
 Set up the run directory:
 
@@ -86,7 +86,7 @@ mkdir -p "$_MOTION_DIR"
 echo "MOTION_DIR: $_MOTION_DIR"
 ```
 
-Replace `<name>` with a kebab-case name for the design. Everything this run writes goes there: `page.html`, `reference.png`, the capture in `cap/`, and the exports.
+Replace `<name>` with a kebab-case name for the design. Later blocks write that printed path for `<motion-dir>`. Everything this run writes goes there: `page.html`, `reference.png`, the capture in `cap/`, and the exports.
 
 ## Step 1: Intake and the motion plan
 
@@ -116,11 +116,11 @@ With `FIGMA_TOKEN: set` and a Figma source:
 Render the rebuilt page's still and the reference at 2x, then compare:
 
 ```bash
-{{BIN_DIR}}/gstack-motion-capture.ts "$_MOTION_DIR/page.html" --size <frame-size> --still "$_MOTION_DIR/still-2x.png" --scale 2
-{{BIN_DIR}}/gstack-motion-encode compare "$_MOTION_DIR/reference.png" "$_MOTION_DIR/still-2x.png" --blur 1.2
+{{BIN_DIR}}/gstack-motion-capture.ts "<motion-dir>/page.html" --size <frame-size> --still "<motion-dir>/still-2x.png" --scale 2
+{{BIN_DIR}}/gstack-motion-encode compare "<motion-dir>/reference.png" "<motion-dir>/still-2x.png" --blur 1.2
 ```
 
-Aim above 35 dB for the frame (`--crop w:h:x:y` per container: above 30 dB; text-heavy containers retest at `--blur 2.5`). Read both images and look for structure: a glow too high, wrong stacking, a missing stroke, a shifted shadow. Fix structure, never sub-pixel offsets. A flat PNG source gets a visual comparison and a plainly stated limit instead of a dB target.
+Aim above 35 dB for the frame (`--crop w:h:x:y` per container: above 30 dB; text-heavy containers retest at `--blur 2.5`). Read both images for structure: a glow too high, wrong stacking, a missing stroke. Fix structure, never sub-pixel offsets. A flat PNG source gets a visual comparison and a plainly stated limit instead of a dB target.
 
 ## Step 4: Motion
 
@@ -131,18 +131,18 @@ Aim above 35 dB for the frame (`--crop w:h:x:y` per container: above 30 dB; text
 The page must expose the capture contract (fidelity section): `?capture` turns off `requestAnimationFrame` and exposes `window.__start()`, `window.__tick(dt)` and `window.__lt`.
 
 ```bash
-{{BIN_DIR}}/gstack-motion-capture.ts "$_MOTION_DIR/page.html" --size <frame-size> --cycle <cycle-seconds> --out "$_MOTION_DIR/cap" --mask '[data-motion-clip]'
+{{BIN_DIR}}/gstack-motion-capture.ts "<motion-dir>/page.html" --size <frame-size> --cycle <cycle-seconds> --out "<motion-dir>/cap" --mask '[data-motion-clip]'
 ```
 
-It steps a fake clock in whole milliseconds averaging 1000/60, records 15 PRE frames before `__start`, one full cycle from frame PRE − 1 (the empty state), and 10 frames past it. It writes `cap/frames/`, `cap/still.png` at the capture scale, `cap/mask.png` and `cap/capture.json`, and prints `CAPTURE_OK`. The mask paints every element marked `data-motion-clip` (each clip container, per the fidelity section). `MOTION_CONTRACT_MISSING`: add the capture mode and rerun.
+It steps a fake clock in whole milliseconds averaging 1000/60, records 15 PRE frames before `__start`, one full cycle from frame PRE − 1 (the empty state), and 10 frames past it. It writes `cap/frames/`, `cap/still.png`, `cap/mask.png` and `cap/capture.json`, and prints `CAPTURE_OK`. The mask paints every element marked `data-motion-clip` (each clip container, per the fidelity section). `MOTION_CONTRACT_MISSING`: add the capture mode and rerun.
 
 ## Step 6: Motion checks (before any export)
 
 ```bash
-{{BIN_DIR}}/gstack-motion-encode check "$_MOTION_DIR/cap" --layout <app|cards>
+{{BIN_DIR}}/gstack-motion-encode check "<motion-dir>/cap" --layout <app|cards>
 ```
 
-The phase defaults follow the cycle: dissolve at cycle − 1.0 s, empty beat from cycle − 0.4 s, intro landed at 2.4 s. When your plan's phases differ, add `--dissolve-at`, `--empty-from` and `--intro-end` in seconds. One `MOTION_CHECK:` line each, then `MOTION_RESULT: clean` or `MOTION_RESULT: <n> failed`:
+The phase defaults follow the cycle: dissolve at cycle − 1.0 s, empty beat from cycle − 0.4 s, intro landed at 2.4 s. When your plan's phases differ, add `--dissolve-at`, `--empty-from` and `--intro-end` in seconds. One `MOTION_CHECK:` line each, then `MOTION_RESULT: clean` or `<n> failed`:
 
 - **seam**: the window's first frame equals the frame one cycle later.
 - **empty-beat**: every empty-beat frame equals the frame before `__start`; catches JS state the reset missed, which the seam cannot see.
@@ -156,10 +156,10 @@ Read `cap/contact-sheet.png` and look for ghosting, pops, content moving ahead o
 On the first design of a session, show the contact sheet before exporting so the direction can be corrected cheaply.
 
 ```bash
-{{BIN_DIR}}/gstack-motion-encode export "$_MOTION_DIR/cap" --name <name> --pad '<hex-color>'
+{{BIN_DIR}}/gstack-motion-encode export "<motion-dir>/cap" --name <name> --pad '<hex-color>'
 ```
 
-It writes `<name>-x.mp4` (H.264, yuv420p, 60 fps, CRF 15, faststart, even dimensions, long side up to 1920), `<name>-loop.gif` (960 px wide, 20 fps) and `<name>-800x500.gif`. For the 800×500, frames with wide empty borders (most card and bento frames) crop to the content with about 40 px of margin at exactly 1.6:1 (add `--crop w:h:x:y` in capture pixels); a frame its content fills is fitted and padded with `--pad`; a photo background always crops. A heavy GIF lowers `--gif-fps` or `--small-fps` (12) before its size.
+It writes `<name>-x.mp4` (H.264, 60 fps, CRF 15, long side up to 1920), `<name>-loop.gif` (960 px wide, 20 fps) and `<name>-800x500.gif`. For the 800×500, frames with wide empty borders (most card and bento frames) crop to the content with about 40 px of margin at exactly 1.6:1 (add `--crop w:h:x:y` in capture pixels); a frame its content fills is fitted and padded with `--pad`; a photo background always crops. A heavy GIF lowers `--gif-fps` or `--small-fps` (12) before its size.
 
 Report: still fidelity (frame and worst container PSNR), each check's result, the three files with size, dimensions, frame rate and duration, and anything not reproduced exactly, named plainly. Offer to copy the exports into the project.
 

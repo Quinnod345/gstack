@@ -79,14 +79,20 @@ export function smallGifArgs(m: CaptureManifest, dir: string, out: string, o: Gi
     'scale=800:500:force_original_aspect_ratio=decrease:flags=lanczos', `pad=800:500:(ow-iw)/2:(oh-ih)/2:color=${pad}`]);
 }
 
-/** A crop for the 800x500 GIF must be exactly 1.6:1 (one pixel of rounding allowed). */
-export function cropError(crop: string): string | null {
+/** A crop must be w:h:x:y in whole pixels; for the 800x500 GIF (ratio) it must also be 1.6:1, one pixel of rounding allowed. */
+export function cropError(crop: string, o: { ratio?: boolean } = { ratio: true }): string | null {
   const m = /^(\d+):(\d+):(\d+):(\d+)$/.exec(crop);
   if (!m) return `--crop must be w:h:x:y in capture pixels, got '${crop}'`;
+  if (!o.ratio) return null;
   const w = Number(m[1]);
   const h = Number(m[2]);
   if (Math.abs(w - h * 1.6) > 1) return `--crop ${w}x${h} is not 1.6:1 (for height ${h} use width ${Math.round(h * 1.6)})`;
   return null;
+}
+
+/** The 800x500 pad colour goes into the filter graph, so it must be a plain #RRGGBB[AA] hex colour (ffmpeg rejects #RGB). */
+export function padError(pad: string): string | null {
+  return /^#?(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(pad) ? null : `--pad must be a hex colour such as '#f4f1ea', got '${pad}'`;
 }
 
 /**
@@ -214,7 +220,7 @@ export function contactSheetArgs(m: CaptureManifest, dir: string, out: string): 
   const picks = Array.from({ length: 12 }, (_, k) => Math.round((k * (m.windowFrames - 1)) / 11));
   const select = picks.map(p => `eq(n\\,${p})`).join('+');
   return [...QUIET, '-start_number', String(m.windowStart), '-i', framePattern(dir),
-    '-vf', `select='${select}',scale=480:-2,tile=4x3:padding=8:color=0x808080`, '-frames:v', '1', '-fps_mode', 'passthrough', out];
+    '-vf', `select='${select}',scale=480:-2,tile=4x3:padding=8:color=0x808080`, '-frames:v', '1', out];
 }
 
 export const FFMPEG_MISSING = 'FFMPEG_MISSING: ffmpeg is not installed or not on PATH (set GSTACK_FFMPEG to its full path). '

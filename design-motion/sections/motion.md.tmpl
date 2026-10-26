@@ -4,7 +4,7 @@ Every timing, distance and curve comes from the defaults table at the end. Never
 
 ### Start empty
 
-The first frame of every page load and every export is the empty state: the background plus the static joined surfaces for an app frame, the background alone for separate cards. Empty becomes loaded; never open on the finished frame.
+The first frame of every showcase load and every export is the empty state (on a website the doctrine wins: the markup is the finished state until the intro fires): the background plus the static joined surfaces for an app frame, the background alone for separate cards. Empty becomes loaded; never open on the finished frame.
 
 ### Loading choreography
 
@@ -60,6 +60,7 @@ The intro only opens the show. The main act is each visual acting out what it do
 
 ```js
 // [[time, value], ...] eased per segment; values may be numbers or arrays
+const easeInOut = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2); // --io, never past 1
 function track(keys, t, ease = easeInOut) {
   if (t <= keys[0][0]) return keys[0][1];
   for (let i = 1; i < keys.length; i++) {
@@ -111,7 +112,7 @@ On a website the intro starts when about 30% of the section is visible (`Interse
 | Durations (showcase) | transforms 1.05 s `--e` (cards 0.9 s); opacity and blur 0.7-0.8 s `--e2` (cards 0.6 s); wipes 0.7 s, slow bars 1.1 s `--io` |
 | Durations (website) | 50-700 ms |
 | Stagger | containers 80-90 ms, items 30-80 ms |
-| Typing | one glyph per 45-70 ms, caret blink 1 s |
+| Typing | one glyph per 45-70 ms, caret blink 1 s (showcase only) |
 | Story | starts 2.4 s, 3-8 s per card, offset between cards |
 | Cycle | 12 s (dissolve 11.0, reset 11.6), longer when a story needs it |
 | Exports | MP4 60 fps CRF 15 up to 1920×1200; loop GIF 960 px 20 fps; small GIF 800×500 20 fps |
