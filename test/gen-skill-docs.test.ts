@@ -2157,6 +2157,15 @@ describe('INVOKE_SKILL resolver', () => {
     expect(ceoContent).toContain('AskUserQuestion Format');
   });
 
+  test('loader skip lists name the shared-preamble pointer that the loaded skills carry', () => {
+    const entry = `- ${SHARED_POINTER_HEADING.replace(/^## /, '')}\n`;
+    expect(ceoContent).toContain(entry);
+    expect(fs.readFileSync(path.join(ROOT, 'autoplan', 'SKILL.md'), 'utf-8')).toContain(entry);
+    for (const skill of ['office-hours', 'plan-ceo-review', 'plan-design-review', 'plan-devex-review', 'plan-eng-review']) {
+      expect(fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8'), skill).toContain(`\n${SHARED_POINTER_HEADING}\n`);
+    }
+  });
+
   test('INVOKE_SKILL output includes error handling', () => {
     expect(ceoContent).toContain('If unreadable');
     expect(ceoContent).toContain('Could not load');
@@ -2945,14 +2954,14 @@ describe('Codex generation (--host codex)', () => {
 
   test('no .claude/skills/ in Codex output', () => {
     for (const skill of CODEX_SKILLS) {
-      const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
       expect(content).not.toContain('.claude/skills');
     }
   });
 
   test('no ~/.claude/ runtime paths in Codex output', () => {
     for (const skill of CODEX_SKILLS) {
-      const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
       // Outside prompts may explicitly forbid reading Claude's skill directory.
       // Every executable/runtime path must still use the selected host root.
       const withoutBoundary = content.replace(/^.*do not read or execute any files under[^\n]*$/gim, '');
@@ -3131,9 +3140,10 @@ describe('Codex generation (--host codex)', () => {
     // Verify across ALL generated skills, not just review
     for (const skill of CODEX_SKILLS) {
       const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
-      // No skill should reference Claude paths
-      expect(content).not.toContain('~/.claude/skills');
-      expect(content).not.toContain('.claude/skills');
+      // No skill should reference Claude paths, including in its shared sections/preamble.md
+      const startup = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
+      expect(startup).not.toContain('~/.claude/skills');
+      expect(startup).not.toContain('.claude/skills');
       if (content.includes('gstack-config') || content.includes('gstack-update-check') || content.includes('gstack-telemetry-log')) {
         expect(content).toContain('$GSTACK_ROOT');
       }
@@ -3335,14 +3345,14 @@ describe('Factory generation (--host factory)', () => {
 
   test('no .claude/skills/ in Factory output', () => {
     for (const skill of FACTORY_SKILLS) {
-      const content = fs.readFileSync(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'));
       expect(content).not.toContain('.claude/skills');
     }
   });
 
   test('no ~/.claude/skills/ paths in Factory output', () => {
     for (const skill of FACTORY_SKILLS) {
-      const content = fs.readFileSync(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'));
       // ~/.claude/skills should be rewritten, but ~/.claude/plans is legitimate
       // (plan directory lookup) and ~/.claude/ in codex prompts is intentional
       expect(content).not.toContain('~/.claude/skills');
@@ -3404,7 +3414,7 @@ describe('Factory generation (--host factory)', () => {
 
 import { ALL_HOST_CONFIGS, getExternalHosts } from '../hosts/index';
 import { sliceBetween } from './helpers/skill-fixture';
-import { readSkillStartup } from './helpers/skill-startup';
+import { readSkillStartup, SHARED_POINTER_HEADING } from './helpers/skill-startup';
 
 describe('Parameterized host smoke tests', () => {
   // Every external host was rendered up front by the module-level
@@ -3436,7 +3446,7 @@ describe('Parameterized host smoke tests', () => {
           if (isRepoRootSymlink(path.join(hostDir, skill))) continue;
           const skillMd = path.join(hostDir, skill, 'SKILL.md');
           if (!fs.existsSync(skillMd)) continue;
-          const content = fs.readFileSync(skillMd, 'utf-8');
+          const content = readSkillStartup(skillMd);
           const leaks = externalHostPathLeaks(content);
           if (leaks.length > 0) {
             throw new Error(`${skill}: .claude/skills leakage:\n${leaks.slice(0, 3).join('\n')}`);
@@ -4577,7 +4587,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
       if (!entry.isDirectory()) continue;
       const skillMd = path.join(ROOT, entry.name, 'SKILL.md');
       if (!fs.existsSync(skillMd)) continue;
-      const content = fs.readFileSync(skillMd, 'utf-8');
+      const content = readSkillStartup(skillMd);
       expect(content, `handshake marker in ${entry.name}/SKILL.md`).not.toContain(HANDSHAKE_MARKER);
       checked++;
     }
@@ -4600,7 +4610,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
         if (!entry.isDirectory()) continue;
         const skillMd = path.join(skillsRoot, entry.name, 'SKILL.md');
         if (!fs.existsSync(skillMd)) continue;
-        const content = fs.readFileSync(skillMd, 'utf-8');
+        const content = readSkillStartup(skillMd);
         expect(content, `handshake marker in ${host}/skills/${entry.name}/SKILL.md`).not.toContain(HANDSHAKE_MARKER);
         checked++;
       }

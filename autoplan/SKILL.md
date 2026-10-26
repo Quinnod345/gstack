@@ -34,7 +34,7 @@ hooks:
 
 ## Shared preamble (load first)
 
-This skill follows gstack shared preamble `3724f69a07a3` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/autoplan/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
+This skill follows gstack shared preamble `4e82fa4c839f` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/autoplan/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
 
 ## Preamble (run first)
 
@@ -224,10 +224,9 @@ Read the `/office-hours` skill file at `~/.claude/skills/gstack/office-hours/SKI
 Follow its instructions from top to bottom, **skipping these sections when present** (already handled by the parent skill):
 - Preamble (run first)
 - AskUserQuestion Format
-- Completeness Principle — Boil the Ocean
+- Shared preamble (load first)
 - Search Before Building
 - Contributor Mode
-- Completion Status Protocol
 - Telemetry (run last)
 - Step 0: Detect platform and base branch
 - Review Readiness Dashboard
@@ -476,9 +475,8 @@ the tasks aggregator at Phase 4. Run every applicable skill and lazy section ful
 - Preamble (run first)
 - Scope gate (the plan under review is already the target)
 - AskUserQuestion Format
-- Completeness Principle — Boil the Ocean
+- Shared preamble (load first)
 - Search Before Building
-- Completion Status Protocol
 - Telemetry (run last)
 - Step 0: Detect platform and base branch
 - Review Readiness Dashboard

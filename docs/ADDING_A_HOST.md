@@ -431,9 +431,9 @@ bun test test/host-config.test.ts
 The parameterized smoke tests automatically pick up the new host. They verify: output exists, no path leakage, valid frontmatter,
 freshness check passes, and outside-review skills match each host's exclusions.
 
-### 6. Update README.md
+### 6. Update README.md and docs/hosts.md
 
-Add install instructions for the new host in the appropriate section.
+Add the new host's row to the README host matrix (tier, install command, first invocation, safety skills, outside-review needs, repair). Per-host notes live in [docs/hosts.md](hosts.md), not the README.
 
 ## Config field reference
 

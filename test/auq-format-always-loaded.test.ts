@@ -33,7 +33,7 @@
 import { describe, test, expect } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readSkillStartup } from './helpers/skill-startup';
+import { readSkillStartup, SHARED_PREAMBLE_FILE } from './helpers/skill-startup';
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -85,10 +85,13 @@ function discoverSkills(): Array<{ skill: string; skillMd: string; sectionsDir: 
     .filter(skill => fs.existsSync(path.join(ROOT, skill, 'SKILL.md')))
     .map(skill => {
       const sectionsDir = path.join(ROOT, skill, 'sections');
+      // Carved means a section beyond the shared preamble every tier 2+ skill ships.
+      const carved = fs.existsSync(sectionsDir)
+        && fs.readdirSync(sectionsDir).some(f => f.endsWith('.md') && f !== SHARED_PREAMBLE_FILE);
       return {
         skill,
         skillMd: path.join(ROOT, skill, 'SKILL.md'),
-        sectionsDir: fs.existsSync(sectionsDir) ? sectionsDir : null,
+        sectionsDir: carved ? sectionsDir : null,
       };
     });
 }
@@ -180,8 +183,6 @@ describe('AUQ format is always-loaded (token-reduction safety net)', () => {
       expect(body).toMatch(/##\s*AskUserQuestion Format/i);
       expect(body).toMatch(/ELI10\s*:/i);
       expect(body).toMatch(/Recommendation\s*:/i);
-      // sanity: confirm there really is a section dir we're guarding against
-      expect(fs.readdirSync(sectionsDir!).some(f => f.endsWith('.md'))).toBe(true);
     });
   }
 

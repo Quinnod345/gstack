@@ -35,10 +35,10 @@ function splitSections(text: string, marker = '## '): string[] {
   let current: string[] = [];
   let fence: string | null = null;
   for (const line of text.split('\n')) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    const [, delimiter, info] = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line) ?? [];
     if (delimiter) {
       if (!fence) fence = delimiter;
-      else if (delimiter[0] === fence[0] && delimiter.length >= fence.length) fence = null;
+      else if (delimiter[0] === fence[0] && delimiter.length >= fence.length && !info.trim()) fence = null;
     } else if (!fence && line.startsWith(marker) && current.some(l => l.trim())) {
       sections.push(current.join('\n').trim());
       current = [];
@@ -75,6 +75,7 @@ function variantSubsections(own: string, shared: string): string | null {
   if (sharedParts.some((part, i) => headingOf(part) !== headingOf(ownParts[i]!))) return null;
   const changed = ownParts.slice(1, sharedParts.length).filter((part, i) => part !== sharedParts[i + 1]);
   const added = ownParts.slice(sharedParts.length);
+  if (changed.length === 0 && added.length === 0) return null;
   const note = added.length
     ? 'Only these subsections replace the shared ones or, under a new heading, add to its end; the rest of this section is shared.'
     : 'Only these subsections replace the shared ones; the rest of this section is shared.';

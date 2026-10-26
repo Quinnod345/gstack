@@ -51,7 +51,7 @@ gbrain:
 
 ## Shared preamble (load first)
 
-This skill follows gstack shared preamble `3724f69a07a3` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/plan-ceo-review/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
+This skill follows gstack shared preamble `4e82fa4c839f` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/plan-ceo-review/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
 
 ## Preamble (run first)
 
@@ -354,10 +354,9 @@ Read the `/office-hours` skill file at `~/.claude/skills/gstack/office-hours/SKI
 Follow its instructions from top to bottom, **skipping these sections when present** (already handled by the parent skill):
 - Preamble (run first)
 - AskUserQuestion Format
-- Completeness Principle — Boil the Ocean
+- Shared preamble (load first)
 - Search Before Building
 - Contributor Mode
-- Completion Status Protocol
 - Telemetry (run last)
 - Step 0: Detect platform and base branch
 - Review Readiness Dashboard
@@ -398,10 +397,9 @@ Read the `/office-hours` skill file at `~/.claude/skills/gstack/office-hours/SKI
 Follow its instructions from top to bottom, **skipping these sections when present** (already handled by the parent skill):
 - Preamble (run first)
 - AskUserQuestion Format
-- Completeness Principle — Boil the Ocean
+- Shared preamble (load first)
 - Search Before Building
 - Contributor Mode
-- Completion Status Protocol
 - Telemetry (run last)
 - Step 0: Detect platform and base branch
 - Review Readiness Dashboard
@@ -608,7 +606,7 @@ the existing path is worse.
 rows (tier 1 always, never `n/a`: premise-table, already-done, surface-check, binding-decisions, numbers, deferred-asks, pr-count; tier 2 by detected scope, `--scope <csv>`).
 Every row cites a file:line receipt (with no linked issue, deferred-asks is `pass`); the premise table counts `unverified=<n>`. End with
 one line per row, `REALITY: <row> pass|finding|n/a <summary> <file:line>`, then run
-`~/.claude/skills/gstack/bin/gstack-plan-reality check --phase ceo <review-file|->`: a missing row is `incomplete`
+`~/.claude/skills/gstack/bin/gstack-plan-reality check --phase ceo <review-file|->` (prints `PLAN_REALITY`): a missing row is `incomplete`
 unattended; interactive runs repair twice, then warn at the gate.
 
 ### 0C. Dream State Mapping

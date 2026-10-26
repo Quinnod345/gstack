@@ -179,7 +179,7 @@ describe('safe classification (A1-2)', () => {
       }
       expect(unknownFileLabel(file).label).toBe('full-gate input');
     }
-    expect(unknownFileLabel('ETHOS.md').label).toBe('real unknown dependency');
+    expect(unknownFileLabel('SECURITY.md').label).toBe('real unknown dependency');
   });
 });
 
@@ -264,7 +264,7 @@ describe('the fail-closed full-gate list', () => {
   });
 
   test('a file the derivation cannot place restores the full gate with its fix', () => {
-    for (const file of ['ETHOS.md', 'conductor.json']) {
+    for (const file of ['SECURITY.md', 'conductor.json']) {
       const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [file], packageVersionOnly: true });
       expect(result.coverage?.mode, file).toBe('full-fallback');
       const label = result.coverage!.unknownFileLabels[0]!;
