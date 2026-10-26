@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { ALL_HOST_CONFIGS } from '../hosts/index';
 import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, put, registryRows, runSetup, setVersion, tree } from './helpers/install-fixture';
 import { expectTokens } from './helpers/prompt-structure';
+import { readSkillStartup } from './helpers/skill-startup';
 
 afterEach(cleanupFixtures);
 afterAll(cleanupSeed);
@@ -80,7 +81,7 @@ function brokenSectionPointers(dest: string, runtimeRoot: string, home: string):
         let targets: string[];
         if (tok.startsWith('sections/')) {
           if (names.length) targets = names.map(n => join(dest, n, tok));
-          else if (existsSync(join(dir, 'sections')) || stop) targets = [join(dir, tok)];
+          else if (readdirSync(join(dir, 'sections'), { withFileTypes: true }).some(e => e.name.endsWith('.md') && e.name !== 'preamble.md') || stop) targets = [join(dir, tok)];
           else continue;
         } else if (tok.startsWith('$GSTACK_ROOT/')) targets = [join(runtimeRoot, tok.slice('$GSTACK_ROOT/'.length))];
         else if (tok.startsWith('~/')) targets = [join(home, tok.slice(2))];
@@ -116,7 +117,7 @@ describe.skipIf(process.platform === 'win32')('host conformance kit', () => {
       if (host !== 'claude') {
         for (const name of readdirSync(dest).filter(n => n.startsWith('gstack-'))) {
           const md = join(dest, name, 'SKILL.md');
-          if (existsSync(md)) expect(readFileSync(md, 'utf8'), `${host}/${name} carries Claude paths`).not.toContain('~/.claude/skills/gstack');
+          if (existsSync(md)) expect(readSkillStartup(md), `${host}/${name} carries Claude paths`).not.toContain('~/.claude/skills/gstack');
         }
       }
       // #2906: /cso skips the shared preamble, so it names its launcher by the
@@ -334,7 +335,7 @@ describe.skipIf(process.platform === 'win32')('host conformance kit', () => {
       renders.add(render);
       const md = join(skills, 'review/SKILL.md');
       expect(realpathSync(md)).toBe(join(realpathSync(render), 'review/SKILL.md'));
-      const text = readFileSync(md, 'utf8');
+      const text = readSkillStartup(md);
       expect(text).not.toContain('~/.claude/skills/gstack/');
       const start = fence(text, '## Preamble');
       const named = start.slice(0, start.indexOf('/bin/gstack-skill-start'));

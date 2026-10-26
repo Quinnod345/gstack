@@ -65,6 +65,11 @@ export { generateTestFailureTriage } from './preamble/generate-test-failure-tria
 // (`preamble-tier: N`). Every template that resolves {{PREAMBLE}} must
 // declare it — there is no default.
 export function generatePreamble(ctx: TemplateContext): string {
+  return preambleSections(ctx).join('\n\n');
+}
+
+/** The preamble's generator outputs in render order, empty ones dropped. */
+export function preambleSections(ctx: TemplateContext): string[] {
   const tier = ctx.preambleTier;
   if (tier === undefined) {
     throw new Error(
@@ -111,5 +116,5 @@ export function generatePreamble(ctx: TemplateContext): string {
     ...(tier >= 3 ? [generateRepoModeSection(), generateSearchBeforeBuildingSection(ctx)] : []),
     generateCompletionStatus(ctx),
   ];
-  return sections.filter(s => s && s.trim().length > 0).join('\n\n');
+  return sections.filter(s => s && s.trim().length > 0);
 }

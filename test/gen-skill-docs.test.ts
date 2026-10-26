@@ -423,7 +423,7 @@ describe('gen-skill-docs', () => {
     // Root SKILL.md is tier 1 and CSO intentionally uses a private startup with
     // no shared PREAMBLE. Check a regular tier 2+ PREAMBLE consumer instead.
     // v1.7.0.0 Pros/Cons format uses "ELI10 (ALWAYS)" rather than "Simplify (ELI10".
-    const content = fs.readFileSync(path.join(ROOT, 'review', 'SKILL.md'), 'utf-8');
+    const content = readSkillStartup(path.join(ROOT, 'review', 'SKILL.md'));
     expect(content).toContain('ELI10');
     expect(content).toContain('plain English');
     expect(content).toContain('not function names');
@@ -1536,7 +1536,7 @@ describe('Skill invocation during plan mode in preamble', () => {
     let checked = 0;
     for (const file of ['SKILL.md', ...fs.readdirSync(ROOT).map(d => path.join(d, 'SKILL.md'))]) {
       if (!fs.existsSync(path.join(ROOT, file))) continue;
-      const content = fs.readFileSync(path.join(ROOT, file), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, file));
       if (!content.includes('## Skill Invocation During Plan Mode')) continue;
       checked++;
       expect(content, file).not.toContain('takes precedence over generic plan mode');
@@ -3240,7 +3240,7 @@ describe('Codex generation (--host codex)', () => {
         timeout: 120_000,
       });
       expect(override.exitCode).toBe(0);
-      const content = fs.readFileSync(path.join(overrideOut, '.agents', 'skills', 'gstack-ship', 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(overrideOut, '.agents', 'skills', 'gstack-ship', 'SKILL.md'));
       expect(content).toContain('Model-Specific Behavioral Patch (claude)');
       // The overlay now travels as --model into gstack-skill-start, which
       // echoes MODEL_OVERLAY at runtime.
@@ -3249,7 +3249,7 @@ describe('Codex generation (--host codex)', () => {
       fs.rmSync(overrideOut, { recursive: true, force: true });
     }
     // Host-default direction: the untouched EXTERNAL_OUT render carries gpt.
-    const hostDefault = fs.readFileSync(path.join(AGENTS_DIR, 'gstack-ship', 'SKILL.md'), 'utf-8');
+    const hostDefault = readSkillStartup(path.join(AGENTS_DIR, 'gstack-ship', 'SKILL.md'));
     expect(hostDefault).toContain('Model-Specific Behavioral Patch (gpt)');
     expect(hostDefault).toContain('--model "gpt"');
   });
@@ -3391,6 +3391,7 @@ describe('Factory generation (--host factory)', () => {
 
 import { ALL_HOST_CONFIGS, getExternalHosts } from '../hosts/index';
 import { sliceBetween } from './helpers/skill-fixture';
+import { readSkillStartup } from './helpers/skill-startup';
 
 describe('Parameterized host smoke tests', () => {
   // Every external host was rendered up front by the module-level
@@ -4603,7 +4604,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
         .filter(file => fs.existsSync(file));
       expect(files.length, `${host.name}: no rendered skills under ${skillsRoot}`).toBeGreaterThan(0);
       const withSection = files.filter(file => {
-        const content = fs.readFileSync(file, 'utf-8');
+        const content = readSkillStartup(file);
         return content.includes(PLAN_MODE_INFO_MARKER) || content.includes('## Plan Mode Safe Operations');
       }).map(file => path.relative(EXTERNAL_OUT, file));
       if (host.capabilities.planMode) {
@@ -4617,7 +4618,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
   test.each(REVIEW_SKILLS)(
     '%s/SKILL.md contains the new plan-mode-info section near the top',
     (skill) => {
-      const content = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill, 'SKILL.md'));
       const idx = content.indexOf(PLAN_MODE_INFO_MARKER);
       expect(idx).toBeGreaterThan(0);
       // Position 1 in preamble composition = within the first ~300 lines.
@@ -4631,10 +4632,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
     // ONLY the steady-state PROACTIVE-false + SKILL_PREFIX rules (the
     // UPGRADE_AVAILABLE prose emits from bin/gstack-skill-start at runtime),
     // so those rules are the resolver's order marker.
-    const content = fs.readFileSync(
-      path.join(ROOT, 'plan-ceo-review', 'SKILL.md'),
-      'utf-8',
-    );
+    const content = readSkillStartup(path.join(ROOT, 'plan-ceo-review', 'SKILL.md'));
     const planModeIdx = content.indexOf(PLAN_MODE_INFO_MARKER);
     const upgradeIdx = content.search(/If `PROACTIVE` is `"?false"?`/i);
     expect(planModeIdx).toBeGreaterThan(0);

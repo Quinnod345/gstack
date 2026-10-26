@@ -46,6 +46,7 @@ import { execSync } from 'child_process';
 import { captureBaseline, extractDescription, type ParityBaseline } from './helpers/capture-parity-baseline';
 import { logBudgetOverride } from './helpers/budget-override';
 import { CARVED_SKILLS } from './helpers/carve-guards';
+import { readSkillStartup } from './helpers/skill-startup';
 
 const REPO_ROOT = path.resolve(import.meta.dir, '..');
 const BASELINE_PATH = path.join(REPO_ROOT, 'test', 'fixtures', 'parity-baseline-v1.81.0.0.json');
@@ -207,10 +208,14 @@ describe('SKILL.md size budget regression (gate, free)', () => {
       if (INTENTIONAL_SHRINKS.has(skill)) continue;
       const after = current.skills[skill];
       if (!after) continue; // skill removed since baseline — separate concern
-      const ratio = after.skillMdBytes / before.skillMdBytes;
+      // A tier 2+ skill's shared preamble moved to sections/preamble.md, which
+      // its SKILL.md requires at startup: measure what it loads, not the move.
+      const skillMd = path.join(REPO_ROOT, skill, 'SKILL.md');
+      const afterBytes = fs.existsSync(skillMd) ? Buffer.byteLength(readSkillStartup(skillMd), 'utf-8') : after.skillMdBytes;
+      const ratio = afterBytes / before.skillMdBytes;
       if (ratio < MIN_RATIO) {
         undershoots.push({
-          skill, beforeBytes: before.skillMdBytes, afterBytes: after.skillMdBytes, ratio,
+          skill, beforeBytes: before.skillMdBytes, afterBytes, ratio,
         });
       }
     }

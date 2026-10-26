@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { config, defaultRender, failableBun, fakeDetect, record, served, setup } from './helpers/claude-overlay-fixture';
 import { rmSync } from 'node:fs';
 import { ROOT, cleanupFixtures, cleanupSeed, makeFixture, makeSource, put } from './helpers/install-fixture';
+import { readSkillStartup } from './helpers/skill-startup';
 
 afterEach(cleanupFixtures);
 afterAll(cleanupSeed);
@@ -30,7 +31,7 @@ describe.skipIf(process.platform === 'win32')('./setup with plan_mode_preamble',
     const src = makeSource(f, join(f.home, '.claude/skills/gstack'));
     fakeDetect(src);
     const skills = join(f.home, '.claude/skills');
-    const committedSkill = readFileSync(join(ROOT, 'autoplan/SKILL.md'), 'utf8');
+    const committedSkill = readSkillStartup(join(ROOT, 'autoplan/SKILL.md'));
     const committedRouter = readFileSync(join(ROOT, 'SKILL.md'), 'utf8');
     expect(committedSkill).toContain(SAFE);
 
@@ -59,7 +60,7 @@ describe.skipIf(process.platform === 'win32')('./setup with plan_mode_preamble',
     expect(on.out).toContain('gstack-gbrain-detect failed');
     expect(existsSync(defaultRender(f))).toBe(false);
     expect(existsSync(`${defaultRender(f)}.overlay`)).toBe(false);
-    expect(served(skills)).toBe(readFileSync(join(src, 'autoplan/SKILL.md'), 'utf8'));
+    expect(served(skills)).toBe(readSkillStartup(join(src, 'autoplan/SKILL.md')));
     expect(served(skills)).toBe(committedSkill);
     expect(readFileSync(join(src, 'SKILL.md'), 'utf8')).toBe(committedRouter);
     expect(alias(skills)).toBe(asAlias(committedRouter));

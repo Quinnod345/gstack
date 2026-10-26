@@ -2,6 +2,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { markerIndex } from './workflow-excerpt';
+import { SHARED_PREAMBLE_FILE, readSkillStartup } from './skill-startup';
 
 export interface WorkflowJudgeFile {
   path: string;
@@ -91,7 +92,7 @@ export function readWorkflowJudgeInput(opts: {
   const sources = [{
     path: opts.skillPath,
     kind: 'entrypoint' as const,
-    content: fs.readFileSync(path.join(opts.root, opts.skillPath), 'utf8'),
+    content: readSkillStartup(path.join(opts.root, opts.skillPath)),
   }];
   const sectionDir = path.join(path.dirname(opts.skillPath), 'sections');
   const sectionRoot = path.join(opts.root, sectionDir);
@@ -102,7 +103,7 @@ export function readWorkflowJudgeInput(opts: {
     ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')).sections ?? [] : [];
   const runnerOnly = new Set(manifestSections.filter(section => section.runner_only).map(section => section.file));
   const sections = fs.existsSync(sectionRoot)
-    ? fs.readdirSync(sectionRoot).sort().filter(name => name.endsWith('.md') && !runnerOnly.has(name))
+    ? fs.readdirSync(sectionRoot).sort().filter(name => name.endsWith('.md') && !runnerOnly.has(name) && name !== SHARED_PREAMBLE_FILE)
       .map(name => ({
         path: path.join(sectionDir, name),
         kind: 'section' as const,

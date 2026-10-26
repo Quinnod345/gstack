@@ -25,6 +25,7 @@ import { HOST_PATHS } from './resolvers/types';
 import { RESOLVERS } from './resolvers/index';
 import { rewriteCarvedSectionRefs, SKILL_BYTE_CEILING, usesLazySections } from './resolvers/sections';
 import { insertRuntimePreludes } from './resolvers/runtime-root';
+import { generateSharedPreambleFile, hoistsPreamble, SHARED_PREAMBLE_FILE } from './resolvers/preamble-hoist';
 import { extractVoiceTriggers } from './resolvers/voice-triggers';
 import { ALL_HOST_NAMES, resolveHostArg, getHostConfig } from '../hosts/index';
 import type { HostConfig } from './host-config';
@@ -69,7 +70,7 @@ interface RenderOptions {
 
 export interface GeneratedArtifact {
   relativePath: string;
-  kind: 'skill' | 'section' | 'metadata' | 'openclaw' | 'index' | 'digest' | 'doctor-components' | 'asset';
+  kind: 'skill' | 'section' | 'preamble' | 'metadata' | 'openclaw' | 'index' | 'digest' | 'doctor-components' | 'asset';
   host?: Host;
 }
 
@@ -757,7 +758,15 @@ function processExternalHost(
   return { content: result, outputPath, symlinkLoop, metadata };
 }
 
-function processTemplate(tmplPath: string, host: Host, options: RenderOptions): { outputPath: string; content: string; symlinkLoop?: boolean; metadata?: { outputPath: string; content: string } } {
+/** sections/preamble.md: the shared preamble with the same host rewrites as a section file. */
+function renderSharedPreamble(ctx: TemplateContext, hostConfig: HostConfig, options: RenderOptions): string {
+  let content = generateSharedPreambleFile(ctx);
+  content = ctx.host === 'claude' ? rewriteSectionBase(content, options.contentLinkRoot) : applyHostRewrites(content, hostConfig);
+  content = rewriteInstallRoot(insertRuntimePreludes(rewriteCarvedSectionRefs(content, ctx), ctx), hostConfig, options.installRoot);
+  return GENERATED_HEADER.replace('{{SOURCE}}', 'scripts/resolvers/preamble-hoist.ts') + content;
+}
+
+function processTemplate(tmplPath: string, host: Host, options: RenderOptions): { outputPath: string; content: string; symlinkLoop?: boolean; metadata?: { outputPath: string; content: string }; preamble?: { outputPath: string; content: string } } {
   // Normalize to LF at the entry point. Templates may have CRLF on disk when
   // checked out on Windows with core.autocrlf=true. Downstream regexes
   // (processVoiceTriggers, transformFrontmatter) hardcode \n, so without
@@ -835,7 +844,10 @@ function processTemplate(tmplPath: string, host: Host, options: RenderOptions): 
   if (skillDir === '' || skillDir === '.') content = omitDisabledSkills(content, options.disabledSkills);
   content = rewriteInstallRoot(insertRuntimePreludes(rewriteCarvedSectionRefs(content, ctx), ctx), currentHostConfig, options.installRoot);
 
-  return { outputPath, content, symlinkLoop, metadata };
+  const preamble = hoistsPreamble(ctx) && tmplContent.includes('{{PREAMBLE}}') && !effectiveSuppressedResolvers(currentHostConfig, options).has('PREAMBLE')
+    ? { outputPath: path.join(path.dirname(outputPath), 'sections', SHARED_PREAMBLE_FILE), content: renderSharedPreamble(ctx, currentHostConfig, options) }
+    : undefined;
+  return { outputPath, content, symlinkLoop, metadata, preamble };
 }
 
 /** autoplan/DRIVER.md (field wave item 13): one host-neutral render of autoplan/DRIVER.md.tmpl through the same resolvers. */
@@ -1003,6 +1015,7 @@ export async function runGeneration(settings: GenerationOptions = {}): Promise<G
         }
         emit(result.outputPath, result.content, 'skill', host);
         if (result.metadata) emit(result.metadata.outputPath, result.metadata.content, 'metadata', host);
+        if (result.preamble) emit(result.preamble.outputPath, result.preamble.content, 'preamble', host);
         if (skillDir === 'qa') {
           const report = fs.readFileSync(path.join(ROOT, 'qa', 'templates', 'functional-report-template.md'), 'utf-8');
           emit(path.join(path.dirname(result.outputPath), 'templates', 'functional-report-template.md'),
