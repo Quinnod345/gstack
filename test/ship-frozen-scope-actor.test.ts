@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import {
   createShipFrozenScopeFixture, FROZEN_SCOPE_DEFER_IDENTITY, FROZEN_SCOPE_FIX_IDENTITY, shipFrozenScopeFailures, shipFrozenScopeWorkflow,
 } from './helpers/ship-frozen-scope-actor';
+import { reviewLoopLine, summarizeReviewLoop } from '../lib/review-scope';
 
 type Fixture = ReturnType<typeof createShipFrozenScopeFixture>;
 let workflow = '';
@@ -78,7 +79,9 @@ async function act(f: Fixture, options: { fix?: boolean; passes?: 1 | 2 } = {}) 
   sh(f, f.commands.continue!);
 }
 
-test('a scripted actor that fixes the diff, defers the pre-existing defect and converges on pass 2 passes the verdict', async () => {
+// The actor replays the bash workflow through bash -c and the shebang bins, so it is POSIX-only like the paid case it mirrors.
+const posixTest = test.skipIf(process.platform === 'win32');
+posixTest('a scripted actor that fixes the diff, defers the pre-existing defect and converges on pass 2 passes the verdict', async () => {
   const f = fixture();
   await act(f);
   const verdict = await shipFrozenScopeFailures(f, { exitReason: 'success' });
@@ -89,9 +92,12 @@ test('a scripted actor that fixes the diff, defers the pre-existing defect and c
   expect(rows[0]!.findings.map((x: any) => [x.fingerprint, x.action])).toEqual([[FROZEN_SCOPE_FIX_IDENTITY, 'auto-fixed'], [FROZEN_SCOPE_DEFER_IDENTITY, 'deferred']]);
   expect(rows[1]!.range_base).toBe(verdict.evidence.head);
   expect(verdict.evidence.payments).toBe(verdict.evidence.originalPayments);
+  const summary = summarizeReviewLoop(rows, verdict.evidence.start.started_at);
+  expect(summary).toEqual(verdict.evidence.loop);
+  expect(reviewLoopLine(summary)).toBe('REVIEW_LOOP: passes=2 blocking_found=2 deferred=1 noted=0 fixed=1 scope=frozen');
 }, 120_000);
 
-test('the fixture interface refuses the undeclared interactions before any decision', async () => {
+posixTest('the fixture interface refuses the undeclared interactions before any decision', async () => {
   const f = fixture();
   expect(await hook(f, 'Edit', { file_path: f.payments, old_string: 'card', new_string: '?' })).toBe('Edit outside invoice.ts');
   expect(await hook(f, 'Write', { file_path: f.payments, content: '' })).toBe('Write outside invoice.ts and the review record');
@@ -104,7 +110,7 @@ test('the fixture interface refuses the undeclared interactions before any decis
   expect(f.snapshot().executions.filter(e => !e.allowed)).toHaveLength(6);
 }, 120_000);
 
-test('leaving the diff defect in place or exiting after one pass are named failures', async () => {
+posixTest('leaving the diff defect in place or exiting after one pass are named failures', async () => {
   const f = fixture();
   await act(f, { fix: false, passes: 1 });
   const verdict = await shipFrozenScopeFailures(f, { exitReason: 'success' });

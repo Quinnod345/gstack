@@ -15,7 +15,10 @@ import { EXIT } from '../lib/headless-artifacts';
 const BIN = path.resolve(import.meta.dir, '../bin/gstack-coauthor-trailers');
 const temps: string[] = [];
 afterAll(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
-const ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+const ENV = {
+  ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+  GIT_COMMITTER_NAME: 'Porter', GIT_COMMITTER_EMAIL: 'porter@example.invalid', GIT_AUTHOR_NAME: 'Porter', GIT_AUTHOR_EMAIL: 'porter@example.invalid',
+};
 
 function git(cwd: string, args: string[], input?: string) {
   const r = spawnSync('git', args, { cwd, env: ENV, encoding: 'utf8', timeout: 30_000, input });

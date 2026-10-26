@@ -54,7 +54,8 @@ describe('deferred-issue search page and the repository argument gh accepts', ()
     return { dir, log };
   };
 
-  test('an exactly-full search page is reported truncated and recorded on the issue it files; a short page is not', () => {
+  // The gh stand-in is a sh script on a colon-joined PATH, which CreateProcess cannot run on Windows.
+  test.skipIf(process.platform === 'win32')('an exactly-full search page is reported truncated and recorded on the issue it files; a short page is not', () => {
     const repo = fixture();
     const classified = path.join(repo.root, 'classified.json');
     fs.writeFileSync(classified, JSON.stringify([finding('lib/legacy.ts:7:data-loss', 'Unbounded delete')]));
@@ -75,7 +76,7 @@ describe('deferred-issue search page and the repository argument gh accepts', ()
     expect(JSON.parse(r2.out)[0]).toEqual({ fingerprint: 'lib/legacy.ts:7:data-loss', path: 'lib/legacy.ts:7', severity: 'CRITICAL', summary: 'Unbounded delete', issue: 900, url: 'https://example.test/acme/app/issues/900' });
   });
 
-  test('with --repo the visibility read passes the repository positionally, so a MEDIUM finding on a public repository waits for a human and stays unfiled', () => {
+  test.skipIf(process.platform === 'win32')('with --repo the visibility read passes the repository positionally, so a MEDIUM finding on a public repository waits for a human and stays unfiled', () => {
     const repo = fixture();
     const classified = path.join(repo.root, 'classified.json');
     fs.writeFileSync(classified, JSON.stringify([

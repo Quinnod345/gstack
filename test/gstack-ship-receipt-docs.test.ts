@@ -170,7 +170,8 @@ describe('carry follow-ups: git floor, named refusal, branch-touched walk, digit
     expect((plan as any).message.split(', ').length).toBe(CARRY_NAMED_PATHS);
   });
 
-  test('carry refuses git below 2.39 by name (RECEIPT_GIT_TOO_OLD) and names a product path the branch touched', () => {
+  // The old-git stand-in is a sh script on a colon-joined PATH, which CreateProcess cannot run on Windows.
+  test.skipIf(process.platform === 'win32')('carry refuses git below 2.39 by name (RECEIPT_GIT_TOO_OLD) and names a product path the branch touched', () => {
     const repo = fixture();
     makePr(repo, 'pr-carry', { expects: '1.2.4.0' });
     const body = path.join(repo.root, 'body.md');
