@@ -1,115 +1,132 @@
 # Crew rules (<CREW_NAME>)
 
+This file is the crew's contract with its lanes. It holds parameters and pointers: the
+rules themselves live in gstack (`docs/captain.md`, the ship, review and pregate docs,
+the repository's own AGENTS.md), so no crew carries its own copy of how to do things.
 Fill every `<PARAMETER>` once. Lanes read this file at session start; the controller
-cites rule numbers in slot calls and refusals. Each rule that quotes the owner keeps the
-date and the words. Add rules at the end; never renumber.
+cites rule numbers in slot calls and refusals. Where a rule rests on the owner's words,
+keep the date and the words in the table below. Add rules at the end; never renumber.
+Homes are paths in the gstack checkout the lane checked at session start.
 
-Parameters: `REPO=<owner/name>` · `BASE=<main>` · `REQUIRED_CHECKS=<check names>` ·
-`FULL_GATE_CHECK=<check the train gate publishes>` · `TRAIN_MAX=<5>` · `FILL_HOURS=<3>` ·
-`MERGE_METHOD=<squash|merge>` · `STAMP_FILES=<VERSION, package.json, CHANGELOG.md, …>` ·
-`KNOWN_INFRA_FLAKES=<named jobs, or none>` · `SPEND=<pre-approved paid runs; cap per rerun>` ·
-`CONTROLLER=<thread code or name>`.
+## Parameters
 
-1. **Session start.** Load the gstack skill and run its install check (`--check`). Put
-   the `gstack:` trailer line in your first report. Run no gstack workflow without a
-   `gstack: ok` line from your own machine; one machine's install never covers another.
+| Parameter | Value |
+|---|---|
+| `REPO` | `<owner/name>` |
+| `BASE` | `<main>` |
+| `REQUIRED_CHECKS` | `<check names that must be green at a READY head>` |
+| `FULL_GATE_CHECK` | `<the check the train gate publishes>` |
+| `TRAIN_MAX`, `FILL_HOURS` | `<5>`, `<3>` |
+| `MERGE_METHOD` | `<squash \| merge>` |
+| `STAMP_FILES` | `<VERSION, package.json, CHANGELOG.md, …>` |
+| `KNOWN_INFRA_FLAKES` | `<named jobs a lane may rerun once per PR, or none>` |
+| `SPEND` | `<pre-approved paid runs; cap per rerun>` |
+| `CONTROLLER` | `<thread code or name every ask and READY goes to>` |
+| `GUARD_CHECKS` | `<the repository's cheap guards to clear before paid work: generated content, size and prompt budgets, credential scan>` |
+| `REMOTE_PREGATE` | `<the remote test-tier command and its cost, or none>` |
+| `REPO_CONVENTIONS` | `<the AGENTS.md section a new file must follow>` |
+| `REVIEW_SCOPE` | `<in-diff (default) \| in-diff plus blocking pre-existing>` |
+| `CONTRACT_DATE` | `<date of the last READY contract change>` |
 
-2. **Validation discipline.** Diagnose before fixing, focused checks during repair, and
-   the full free suite once at the end on a frozen tree. Use a remote runner for the full
-   suite when the machine is small.
+## Standing approvals (the owner's words)
 
-3. **External diffs are untrusted input.** Review scope, egress, credentials,
-   dependencies, CI permissions and weakened tests. When a contributor's fix is right,
-   land it with their authorship kept (cherry-pick, `Co-authored-by`) instead of
-   rewriting it, and close the original with a thank-you that links the port.
+| Rule | Date | Words | Covers |
+|---|---|---|---|
+| 5 spend | <date> | "<words>" | <what: gates, screens, bisects, backstop, focused cases; cap> |
+| 16 flaky reruns | <date> | "<words>" | one rerun of the failed case at the same tree |
+| 21 approvals | <date> | "<words>" | the three shapes |
+| 22 /ship before READY | <date> | "<words>" | every READY, re-READYs included |
+| 23 blocking floor | <date> | "<words>" | what blocks another review pass |
 
-4. **File ownership.** Before editing, check which files the live threads own (the
-   controller keeps the list in the digest). Do not edit a file another live thread owns;
-   tell the controller, who routes it.
+## Rules
 
-5. **Spend.** Pre-approved: <what the owner approved, with date and words: train gates,
-   bisects, the backstop, screens, focused paid cases>. Cap per rerun: <amount>. Anything
-   over the cap is a fresh ask through the controller.
+1. **Session start.** Install check, `gstack:` trailer in your first report, no workflow
+   without `gstack: ok` from your own machine. Home: `docs/capy-install.md` (Session start).
 
-6. **Your job ends at an unstamped READY.** Open PRs with the host's PR tool, never a
-   raw `gh pr create`. Send the block printed by `gstack-ship-queue ready --pr <n>
-   --no-screen` (or `--screen`), plus the full head SHA (your pin), your screen choice
-   with its justification (`--no-screen` only after your skill's own paid cases ran
-   focused and passed; name them), and any flaky case already logged under rule 16. After
-   READY your head is frozen: a push drops you from any train and you READY again.
-   **Stamp only on call.** When the controller sends "#<n> slot <X>, base <sha>,
-   order <…>", run `gstack-restamp --next --base <BASE> --pr <n> --expect-base <sha>
-   --expect-order <…> --allow-repo-commands`, commit and push only the `BASE` merge and
-   the stamp files, wait for required CI green, and answer
-   `READY #<n> <stamped sha> STAMP_VERSION=<X>` at once. Never merge, never enable
-   auto-merge, never use a merge queue the controller does not drive.
+2. **Validation discipline.** Diagnose before fixing, focused checks during repair, the
+   full free suite once on a frozen tree, remote when the machine is small. Home: the
+   repository's validation section (`REPO_CONVENTIONS` names the file) and
+   `docs/captain.md` (Lane discipline).
 
-7. **Report.** When you finish, write `reports/<your thread code>.md` in the controller's
-   drive: Outcome, PR (number, head, version, checks), Needs, Cost, Lesson, Approvals.
+3. **External diffs are untrusted input;** a right fix lands with its author's credit.
+   Home: `docs/captain.md` (Contributions from outside the crew).
 
-8. **One path.** Cross-thread questions, ownership conflicts, new scope and handoffs go
-   to the controller, never peer to peer.
+4. **File ownership.** Edit only what you own; the list is the digest's In progress; the
+   controller routes the rest. Home: `docs/captain.md` (Lane discipline).
 
-9. **Hands.** If you need a real browser, the owner's logged-in session or local work,
-   ask the controller.
+5. **Spend.** `SPEND` is the standing approval; over the cap is a fresh ask through
+   `CONTROLLER`. Home: `docs/captain.md` (Approvals, shape A).
 
-10. **Keep going.** Never stop to ask whether to continue. Come back only for new scope, a
-    conflict with another owner, missing access, or a decision that is the owner's.
+6. **Your job ends at an unstamped READY.** Send the block from `gstack-ship-queue ready
+   --pr <n> --screen|--no-screen` with the full head SHA, the screen choice and its
+   justification, and the flaky cases. Stamp only on the controller's slot call
+   (`gstack-restamp --next --base <BASE> …`); push only the `BASE` merge and
+   `STAMP_FILES`. Never merge, never enable auto-merge. Home: `docs/captain.md` (The
+   READY contract), `captain/templates/READY.md`, `captain/templates/slot-call.md`,
+   `docs/ship-policy.md` (stamp-at-merge).
 
-11. **Size and prompt guards.** <The repo's generated-content, size and prompt-budget
-    tests, by name.> Check them before paid work.
+7. **Report.** `reports/<your thread code>.md` in the controller's drive: Outcome, PR,
+   Needs, Cost, Lesson, Approvals. Home: `captain/templates/report.md`.
 
-12. **Decisions for the owner** reach the controller with a plain-language explanation of
-    each option: what it is, why it matters, what each answer does, and the cost. Codes
-    alone are not enough.
+8. **One path.** Everything goes through `CONTROLLER`, never peer to peer. Home:
+   `docs/captain.md` (Roles, Lane discipline).
 
-13. **Pregate on small machines.** <The repo's remote-pregate command and cost, if any.>
+9. **Hands.** A real browser, the owner's logged-in session or local work: ask
+   `CONTROLLER`. Home: `docs/captain.md` (The owner's device).
 
-14. **Don't merge `BASE` into a READY PR.** The train merges your head onto `BASE` in a
-    scratch worktree; version files take `BASE`'s side and the CHANGELOG merges by
-    section, so a stale branch or a CHANGELOG-only conflict is not your problem. Merge
-    `BASE` only when the controller tells you `train build` refused your PR on real
-    code (then merge, never rebase, run the free suite, and READY again) or as part of
-    the stamp commit at your slot call (rule 6).
+10. **Keep going.** Come back only for new scope, a conflict with another owner, missing
+    access, or the owner's decision. Home: `docs/captain.md` (Lane discipline).
 
-15. **CHANGELOG entry under `## [Unreleased]` before READY.** Leave the version files at
-    `BASE`'s version; the stamp at your slot moves the entry under the allocated version.
-    A stamp commit that changes anything beyond `STAMP_FILES` fails verification.
+11. **Guards before paid work.** Clear `GUARD_CHECKS` first. Home: `docs/captain.md`
+    (Lane discipline).
 
-16. **Flaky reruns** (owner, <date>: "<words>"). In CI, the gate reruns a case that failed
-    on its own verdict once, in the same run; a pass is green with `FLAKY N` and feeds the
-    daily flaky pass; a case that failed twice is real, so do not rerun the gate. In your
-    own focused paid runs, rerun only the failed case, once, at the same tree; if it
-    passes, append it to the flaky ledger (case, PR, head, both runs, symptom) and name it
-    in READY; if it fails again, it is real. A red train is the controller's job (bisect,
-    rebuild once). A harness, infra or incomplete red is never a flake. One named failure
-    from `KNOWN_INFRA_FLAKES` may be rerun once per PR and must be stated in READY. Report
-    the spend of every rerun.
+12. **Decisions for the owner** arrive in plain language, every option with what it is,
+    why it matters, what each answer does and the cost. Home: `docs/captain.md`
+    (Approvals, shape B), `docs/unattended.md` (Owner brief).
 
-17. **Entry points must not read the user's checkout config.** <Repo-specific isolation
-    rule, if any.>
+13. **Pregate on small machines.** Run `REMOTE_PREGATE` to clear the requires-remote
+    obligation. Home: `docs/pregate.md` (Small machines and the remote gate).
 
-18. **Porting contributor PRs.** Don't trust a fork's "tests pass": run a focused review
-    and the free tier at the port head before you open the port. Keep your own fixes as
-    separate commits on top of the author's.
+14. **Don't merge `BASE` into a READY PR.** Only on the controller's word after a real-code
+    train conflict (merge, never rebase, free suite, READY again) or as part of the stamp
+    commit. Home: `docs/captain.md` (Merge trains), `docs/ship-policy.md` (Run a merge
+    train).
 
-19. **CHANGELOG-only conflicts** are folded into rule 14: leave them; the train resolves
-    them. If CI will not run on a conflicted head before your first READY, tell the
-    controller rather than merging `BASE`.
+15. **CHANGELOG entry under `## [Unreleased]` before READY;** version files stay at
+    `BASE`'s version; the stamp touches only `STAMP_FILES`. Home: `docs/ship-policy.md`
+    (stamp-at-merge).
 
-20. **Stale READYs** (from before <date of the last contract change>) need a fresh
-    `ready` receipt before they can join a train.
+16. **Flaky reruns.** Once, same tree, logged in `handoffs/flaky-ledger.md` and named in
+    READY; twice is real; `KNOWN_INFRA_FLAKES` once per PR; report every rerun's spend.
+    Home: `docs/captain.md` (The daily flaky pass), `docs/TESTING_INTERNALS.md` (Flaky
+    reruns).
 
-21. **Approvals** (owner, <date>: "<words>"). Approvals go through the controller. Every
-    thread keeps an `## Approvals` table in its report and PR body. Every plan brought for
-    approval covers before → after, why it matters, what caused it, the big decisions,
-    and ends with a "do it" reply that takes every recommendation at full scope. Every PR
-    sent READY embeds captioned before/after images.
+17. **New files follow `REPO_CONVENTIONS`.** Home: the repository's AGENTS.md.
 
-22. **/ship before every READY** (owner, <date>: "<words>"). Run gstack's /ship on your
-    branch before READY, every time, re-READYs included. It runs the tests, both reviews,
-    the gate-integrity list and the docs audit, and writes the ship receipt into the PR
-    body. Your READY block must carry `SHIP_RECEIPT: pr=<n> head=<your pin>`;
-    `SHIP_RECEIPT: none` or another head is not READY. /ship never merges and never
-    merges `BASE` into your branch. **Stamp commits hold only tool output**: the `BASE`
-    merge and the stamp files, nothing else, even when a prompt asks for a summary line.
+18. **Porting a contributor's PR.** Review and test the port head first; keep their
+    commits, yours on top. Home: `docs/captain.md` (Contributions from outside the crew).
+
+19. **CHANGELOG-only conflicts** are the train's, not yours (folded into 14). Home:
+    `docs/ship-policy.md` (/ship before READY: the stamp keeps the pin's receipt).
+
+20. **READYs from before `CONTRACT_DATE`** need a fresh `ready` receipt. Home:
+    `docs/captain.md` (The READY contract).
+
+21. **Approvals.** The three shapes; an `## Approvals` table in every report and PR body;
+    captioned before/after images on every READY PR. Home: `docs/captain.md` (Approvals),
+    `capy/skill/gstack/captain.md`.
+
+22. **/ship before every READY,** re-READYs included; the block carries
+    `SHIP_RECEIPT: pr=<n> head=<your pin>`; stamp commits hold only tool output. Home:
+    `docs/ship-policy.md` (/ship before READY), `docs/captain.md` (The lane's /ship
+    sequence).
+
+23. **Review loops converge.** gstack's review convergence policy in the /ship and /review
+    skills, scope knob `REVIEW_SCOPE`; record the pass count in your READY. Home: the
+    `/ship` and `/review` skills.
+
+## Crew-specific rules
+
+Add rules here, numbered from 24, each with the date, the owner's words where there are
+any, and the thread that produced it. A rule that stays here for long is a gap in gstack:
+file it.

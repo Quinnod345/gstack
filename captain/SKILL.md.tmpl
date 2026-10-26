@@ -82,11 +82,16 @@ The repo's `.gstack/ship-policy.json` carries the `train` block (`gate_workflow`
 rules file read the same names. A repo without a `train` block runs the per-PR READY
 flow: the same block, no slots.
 
-The rules file is the lanes' contract: session-start install check, validation
-discipline, untrusted external diffs, file ownership, pre-approved spend, the READY
-contract, reports, one routing path (everything through the controller), no merging base
-into a READY branch, the CHANGELOG entry under `[Unreleased]`, the flaky rule, approvals,
-and /ship before READY. Every rule that quotes the owner carries the date and the words.
+The rules file is the lanes' contract, and it is pointers plus parameters: each rule is
+one line that names its home in gstack (`docs/captain.md`, the ship-policy, pregate and
+testing docs, the /ship and /review skills, the repository's own AGENTS.md), so no crew
+carries its own copy of how to do things. The rules: session-start install check,
+validation discipline, untrusted external diffs, file ownership, pre-approved spend, the
+READY contract, reports, one routing path (everything through the controller), no merging
+base into a READY branch, the CHANGELOG entry under `[Unreleased]`, the flaky rule,
+approvals, /ship before READY, and review convergence. Every rule that rests on the
+owner's words carries the date and the words. A rule that exists only in a crew's file is
+a gap in gstack: write it there, then point at it.
 
 ## The READY contract
 

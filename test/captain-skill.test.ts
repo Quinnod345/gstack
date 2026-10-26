@@ -58,7 +58,12 @@ describe('/captain skill', () => {
     expect(read('captain/templates/READY.md')).toContain('SHIP_RECEIPT: pr=<n> head=<sha12>');
     expect(read('captain/templates/slot-call.md')).toContain('STAMP_VERSION=<X>');
     expect(read('captain/templates/flaky-ledger.md')).toMatch(/## Open[\s\S]*## Fixed[\s\S]*## Won't fix/);
-    expect(read('captain/templates/CREW.md')).toMatch(/^22\. /m);
+    const crew = read('captain/templates/CREW.md');
+    expect(crew).toMatch(/^23\. /m);
+    expect(crew).not.toMatch(/^24\. /m);
+    for (let n = 1; n <= 23; n++) expect(crew, 'rule ' + n + ' names its home').toMatch(new RegExp('^' + n + '\\. \\*\\*[^]*?Home:', 'm'));
+    for (let n = 1; n <= 23; n++) expect(doc, 'docs/captain.md maps rule ' + n).toMatch(new RegExp('^\\| ' + n + ' \\| ', 'm'));
+    for (const h of ['## Lane discipline', '## Contributions from outside the crew']) expect(doc).toContain(h);
     expect(read('captain/templates/plan-ask.md')).toContain('**do it**');
     expect(read('captain/templates/automation-flaky-pass.md')).toContain('never merge');
   });

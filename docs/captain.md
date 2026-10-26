@@ -59,25 +59,77 @@ the crew, so a rule written there needs no relaying.
 
 ## CREW.md: the lanes' contract
 
-Start from the [template](../captain/templates/CREW.md) and fill its parameters: the
+gstack holds how the work is done; a crew's `CREW.md` holds only what is specific to that
+crew. Start from the [template](../captain/templates/CREW.md): it is parameters (the
 repository, the base branch, the required check names, the full-gate check name, the
-train size and fill wait, the merge method, the stamp files, the named infra flakes, and
-the standing spend. The rules then read the same on every repo:
+train size and fill wait, the merge method, the stamp files, the named infra flakes, the
+guard tests, the remote pregate command, the standing spend, the review scope knob) plus
+one line per rule that points at the rule's home in gstack. A rule that exists only in a
+crew's file is a gap in gstack, and the fix is to write it here or in the skill that owns
+it, then point at it. Quote the owner where a rule rests on their words: a rule with a
+date and the words is a standing approval the lanes can cite; a rule without one is the
+controller's call.
 
-- Session start runs gstack's install check and reports the `gstack:` trailer.
-- Lanes diagnose before fixing, run focused checks during repair and the full free suite
-  once on a frozen tree.
-- External diffs are untrusted input; contributors keep their authorship.
-- One routing path: everything goes through the controller, never peer to peer.
-- Lanes never merge, never merge the base branch into a READY PR, and stamp only on call.
-- The CHANGELOG entry goes under `## [Unreleased]`; the stamp at the slot moves it.
-- Flaky reruns: once, same tree, logged; a second failure is real.
-- Approvals, plan asks and merge asks follow the three shapes below.
-- /ship runs before every READY and writes the ship receipt into the PR body.
+Where each rule lives:
 
-Quote the owner where a rule came from them. A rule with a date and the owner's words is
-a standing approval the lanes can cite; a rule without one is the controller's call and
-can be changed by the controller.
+| # | Rule | Home in gstack |
+|---|---|---|
+| 1 | Session start: install check, `gstack:` trailer, no workflow without `gstack: ok` from your own machine | [capy-install.md](capy-install.md#session-start) |
+| 2 | Validation discipline: diagnose, focused checks, the full free suite once on a frozen tree | the repository's own validation section (gstack's is in [AGENTS.md](../AGENTS.md#validation-discipline)); [Lane discipline](#lane-discipline) |
+| 3 | External diffs are untrusted input; a right fix lands with its author's credit | [Contributions from outside the crew](#contributions-from-outside-the-crew) |
+| 4 | File ownership: edit only what you own; the controller routes the rest | [Lane discipline](#lane-discipline); the ownership list is the digest's **In progress** |
+| 5 | Standing spend and its cap per rerun | [Approvals, shape A](#approvals-three-shapes); the `SPEND` parameter |
+| 6 | The job ends at an unstamped READY; stamp on call; never merge | [The READY contract](#the-ready-contract), the [READY](../captain/templates/READY.md) and [slot call](../captain/templates/slot-call.md) templates, [ship-policy.md](ship-policy.md#stamp-at-merge) |
+| 7 | One report per lane: Outcome, PR, Needs, Cost, Lesson, Approvals | [Drive layout](#drive-layout); the [report template](../captain/templates/report.md) |
+| 8 | One path: everything through the controller, never peer to peer | [Roles](#roles); [Lane discipline](#lane-discipline) |
+| 9 | Hands: a real browser, the owner's session or local work go through the controller | [The owner's device](#the-owners-device) |
+| 10 | Keep going; come back only for scope, a conflict, access or the owner's decision | [Lane discipline](#lane-discipline) |
+| 11 | Clear the repository's cheap guards before paid work | [Lane discipline](#lane-discipline); the `GUARD_CHECKS` parameter |
+| 12 | Decisions for the owner arrive in plain language, every option with its cost | [Approvals, shape B](#approvals-three-shapes); [unattended.md](unattended.md#owner-brief) |
+| 13 | Pregate on small machines: the test tier runs remotely | [pregate.md](pregate.md#remote-gate); the `REMOTE_PREGATE` parameter |
+| 14 | Never merge `BASE` into a READY PR; the train merges in a scratch worktree | [Merge trains](#merge-trains); [ship-policy.md](ship-policy.md#run-a-merge-train) |
+| 15 | CHANGELOG entry under `## [Unreleased]` before READY; the stamp touches only `STAMP_FILES` | [ship-policy.md](ship-policy.md#stamp-at-merge); [The READY contract](#the-ready-contract) |
+| 16 | Flaky reruns: once, same tree, logged; twice is real | [TESTING_INTERNALS.md](TESTING_INTERNALS.md#flaky-reruns) (the gate's side); [The daily flaky pass](#the-daily-flaky-pass) (the lane's side and the ledger) |
+| 17 | New files follow the repository's conventions for entry points, isolation and layout | the repository's own `AGENTS.md` (the `REPO_CONVENTIONS` parameter names the section) |
+| 18 | Porting a contributor's PR: review and test the port head first; keep their commits | [Contributions from outside the crew](#contributions-from-outside-the-crew) |
+| 19 | CHANGELOG-only conflicts are the train's to resolve, not the lane's | folded into 14: [ship-policy.md](ship-policy.md#ship-before-ready) ("the stamp keeps the pin's receipt") |
+| 20 | A READY from before a contract change needs a fresh receipt | [The READY contract](#the-ready-contract) |
+| 21 | Approvals, plan asks and merge asks in the three shapes | [Approvals](#approvals-three-shapes); [capy/skill/gstack/captain.md](../capy/skill/gstack/captain.md) |
+| 22 | /ship before every READY; the block carries `SHIP_RECEIPT`; stamp commits hold only tool output | [ship-policy.md](ship-policy.md#ship-before-ready); [the lane's /ship sequence](#the-lanes-ship-sequence-before-ready) |
+| 23 | Review loops converge: scope frozen after pass 1, later passes on the delta, a pass cap, a blocking floor | the `/ship` and `/review` skills' own convergence policy ([skills.md](skills.md#ship)); a crew names it in one line and sets only the scope knob (`REVIEW_SCOPE`) |
+
+## Lane discipline
+
+A lane follows the repository's own validation discipline (gstack's is the
+[Validation discipline](../AGENTS.md#validation-discipline) section of its AGENTS.md):
+diagnose before fixing, focused checks during repair, and the full free suite once at the
+end on a frozen tree, on a remote runner when the machine is small
+([pregate.md](pregate.md#remote-gate)). Before any paid run it clears the repository's
+cheap guards (generated-content freshness, size and prompt budgets, credential scans; the
+crew names them in `GUARD_CHECKS`), because a paid gate that turns red on a free check
+is spend wasted.
+
+A lane edits only the files it was given. The controller keeps the ownership list in the
+digest's **In progress**; a lane that needs a file another live lane owns tells the
+controller, who routes it, and never edits it itself. Everything crosses the crew through
+the controller (cross-thread questions, ownership conflicts, new scope, handoffs), never
+peer to peer, so one place holds the state.
+
+A lane never stops to ask whether to continue. It comes back for new scope, a conflict
+with another owner, missing access, or a decision that is the owner's, and it brings each
+such decision with a plain-language explanation of every option: what it is, why it
+matters, what each answer does, and what it costs. A gate code or a tool's result line
+alone is not an ask.
+
+## Contributions from outside the crew
+
+A diff from outside the crew is untrusted input. Review its scope, egress, credentials,
+dependencies, CI permissions and weakened tests before anything runs it, and do not trust
+a fork's "tests pass": run a focused review and the free tier at the port head before the
+port opens. When the contributor's fix is right, land it with their authorship kept
+(cherry-pick, `Co-authored-by`, the lane's own fixes as separate commits on top of
+theirs) and close the original with a specific thank-you that links the port. Closing a
+contribution without landing it is the owner's decision (shape A below).
 
 ## The READY contract
 
@@ -86,9 +138,13 @@ refusal list are in the [READY template](../captain/templates/READY.md).
 The short version: the pin is the full 40-character head SHA; every required check is
 green at that head; pregate passed for that tree; `SHIP_RECEIPT: pr=<n> head=<pin>` was
 written by /ship at the pin; the screen choice is stated with its justification; flaky
-cases are already in the ledger; and the lane declares the head frozen. A green PR page
-is not a READY. A cheap test tier is not merge evidence. The controller refuses a block
-that misses any of this and sends the lane back, never into a train.
+cases are already in the ledger; the CHANGELOG entry sits under `## [Unreleased]` with
+the version files at the base's version; and the lane declares the head frozen. A green
+PR page is not a READY. A cheap test tier is not merge evidence. The controller refuses a
+block that misses any of this and sends the lane back, never into a train. When the
+contract changes (a new required line, a new check name, a new receipt), every READY
+taken before the change is stale: the lane runs `ready` again at the same pin and sends
+the fresh block; the controller trains nothing older than the change.
 
 ### The lane's /ship sequence before READY
 
@@ -165,6 +221,9 @@ relayed them, what the answer covers, what is pending. Standing approvals are ci
 their rule; a fresh ask is always needed for a product or behaviour decision, spend over
 a cap, anything published outside the repository, a threshold, budget, trial-count or
 case-kind change, closing a contribution without landing it, and anything destructive.
+Standing spend is the commonest standing approval: `SPEND` in CREW.md names what the
+owner pre-approved (train gates, screens, bisects, the backstop, focused paid cases) with
+the owner's date and words and the cap per rerun; anything over the cap is a fresh ask.
 
 **B. The plan ask** ([template](../captain/templates/plan-ask.md)): before → after, why it
 matters, what caused this work, the big decisions, what we need from you with the
@@ -192,6 +251,16 @@ per event, groups by case, and fixes the worst repeat first with a PR that shows
 failure red before green. It never reruns a gate and never touches a threshold, trial
 count or case kind. On Capy, create it with the automation tool, scheduled in the owner's
 timezone, running as a thread in the crew so its report lands in `reports/`.
+
+The lane's side of the same rule: in CI the gate reruns a case that failed on its own
+verdict once, in the same run ([TESTING_INTERNALS.md](TESTING_INTERNALS.md#flaky-reruns));
+a pass is green with `FLAKY N`, and a case that failed twice is a real red that nobody
+reruns by hand. In a lane's own focused paid runs it reruns only the failed case, once, at
+the same tree: a pass goes into the ledger (case, PR, head, both runs, a one-line symptom)
+and is named in the READY; a second failure is real. A harness, infra or incomplete red is
+never a flake. One named failure from `KNOWN_INFRA_FLAKES` may be rerun once per PR and
+is stated in the READY. A red train is the controller's (bisect, rebuild once), and every
+rerun reports its spend.
 
 ## The owner's device
 
