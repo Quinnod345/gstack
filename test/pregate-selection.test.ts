@@ -11,9 +11,10 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { changedLiterals, constantsIn } from '../lib/pregate/checks/literals';
+import { changedLiterals, constantsIn, consumersOf } from '../lib/pregate/checks/literals';
 import { parseSummary, planRuns } from '../lib/pregate/checks/lanes';
 import { DEFAULT_CONFIG, validateConfig } from '../lib/pregate/config';
 import { isDocsEmptyLane } from '../lib/pregate/docs-lane';
@@ -199,6 +200,26 @@ describe('literals (pure)', () => {
     expect(changedLiterals('f.ts', 'export const MAX = 3;\nconst x = { timeout: 5000 };', 'export const MAX = 4;\nconst x = { timeout: 9000 };')).toEqual([
       { name: 'MAX', old: '3', new: '4', file: 'f.ts' }, { name: 'timeout', old: '5000', new: '9000', file: 'f.ts' },
     ]);
+  });
+  test('consumersOf: a module stem is a path fragment, never a bare word, and a one-character old value needs the constant name (GSTA-114 flood: install.sh 2 -> 3 flagged 575 consumers)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-literals-'));
+    const nl = String.fromCharCode(10);
+    const files: Record<string, string> = {
+      'test/wrapper.test.ts': ["import { x } from '../capy/skill/gstack/scripts/install.sh';", 'expect(GSTACK_CAPY_WRAPPER).toBe(2);', ''].join(nl),
+      'test/by-path.test.ts': ["const out = run('scripts/install.sh');", 'expect(out.wrapper).toBe(2);', ''].join(nl),
+      'test/prose.test.ts': ['// run install first, then check 2 things', 'expect(count).toBe(2);', ''].join(nl),
+      'test/other.test.ts': ['expect(install.steps.length).toBe(2);', ''].join(nl),
+      'test/retry.test.ts': ["expect(require('../lib/retry.js').TIMEOUT_MS).toBe(5000);", ''].join(nl),
+      'test/retry-path.test.ts': ["const mod = require('../lib/retry.js');", 'expect(mod.wait()).toBe(5000);', ''].join(nl),
+      'test/retry-words.test.ts': ['// the retry budget was 5000 once', 'expect(elapsed).toBeLessThan(5000);', ''].join(nl),
+    };
+    for (const [rel, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); }
+    const all = Object.keys(files);
+    // A one-character value: only the file that names the constant counts; the path fragment alone is not enough for "2".
+    expect(consumersOf(root, all, { name: 'GSTACK_CAPY_WRAPPER', old: '2', new: '3', file: 'capy/skill/gstack/scripts/install.sh' })).toEqual(['test/wrapper.test.ts:2']);
+    // A longer value: the constant's name or the module as a path fragment; the bare word "retry" in prose does not count.
+    expect(consumersOf(root, all, { name: 'TIMEOUT_MS', old: '5000', new: '9000', file: 'lib/retry.js' })).toEqual(['test/retry.test.ts:1', 'test/retry-path.test.ts:2']);
+    fs.rmSync(root, { recursive: true, force: true });
   });
   test('runner summaries: bun, node --test, vitest, jest, pytest, zero-run', () => {
     expect(parseSummary(' 12 pass\n 1 fail\nRan 13 tests across 2 files.')).toEqual({ ran: 13, failed: 1 });
