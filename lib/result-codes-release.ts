@@ -229,4 +229,15 @@ export const RELEASE_RESULT_CODES = {
     summary: 'the product diff against the base changed between the receipt\'s head and HEAD (a product file differs beyond a base merge, a test-only fix or release metadata), so the reviewed verdict does not cover HEAD',
     fix: 'run /ship on the new head; the receipt carries only when every changed path is a test, release metadata or the base merge and the product patch-id is unchanged',
   },
+  // gstack-pr-wait (lib/pr-wait.ts): the landing-path PR watcher's two terminal codes.
+  PR_WAIT_BLOCKED: {
+    anchor: 'pr-wait-blocked',
+    summary: 'the --until condition cannot be met without action: a required check failed, the branch conflicts with its base, the PR closed, ready is blocked by unresolved threads or a BEHIND branch, or GitHub stayed unreachable',
+    fix: 'act on the event lines above it (fix the check, update or rebase the branch, resolve the threads), push, and start gstack-pr-wait again',
+  },
+  PR_WAIT_REFUSED: {
+    anchor: 'pr-wait-refused',
+    summary: 'the watcher did not start',
+    fix: 'pass a PR number or URL the current gh login can read (--repo owner/name when the checkout is not that repository), or stop the watcher the line names before starting another for the same PR',
+  },
 } as const satisfies Record<string, ResultCode>;

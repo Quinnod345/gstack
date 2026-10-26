@@ -295,6 +295,8 @@ gstack_result_anchor() {
     REVIEW_SCOPE_RANGE) printf '%s' 'review-scope-range' ;;
     RECEIPT_CARRY_REFUSED) printf '%s' 'receipt-carry-refused' ;;
     RECEIPT_CARRY_PRODUCT_CHANGED) printf '%s' 'receipt-carry-product-changed' ;;
+    PR_WAIT_BLOCKED) printf '%s' 'pr-wait-blocked' ;;
+    PR_WAIT_REFUSED) printf '%s' 'pr-wait-refused' ;;
     APPROVAL_RECORD_INVALID) printf '%s' 'approval-record-invalid' ;;
     APPROVAL_RECORD_SECRET) printf '%s' 'approval-record-secret' ;;
     APPROVAL_RECORD_NO_BRANCH) printf '%s' 'approval-record-no-branch' ;;
@@ -307,8 +309,6 @@ gstack_result_anchor() {
     PR_SHOTS_IDENTICAL) printf '%s' 'pr-shots-identical' ;;
     PR_SHOTS_RENDER_FAILED) printf '%s' 'pr-shots-render-failed' ;;
     LAUNCH_FILE_UNWRITABLE) printf '%s' 'capy-install-launch-file-unwritable' ;;
-    PR_WAIT_BLOCKED) printf '%s' 'pr-wait-blocked' ;;
-    PR_WAIT_REFUSED) printf '%s' 'pr-wait-refused' ;;
     *) return 1 ;;
   esac
 }

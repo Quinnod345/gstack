@@ -12,7 +12,6 @@
  */
 import { RELEASE_RESULT_CODES } from './result-codes-release';
 import { CAPY_RESULT_CODES } from './result-codes-capy';
-import { PR_WAIT_RESULT_CODES } from './result-codes-pr-wait';
 
 export interface ResultCode {
   /** Stable `<a id>` in docs/troubleshooting.md. */
@@ -771,7 +770,6 @@ export const RESULT_CODES = {
   },
   ...RELEASE_RESULT_CODES,
   ...CAPY_RESULT_CODES,
-  ...PR_WAIT_RESULT_CODES,
 } as const satisfies Record<string, ResultCode>;
 
 export type ResultCodeName = keyof typeof RESULT_CODES;
