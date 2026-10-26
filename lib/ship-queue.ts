@@ -231,14 +231,15 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
   let pregateOk = false;
   const treeNow = wtreeFingerprint({ cwd: ctx.repoRoot });
   // The mirror stands in for a record that is missing, unreadable, recorded for another tree, or current but
-  // waiting on a remote receipt another checkout holds; a record whose own checks failed or stayed incomplete is final.
+  // waiting on a remote receipt another checkout holds; a record whose own checks failed or stayed incomplete (the diff's doing
+  // or the environment's) is final.
   let useMirror = true;
   if (fs.existsSync(pregateFile)) {
     const read = readPregateFile(pregateFile);
     if (read.file) {
       const v = verifyPregate(ctx.repoRoot, read.file, treeNow);
       pregateOk = v.ok;
-      useMirror = !v.ok && v.code !== 'PREGATE_LANE_FAILED' && v.code !== 'PREGATE_INCOMPLETE';
+      useMirror = !v.ok && v.code !== 'PREGATE_LANE_FAILED' && v.code !== 'PREGATE_INCOMPLETE' && v.code !== 'PREGATE_ENVIRONMENT';
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
   }

@@ -329,7 +329,8 @@ describe('ready', () => {
     expect([current.status, current.err]).toEqual([EXIT.ok, '']);
     expect(line(current.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1`);
     // Value: protects=a same-tree record that only waits on a remote receipt (the small-machine run) is cleared by the clone's mirror, an
-    // unreadable record falls through to the mirror, and a record whose own checks failed or stayed incomplete is never overridden by a green mirror;
+    // unreadable record falls through to the mirror, and a record whose own checks failed or stayed incomplete is never overridden by a green mirror,
+    // including an incomplete check the environment caused (PREGATE_ENVIRONMENT, #3480: a secrets scanner that never finished is not a scanned diff);
     // fails_when=ready reads the mirror only for another tree (the documented lane case refuses PREGATE_REMOTE_UNCLEARED) or lets a mirror hide a red
     // or incomplete local run; why_new=the rows above cover only stale, missing and current records; seam=none; no_claim=the mirror's writer
     const local = path.join(repo.root, 'pregate-local.json');
@@ -350,6 +351,11 @@ describe('ready', () => {
     const incompleteLocal = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
     expect(incompleteLocal.status).toBe(EXIT.refused);
     expect(line(incompleteLocal.out, 'PREGATE:')).toMatch(/\(PREGATE_INCOMPLETE\)$/);
+    fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'incomplete', checks: [{ id: 'secrets', status: 'incomplete', cause: 'environment', environment: { kind: 'missing-binary', evidence: 'gstack-redact: not on PATH', proof: 'launch' } }] }));
+    const environmentLocal = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(environmentLocal.status).toBe(EXIT.refused);
+    expect(line(environmentLocal.out, 'PREGATE:')).toMatch(/\(PREGATE_ENVIRONMENT\)$/);
+    expect(environmentLocal.out).not.toContain(suffix);
     fs.appendFileSync(path.join(repo.work, 'pr-a.txt'), 'dirty\n');
     expect(queue(repo, ['ready', '--pr', '1'], shim(moved, green)).err).toMatch(/uncommitted tracked changes: pr-a\.txt.*\(QUEUE_NOT_READY\)/);
   }, 180_000);
