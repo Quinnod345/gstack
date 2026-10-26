@@ -347,9 +347,9 @@ engine now refuses the VALUE of any `*_KEY`, `*_TOKEN`, `*_SECRET`,
 `*_PASSWORD`, `*_PASSWD`, `*_PASS`, `*_PAT`, `*_APIKEY` or `*_PWD` variable
 in the writer's environment (any case; names carrying a `PUBLIC` word are
 framework-public and exempt, gstack's own `GSTACK_BRAIN_LOCK_TOKEN` is not a
-secret, and a value that names an existing file says where the credential lives
-rather than what it is) (`env.value`, HIGH), so a leaked value cannot reach a PR
-body, receipt, report or Drive file.
+secret) (`env.value`, HIGH), so a leaked value cannot reach a PR body, receipt,
+report or Drive file. There is no path exemption: a path-valued `SSL_KEY` that
+must appear in a text goes through the allowlist.
 
 `PATH=<dir>:$PATH` and `GSTACK_LAUNCH_PATH` appear only when the certified Bun,
 or the project's resolved Node, is not first on PATH (older Capy images ship
@@ -362,8 +362,8 @@ directory holding only `bun`, `bunx` and, when needed, `node`, `npm`, `npx` and
 never puts that directory's other tools (the image's node) in front of PATH.
 The pregate's lanes launch through the same directory. A child shell's `export` cannot
 configure the parent's later commands, so the parent supplies these
-assignments to every gstack command it launches (prefix the command, or
-export them once in the shell that runs it). A fresh shell without them keeps
+assignments to every gstack command it launches by sourcing the launch file
+(`. <GSTACK_LAUNCH_FILE>`) at the start of the shell that runs it. A fresh shell without them keeps
 reporting the Bun it would really run: `FAIL runtime — bun 1.3.14 at
 /usr/local/bin/bun ...; verified bun 1.4.2 found at ~/.bun/bin (not on PATH);
 fix: export PATH="$HOME/.bun/bin:$PATH" or prefix commands with the

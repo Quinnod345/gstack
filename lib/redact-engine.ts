@@ -1,12 +1,10 @@
 /**
  * redact-engine — pure scanning + auto-redaction over the shared taxonomy.
  *
- * Deterministic given its ambient inputs: `scan()` reads the credential-named
- * variables of `process.env` by value unless `processEnv` is passed, and asks
- * the filesystem only whether a path-shaped one of those values names an
- * existing file (GSTA-104); nothing else is read. The CLI shim
- * (`bin/gstack-redact`), the pre-push hook (`bin/gstack-redact-prepush`), and
- * tests all import from here.
+ * No I/O. Deterministic given its one ambient input: `scan()` reads the
+ * credential-named variables of `process.env` by value unless `processEnv` is
+ * passed (GSTA-104). The CLI shim (`bin/gstack-redact`), the pre-push hook
+ * (`bin/gstack-redact-prepush`), and tests all import from here.
  *
  * Key behaviors (locked in /plan-eng-review + two Codex passes):
  *   - Normalization BEFORE matching (NFKC + strip zero-width + decode a small
@@ -25,8 +23,6 @@
  *     no trust exemption (the marker scheme was dropped as theater).
  */
 
-import * as fs from "node:fs";
-import * as os from "node:os";
 import {
   PATTERNS,
   PATTERNS_BY_ID,
@@ -479,8 +475,11 @@ function scanInternal(input: string, opts: ScanOptions, spans?: Map<Finding, Ori
 
   // Environment values, by exact value: a credential that is already in the
   // process environment needs no shape to be recognized.
-  for (const { name, value } of credentialEnvValues(opts.processEnv ?? process.env)) {
-    if (allow.has(value)) continue;
+  for (const { name, value: raw } of credentialEnvValues(opts.processEnv ?? process.env)) {
+    if (allow.has(raw)) continue;
+    // The text was normalized before matching; the value takes the same form.
+    const value = normalizeOriginal(raw).normalized;
+    if (value.length < MIN_ENV_VALUE_LENGTH) continue;
     let from = 0;
     let normOffset: number;
     while ((normOffset = normalized.indexOf(value, from)) !== -1) {
@@ -535,12 +534,14 @@ const MIN_ENV_VALUE_LENGTH = 8;
  * variables (the last `_`-separated word is KEY, TOKEN, SECRET, PASSWORD, PASSWD,
  * PASS, PAT or APIKEY, or the name ends in _PWD; names carrying a PUBLIC word and
  * gstack's own non-secret tokens are exempt) whose trimmed value is long enough to
- * be a credential, is not a placeholder and does not name a file that exists on
- * this machine (SSL_KEY=/etc/ssl/private/x.key says where the credential lives; a
- * secret that happens to start with `/` names no file, so a shape rule would miss
- * it). A short or placeholder value would match ordinary prose. The value is
+ * be a credential and is not a placeholder. A short or placeholder value would
+ * match ordinary prose. There is no path exemption on purpose: a shape rule
+ * exempted base64 secrets that start with `/`, and an existence check let the
+ * scanned agent exempt a value by creating a path of that name; a path-valued
+ * SSL_KEY that must appear in a text goes through the allowlist. The value is
  * trimmed, so a key read from a file with a trailing newline still matches its
- * leaked form.
+ * leaked form; it is matched against the normalized text in its own normalized
+ * form, so a value NFKC rewrites still finds its leaked bytes.
  */
 export function credentialEnvValues(env: Record<string, string | undefined>): Array<{ name: string; value: string }> {
   const out: Array<{ name: string; value: string }> = [];
@@ -548,7 +549,7 @@ export function credentialEnvValues(env: Record<string, string | undefined>): Ar
     if (!CREDENTIAL_ENV_NAME.test(name) || PUBLIC_ENV_NAME.test(name) || NON_SECRET_ENV_NAMES.has(name)) continue;
     const value = raw?.trim() ?? "";
     if (value.length < MIN_ENV_VALUE_LENGTH) continue;
-    if (isPlaceholderSpan(value) || (/^[~/]|^[A-Za-z]:\\/.test(value) && fs.existsSync(value.replace(/^~(?=\/)/, os.homedir())))) continue;
+    if (isPlaceholderSpan(value)) continue;
     out.push({ name, value });
   }
   return out;
