@@ -34,6 +34,32 @@
 ### Gate integrity
 - No threshold, budget, timeout, trial count, case kind or assertion weakened. The section heading "Completeness Principle — Boil the Ocean" is unchanged, so every skip list that names it still matches.
 
+## [1.91.226.0] - 2026-10-26
+
+**/review can re-review just its own fixes after a fixing pass, under the same rules as /ship (#3339).** Before, every /review fix cycle reran the whole review over the whole branch, so a large branch could hit the three-cycle stop on findings in code the earlier passes had already read. Now the pass after an edited pass starts with `gstack-review-log --start review --fix-range` and its checklist, specialists and QA read only what changed since that pass. The Step 4.8 adversarial review still reads the whole branch on every pass, because its rows carry their own freshness. A narrowed pass is never the final review: when it makes no edits, /review runs one full pass before writing the final record, and a fix-range record is never CURRENT. Garry's "do it" on 2026-10-24 for a fix-range re-review with a final full pass covers it.
+
+### Changed
+- **`review/SKILL.md.tmpl`** Step 3: the first pass always starts full. The pass right after an edited pass starts with `--start review --fix-range`, and wherever that pass sets DIFF_BASE outside Step 4.8 it uses the printed `FIX_BASE=<sha>` instead. Step 4.8 and every other `<base>` use (state-matrix detection, the gate, banned-terms and slop scans, the queue check) keep the base branch. State-matrix detection builds `origin/<base>` from its argument, and the slop scan diffs `<base>...HEAD`, which is empty while /review's fixes are uncommitted. If the logger refuses (for example, the first pass read uncommitted work, so no commit marks what it read), the pass starts full.
+- **Step 5.8**: an edited pass now saves its own record with `converged:false` before the repeat, because the fix-range start takes its base from that record. Before, only the final pass was logged. Step 5.0 never treats this invocation's own records as prior reviews, so a defect the user skipped this invocation is not suppressed on the next pass and still counts as unresolved. "No edits" fills the final record only after a full pass; after a fix-range pass it repeats Steps 3–5 with a full start. Each logged pass finishes its own REVIEW_START.
+- Nearby prose was tightened to pay for the growth (the slop-scan note, the Step 4.7 probe-reuse rule, the search-before-recommending list, the version-compare note, the final-report and Greptile lines). Every host's review SKILL.md shrank by 36 characters, and its size pin was lowered to match. The Claude skeleton is 80,581 bytes against its 80,900 cap.
+
+### Tests
+- `test/review-fix-range.test.ts` adds five cases. Two check the rendered rules: the first pass's start block has no `--fix-range`, only the pass after an edited pass narrows, FIX_BASE replaces only DIFF_BASE outside Step 4.8, a refusal falls back to a full start, the edited pass is logged before the repeat and kept out of Step 5.0, and a fix-range pass is never final. Three run /review's real order on every pass against the real logger: core start, then the Step 4.8 attempt's start and finish, then fixes in the working tree, then the core finish with the pass's own token, and never a commit. A committed first pass narrows the next repeat to the uncommitted fixes, and the following repeat is refused back to a full pass that is CURRENT. A zero-edit fix-range row is UNVERIFIED even if it were logged. A first pass over uncommitted work can't be narrowed.
+- `test/review-workflow-clarity.test.ts`: three expectations follow the new contract: the "No edits" marker, the edited pass saving its record with `converged:false`, and each pass finishing its own token instead of only the final one. The test formerly named "finish only the final core token without log-time capture" is now "each logged pass finishes its own core token without log-time capture". It still requires one `--finish REVIEW_START`, no `--start review` in Step 5.8 and no log-time token capture.
+
+### Gate integrity
+- One gate change to review: /review may narrow a repeat pass. Verdict: this does not weaken what the final review covers, because a narrowed pass can't be the final record. The logger never marks a fix-range row CURRENT, Step 5.8 requires a full pass after a zero-edit fix-range pass, Step 4.8 stays full, and Step 5.0 can't suppress this invocation's skipped defects through its own intermediate records. Mutation checks on the rendered skill, each caught by the suite:
+  - letting a fix-range pass be final;
+  - dropping the full-pass condition on "No edits";
+  - narrowing every repeat;
+  - dropping the refusal fallback;
+  - narrowing the first pass;
+  - not logging the edited pass;
+  - logging after the repeat;
+  - narrowing Step 4.8 and other base uses;
+  - letting Step 5.0 read this invocation's records.
+- No threshold, budget, timeout, trial count or case kind changed. Size pins only went down.
+
 ## [1.91.225.0] - 2026-10-26
 
 **/design-html builds landing pages around one visitor action and pages that look finished, without inventing proof; adapted from Elaya's design skills (GSTA-92).** Freeform /design-html asked for purpose, audience and feel, then built. It never asked for the one action the page exists for or where the traffic comes from, and nothing caught a page that shipped with invented customers and numbers, a dead `href="#"`, a scroll-listener reveal, `100vh`, or no description, favicon or working skip link. Now every run reads a craft section at Step 1, and a free checker counts the tells at Step 4. Adapted from Elaya's [ai-design-skills](https://github.com/elayadesign/ai-design-skills) (landing-page-design, design-to-motion) and [redesign-skill](https://github.com/elayadesign/redesign-skill), MIT, © 2026 Elaya. Thank you, Elaya.
