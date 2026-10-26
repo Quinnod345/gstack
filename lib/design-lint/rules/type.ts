@@ -4,9 +4,10 @@
  *
  * Gate 75 (tiny text) is render-only and lives in the render tier.
  */
+import { OVERUSED_FONTS_DISPLAY } from '../../design-catalog';
 import type { LintContext } from '../context';
 import { fontPx, mergedRules, styleFor, trackingEm, valueOf } from '../context';
-import { famKey, firstFamily, GENERIC_FAMILIES, HEADING_SEL, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
+import { MONO_FACE, famKey, firstFamily, GENERIC_FAMILIES, HEADING_SEL, isTokenRule, pxOf, resolveVars, type CssDecl, type CssRule, type MergedRule } from '../css';
 import { ancestorMap, getAttr, innerOf, plainText } from '../html';
 import type { Reporter } from '../report';
 import { trunc } from '../report';
@@ -23,7 +24,8 @@ function tokenSite(ctx: LintContext, prop: string): { file: string; line: number
   return { file: tr?.file ?? ctx.rules[0]?.file ?? ctx.key, line: d?.line ?? 1 };
 }
 
-const OVERUSED = ['inter', 'roboto', 'open sans', 'poppins', 'lato', 'system-ui', '-apple-system', 'arial', 'helvetica', 'helvetica neue', 'segoe ui'].map(famKey);
+/** gstack's own catalog of training-data display faces, plus the system stacks sloplint names. */
+const OVERUSED = [...OVERUSED_FONTS_DISPLAY, 'system-ui', '-apple-system', 'helvetica neue', 'segoe ui'].map((f) => famKey(f.toLowerCase()));
 
 // sloplint check1 (gate 1)
 function check1(ctx: LintContext, r: Reporter): void {
@@ -184,7 +186,6 @@ function check55(ctx: LintContext, r: Reporter): void {
   }
 }
 
-const MONO_FACE = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
 
 // sloplint monoIsMaterial (gate 64): a monospace face declared as the display, body or outlier is the page's material, not a costume
 function monoIsMaterial(ctx: LintContext): boolean {
@@ -195,7 +196,7 @@ function monoIsMaterial(ctx: LintContext): boolean {
 // sloplint check64 (gate 64)
 function check64(ctx: LintContext, r: Reporter): void {
   if (monoIsMaterial(ctx)) return;
-  const monoFam = (v: string) => /mono|courier|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|silkscreen/i.test(firstFamily(resolveVars(v, ctx.tokens)));
+  const monoFam = (v: string) => MONO_FACE.test(firstFamily(resolveVars(v, ctx.tokens)));
   const LABELISH = /label|caption|meta|eyebrow|kicker|tag\b|badge|chip|small|folio|footnote|legend|\bth\b|thead|figcaption|overline|dateline|byline|credit|note\b/i;
   const DATAISH = /code|pre\b|kbd|samp|num|figure|stat|price|value|data|tabular|counter|timer|clock|coord|amount|total|score|version|hash|\bid\b|sku|time|date|hour|utc|eta|lot\b|edition|ref\b|dimension|measure|reading|plate-?no|tag-?no|url|uri\b|path|endpoint|command|cmd|snippet|install/i;
   const seen = new Set<string>();

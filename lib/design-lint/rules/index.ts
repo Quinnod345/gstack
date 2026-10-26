@@ -31,4 +31,3 @@ export const FAMILIES: RuleFamily[] = [
   { name: 'copy', run: runCopy },
 ];
 
-export { RULES, RULE_IDS, ruleMeta, type RuleMeta, type Tier } from './ids';

@@ -13,6 +13,7 @@
  */
 import { glGaps, glHero, glHeroSpace, glMarks, glPhotos, glPictures, glSlots, glSpace, glThin, glWide, glWords } from './render-probe-space';
 import { glFields, glGrid, glPadding, glProse, glQuality, glRhythm, glStrain } from './render-probe-quality';
+import type { SampleRect } from './render-png';
 
 export interface ProbeAt { tag: string; cls: string; text: string; /** A distinguishing attribute in the open tag, like data-slot="hero" or id="main". */ attr?: string }
 
@@ -40,7 +41,6 @@ export interface RingProbe {
 export interface SetupReport { lost: string[] }
 
 export interface PixelItem { path: string; kind: 'text' | 'ring'; pad?: number }
-export interface PixelRect { x: number; y: number; w: number; h: number; inner?: { l: number; t: number; r: number; b: number } }
 
 /** Shared in-page helpers; built once by the install step. */
 export function glHelpers() {
@@ -452,20 +452,24 @@ export async function glOcclusion(P: Probes): Promise<ProbeFinding[]> {
 }
 
 // sloplint-render pixelBehind and pixelsAroundRing, the preparation half: hide the ink, report where to sample in page coordinates
-export function glHide(P: Probes, items: PixelItem[]): Array<PixelRect | null> {
+export function glHide(P: Probes, items: PixelItem[]): Array<SampleRect | null> {
   window.scrollTo(0, 0);
   const vw = innerWidth;
-  return items.map((item) => {
-    const el = document.querySelector(item.path) as HTMLElement | null;
+  const els = items.map((item) => document.querySelector(item.path) as HTMLElement | null);
+  els.forEach((el, i) => {
+    if (!el) return;
+    if (items[i].kind === 'text') { for (const [k, v] of [['color', 'transparent'], ['text-shadow', 'none'], ['-webkit-text-stroke', '0'], ['text-decoration-color', 'transparent']]) el.style.setProperty(k, v, 'important'); return; }
+    el.style.setProperty('outline-style', 'none', 'important');
+    el.style.setProperty('box-shadow', 'none', 'important');
+  });
+  return items.map((item, i) => {
+    const el = els[i];
     if (!el) return null;
     if (item.kind === 'text') {
-      for (const [k, v] of [['color', 'transparent'], ['text-shadow', 'none'], ['-webkit-text-stroke', '0'], ['text-decoration-color', 'transparent']]) el.style.setProperty(k, v, 'important');
       const r = el.getBoundingClientRect();
       const x = Math.max(0, r.left), y = Math.max(0, r.top + scrollY);
       return { x, y, w: Math.min(r.right, vw) - x, h: Math.min(r.bottom + scrollY, y + 400) - y };
     }
-    el.style.setProperty('outline-style', 'none', 'important');
-    el.style.setProperty('box-shadow', 'none', 'important');
     const r = el.getBoundingClientRect(), pad = item.pad || 4;
     const x = Math.max(0, r.left - pad), y = Math.max(0, r.top + scrollY - pad);
     return { x, y, w: Math.min(vw, r.right + pad) - x, h: r.bottom + scrollY + pad - y, inner: { l: r.left - x, t: r.top + scrollY - y, r: r.right - x, b: r.bottom + scrollY - y } };

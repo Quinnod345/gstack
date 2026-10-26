@@ -92,10 +92,12 @@ about this page:
 `impeccable-disable <rule>: <reason>` is accepted as an alias, so a comment
 that already silences the impeccable engine answers the same tell here. The
 lint refuses, each as its own `waiver` finding at ask: a rule it does not
-know; a **blocking** rule (the Floor is never waivable); a reason under 24
-characters, boilerplate ("by design", "intentional", "looks better"), reused
-word for word on another waiver, or sharing no word of four letters or more
-with the page's own text; a second waiver of one rule. More than three waivers
+know; a **blocking** rule (the Floor is never waivable; the one exception is a
+blocking rule the lint could only *suspect* on this page, which it reports at
+ask and which a waiver answers like any ask); a reason under 24 characters,
+boilerplate ("by design", "intentional", "looks better"), reused word for
+word on another waiver, or sharing no word of four letters or more with the
+page's own text; a second waiver of one rule. More than three waivers
 on one page is a house style and belongs in DESIGN.md: reported once at polish
 as `house-style`.
 
@@ -112,7 +114,7 @@ as `house-style`.
 | `glow-wash` | ask | 29 | glow and wash: blurred orbs, a radial halo or a zero-offset coloured glow | a solid or grained surface; elevation by lightness, shadows with offset and blur |
 | `cream-palette` | ask | 65 | the cream paper, serif display and terracotta accent look | move one axis: the accent first, the paper second, the display last |
 | `framework-palette` | ask | 74 | a framework default palette (Tailwind indigo-500, slate-900 and kin) as a token or utility | a colour mixed for the page in OKLCH |
-| `overused-font` | ask | 1 | Inter, Roboto, Open Sans, Poppins, Lato or a system face as the display | a display face chosen for the page |
+| `overused-font` | ask | 1 | a training-data display face (Inter, Roboto, Fraunces, Playfair Display, Space Grotesk and the rest of gstack's catalog) or a system stack as the display | a display face chosen for the page |
 | `line-length` | ask | 25 | running prose outside 45 to 75 characters a line | max-width: 65ch |
 | `font-family-count` | ask | 37 | more than three font families | display, body and one outlier |
 | `italic-word-in-heading` | blocks | 38i | one italic word inside an otherwise roman heading | a line break, or the whole head set one way |
@@ -230,10 +232,11 @@ as `house-style`.
 | `missing-aria-current` | ask | craft | route navigation without aria-current | mark the current nav link aria-current="page" |
 
 Source gates are Nutlope/hallmark `references/gates.md` at 7ec8682; `craft`
-marks a rule carried over from `gstack-design-craft` (Elaya-derived). Three
+marks a rule carried over from `gstack-design-craft` (Elaya-derived). Four
 ids are the lint's own: `waiver` (a refused waiver, ask), `house-style` (more
-than three waivers, polish) and `render` (a page that did not render, blocks:
-an unrendered page is never a pass).
+than three waivers, polish), `render` (a page that did not render, blocks:
+an unrendered page is never a pass) and `internal-error` (a rule family that
+threw on a page, ask: the page is not a pass until the lint has read it).
 
 ## What is deliberately not ported
 

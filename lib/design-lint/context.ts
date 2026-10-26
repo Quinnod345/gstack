@@ -60,16 +60,3 @@ export const fontPx = (ctx: LintContext, decls: CssDecl[]): number | null => fon
 
 export const trackingEm = (ctx: LintContext, decls: CssDecl[], px: number | null): number | null => trackingEmOf(decls, ctx.tokens, px);
 
-/** Every open tag of the given names across the context's documents, with its doc. */
-export function openTags(ctx: LintContext, names?: Set<string>): Array<{ doc: Doc; idx: number }> {
-  const out: Array<{ doc: Doc; idx: number }> = [];
-  for (const doc of ctx.docs) {
-    for (let i = 0; i < doc.tags.length; i++) {
-      const t = doc.tags[i];
-      if (t.close) continue;
-      if (names && !names.has(t.name)) continue;
-      out.push({ doc, idx: i });
-    }
-  }
-  return out;
-}

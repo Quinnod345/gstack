@@ -12,7 +12,7 @@
 import type { LintContext } from './context';
 import { memo } from './context';
 import { COLOR_LITERAL, hueIn, oklchOf, parseColor, type Color } from './color';
-import { GENERIC_FAMILIES, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
+import { MONO_FACE, GENERIC_FAMILIES, firstFamily, pxOf, resolveVars, splitTop, type Tokens } from './css';
 import { braceEnd, closeIndex, clsLits, directChildren, getAttr, innerOf, plainText, type Doc, type Tag } from './html';
 import { trunc } from './report';
 
@@ -29,10 +29,8 @@ const TW_PINK = /^(?:pink|rose)$/;
 const TW_GREY = /^(?:slate|gray|zinc|neutral|stone)$/;
 const TW_NONFILL = /^bg-(?:none|transparent|inherit|current|fixed|local|scroll|cover|contain|auto|center|top|bottom|left|right|no-repeat|repeat(?:-[\w-]+)?|(?:left|right|top|bottom)-(?:top|bottom|left|right)|clip-[\w-]+|origin-[\w-]+|blend-[\w-]+|gradient-to-[\w-]+|(?:linear|radial|conic)(?:-.*)?|size-.*|position-.*|\[(?:url|length|position|size|image|(?:repeating-)?(?:linear|radial|conic)-gradient)[^\]]*\].*)$/;
 const TW_GLASS = /^bg-(?:white|black|(?:slate|gray|zinc|neutral|stone)-(?:50|100|900|950)|paper|ink|background|foreground)\/(\d{1,2}|\[(?:0?\.\d+|\d{1,2}%)\])$/;
-const TW_MONO = /mono|courier|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|silkscreen/i;
 const TW_LOGO = /logo|brand|wordmark/i;
 const TW_COLOR_LIT = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
-const MONO_TOKEN = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
 const EYEBROW_ANCESTOR_SKIP = /^(form|fieldset|table|thead|tbody|nav|menu|dl|select|figcaption|label|button)$/;
 const EYEBROW_BLOCKY = /<(p|ul|ol|hr|h[1-6]|img|table|figure|section|article|blockquote|form|dl)\b/i;
 const EYEBROW_ANNOUNCE = /^(features?|benefits?|introducing|new|how it works?|the (process|tour)|our (process|story|work|team|approach|values?)|why (us|choose|we)|pricing|plans?|faq|questions?|testimonials?|reviews?|trusted by|as seen in|what we do|about( us)?|services?|solutions?|use cases?|get started|contact|team|work|projects?|gallery|blog|news|resources?|examples?|overview)$/i;
@@ -242,10 +240,10 @@ function twReadType(ctx: LintContext, b: string, tok: string, p: TwParsed, f: Tw
   if (b.startsWith('font-')) {
     const arb = /^font-\[(.+)\]$/.exec(b);
     const fam = arb ? twFamily(arb[1]) : null;
-    if (fam) { f.font = f.font || tok; if (TW_MONO.test(fam)) f.mono = true; }
+    if (fam) { f.font = f.font || tok; if (MONO_FACE.test(fam)) f.mono = true; }
     const named = !arb && /^font-([a-z][\w-]*)$/.exec(b);
     const tv = named ? twTokens(ctx)[`--font-${named[1]}`] : undefined;
-    if (tv && /mono|courier|code/i.test(firstFamily(resolveVars(tv, twTokens(ctx))))) f.mono = true;
+    if (tv && MONO_FACE.test(firstFamily(resolveVars(tv, twTokens(ctx))))) f.mono = true;
     return true;
   }
   return false;
@@ -601,7 +599,7 @@ export function twGlow(ctx: LintContext, f: TwInfo): string | null {
 
 /** Whether a mono face is one of the page's declared families, so font-mono labels are material, not costume. */
 export function twMonoIsMaterial(tokens: Tokens): boolean {
-  const mono = (v: string | undefined) => !!v && MONO_TOKEN.test(firstFamily(resolveVars(v, tokens)));
+  const mono = (v: string | undefined) => !!v && MONO_FACE.test(firstFamily(resolveVars(v, tokens)));
   return mono(tokens['--font-display']) || mono(tokens['--font-body']) || mono(tokens['--font-outlier']);
 }
 

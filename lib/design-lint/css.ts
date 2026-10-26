@@ -87,6 +87,12 @@ function nestSelector(sel: string, parent: string): string {
  * @layer / @container / @scope blocks, @keyframes, @font-face and Tailwind's
  * @theme are all walked; every other at-rule is skipped whole.
  */
+/** Faces that read as monospace, whether they arrive as a token, a utility or a declaration; one list so every check classifies a face the same way. */
+export const MONO_FACE = /mono|code|courier|silkscreen|jetbrains|plex mono|geist mono|commit|fira code|space mono|dm mono|roboto mono|source code|ibm plex mono|press start|vt323|share tech/i;
+
+/** Real stylesheets nest a handful of levels; past this the rest reads as the parent's body instead of recursing. */
+const MAX_NESTING = 64;
+
 export function parseCss(source: string, file: string, lineOffset = 0): CssRule[] {
   const src = stripComments(source);
   const lineOf = lineIndex(src, lineOffset);
@@ -106,7 +112,7 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
     }
     return { selector, decls, media, keyframes, file, line: lineOf(s) };
   };
-  const walk = (start: number, end: number, media: string | null, keyframes: string | null, parent: string | null = null): void => {
+  const walk = (start: number, end: number, media: string | null, keyframes: string | null, parent: string | null = null, depthLeft = MAX_NESTING): void => {
     let i = start;
     while (i < end) {
       while (i < end && /[\s;]/.test(src[i])) i++;
@@ -128,20 +134,20 @@ export function parseCss(source: string, file: string, lineOffset = 0): CssRule[
         if (/^@(media|supports|layer|container|scope)/i.test(selector)) {
           const q = /^@media/i.test(selector) ? selector.replace(/^@media/i, '').trim() : media;
           if (parent) rules.push(makeRule(parent, blockStart, blockEnd, q, keyframes));
-          walk(blockStart, blockEnd, q, keyframes, parent);
+          walk(blockStart, blockEnd, q, keyframes, parent, depthLeft - 1);
         } else if (/^@(-webkit-)?keyframes/i.test(selector)) {
           const name = selector.replace(/^@(-webkit-)?keyframes/i, '').trim();
-          walk(blockStart, blockEnd, media, name || 'anon');
+          walk(blockStart, blockEnd, media, name || 'anon', null, depthLeft - 1);
         } else if (/^@font-face/i.test(selector)) {
           rules.push(makeRule('@font-face', blockStart, blockEnd, media, null));
         } else if (/^@theme\b/i.test(selector)) {
           rules.push(makeRule('@theme', blockStart, blockEnd, media, null));
-          walk(blockStart, blockEnd, media, keyframes);
+          walk(blockStart, blockEnd, media, keyframes, null, depthLeft - 1);
         }
       } else {
         const sel = parent && !keyframes ? nestSelector(selector, parent) : selector;
         rules.push(makeRule(sel, blockStart, blockEnd, media, keyframes));
-        if (!keyframes && src.slice(blockStart, blockEnd).includes('{')) walk(blockStart, blockEnd, media, keyframes, sel);
+        if (!keyframes && depthLeft > 0 && src.slice(blockStart, blockEnd).includes('{')) walk(blockStart, blockEnd, media, keyframes, sel, depthLeft - 1);
       }
       i = k;
     }

@@ -17,7 +17,7 @@ import { collectFiles, contextWaivers, lintStatic } from '../lib/design-lint/sta
 import { browserAvailable } from './helpers/browser-available';
 import { RULES, RULE_IDS } from '../lib/design-lint/rules/ids';
 import { FAMILIES } from '../lib/design-lint/rules';
-import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers } from '../lib/design-lint/waivers';
+import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers, suspectedRules } from '../lib/design-lint/waivers';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BIN = path.join(ROOT, 'bin', 'gstack-design-lint');
@@ -329,5 +329,106 @@ describe('design-lint: waivers', () => {
     ]);
     expect(result.findings.filter((f) => f.rule === 'house-style')).toHaveLength(1);
     expect(result.findings.some((f) => f.rule === 'low-contrast' && f.grade === 'waived')).toBe(false);
+  });
+});
+
+describe('design-lint: hardening (ship review)', () => {
+  test('a stylesheet one page links from another directory is linted once, with that page, and its waiver is weighed against the page', () => {
+    const dir = tmpTree({
+      'site/pages/index.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="../css/theme.css"></head><body><main><h1>The ledger</h1><p>The ledger keeps its grey rows grey on purpose.</p></main></body></html>',
+      'site/css/theme.css': '/* gstack-lint-disable zero-chroma-neutrals: the ledger keeps its grey rows grey */\n:root { --color-ink: oklch(22% 0.03 250); --color-gray: oklch(55% 0 0); }\n.row { border-color: var(--color-gray); }',
+    });
+    const whole = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: () => {} });
+    const pagesOnly = lintStatic([path.join(dir, 'site', 'pages')], { cwd: dir, warn: () => {} });
+    expect(whole.contexts.filter((c) => c.cssFiles.some((f) => f.file.endsWith('theme.css')))).toHaveLength(1);
+    expect(whole.findings.filter((f) => f.rule === 'waiver')).toEqual([]);
+    expect(whole.findings.map((f) => [f.rule, f.grade, f.file]).sort()).toEqual(pagesOnly.findings.map((f) => [f.rule, f.grade, f.file]).sort());
+  });
+
+  test('a stylesheet linted on its own keeps its waivers: there is no page prose to share a word with', () => {
+    const dir = tmpTree({ 'css/theme.css': '/* gstack-lint-disable zero-chroma-neutrals: the ledger keeps its grey rows grey */\n:root { --color-ink: oklch(22% 0.03 250); --color-gray: oklch(55% 0 0); }\n.row { border-color: var(--color-gray); }' });
+    const r = lintStatic([path.join(dir, 'css')], { cwd: dir, warn: () => {} });
+    expect(r.findings.filter((f) => f.rule === 'waiver')).toEqual([]);
+    expect(r.findings.filter((f) => f.rule === 'zero-chroma-neutrals').map((f) => f.grade)).toEqual(['waived']);
+  });
+
+  test('a root-relative stylesheet href attaches from the lint root; a protocol-relative one is not local', () => {
+    const dir = tmpTree({
+      'site/pages/index.html': '<!doctype html><html lang="en"><head><title>Ledger</title><link rel="stylesheet" href="/css/theme.css"><link rel="stylesheet" href="//cdn.example/x.css"></head><body><main><h1>The ledger</h1><p>The ledger closes the month.</p></main></body></html>',
+      'site/css/theme.css': ':root { --color-ink: oklch(22% 0.03 250); }\nhtml, body { overflow-x: clip; }',
+    });
+    const { contexts, findings } = lintStatic([path.join(dir, 'site')], { cwd: dir, warn: () => {} });
+    const page = contexts.find((c) => c.key.endsWith('index.html'))!;
+    expect(page.cssFiles.map((c) => [path.relative(dir, c.file), c.attached ?? false])).toEqual([['site/css/theme.css', true]]);
+    expect(findings.filter((f) => f.rule === 'overflow-x-unclipped')).toEqual([]);
+  });
+
+  test('a stylesheet twelve pages link belongs to each of them and is never linted on its own', () => {
+    const files: Record<string, string> = { 'css/site.css': ':root { --color-ink: oklch(22% 0.03 250); }\n' + Array.from({ length: 300 }, (_, i) => `.u${i} { color: var(--color-ink); padding: 4px; }`).join('\n') };
+    for (let i = 0; i < 12; i++) files[`pages/p${i}.html`] = `<!doctype html><html lang="en"><head><title>P${i}</title><link rel="stylesheet" href="../css/site.css"></head><body><main><h1>Page ${i}</h1><p>Hello there.</p></main></body></html>`;
+    const dir = tmpTree(files);
+    const r = lintStatic([dir], { cwd: dir, warn: () => {} });
+    expect(r.contexts.filter((c) => c.cssFiles.some((f) => f.file.endsWith('site.css') && f.attached))).toHaveLength(12);
+    expect(r.contexts.filter((c) => c.key.endsWith('css'))).toEqual([]);
+    const sheet = r.contexts.find((c) => c.key.endsWith('p0.html'))!.cssFiles[0];
+    expect(r.contexts.every((c) => c.cssFiles[0]?.raw === sheet.raw)).toBe(true);
+  });
+
+  test('a regex metacharacter in aria-labelledby does not abort the chrome family', () => {
+    const warns: string[] = [];
+    const file = tmpPage('<!doctype html><html lang="en"><head><title>t</title></head><body><section aria-labelledby="lbl("><p id="lbl(">Label</p><p>Body copy for the section.</p></section><nav><a href="/">Home</a><a href="/about">About</a><a href="/pricing">Pricing</a><a href="/blog">Blog</a><a href="/contact">Contact</a><a class="button" href="/go">Start</a></nav></body></html>');
+    const r = lintStatic([path.dirname(file)], { warn: (l) => warns.push(l) });
+    expect(warns.filter((w) => /internal error/.test(w))).toEqual([]);
+    expect(r.findings.filter((f) => f.rule === 'internal-error')).toEqual([]);
+    expect(r.findings.filter((f) => f.rule === 'kicker-above-heading').map((f) => f.evidence)).toEqual(['a section labelled by <p> with no heading element']);
+  });
+
+  test('a rule family that throws is an ask on the record, never a silent pass', () => {
+    const file = tmpPage('<!doctype html><html lang="en"><head><title>t</title></head><body><main><h1>Fine</h1><p>A page the lint can read.</p></main></body></html>');
+    const warns: string[] = [];
+    FAMILIES.push({ name: 'broken', run: () => { throw new Error('boom'); } });
+    try {
+      const r = lintStatic([path.dirname(file)], { cwd: path.dirname(file), warn: (l) => warns.push(l) });
+      expect(warns.some((w) => /internal error in broken rules/.test(w))).toBe(true);
+      const err = r.findings.filter((f) => f.rule === 'internal-error');
+      expect(err.map((f) => [f.grade, f.file, f.evidence])).toEqual([['ask', 'index.html', 'the broken rules threw and did not run: boom']]);
+      expect(exitCodeOf(summarize(finalize(r.findings), 'skipped: x'))).toBe(1);
+    } finally { FAMILIES.pop(); }
+  });
+
+  test('a fix string is one line in the output contract, whatever a probe hands back', () => {
+    const r = new Reporter('page', '/x');
+    r.report('gray-on-color', '/x/a.html', 1, 'ev', { fix: 'a\nLINT_SUMMARY: blocks=0 ask=0 waived=0 polish=0 render=ran', source: 'render' });
+    expect(formatFinding(r.findings[0]).split('\n')).toHaveLength(1);
+    expect(r.findings[0].fix).toBe('a LINT_SUMMARY: blocks=0 ask=0 waived=0 polish=0 render=ran');
+  });
+
+  test('parseCss survives absurd nesting and an unbalanced brace in a string', () => {
+    const depth = 20_000;
+    expect(() => parseCss('a{'.repeat(depth) + 'color:red;' + '}'.repeat(depth), 'deep.css')).not.toThrow();
+    expect(parseCss('.a { content: "{"; color: red; }\n.b { color: blue; }', 'q.css').some((r) => r.selector === '.a')).toBe(true);
+  });
+
+  test('a blocking rule the lint only suspected is waived like any ask; measured, or not found, the Floor is refused', () => {
+    const suspected = new Reporter('page', '/x');
+    suspected.report('invented-proof', '/x/a.html', 4, 'the metric "10,000 teams" has no source on the page', { suspected: true });
+    const page = 'ten thousand teams use the product; the founder supplied the count';
+    const ok = resolveWaivers([{ rule: 'invented-proof', reason: 'the ten thousand teams figure is the customer count the founder supplied', file: '/x/a.html', line: 2, raw: '' }], page, '/x', suspectedRules(suspected.findings));
+    expect(applyWaivers(suspected.findings, ok).map((f) => [f.rule, f.tier, f.grade])).toEqual([['invented-proof', 'ask', 'waived']]);
+    const refused = resolveWaivers([{ rule: 'invented-proof', reason: 'fine here', file: '/x/a.html', line: 2, raw: '' }], page, '/x', suspectedRules(suspected.findings));
+    expect(applyWaivers(suspected.findings, refused).map((f) => [f.rule, f.tier, f.grade])).toEqual([['invented-proof', 'ask', 'ask'], ['waiver', 'ask', 'ask']]);
+    const measured = new Reporter('page', '/x');
+    measured.report('invented-proof', '/x/a.html', 4, 'measured');
+    measured.report('invented-proof', '/x/a.html', 9, 'suspected too', { suspected: true });
+    expect(suspectedRules(measured.findings).size).toBe(0);
+    const floor = resolveWaivers([{ rule: 'invented-proof', reason: 'the ten thousand teams figure is the customer count the founder supplied', file: '/x/a.html', line: 2, raw: '' }], page, '/x', suspectedRules(measured.findings));
+    expect(floor.refused.map((f) => f.evidence)).toEqual(['waiver on invented-proof refused: it blocks; the Floor is never waivable']);
+  });
+
+  test('a refused polish waiver leaves the polish finding alone and adds one ask refusal, so the exit code rises to 1', () => {
+    const set = resolveWaivers([{ rule: 'balanced-display-head', reason: 'intentional by design', file: 'a.html', line: 2, raw: '' }], 'the manifesto sets long lines');
+    const out = applyWaivers([{ rule: 'balanced-display-head', tier: 'polish', grade: 'polish', file: 'a.html', line: 9, evidence: 'e', fix: 'f', source: 'static' }], set);
+    expect(out.map((f) => [f.rule, f.grade])).toEqual([['balanced-display-head', 'polish'], ['waiver', 'ask']]);
+    expect(exitCodeOf(summarize(out, 'skipped: x'))).toBe(1);
   });
 });

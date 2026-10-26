@@ -14,7 +14,7 @@ import { docKindOf, getAttr, parseDoc, type Doc } from './html';
 import { Reporter, type Finding } from './report';
 import { FAMILIES } from './rules';
 import { twVariants } from './tailwind';
-import { applyWaivers, findWaivers, resolveWaivers } from './waivers';
+import { applyWaivers, findWaivers, resolveWaivers, suspectedRules, type WaiverSet } from './waivers';
 
 export interface StaticOptions {
   scope?: 'page' | 'component';
@@ -27,6 +27,8 @@ export interface StaticOptions {
 export interface StaticResult {
   files: string[];
   contexts: LintContext[];
+  /** Each context's resolved waivers, in context order, so the render tier can honour the same comments. */
+  waivers: WaiverSet[];
   findings: Finding[];
 }
 
@@ -53,62 +55,96 @@ export function collectFiles(paths: string[], warn: (l: string) => void = () => 
   return files;
 }
 
-const localRef = (href: string | null): string | null => (href && !/^(?:[a-z]+:|\/\/)/i.test(href) ? href.split(/[?#]/)[0] : null);
+/**
+ * A local stylesheet reference as a path: relative to the referring file, or
+ * for a root-relative href (`/css/site.css`, the common form on a real site)
+ * relative to the lint root the page was found under. Schemes and
+ * protocol-relative URLs are not local.
+ */
+export function resolveRef(href: string | null, from: string, root: string | null): string | null {
+  if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) return null;
+  const ref = href.split(/[?#]/)[0];
+  if (!ref) return null;
+  if (ref.startsWith('/')) return root ? path.join(root, ref) : null;
+  return path.resolve(from, ref);
+}
 
-export function importsOf(css: string, from: string): string[] {
+export function importsOf(css: string, from: string, root: string | null = null): string[] {
   const out: string[] = [];
   for (const m of stripComments(css).matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?/gi)) {
-    const ref = localRef(m[1]);
-    if (ref) out.push(path.resolve(from, ref));
+    const ref = resolveRef(m[1], from, root);
+    if (ref) out.push(ref);
   }
   return out;
 }
 
-export function linksOf(doc: Doc, from: string): string[] {
+export function linksOf(doc: Doc, from: string, root: string | null = null): string[] {
   const out: string[] = [];
   for (const t of doc.tags) {
     if (t.close || t.name !== 'link' || !/stylesheet/i.test(getAttr(t.attrs, 'rel') || '')) continue;
-    const ref = localRef(getAttr(t.attrs, 'href'));
-    if (ref) out.push(path.resolve(from, ref));
+    const ref = resolveRef(getAttr(t.attrs, 'href'), from, root);
+    if (ref) out.push(ref);
   }
   return out;
 }
 
-const readCss = (f: string): string | null => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+/** The lint root a file was collected under: the longest top-level directory that contains it, else its own directory. */
+const rootOf = (file: string, roots: string[]): string =>
+  roots.filter((r) => file.startsWith(r + path.sep)).sort((a, b) => b.length - a.length)[0] ?? path.dirname(file);
 
-/** Follow @import and <link rel=stylesheet> from the group's files to every local .css they reach. */
-function attachStylesheets(cssFiles: CssFile[], rules: CssRule[], pending: string[], inGroup: Set<string>): void {
-  while (pending.length) {
-    const p = pending.shift()!;
-    if (inGroup.has(p) || path.extname(p).toLowerCase() !== '.css' || !fs.existsSync(p)) continue;
-    inGroup.add(p);
-    const raw = readCss(p);
-    if (raw == null) continue;
-    cssFiles.push({ file: p, raw, attached: true });
-    rules.push(...parseCss(raw, p));
-    pending.push(...importsOf(raw, path.dirname(p)));
+interface CssRead { raw: string; rules: CssRule[]; imports: string[] }
+
+/** Stylesheets read once per run: a bundle shared by forty pages is parsed once, not forty times. */
+class CssCache {
+  private readonly files = new Map<string, CssRead | null>();
+  constructor(readonly roots: string[], private readonly warn: (l: string) => void) {}
+  read(f: string): CssRead | null {
+    if (this.files.has(f)) return this.files.get(f)!;
+    let out: CssRead | null = null;
+    try {
+      const raw = fs.readFileSync(f, 'utf8');
+      out = { raw, rules: parseCss(raw, f), imports: importsOf(raw, path.dirname(f), rootOf(f, this.roots)) };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') this.warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`);
+    }
+    this.files.set(f, out);
+    return out;
   }
 }
 
-export function buildContext(key: string, cssList: string[], docList: Doc[], opts: StaticOptions): LintContext {
+/** Follow @import and <link rel=stylesheet> from the group's files to every local .css they reach. */
+function attachStylesheets(cssFiles: CssFile[], rules: CssRule[], pending: string[], inGroup: Set<string>, cache: CssCache): void {
+  while (pending.length) {
+    const p = pending.shift()!;
+    if (inGroup.has(p) || path.extname(p).toLowerCase() !== '.css') continue;
+    inGroup.add(p);
+    const got = cache.read(p);
+    if (!got) continue;
+    cssFiles.push({ file: p, raw: got.raw, attached: true });
+    rules.push(...got.rules);
+    pending.push(...got.imports);
+  }
+}
+
+export function buildContext(key: string, cssList: string[], docList: Doc[], opts: StaticOptions, cache = new CssCache([], () => {})): LintContext {
   const cssFiles: CssFile[] = [];
   const rules: CssRule[] = [];
   const inGroup = new Set<string>([...cssList, ...docList.map((d) => d.file)]);
   const pending: string[] = [];
   for (const f of cssList) {
-    const raw = readCss(f) ?? '';
-    cssFiles.push({ file: f, raw });
-    rules.push(...parseCss(raw, f));
-    pending.push(...importsOf(raw, path.dirname(f)));
+    const got = cache.read(f);
+    cssFiles.push({ file: f, raw: got?.raw ?? '' });
+    if (got) { rules.push(...got.rules); pending.push(...got.imports); }
   }
   for (const doc of docList) {
+    const root = rootOf(doc.file, cache.roots);
     for (const st of doc.styles) {
       rules.push(...parseCss(st.css, doc.file, st.lineOffset));
-      pending.push(...importsOf(st.css, path.dirname(doc.file)));
+      pending.push(...importsOf(st.css, path.dirname(doc.file), root));
     }
-    pending.push(...linksOf(doc, path.dirname(doc.file)));
+    pending.push(...linksOf(doc, path.dirname(doc.file), root));
   }
-  attachStylesheets(cssFiles, rules, pending, inGroup);
+  attachStylesheets(cssFiles, rules, pending, inGroup, cache);
   const allCss = cssFiles.map((c) => c.raw).join('\n') + '\n' + docList.map((d) => d.styles.map((st) => st.css).join('\n')).join('\n');
   return {
     key, rules, tokens: buildTokens(rules), docs: docList, cssFiles, allCss,
@@ -119,47 +155,59 @@ export function buildContext(key: string, cssList: string[], docList: Doc[], opt
 }
 
 /** The .css files a page reaches through <link> and @import, transitively. */
-function linkedCss(page: Doc): Set<string> {
+function linkedCss(page: Doc, cache: CssCache): Set<string> {
   const linked = new Set<string>();
-  const queue = [...linksOf(page, path.dirname(page.file)), ...page.styles.flatMap((st) => importsOf(st.css, path.dirname(page.file)))];
+  const root = rootOf(page.file, cache.roots);
+  const queue = [...linksOf(page, path.dirname(page.file), root), ...page.styles.flatMap((st) => importsOf(st.css, path.dirname(page.file), root))];
   while (queue.length) {
     const q = queue.shift()!;
-    if (linked.has(q) || !fs.existsSync(q) || path.extname(q).toLowerCase() !== '.css') continue;
+    if (linked.has(q) || path.extname(q).toLowerCase() !== '.css') continue;
+    const got = cache.read(q);
+    if (!got) continue;
     linked.add(q);
-    const raw = readCss(q);
-    if (raw != null) queue.push(...importsOf(raw, path.dirname(q)));
+    queue.push(...got.imports);
   }
   return linked;
 }
 
-/** One context per page (with its own stylesheets), plus one per directory for components and unlinked CSS. */
-export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void): LintContext[] {
-  const groups = new Map<string, { css: string[]; docs: string[] }>();
+/**
+ * One context per page (with its own stylesheets), plus one per directory for
+ * components and unlinked CSS. A stylesheet some page links, from any
+ * directory, belongs to that page and is not linted again on its own.
+ */
+export function groupContexts(files: string[], opts: StaticOptions, warn: (l: string) => void, roots: string[] = []): LintContext[] {
+  const cache = new CssCache(roots, warn);
+  const groups = new Map<string, { css: string[]; pages: Doc[]; parts: Doc[] }>();
   for (const f of files) {
     const dir = path.dirname(f);
-    if (!groups.has(dir)) groups.set(dir, { css: [], docs: [] });
+    if (!groups.has(dir)) groups.set(dir, { css: [], pages: [], parts: [] });
     const g = groups.get(dir)!;
-    if (path.extname(f).toLowerCase() === '.css') g.css.push(f); else g.docs.push(f);
+    if (path.extname(f).toLowerCase() === '.css') { g.css.push(f); continue; }
+    try {
+      const doc = parseDoc(f, fs.readFileSync(f, 'utf8'));
+      (doc.kind === 'html' ? g.pages : g.parts).push(doc);
+    } catch (e) { warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`); }
+  }
+  const linkedBy = new Map<Doc, Set<string>>();
+  const owned = new Set<string>();
+  for (const g of groups.values()) for (const page of g.pages) {
+    const linked = linkedCss(page, cache);
+    linkedBy.set(page, linked);
+    for (const c of linked) owned.add(c);
   }
   const contexts: LintContext[] = [];
   for (const [dir, g] of groups) {
-    const docs: Doc[] = [];
-    for (const f of g.docs) {
-      try { docs.push(parseDoc(f, fs.readFileSync(f, 'utf8'))); } catch (e) { warn(`design-lint: skipped ${f}, it could not be parsed (${(e as Error).message})`); }
-    }
-    const pages = docs.filter((d) => d.kind === 'html');
-    const parts = docs.filter((d) => d.kind !== 'html');
-    if (!pages.length) { contexts.push(buildContext(dir, g.css, parts, opts)); continue; }
+    const free = g.css.filter((c) => !owned.has(c));
+    if (!g.pages.length) { if (free.length || g.parts.length) contexts.push(buildContext(dir, free, g.parts, opts, cache)); continue; }
     const used = new Set<string>();
-    for (const page of pages) {
-      const linked = linkedCss(page);
-      const own = pages.length === 1 ? g.css : g.css.filter((c) => linked.has(c));
+    for (const page of g.pages) {
+      const linked = linkedBy.get(page)!;
+      const own = g.pages.length === 1 ? g.css.filter((c) => !owned.has(c) || linked.has(c)) : g.css.filter((c) => linked.has(c));
       own.forEach((c) => used.add(c));
-      for (const c of linked) used.add(c);
-      contexts.push(buildContext(page.file, own, [page], opts));
+      contexts.push(buildContext(page.file, own, [page], opts, cache));
     }
-    const rest = g.css.filter((c) => !used.has(c));
-    if (rest.length || parts.length) contexts.push(buildContext(dir, rest, parts, opts));
+    const rest = free.filter((c) => !used.has(c));
+    if (rest.length || g.parts.length) contexts.push(buildContext(dir, rest, g.parts, opts, cache));
   }
   return contexts;
 }
@@ -205,30 +253,35 @@ export function shareProjects(contexts: LintContext[]): void {
   }
 }
 
-/** The waiver comments of a context: in its documents and its own stylesheets. */
-export function contextWaivers(ctx: LintContext, cwd: string) {
+/** The waiver comments of a context, in its documents and its own stylesheets, weighed against what its rules found. */
+export function contextWaivers(ctx: LintContext, cwd: string, findings: Finding[] = []): WaiverSet {
   const claims = [
     ...ctx.docs.flatMap((d) => findWaivers(d.file, d.raw)),
     ...ctx.cssFiles.filter((c) => !c.attached).flatMap((c) => findWaivers(c.file, c.raw)),
   ];
-  return resolveWaivers(claims, ctx.docs.map((d) => d.text).join(' '), cwd);
+  return resolveWaivers(claims, ctx.docs.map((d) => d.text).join(' '), cwd, suspectedRules(findings));
 }
 
 export function lintStatic(paths: string[], opts: StaticOptions = {}): StaticResult {
   const warn = opts.warn ?? ((l: string) => console.error(l));
   const cwd = opts.cwd ?? process.cwd();
   const files = collectFiles(paths, warn);
-  const contexts = groupContexts(files, opts, warn);
+  const roots = paths.map((p) => path.resolve(p)).map((p) => { try { return fs.statSync(p).isDirectory() ? p : path.dirname(p); } catch { return null; } }).filter((p): p is string => p !== null);
+  const contexts = groupContexts(files, opts, warn, roots);
   shareProjects(contexts);
   const findings: Finding[] = [];
+  const waivers: WaiverSet[] = [];
   for (const ctx of contexts) {
     const reporter = new Reporter(ctx.scope, cwd);
     for (const family of FAMILIES) {
       try { family.run(ctx, reporter); } catch (e) {
         warn(`design-lint: internal error in ${family.name} rules for ${ctx.key}: ${(e as Error).message}`);
+        reporter.report('internal-error', ctx.docs[0]?.file ?? ctx.cssFiles[0]?.file ?? ctx.key, 1, `the ${family.name} rules threw and did not run: ${(e as Error).message}`);
       }
     }
-    findings.push(...applyWaivers(reporter.findings, contextWaivers(ctx, cwd)));
+    const set = contextWaivers(ctx, cwd, reporter.findings);
+    waivers.push(set);
+    findings.push(...applyWaivers(reporter.findings, set));
   }
-  return { files, contexts, findings };
+  return { files, contexts, waivers, findings };
 }

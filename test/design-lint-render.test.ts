@@ -9,6 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { lint } from '../lib/design-lint/index';
 import { lintRender, lineOf } from '../lib/design-lint/render';
 import { installScript } from '../lib/design-lint/render-probe';
 import { decodePng, medianRgb } from '../lib/design-lint/render-png';
@@ -258,5 +259,26 @@ describe.skipIf(!hasBrowser)('design-lint render: the browser tier', () => {
     const many = await measure(pageWith('.wrap > section { padding: 0; margin: 0 0 160px; }', Array.from({ length: 7 }, (_, i) => block(i + 1)).join('\n')));
     expect(many.of('section-gap').map((f) => [f.grade, f.evidence])).toContainEqual(['ask', '[1440px] 11 sections on one page']);
     expect(many.of('section-gap').find((f) => f.evidence.endsWith('sections on one page'))!.line).toBe(lineIn(many.html, 'class="gap6"'));
+  }, 90_000);
+});
+
+describe('design-lint render: hardening (ship review)', () => {
+  test('lineOf tolerates regex metacharacters in a tag name the page reports', () => {
+    expect(() => lineOf('<x>\n<a(b class="c">hi</a(b>', { tag: 'a(b', cls: 'c', text: 'hi' })).not.toThrow();
+    expect(lineOf('<x>\n<a(b class="c">hi</a(b>', { tag: 'a(b', cls: 'c', text: 'hi' })).toBe(2);
+  });
+
+  test.skipIf(!hasBrowser)('a page waiving section-gap sees its render section-gap finding at waived, not ask', async () => {
+    const block = (n: number) => `<section class="gap${n}"><h2>Section ${n} of the close</h2><p>${WORDS(24)}.</p></section>`;
+    const html = '<!-- gstack-lint-disable section-gap: the ledger separates its close sections with hairline rules, not air -->\n'
+      + pageWith('.gap1,.gap2,.gap3{padding:0;margin:4px 0}', block(1) + block(2) + block(3));
+    const { file, dir } = tmpPage(html);
+    try {
+      const r = await lint([dir], { cwd: dir, render: true, warn: () => {}, engine });
+      expect(r.findings.filter((f) => f.rule === 'waiver')).toEqual([]);
+      expect(r.findings.filter((f) => f.rule === 'section-gap').map((f) => [f.grade, f.file, f.source])).toEqual([['waived', 'index.html', 'render']]);
+      expect(r.summary.waived).toBe(1);
+      void file;
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 });

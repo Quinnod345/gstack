@@ -25,7 +25,8 @@ export interface Tag {
   line: number;
 }
 
-export interface ComponentTag extends Tag {}
+/** A string as a literal inside a RegExp source. */
+export const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export interface StyleBlock { css: string; lineOffset: number }
 
@@ -44,7 +45,7 @@ export interface Doc {
   scripts: string;
   tags: Tag[];
   /** Non-HTML (component) tags in a component file. */
-  comps: ComponentTag[];
+  comps: Tag[];
   /** Visible text with entities decoded and whitespace folded. */
   text: string;
   lineOf: (pos: number) => number;
@@ -74,7 +75,7 @@ export function parseHtml(file: string, src: string, kind: DocKind = 'html'): Do
     .replace(/<!--[\s\S]*?-->/g, pad)
     .replace(/(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi, (_m0, open: string, _tag: string, body: string, close: string) => open + pad(body) + close);
   const tags: Tag[] = [];
-  const comps: ComponentTag[] = [];
+  const comps: Tag[] = [];
   const tagRe = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
   while ((m = tagRe.exec(masked))) {
     const attrs = m[3] || '';
@@ -327,7 +328,7 @@ class JsxScanner {
     return e;
   }
   /** One attribute from i; returns the index after it, or -1 when the tag is not JSX after all. */
-  private attr(i: number, start: number, cls: { v: string[] | null }): number {
+  private attr(i: number, cls: { v: string[] | null }): number {
     const { src, n } = this;
     let k = i + 1;
     while (k < n && /[\w$:.-]/.test(src[k])) k++;
@@ -356,7 +357,6 @@ class JsxScanner {
       this.blank(i, e + 1);
     } else return -1;
     if (isCls && cls.v) this.write(i, e + 1, 'class="' + cls.v.join(' ').replace(/"/g, "'").replace(/[<>]/g, ' ') + '"');
-    void start;
     return e + 1;
   }
   private tag(start: number): number {
@@ -377,7 +377,7 @@ class JsxScanner {
       if (c === '>') { this.paint(i, i + 1); i++; break; }
       if (c === '{') { const e = this.js(i + 1, true); if (e >= n) return -1; this.blank(i, e + 1); i = e + 1; continue; }
       if (!/[A-Za-z_$]/.test(c)) return -1;
-      i = this.attr(i, start, cls);
+      i = this.attr(i, cls);
       if (i < 0) return -1;
     }
     if (cls.v) this.classes.push([start, cls.v]);

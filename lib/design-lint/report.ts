@@ -55,7 +55,7 @@ export class Reporter {
       rule, tier, grade: tier,
       file: relPath(file, this.cwd), line: line || 1,
       evidence: trunc(String(evidence).replace(/\s+/g, ' ').trim()),
-      fix: opts.fix ?? meta.fix,
+      fix: trunc(String(opts.fix ?? meta.fix).replace(/\s+/g, ' ').trim(), 240),
       source: opts.source ?? (meta.render ? 'render' : 'static'),
     });
   }

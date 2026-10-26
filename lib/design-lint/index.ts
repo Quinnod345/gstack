@@ -10,15 +10,17 @@
  * Exit 2 when anything blocks, 1 when an ask is unanswered, 0 otherwise.
  * docs/design-lint.md is the user-facing contract.
  */
-import * as path from 'node:path';
 import { docKindOf } from './html';
-import { lintRender } from './render';
-import { exitCodeOf, finalize, formatFinding, formatSummary, summarize, type Finding, type Summary } from './report';
+import { lintRender, type RenderOptions } from './render';
+import { exitCodeOf, finalize, formatFinding, formatSummary, relPath, summarize, type Finding, type Summary } from './report';
 import { lintStatic, type StaticOptions } from './static';
+import { applyWaivers, FLOOR_REFUSAL, refusal, type WaiverSet } from './waivers';
 
 export interface LintOptions extends StaticOptions {
   render?: boolean;
   urls?: string[];
+  /** Replaces the render engine choice (tests inject one). */
+  engine?: RenderOptions['engine'];
 }
 
 export interface LintResult {
@@ -29,13 +31,14 @@ export interface LintResult {
 }
 
 export async function lint(paths: string[], opts: LintOptions = {}): Promise<LintResult> {
+  const cwd = opts.cwd ?? process.cwd();
   const stat = lintStatic(paths, opts);
   let findings = stat.findings;
   let render = 'skipped: not requested';
   if (opts.render || opts.urls?.length) {
     const pages = stat.files.filter((f) => docKindOf(f) === 'html');
-    const r = await lintRender([...pages, ...(opts.urls ?? [])], { cwd: opts.cwd, job: opts.job, scope: opts.scope });
-    findings = [...findings, ...r.findings];
+    const r = await lintRender([...pages, ...(opts.urls ?? [])], { cwd: opts.cwd, job: opts.job, scope: opts.scope, engine: opts.engine });
+    findings = [...findings, ...waiveRender(r.findings, stat.contexts.map((c, i) => [c.docs.length === 1 && c.docs[0].kind === 'html' ? relPath(c.key, cwd) : null, stat.waivers[i]]), cwd)];
     render = r.status;
   }
   const final = finalize(findings);
@@ -47,7 +50,22 @@ export function formatResult(result: LintResult): string {
   return [...result.findings.map(formatFinding), formatSummary(result.summary)].join('\n');
 }
 
-export const isPage = (f: string): boolean => docKindOf(f) === 'html' && path.extname(f) !== '';
+/**
+ * A page's waivers reach its render findings too. A waiver the static tier
+ * accepted on a blocking rule it only suspected is refused here when the
+ * render tier measures that rule for real; the measured finding stays blocks.
+ */
+function waiveRender(findings: Finding[], sets: Array<[string | null, WaiverSet]>, cwd: string): Finding[] {
+  const byPage = new Map(sets.filter((s): s is [string, WaiverSet] => s[0] !== null));
+  const out: Finding[] = [];
+  for (const f of findings) {
+    const set = byPage.get(f.file);
+    if (!set) { out.push(f); continue; }
+    const claim = f.tier === 'blocks' ? set.claims.get(f.rule) : undefined;
+    if (claim) out.push(f, refusal(claim, FLOOR_REFUSAL, cwd));
+    else out.push(...applyWaivers([f], { ...set, refused: [] }));
+  }
+  return out;
+}
 
-export { RULES, RULE_IDS, ruleMeta } from './rules/ids';
 export { formatFinding, formatSummary, type Finding, type Summary } from './report';

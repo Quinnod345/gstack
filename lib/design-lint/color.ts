@@ -133,10 +133,4 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
 /** Whether hue h (degrees) lies in [lo, hi], wrapping through 360 when lo > hi. */
 export const hueIn = (h: number, lo: number, hi: number): boolean => (lo <= hi ? h >= lo && h <= hi : h >= lo || h <= hi);
 
-/** Composite a translucent colour over an opaque one. */
-export function over(top: Color, under: Rgb): Rgb {
-  const a = top.alpha;
-  return { r: top.r * a + under.r * (1 - a), g: top.g * a + under.g * (1 - a), b: top.b * a + under.b * (1 - a) };
-}
-
 export const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|oklch\([^)]*\)|rgba?\([^)]*\)|hsla?\([^)]*\)|color-mix\((?:[^()]|\([^()]*\))*\)|\b(white|black|transparent)\b/i;

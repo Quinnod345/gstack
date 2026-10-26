@@ -17,10 +17,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pickEngine, render, renderWithBrowse, type EngineChoice, type RenderResult as EngineResult, type RenderSpec, type RenderStep } from '../aside-render';
 import { contrastRatio } from './color';
-import { plainText } from './html';
+import { escapeRe, plainText } from './html';
 import { decodePng, medianRgb, type SampleRect } from './render-png';
 import { installScript, probeScript, type PixelItem, type ProbeAt, type ProbeFinding, type RingProbe, type SetupReport } from './render-probe';
 import { Reporter, type Finding } from './report';
+import { ruleMeta } from './rules/ids';
 
 export interface RenderOptions {
   cwd?: string;
@@ -98,10 +99,10 @@ function parsed<T>(text: string | undefined): Parsed<T> {
 /** The source line of the element a finding names: its tag, first class, a distinguishing attribute and its opening text. Best effort; 1 when nothing matches. */
 export function lineOf(src: string | null, at?: ProbeAt): number {
   if (!src || !at) return 1;
-  const cls = at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${at.cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s[^"']*)?["']`, 'i') : null;
+  const cls = at.cls ? new RegExp(`class=["'](?:[^"']*\\s)?${escapeRe(at.cls)}(?:\\s[^"']*)?["']`, 'i') : null;
   const want = at.text.toLowerCase();
   let fallback = -1;
-  for (const m of src.matchAll(new RegExp(`<${at.tag}\\b[^>]*>`, 'gi'))) {
+  for (const m of src.matchAll(new RegExp(`<${escapeRe(at.tag)}\\b[^>]*>`, 'gi'))) {
     const pos = m.index ?? 0;
     if (cls && !cls.test(m[0])) continue;
     if (at.attr && !m[0].includes(at.attr)) continue;
@@ -116,7 +117,14 @@ interface Found extends ProbeFinding { label: string }
 
 async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: number): Promise<void> {
   const file = isUrl(target) ? target : path.resolve(target);
-  const report = (f: Found | ProbeFinding, src: string | null) => r.report(f.rule, file, lineOf(src, f.at), ('label' in f ? `[${f.label}] ` : '') + f.evidence, { fix: f.fix, suspected: f.grade === 'warn', source: 'render' });
+  const report = (f: Found | ProbeFinding, src: string | null) => {
+    const meta = ruleMeta(f.rule);
+    if (f.rule !== 'render' && (!meta || (f.grade !== 'fail' && f.grade !== 'warn'))) {
+      r.report('render', file, 1, `the page handed back a measurement the lint does not know (${String(f.rule).slice(0, 40)}); its scripts may be tampering with the probes`, { fix: 'a page must not touch the lint; remove whatever redefines window.__gstackLint or the layout APIs', source: 'render' });
+      return;
+    }
+    r.report(f.rule, file, lineOf(src, f.at), ('label' in f ? `[${f.label}] ` : '') + f.evidence, { fix: f.fix, suspected: f.grade === 'warn', source: 'render' });
+  };
   if (isUrl(target)) {
     const err = await unreachable(target);
     if (err) { report({ rule: 'render', grade: 'fail', evidence: `could not reach ${target}: ${err}` }, null); return; }
@@ -124,11 +132,12 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   let src: string | null = null;
   if (!isUrl(target)) { try { src = fs.readFileSync(file, 'utf8'); } catch { src = null; } }
   const plan = measures();
-  const steps: RenderStep[] = [...openingSteps(), ...plan.map((m) => evalStep(m.call, m.width, m.height))];
+  const opening = openingSteps();
+  const steps: RenderStep[] = [...opening, ...plan.map((m) => evalStep(m.call, m.width, m.height))];
   const res = await run({ file, steps, timeoutMs });
   if (!res.ok) { report({ rule: 'render', grade: 'fail', evidence: `the page did not render: ${res.error ?? 'unknown error'}` }, null); return; }
 
-  const setup = parsed<SetupReport>(res.evals[1]);
+  const setup = parsed<SetupReport>(res.evals[opening.length - 1]);
   if ('error' in setup) report({ rule: 'render', grade: 'fail', evidence: `the page could not be prepared for measurement: ${setup.error}` }, null);
   else if (setup.value.lost.length) report({ rule: 'render', grade: 'warn', evidence: `fonts or stylesheets did not load (${setup.value.lost.slice(0, 2).join(', ')}): the measurements show a fallback face`, fix: 'fix the path or wait for the host, then measure again; never sign off a fallback face' }, null);
   const errs = parsed<string[]>(res.stdout.match(/^PAGE_ERRORS=(.+)$/m)?.[1]);
@@ -139,7 +148,7 @@ async function lintPage(target: string, r: Reporter, run: Runner, timeoutMs: num
   let rings: RingProbe[] = [];
   const seen = new Set<string>();
   plan.forEach((m, i) => {
-    const p = parsed<ProbeFinding[] | RingProbe[]>(res.evals[i + 2]);
+    const p = parsed<ProbeFinding[] | RingProbe[]>(res.evals[opening.length + i]);
     if ('error' in p) { report({ rule: 'render', grade: 'fail', evidence: `the ${m.call.replace(/^P\.(\w+).*/, '$1')} measurement at ${m.label} failed: ${p.error}` }, null); return; }
     if (m.call === 'P.focus(P)') { rings = p.value as RingProbe[]; return; }
     for (const f of p.value as ProbeFinding[]) {
@@ -182,11 +191,12 @@ async function confirmPixels(file: string, run: Runner, timeoutMs: number, textP
   try {
     const textItems: PixelItem[] = [...new Map(textProbes.map((f) => [f.probe!.path, { path: f.probe!.path, kind: 'text' as const }])).values()];
     const ringItems: PixelItem[] = weakRings.map((x) => ({ path: x.path, kind: 'ring' as const, pad: x.pad }));
-    const groups: Array<{ items: PixelItem[]; width: number; height: number; shot: string }> = [];
-    if (textItems.length) groups.push({ items: textItems, width: 1280, height: 800, shot: path.join(dir, 'text.png') });
-    if (ringItems.length) groups.push({ items: ringItems, width: LAPTOP.width, height: LAPTOP.height, shot: path.join(dir, 'ring.png') });
+    const groups: Array<{ items: PixelItem[]; width: number; height: number; shot: string; evalIdx: number }> = [];
+    if (textItems.length) groups.push({ items: textItems, width: 1280, height: 800, shot: path.join(dir, 'text.png'), evalIdx: -1 });
+    if (ringItems.length) groups.push({ items: ringItems, width: LAPTOP.width, height: LAPTOP.height, shot: path.join(dir, 'ring.png'), evalIdx: -1 });
     const steps: RenderStep[] = openingSteps();
     for (const g of groups) {
+      g.evalIdx = steps.length;
       steps.push(evalStep(`P.hide(P, ${JSON.stringify(g.items)})`, g.width, g.height));
       steps.push({ kind: 'screenshot', out: g.shot, width: g.width, height: g.height, fullPage: true, type: 'png', mobile: false });
       steps.push(evalStep(`P.restore(P, ${JSON.stringify(g.items)})`, g.width, g.height));
@@ -194,8 +204,8 @@ async function confirmPixels(file: string, run: Runner, timeoutMs: number, textP
     const res = await run({ file, steps, timeoutMs });
     if (!res.ok) return null;
     const out: Confirmed = { text: new Map(), ring: new Map() };
-    groups.forEach((g, gi) => {
-      const rects = parsed<Array<SampleRect | null>>(res.evals[2 + gi * 3]);
+    groups.forEach((g) => {
+      const rects = parsed<Array<SampleRect | null>>(res.evals[g.evalIdx]);
       if ('error' in rects || !fs.existsSync(g.shot)) return;
       const png = decodePng(fs.readFileSync(g.shot));
       if (!png) return;

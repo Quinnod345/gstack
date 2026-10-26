@@ -7,7 +7,7 @@
  * somewhere real are not eyebrows.
  */
 import { fontPx, styleFor, trackingEm, valueOf, type LintContext } from '../context';
-import { ancestorMap, directChildren, getAttr, innerOf, plainText, type Child } from '../html';
+import { escapeRe, ancestorMap, directChildren, getAttr, innerOf, plainText, type Child } from '../html';
 import { trunc, type Reporter } from '../report';
 
 const EYEBROW_CONTAINER = /^(div|header|footer|section|article|aside|hgroup|li|main|figure|a|body|blockquote)$/;
@@ -125,7 +125,7 @@ function checkUnheadedSection(ctx: LintContext, r: Reporter): void {
       if (!labelledBy) continue;
       const body = innerOf(doc, i);
       if (!body || /<h[1-6][\s>]/i.test(body.inner)) continue;
-      const idRe = new RegExp('<([a-z][\\w-]*)\\b[^>]*\\sid\\s*=\\s*["\']' + labelledBy.split(/\s+/)[0] + '["\'][^>]*>', 'i');
+      const idRe = new RegExp('<([a-z][\\w-]*)\\b[^>]*\\sid\\s*=\\s*["\']' + escapeRe(labelledBy.split(/\s+/)[0]) + '["\'][^>]*>', 'i');
       const m = idRe.exec(body.inner);
       if (!m || /^h[1-6]$/i.test(m[1])) continue;
       r.report('kicker-above-heading', doc.file, doc.lineOf(body.endPos - body.inner.length + m.index), 'a section labelled by <' + m[1].toLowerCase() + '> with no heading element', { fix: 'promote the label to a heading; a label doing heading duty is a heading' });

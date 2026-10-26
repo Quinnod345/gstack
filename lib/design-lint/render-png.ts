@@ -64,13 +64,15 @@ export function decodePng(buf: Uint8Array): Png | null {
 export function medianRgb(png: Png, rect: SampleRect): number[] | null {
   const x0 = Math.max(0, Math.floor(rect.x)), y0 = Math.max(0, Math.floor(rect.y));
   const x1 = Math.min(png.width, Math.ceil(rect.x + rect.w)), y1 = Math.min(png.height, Math.ceil(rect.y + rect.h));
-  const ch: number[][] = [[], [], []];
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
   const grey = png.channels < 3;
+  let n = 0;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     if (rect.inner) { const ix = x - rect.x, iy = y - rect.y; if (ix >= rect.inner.l && ix < rect.inner.r && iy >= rect.inner.t && iy < rect.inner.b) continue; }
     const i = (y * png.width + x) * png.channels;
-    ch[0].push(png.data[i]); ch[1].push(grey ? png.data[i] : png.data[i + 1]); ch[2].push(grey ? png.data[i] : png.data[i + 2]);
+    hist[0][png.data[i]]++; hist[1][png.data[grey ? i : i + 1]]++; hist[2][png.data[grey ? i : i + 2]]++;
+    n++;
   }
-  if (!ch[0].length) return null;
-  return ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1] / 255);
+  if (!n) return null;
+  return hist.map((h) => { let seen = 0; for (let v = 0; v < 256; v++) { seen += h[v]; if (seen > n >> 1) return v / 255; } return 1; });
 }
