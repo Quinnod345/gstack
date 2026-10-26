@@ -218,8 +218,8 @@ describe('ready under a train policy: the screen choice', () => {
     expect(missing.err).toMatch(/has no refs\/pull\/1\/merge.*\(QUEUE_SCREEN_STALE_REF\)/);
     const tree = repo.git('rev-parse', `${moved}^{tree}`);
     const main = repo.git('rev-parse', 'origin/main');
-    const badMerge = spawnSync('git', ['-C', repo.origin, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { input: `tree ${tree}\nparent ${main}\nparent ${moved}\nauthor A <a@example.com> 1700000000 +0000\ncommitter B 1700000000 +0000\n\nmerge without a committer email\n`, encoding: 'utf8' }).stdout.trim();
-    spawnSync('git', ['-C', repo.origin, 'update-ref', 'refs/pull/1/merge', badMerge]);
+    const badMerge = spawnSync('git', ['-C', repo.origin, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { input: `tree ${tree}\nparent ${main}\nparent ${moved}\nauthor A <a@example.com> 1700000000 +0000\ncommitter B 1700000000 +0000\n\nmerge without a committer email\n`, encoding: 'utf8', timeout: 30_000 }).stdout.trim();
+    spawnSync('git', ['-C', repo.origin, 'update-ref', 'refs/pull/1/merge', badMerge], { timeout: 30_000 });
     repo.git('config', 'fetch.fsckObjects', 'true');
     const unfetchable = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
     expect(unfetchable.status).toBe(EXIT.refused);
