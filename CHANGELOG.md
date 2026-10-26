@@ -10,7 +10,7 @@
 - `review/specialists/simplification.md` and `CLAUDE.md` quote the new house rule instead of "If A is 70 lines more, choose A".
 
 ### Tests
-- `test/model-overlays.test.ts` asserts the new default wording ("Complete coverage, minimal code.", "prefer the smaller diff").
+- `test/model-overlays.test.ts` asserts the new default wording ("Complete coverage, minimal code.", "prefer the smaller diff") and checks that the section still states full coverage of the requirement, the smaller diff only at equal coverage, no impossible-state checks, and that unrelated scope never excuses a gap.
 - `test/fixtures/skill-md-size-allowlist.json`: 89 pins lowered by 3 characters each. None raised.
 
 ### Gate integrity
