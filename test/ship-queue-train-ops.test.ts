@@ -445,8 +445,8 @@ describe('train build --dry-run --stack-tests', () => {
   // fails_when=the new test files run against the PR head instead of the integrated prefix, a failing prefix still dry-runs green, or a PR without new tests (a helper under test/ included: bun exits 1 when a positional filter matches no test file) is misreported; why_new=no pre-dispatch stack check existed; seam=bun test in a scratch worktree; no_claim=the repo's full suite on the prefix
   test('runs each PR\'s new test files on its integrated prefix T<k>: a pass and a helper-only PR are reported, a failure refuses the dry run and names the prefix, and the ordinary dry run skips it', () => {
     const fx = make();
-    const h1 = openPr(fx, '1', { file: 'test/pr-1.test.ts', text: "import { expect, test } from 'bun:test';\ntest('pr-1', () => { expect(1).toBe(1); });\n" });
-    const h2 = openPr(fx, '2', { file: 'test/pr-2.test.ts', text: "import { existsSync } from 'node:fs';\nimport { expect, test } from 'bun:test';\ntest('pr-2 wants no pr-1 test beside it', () => { expect(existsSync('test/pr-1.test.ts')).toBe(false); });\n" });
+    const h1 = openPr(fx, '1', { file: 'test/pr-1_test.ts', text: "import { expect, test } from 'bun:test';\ntest('pr-1', () => { expect(1).toBe(1); });\n" });
+    const h2 = openPr(fx, '2', { file: 'test/pr-2.test.ts', text: "import { existsSync } from 'node:fs';\nimport { expect, test } from 'bun:test';\ntest('pr-2 wants no pr-1 test beside it', () => { expect(existsSync('test/pr-1_test.ts')).toBe(false); });\n" });
     const h3 = openPr(fx, '3', { file: 'test/helpers/pr-3-helper.ts', text: 'export const three = 3;\n' });
     readyReceipt(fx, '1', h1);
     readyReceipt(fx, '2', h2);
@@ -456,7 +456,7 @@ describe('train build --dry-run --stack-tests', () => {
     const r = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2},3@${h3}`, '--dry-run', '--stack-tests']);
     expect(r.status).toBe(EXIT.fail);
     expect(r.out.split('\n').filter(l => l.startsWith('STACK_TESTS:'))).toEqual([
-      'STACK_TESTS: #1 T1 1 new test file(s) pass (test/pr-1.test.ts)',
+      'STACK_TESTS: #1 T1 1 new test file(s) pass (test/pr-1_test.ts)',
       expect.stringMatching(/^STACK_TESTS: #2 T2 1 new test file\(s\) FAIL \(test\/pr-2\.test\.ts\): .*\(fail\) pr-2 wants no pr-1 test beside it.*1 fail$/),
       'STACK_TESTS: #3 T3 no new test files']);
     expect(r.err).toMatch(/#2's new tests fail on the integrated prefix T2 \(test\/pr-2\.test\.ts\); they pass on the PR head alone only if nothing before it in the train changes what they read.*\(QUEUE_TRAIN_STACK_RED\)/);
@@ -466,7 +466,7 @@ describe('train build --dry-run --stack-tests', () => {
     expect(reordered.status).toBe(EXIT.ok);
     expect(reordered.out.split('\n').filter(l => l.startsWith('STACK_TESTS:'))).toEqual([
       'STACK_TESTS: #2 T1 1 new test file(s) pass (test/pr-2.test.ts)',
-      'STACK_TESTS: #1 T2 1 new test file(s) pass (test/pr-1.test.ts)',
+      'STACK_TESTS: #1 T2 1 new test file(s) pass (test/pr-1_test.ts)',
       'STACK_TESTS: #3 T3 no new test files']);
     expect(fx.repo.git('worktree', 'list', '--porcelain')).not.toContain('gstack-stack-tests-');
     expect(queue(fx, ['train', 'build', '--prs', `1@${h1}`, '--stack-tests']).status).toBe(EXIT.usage);

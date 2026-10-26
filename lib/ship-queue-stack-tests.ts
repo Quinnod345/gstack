@@ -20,8 +20,8 @@ import { git } from './ship-queue-gate';
 import type { TrainPrefix, TrainSlot } from './ship-queue-train-record';
 
 export const DEFAULT_STACK_TEST_COMMAND = ['bun', ...bunIsolationArgs(), 'test'];
-/** Bun's own test-file rule (`.test`, `_test_`, `.spec` or `_spec_` in the name); a helper or fixture under test/ is not a test file and would make `bun test <file>` exit 1 for matching nothing. */
-const TEST_FILE = /(?:\.(?:test|spec)|_(?:test|spec)_)[^/]*\.[cm]?[jt]sx?$/;
+/** Bun's own test-file rule: the name ends in `.test`, `_test`, `.spec` or `_spec` before its extension; a helper or fixture under test/ is not a test file and would make `bun test <file>` exit 1 for matching nothing. */
+const TEST_FILE = /[._](?:test|spec)\.[cm]?[jt]sx?$/;
 
 export interface StackTestResult { pr: string; prefix: number; files: string[]; ok: boolean; detail: string }
 
