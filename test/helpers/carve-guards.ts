@@ -748,8 +748,8 @@ do not launch the downstream skill or open a browser.`,
       mustMoveToSection: ['### 4. Fix order and stack (Phase 8)'],
       gateAfterStop: undefined,
     },
-    // No section-loading paid case yet: its touchfile row lives in
-    // test/helpers/touchfiles-data.ts, which #3413 owns.
+    // No section-loading paid case yet: a new periodic case would push the
+    // periodic census past its 38-slice cap (test/paid-retry-supervision.test.ts).
     behavioral: 'none',
     maxSkeletonBytes: 137_773, // measured 137773 (2026-10-25): the Section index the external-host carve test requires, its craft-audit row, and the STOP pointer (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
     minUnionBytes: 143_300, // measured union 145082
