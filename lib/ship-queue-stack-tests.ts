@@ -58,5 +58,5 @@ export function stackTests(repoRoot: string, baseSha: string, slots: TrainSlot[]
 /** One `STACK_TESTS:` line per slot. */
 export function stackTestLine(r: StackTestResult): string {
   if (!r.files.length) return `STACK_TESTS: #${r.pr} T${r.prefix} no new test files`;
-  return `STACK_TESTS: #${r.pr} T${r.prefix} ${r.files.length} new test file(s) ${r.ok ? 'pass' : 'FAIL'} (${r.files.join(', ')})${r.ok || r.detail === 'pass' ? '' : `: ${r.detail}`}`;
+  return `STACK_TESTS: #${r.pr} T${r.prefix} ${r.files.length} new test file(s) ${r.ok ? 'pass' : 'FAIL'} (${r.files.join(', ')})${r.ok ? '' : `: ${r.detail}`}`;
 }

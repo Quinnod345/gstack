@@ -419,7 +419,7 @@ describe('train build --dry-run --stack-tests', () => {
       'STACK_TESTS: #2 T1 1 new test file(s) pass (test/pr-2.test.ts)',
       'STACK_TESTS: #1 T2 1 new test file(s) pass (test/pr-1.test.ts)',
       'STACK_TESTS: #3 T3 no new test files']);
-    expect(fs.readdirSync(path.join(fx.state, 'ship-queue')).filter(n => n.startsWith('stack-tests'))).toEqual([]);
+    expect(fx.repo.git('worktree', 'list', '--porcelain')).not.toContain('gstack-stack-tests-');
     expect(queue(fx, ['train', 'build', '--prs', `1@${h1}`, '--stack-tests']).status).toBe(EXIT.usage);
   }, 180_000);
 });
