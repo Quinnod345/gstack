@@ -32,7 +32,7 @@
 # runtime root's .source-path, else ../). A root that is not a git checkout
 # exits 2 and writes nothing. GSTACK_LEASE_DIR overrides the lease directory
 # (hermetic tests; a dev checkout's own tests must not lease it). Bash 3.2
-# plus git, ps, find, mkdir, mv, readlink.
+# plus git, ps, find, stat, date, head, mkdir, mv, readlink.
 set -u
 BIN="$(cd "$(dirname "$0")" && pwd -P)"
 # shellcheck source=bin/gstack-install-verdict.sh
@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
 done
 case "$VERB" in
   touch|live|list) ;;
-  -h|--help|'') sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|'') sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "gstack-lease: unknown verb '$VERB'" >&2; exit 2 ;;
 esac
 [ -n "$ROOT" ] || ROOT=$(gstack_source_root "$BIN")
@@ -112,9 +112,13 @@ state() {
 # broken once no claimant lives and it is at least 2 s old (and unchanged
 # while it was checked), so a taker between its mkdir and its owner rename is
 # never taken for a crash, even when its claim landed after the claims were
-# read; a claim older than 2 minutes is abandoned, since a live taker holds
-# one for milliseconds. An owner token whose pid is 0 or not a number counts
-# as a dead holder. A symlink .lock left by an older
+# read. A claim is honored while its claimant lives; one that records no
+# start identity (so a reused pid cannot be told apart) is abandoned after 2
+# minutes, since a live taker holds one for milliseconds. Known limit: on such
+# a host a taker stalled over 2 minutes between its mkdir and its owner rename
+# can be broken and then publish into its successor's lock. An owner whose
+# pid is 0, zero-padded or not a number counts as a dead holder, and a lock
+# whose owner file exists but cannot be read is never treated as ownerless. A symlink .lock left by an older
 # gstack names its holder the same way and excludes a directory lock at the
 # same path. Known limit: the reverse does not hold, since an older gstack's
 # ln -s onto a directory lock links inside it and succeeds; only a process
@@ -127,33 +131,36 @@ take() {
   if [ -e "$1" ] || [ -L "$1" ]; then return 1; fi
   { printf '%s\n' "$TOKEN" > "$1.claim.$$"; } 2>/dev/null || { rm -f "$1.claim.$$"; return 1; }
   if mkdir "$1" 2>/dev/null; then
-    mv -f "$1.claim.$$" "$1/owner" && return 0
-    rm -rf "$1"
+    [ ! -e "$1/owner" ] && mv -f "$1.claim.$$" "$1/owner" && return 0
+    [ -e "$1/owner" ] || rm -rf "$1"
   fi
   rm -f "$1.claim.$$"
   return 1
 }
 # owner_of PATH — the token the lock PATH names, empty when it names none.
 owner_of() { if [ -L "$1" ]; then readlink "$1" 2>/dev/null; else head -1 "$1/owner" 2>/dev/null; fi; }
-# orphaned PATH — PATH is a lock (not a legacy symlink) that names no owner,
-# has no live claimant younger than 2 minutes, is at least 2 s old and kept
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+# orphaned PATH — PATH is a lock (not a legacy symlink) whose owner file is
+# missing or readable and empty, has no live claimant, is at least 2 s old and kept
 # its mtime throughout. The clock is read before the first mtime, so a pause
 # only makes the lock look younger, and a lock made since (a new generation)
 # has a newer mtime. Claims are read before the owner, so a taker that renames
 # its claim in between is seen as the owner. An empty claim is a taker that
 # has not reached its mkdir, so it never made this lock. An mtime a minute or
 # more in the future (clock skew) counts as old.
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 orphaned() {
   _oclock=$(date +%s)
   [ -e "$1" ] && [ ! -L "$1" ] || return 1
   _om=$(mtime "$1") || return 1
   for _c in "$1".claim.*; do
-    [ -n "$(find "$_c" -mmin -2 2>/dev/null)" ] || continue
     _t=$(head -1 "$_c" 2>/dev/null)
+    abandoned "$_c" "$_t" && continue
     [ -n "$_t" ] && ! holder_gone "$_t" && return 1
   done
-  [ -z "$(owner_of "$1")" ] || return 1
+  if [ -d "$1" ] && [ -e "$1/owner" ]; then
+    _o=$(head -1 "$1/owner" 2>/dev/null) || return 1
+    [ -z "$_o" ] || return 1
+  fi
   [ "$(mtime "$1")" = "$_om" ] || return 1
   _oage=$((_oclock - _om))
   [ "$_oage" -ge 2 ] || [ "$_oage" -le -60 ]
@@ -189,8 +196,11 @@ lock() {
     sleep 0.1
   done
 }
+# abandoned CLAIM TOKEN — the claim records no start identity and is over 2
+# minutes old.
+abandoned() { [ -z "${2#* }" ] && [ -z "$(find "$1" -mmin -2 2>/dev/null)" ]; }
 holder_gone() {
-  case "${1%% *}" in ''|*[!0-9]*|0) return 0 ;; esac
+  case "${1%% *}" in ''|*[!0-9]*|0*) return 0 ;; esac
   case "$(state "${1%% *}" "${1#* }" 0)" in dead|stale) return 0 ;; esac; return 1
 }
 # break_lock OWNER — remove the lock only if it still names OWNER (empty: is
@@ -249,7 +259,11 @@ case "$VERB" in
     _tmp="$DIR/.$PID.$$"
     identity "$PID" > "$_tmp" && mv -f "$_tmp" "$DIR/$PID" || { rm -f "$_tmp"; unlock; exit 2; }
     find "$DIR" -maxdepth 1 -mmin +120 -type f ! -name '.lock*' -exec rm -f {} + 2>/dev/null
-    find "$DIR" -maxdepth 1 -mmin +2 -type f -name '.lock*.claim.*' -exec rm -f {} + 2>/dev/null
+    for _c in "$DIR"/.lock*.claim.*; do
+      [ -f "$_c" ] || continue
+      _t=$(head -1 "$_c" 2>/dev/null)
+      [ -n "$(find "$_c" -mmin +2 2>/dev/null)" ] && { abandoned "$_c" "$_t" || holder_gone "$_t"; } && rm -f "$_c"
+    done
     rm -rf "$DIR"/.lock*.gone.* 2>/dev/null
     unlock
     exit 0 ;;

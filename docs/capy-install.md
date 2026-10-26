@@ -126,17 +126,21 @@ deleted and a live lease never disappears from a concurrent scan. The lock is a
 directory because `mkdir` is atomic on every host, while Git Bash on Windows
 cannot `ln -s` to a target that does not exist (#3330). A taker publishes a
 claim before its `mkdir` and renames it in as the owner after, so an ownerless
-lock is broken only once no claimant younger than 2 minutes lives and the
-lock is at least 2 s old and unchanged while checked, which keeps a taker
-between its two steps safe; an owner that names no valid pid counts as a dead
-holder. A live holder that never lets go bounds the wait at 300 tries or 30 s. The lock is broken only when its holder is dead or
+lock is broken only once no claimant lives and the lock is at least 2 s old
+and unchanged while checked, which keeps a taker between its two steps safe.
+A claim that records no start identity is abandoned after 2 minutes, so a
+reused pid cannot keep an orphan forever; an owner that names no valid pid
+counts as a dead holder, and an owner file that cannot be read keeps the
+lock. A live holder that never lets go bounds the wait at 300 tries or 30 s. The lock is broken only when its holder is dead or
 its pid was reused, never by age, and breakers serialize on a second lock and
 reread the lock before removing it. A symlink `.lock` left by an older gstack
-is honored the same way. Two known limits remain. An older gstack's `ln -s`
+is honored the same way. Three known limits remain. An older gstack's `ln -s`
 onto a directory lock links inside it and succeeds, so a process that started
 before an upgrade of this checkout can share the lock with a newer one. And a
 breaker killed while holding the second lock, followed by two live breakers
-clearing it at once, can let a reclaim delete a renewal. While a live process
+clearing it at once, can let a reclaim delete a renewal. On a host without start
+identities, a taker stalled over 2 minutes between its `mkdir` and its owner
+rename can be broken and then publish into its successor's lock. While a live process
 holds the lock, or it cannot be taken at all, `touch` exits 3 without writing
 (`gstack-skill-start` reports that the session holds no lease) and a reclaim
 keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and

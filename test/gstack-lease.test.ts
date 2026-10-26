@@ -90,6 +90,8 @@ describe('gstack-lease', () => {
     expect(fs.statSync(LEASE).mode & 0o111).not.toBe(0);
     const r = spawnSync('bash', ['-n', LEASE], { encoding: 'utf8', timeout: 30_000 });
     expect(r.status, r.stderr).toBe(0);
+    const help = spawnSync('bash', [LEASE, '--help'], { encoding: 'utf8', timeout: 30_000 });
+    expect(help.stdout).toContain('print `<pid> <age>m alive|dead|stale` for every lease');
   });
 
   test('touch writes <git dir>/gstack-leases/<pid> for --pid and prunes leases older than 120 minutes', () => {
@@ -365,6 +367,7 @@ describe('gstack-lease', () => {
     const shapes: Array<[string, () => void]> = [
       ['an empty owner file', () => plantLock(lockPath, '')],
       ['owner pid 0', () => plantLock(lockPath, '0 ')],
+      ['a zero-padded owner pid', () => plantLock(lockPath, '00 ')],
       ['a non-numeric owner', () => plantLock(lockPath, 'garbage x')],
       ['an ownerless lock an hour ahead (clock skew)', () => fs.mkdirSync(lockPath)],
       ['a stray file', () => { fs.rmSync(lockPath, { recursive: true, force: true }); fs.writeFileSync(lockPath, ''); }],
@@ -384,12 +387,12 @@ describe('gstack-lease', () => {
     }
   });
 
-  // Value: protects=a claim left by a killed taker neither blocks recovery of an ownerless lock (even when its pid is alive again) nor lingers:
-  //   a claim older than 2 minutes is abandoned, and touch prunes it;
-  //   fails_when=orphaned() honors claims of any age, or touch's prune skips claim files;
+  // Value: protects=a claim without a start identity left by a killed taker neither blocks recovery of an ownerless lock (even when its pid is
+  //   alive again) nor lingers once 2 minutes old, while a claim whose recorded identity is still live is honored however old;
+  //   fails_when=orphaned() honors identity-less claims of any age, expires live identified claims, or touch's prune skips claim files;
   //   why_new=the ownerless cases plant fresh claims only; nothing ages one or checks the prune for claims;
   //   seam=none; no_claim=real pid reuse (a live sleeper stands in for the reused pid)
-  test('a claim older than 2 minutes is abandoned: it neither keeps an ownerless lock nor survives touch', () => {
+  test('an identity-less claim older than 2 minutes is abandoned and pruned; an old claim with a live identity is honored', () => {
     const { dir, leases } = checkout();
     const [holder, reused] = [sleeper(), sleeper()];
     const lockPath = path.join(leases, '.lock');
@@ -402,6 +405,37 @@ describe('gstack-lease', () => {
     const r = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(fs.readdirSync(leases)).toEqual([String(holder)]);
+
+    // A claim that records its claimant's start identity is honored however old, so a stalled live taker keeps its lock.
+    expect(run(['touch', '--root', dir, '--pid', String(reused)]).status).toBe(0);
+    const identity = fs.readFileSync(path.join(leases, String(reused)), 'utf8').trim();
+    expect(identity, 'this host records start identities').not.toBe('');
+    fs.rmSync(path.join(leases, String(reused)));
+    fs.mkdirSync(lockPath);
+    age(lockPath);
+    fs.writeFileSync(claim, `${reused} ${identity}\n`);
+    fs.utimesSync(claim, fiveMinutesAgo, fiveMinutesAgo);
+    const kept = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3' });
+    expect(kept.status, kept.stdout + kept.stderr).toBe(3);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.existsSync(claim)).toBe(true);
+  });
+
+  // Value: protects=a live holder's lock is never broken because its owner file could not be read (a Windows sharing violation, a permission error);
+  //   fails_when=orphaned() treats an unreadable owner (empty owner_of output) as no owner;
+  //   why_new=every ownerless case removes or empties the owner file; none makes a present owner unreadable;
+  //   seam=none; no_claim=a real sharing violation (a head shim fails reads of the owner file)
+  test('a lock whose owner file cannot be read is kept, not taken for ownerless', () => {
+    const { dir, leases } = checkout();
+    const [holder, owner] = [sleeper(), sleeper()];
+    const lockPath = path.join(leases, '.lock');
+    plantLock(lockPath, `${owner} `);
+    age(lockPath);
+    const shim = bashEnv(dir, 'head() { case "$*" in *"/.lock/owner") return 1 ;; esac; command head "$@"; }\n');
+    const r = run(['touch', '--root', dir, '--pid', String(holder)], { GSTACK_LEASE_LOCK_TRIES: '3', BASH_ENV: shim });
+    expect(r.status, r.stdout + r.stderr).toBe(3);
+    expect(ownerOf(lockPath)).toBe(String(owner));
+    expect(fs.existsSync(path.join(leases, String(holder)))).toBe(false);
   });
 
   // Value: protects=a live holder that never lets go bounds touch at 30 s even with the default 300 tries, a non-numeric
@@ -439,6 +473,10 @@ describe('gstack-lease', () => {
     const { dir, leases } = checkout();
     const holder = sleeper();
     const shim = bashEnv(dir, 'find() { command touch -d "3 hours ago" "$1/.lock/owner" 2>/dev/null || command touch -t 197001010000 "$1/.lock/owner"; command find "$@"; }\n');
+    // Renamed-aside copies a failed delete left behind are pruned too.
+    fs.mkdirSync(path.join(leases, '.lock.gone.99999'), { recursive: true });
+    fs.writeFileSync(path.join(leases, '.lock.gone.99999', 'owner'), '99999 \n');
+    fs.mkdirSync(path.join(leases, '.lock.break.gone.99998'));
     const r = run(['touch', '--root', dir, '--pid', String(holder)], { BASH_ENV: shim });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(fs.readdirSync(leases)).toEqual([String(holder)]);
