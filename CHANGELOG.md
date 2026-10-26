@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.252.0] - 2026-10-26
 
 **`/retro` can now say whether the factory is getting better, and a new team has one page that takes it from zero to its first merged train on gstack + Capy.** `bin/gstack-factory-scorecard` reads one window (default 7 days) from GitHub through `gh` and prints a Markdown table plus a CSV: merged PRs (crew vs outside contributors), lead time (PR created → merged, and first READY comment → merged), gate runs green / red / cancelled with their known cost, cost per merge, the red-train rate, flaky events from the same two sources the daily flaky pass reads, issues opened vs closed, and releases cut. Each line carries its counting rule and what one of the best software factories would show on it; a line whose input cannot be read says `unavailable (<reason>)`, never 0. `docs/recommended-harness.md` is the adoption guide: install, the Captain and its Drive, the first train, the daily flaky pass, the weekly release, the scorecard with gstack's own numbers against the bar, what is Capy-specific, the options where two crews differ, and the known Capy limits as of 2026-10-26.
 
