@@ -4,7 +4,7 @@
  * the page annotates that the lint has a rule for is reported, the clean
  * fixture is not, and both agree with hallmark's own sloplint on the same
  * files (checked by hand at hallmark 7ec8682; the gate set is identical).
- * Phase 1 of plans/absorb-hallmark.md, item D7: the free regression that a
+ * Phase 1 of the hallmark absorption plan, item D7: the free regression that a
  * recorded output keeps linting the same way.
  */
 import { describe, expect, test } from 'bun:test';

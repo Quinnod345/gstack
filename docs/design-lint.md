@@ -26,7 +26,8 @@ gstack-design-lint <file-or-dir ...> [--render] [--url <http://…>] [--scope pa
 - Reads `.html`, `.css`, `.jsx`, `.tsx`, `.vue`, `.svelte` and `.astro`.
   Tailwind class strings in components are read too, including `cn()`,
   `clsx()`, `cva()` and their kin. `node_modules`, dot folders and build
-  output below the top level are skipped.
+  output below the top level are skipped; a symlink is followed once; a file
+  over 2 MB is a bundle, not a page, and is skipped with a warning on stderr.
 - A page is linted with the stylesheets it links (`<link rel=stylesheet>`,
   `@import`, and anything they reach); a directory of components shares the
   project's tokens and global state styles, so a focus ring declared once in
@@ -92,7 +93,9 @@ about this page:
 `impeccable-disable <rule>: <reason>` is accepted as an alias, so a comment
 that already silences the impeccable engine answers the same tell here. The
 lint refuses, each as its own `waiver` finding at ask: a rule it does not
-know; a **blocking** rule (the Floor is never waivable; the one exception is a
+know; the lint's own rules (`render`, `waiver`, `house-style`,
+`internal-error`: a fallback face or a failed measurement is never signed off);
+a **blocking** rule (the Floor is never waivable; the one exception is a
 blocking rule the lint could only *suspect* on this page, which it reports at
 ask and which a waiver answers like any ask); a reason under 24 characters,
 boilerplate ("by design", "intentional", "looks better"), reused word for
@@ -100,6 +103,14 @@ word on another waiver, or sharing no word of four letters or more with the
 page's own text; a second waiver of one rule. More than three waivers
 on one page is a house style and belongs in DESIGN.md: reported once at polish
 as `house-style`.
+
+A claim written in a stylesheet answers for that stylesheet on every page
+that links it, and only for findings located in it: the shared-word check does
+not apply (a stylesheet has no prose), so the claim cannot reach a finding in
+the page's own markup. Two claims on one line are both read. A blocking copy
+tell (`generic-hero-copy`) is the Floor inside the hero, the section or header
+that holds the h1; the same line in body copy further down is suspected and
+reported at ask, so a waiver can answer it.
 
 ## Rules
 
@@ -267,7 +278,20 @@ reports at the document's first line with a count, because
 patterns into the lint with lines. Where a rule id is shared with
 `lib/design-catalog.ts`, the tier here follows hallmark's gate (several
 catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
-catalog row is marked `detect: lint`.
+catalog row is marked `detect: lint`. Also outside the lint: `system-ui` or
+`-apple-system` as the body's first face (`system-font-primary`; the
+`overused-font` rule reads display tokens and heading selectors, as hallmark's
+gate does), a gradient fill on the primary button (`gradient-cta`;
+`purple-blue-gradient` reports the banned hue pairs only, and an
+indigo-to-violet ramp needs stops 12° or more apart), `text-align: center`
+density, one large radius on everything, and backdrop blur on more than one
+container (`glow-wash` reports a blur over a translucent near-white or
+near-black fill; the zero-offset coloured glow is read from 8px in a Tailwind
+class and past 20px in a stylesheet, hallmark's two thresholds). The render
+tier's probes run in the page's own JavaScript, so a page that redefines them
+is caught only when it hands back a rule or grade the lint does not know; a
+page that answers every probe with nothing passes the render tier, which is why
+the static tier stands on its own and a URL target is measured, never trusted.
 
 ## What is deliberately not ported
 
