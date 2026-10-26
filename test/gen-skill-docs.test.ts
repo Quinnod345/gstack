@@ -3131,9 +3131,10 @@ describe('Codex generation (--host codex)', () => {
     // Verify across ALL generated skills, not just review
     for (const skill of CODEX_SKILLS) {
       const content = fs.readFileSync(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'), 'utf-8');
-      // No skill should reference Claude paths
-      expect(content).not.toContain('~/.claude/skills');
-      expect(content).not.toContain('.claude/skills');
+      // No skill should reference Claude paths, including in its shared sections/preamble.md
+      const startup = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
+      expect(startup).not.toContain('~/.claude/skills');
+      expect(startup).not.toContain('.claude/skills');
       if (content.includes('gstack-config') || content.includes('gstack-update-check') || content.includes('gstack-telemetry-log')) {
         expect(content).toContain('$GSTACK_ROOT');
       }
@@ -3335,14 +3336,14 @@ describe('Factory generation (--host factory)', () => {
 
   test('no .claude/skills/ in Factory output', () => {
     for (const skill of FACTORY_SKILLS) {
-      const content = fs.readFileSync(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'));
       expect(content).not.toContain('.claude/skills');
     }
   });
 
   test('no ~/.claude/skills/ paths in Factory output', () => {
     for (const skill of FACTORY_SKILLS) {
-      const content = fs.readFileSync(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(FACTORY_DIR, skill.factoryName, 'SKILL.md'));
       // ~/.claude/skills should be rewritten, but ~/.claude/plans is legitimate
       // (plan directory lookup) and ~/.claude/ in codex prompts is intentional
       expect(content).not.toContain('~/.claude/skills');

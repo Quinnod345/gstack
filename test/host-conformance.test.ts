@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { ALL_HOST_CONFIGS } from '../hosts/index';
 import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, put, registryRows, runSetup, setVersion, tree } from './helpers/install-fixture';
 import { expectTokens } from './helpers/prompt-structure';
-import { readSkillStartup } from './helpers/skill-startup';
+import { readSkillStartup, SHARED_PREAMBLE_FILE } from './helpers/skill-startup';
 
 afterEach(cleanupFixtures);
 afterAll(cleanupSeed);
@@ -81,7 +81,7 @@ function brokenSectionPointers(dest: string, runtimeRoot: string, home: string):
         let targets: string[];
         if (tok.startsWith('sections/')) {
           if (names.length) targets = names.map(n => join(dest, n, tok));
-          else if ((existsSync(join(dir, 'sections')) && readdirSync(join(dir, 'sections'), { withFileTypes: true }).some(e => e.name.endsWith('.md') && e.name !== 'preamble.md')) || stop) targets = [join(dir, tok)];
+          else if ((existsSync(join(dir, 'sections')) && readdirSync(join(dir, 'sections'), { withFileTypes: true }).some(e => e.name.endsWith('.md') && e.name !== SHARED_PREAMBLE_FILE)) || stop) targets = [join(dir, tok)];
           else continue;
         } else if (tok.startsWith('$GSTACK_ROOT/')) targets = [join(runtimeRoot, tok.slice('$GSTACK_ROOT/'.length))];
         else if (tok.startsWith('~/')) targets = [join(home, tok.slice(2))];
