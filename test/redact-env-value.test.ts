@@ -152,7 +152,8 @@ describe("env-value scan", () => {
   // GSTACK_BRAIN_LOCK_TOKEN (pid-random-epoch, written to the lock owner file) is not a secret, and
   // bin/gstack-brain-lock.sh still exports every name in that set; (4) a value NFKC rewrites
   // (fullwidth digits) is matched in its normalized form, so its leaked ASCII form is found, and a
-  // value whose normalized form is under eight characters is not searched for.
+  // value whose normalized form is under eight characters, or a placeholder, is not searched for,
+  // and the allowlist suppresses by normalized form as well.
   // fails_when: PWD is admitted (every mention of the cwd becomes HIGH), a shape or existence rule
   // returns (the slash secret or the directory value is skipped), the non-secret set drifts, or the
   // value is matched raw against the normalized text.
@@ -172,6 +173,11 @@ describe("env-value scan", () => {
     expect(scan(`leak: ${anthropicValue} end`, { processEnv: { WIDE_KEY: fullwidth } }).findings.map(f => f.id)).toEqual(["env.value"]);
     const zeroWidthPadded = "ab\u200bcd\u200bef\u200bg";
     expect(scan("plain abcdefg here", { processEnv: { ZW_KEY: zeroWidthPadded } }).findings).toEqual([]);
+    // The allowlist and the placeholder rule see the normalized form too: an allowlisted ASCII form
+    // suppresses the fullwidth value, and a value that is a placeholder only after NFKC is not searched.
+    expect(scan(`leak: ${anthropicValue} end`, { processEnv: { WIDE_KEY: fullwidth }, allowlist: [anthropicValue] }).findings).toEqual([]);
+    const widePlaceholder = "your-token-here".replace(/[a-z]/g, c => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+    expect(scan("x your-token-here y", { processEnv: { P_TOKEN: widePlaceholder } }).findings.filter(f => f.id === "env.value")).toEqual([]);
   });
 
   test("the default environment is process.env", () => {
