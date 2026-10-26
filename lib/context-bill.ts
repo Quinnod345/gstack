@@ -284,7 +284,11 @@ export interface WalkedFile {
  *
  * With `skipNestedSkills`, a top-level subdirectory holding its own SKILL.md is
  * not entered, so a container skill keeps the files it shares with a nested
- * skill instead of losing them to whichever path sorted first.
+ * skill instead of losing them to whichever path sorted first. The root
+ * container also skips a nested skill reached through a directory link at any
+ * depth: discovery bills that skill on its own, and the plain walk this
+ * replaced never followed directory links, so counting it here too would bill
+ * it twice.
  *
  * Every directory is read through its realpath, so a lookup crosses at most
  * one link however deep the lexical path runs: a chain of links never hits
@@ -301,8 +305,9 @@ export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNested
     return out;
   }
   const seen = new Set<string>([rootReal]);
+  const container = rootReal === billedReal;
   let entryCount = 0;
-  const walk = (current: string, currentReal: string) => {
+  const walk = (current: string, currentReal: string, viaLink: boolean) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(currentReal, { withFileTypes: true });
@@ -320,7 +325,9 @@ export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNested
       } else if (
         kind !== "dir" ||
         fs.existsSync(path.join(viaReal, ".git")) ||
-        (opts.skipNestedSkills && current === dir && isFile(path.join(viaReal, "SKILL.md")))
+        (opts.skipNestedSkills &&
+          (current === dir || (container && (viaLink || e.isSymbolicLink()))) &&
+          isFile(path.join(viaReal, "SKILL.md")))
       ) {
         continue;
       }
@@ -347,10 +354,10 @@ export function walkMdFiles(dir: string, opts: { billedRoot?: string; skipNested
       }
       if (encloses(real, rootReal) || encloses(real, billedReal)) continue;
       seen.add(real);
-      walk(p, real);
+      walk(p, real, viaLink || e.isSymbolicLink());
     }
   };
-  walk(dir, rootReal);
+  walk(dir, rootReal, false);
   return out;
 }
 

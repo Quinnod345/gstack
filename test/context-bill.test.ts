@@ -398,6 +398,32 @@ describe("upstream fix b: installed-tree layout (repo-checkout subdir skip)", ()
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("keeps a root container from billing a nested skill that a deeper directory link reaches", () => {
+    if (process.platform === "win32") return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-container-deep-"));
+    fs.writeFileSync(path.join(root, "SKILL.md"), "---\nname: c\ndescription: d\n---\n# c\n");
+    fs.mkdirSync(path.join(root, "sub"));
+    fs.writeFileSync(path.join(root, "sub", "SKILL.md"), "---\nname: s\ndescription: d\n---\n# s\n");
+    fs.writeFileSync(path.join(root, "sub", "big.md"), "b".repeat(10_000));
+    fs.mkdirSync(path.join(root, "refs"));
+    fs.writeFileSync(path.join(root, "refs", "note.md"), "n");
+    fs.symlinkSync(path.join(root, "sub"), path.join(root, "refs", "alias"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-container-outside-"));
+    fs.mkdirSync(path.join(outside, "deep"));
+    fs.writeFileSync(path.join(outside, "deep", "SKILL.md"), "---\nname: o\ndescription: d\n---\n# o\n");
+    fs.writeFileSync(path.join(outside, "deep", "o.md"), "o".repeat(5_000));
+    fs.mkdirSync(path.join(root, "linked"));
+    fs.symlinkSync(outside, path.join(root, "linked", "via"));
+
+    const bill = buildBill(root);
+    const byName = Object.fromEntries(bill.skills.map((s) => [s.name, s]));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+    expect(Object.keys(byName).sort()).toEqual([path.basename(root), path.join("linked", "via", "deep"), path.join("refs", "alias"), "sub"].sort());
+    expect(byName[path.basename(root)].totalMdBytes).toBe("---\nname: c\ndescription: d\n---\n# c\n".length + 1);
+    expect(byName[path.join("refs", "alias")].totalMdBytes).toBe(byName.sub.totalMdBytes);
+  });
+
   it("walks a chain of links deeper than the kernel's link limit without losing files", () => {
     if (process.platform === "win32") return;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "context-bill-deep-chain-"));
