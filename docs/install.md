@@ -26,7 +26,9 @@ Swap `required` for `optional` if you'd rather nudge teammates than block them.
 
 ## Hooks that `./setup` registers
 
-`./setup` also registers one default-on Stop hook in `~/.claude/settings.json`:
+`./setup` registers up to three hook families in `~/.claude/settings.json`, every one pointing at the canonical install. In team mode it registers the `SessionStart` auto-update hook (`gstack-session-update`; `./setup --no-team` skips it). It asks before registering the AskUserQuestion `PreToolUse` (preference enforcement) and `PostToolUse` (deterministic answer capture) hooks that `/plan-tune` uses at runtime; `./setup` never writes them silently. `docs/uninstall.md` lists the same families when telling you what to remove by hand.
+
+`./setup` also registers one default-on Stop hook:
 `gstack-timeline-stop` (closes dangling session-timeline entries when a session
 is interrupted; fail-open — 2s internal budget, always exits 0, can never block
 a session). Opt out persistently with `./setup --no-timeline-stop-hook` — the
