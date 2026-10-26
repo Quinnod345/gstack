@@ -73,6 +73,7 @@ function variantSubsections(own: string, shared: string): string | null {
   if (ownParts.length < 2 || ownParts.length !== sharedParts.length || ownParts[0] !== sharedParts[0]) return null;
   if (ownParts.some((part, i) => headingOf(part) !== headingOf(sharedParts[i]!))) return null;
   const changed = ownParts.slice(1).filter((part, i) => part !== sharedParts[i + 1]);
+  if (changed.length === 0) return null;
   return [`${headingOf(own)}\n\nOnly these subsections replace the shared ones; the rest of this section is shared.`, ...changed].join('\n\n');
 }
 
