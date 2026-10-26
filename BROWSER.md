@@ -1298,52 +1298,36 @@ ARCHITECTURE.md § "Prompt injection defense" for the full threat model.
 
 ### TLS trust: the bundled Chromium's root store
 
-The fallback engine checks HTTPS certificates against the root store compiled
-into its bundled Playwright Chromium. The default headless browser never gets
-the CRLSet revocation updates Chrome pushes to running browsers. Headed mode and
-`handoff` fetched them in testing on Linux, but only about a minute after each
-launch, so the first pages they open, including the page `handoff` reopens, are
-checked against the compiled root store alone. `BROWSE_EXTENSIONS_DIR` makes the
-headless browser launch like headed mode. `GSTACK_CHROMIUM_PATH` replaces the
-bundled build for headless and headed launches, but `handoff` always reopens in
-the bundled build, and the headless launch still gets no CRLSet, so pointing it
-at a current Chrome only helps if that build itself drops the root. The bundled
-build does not enforce Certificate Transparency. That matters most for the
-commands that put real sessions and credentials into the browser, including
-`cookie-import-browser`, `cookie-import`, `cookie`, `header`, `state load`,
-`storage set`, `fill`/`type`, `upload` and `handoff`, and a paired agent using
-`fill`/`type`. Aside
-uses your own browser's trust store and updates.
+The fallback engine checks HTTPS certificates against the root store built into
+its bundled Playwright Chromium. Its default headless browser launches with
+Playwright's `--disable-component-update`, so it never receives the CRLSet
+revocation updates Chrome pushes to running browsers. Aside uses your own
+browser's trust store and updates.
 
 **Known gap: the compromised eMudhra intermediates
-([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked them
-by CRLSet on 2026-10-17, the day the compromise was reported, and scheduled the
-removal of their root, emSign ECC Root CA - G3, from the Chrome Root Store for
-2026-10-27. As of 2026-10-24, gstack's pinned Playwright 1.62.1 (Chromium 151),
-the latest release 1.64.1 (Chromium 156) and the 1.65.0 alpha of 2026-10-24
-(Chromium 157) still trust them, so
-`$B goto https://dv-g3b-emudhra.we-have-a-problem.com/` loads a page saying
-"That's bad!" instead of failing with `ERR_CERT_AUTHORITY_INVALID` (headed mode
-fails it with `ERR_CERT_REVOKED` once its CRLSet arrives). gstack will move to
-the first Playwright release whose Chromium carries the removal. Until then,
-don't do signed-in work in this engine on a network you do not trust (sessions
-imported earlier persist in each project's headed profile (`$B profiles list`
-shows them; new projects copy logins from the old shared
-`~/.gstack/chromium-profile`), the `BROWSE_EXTENSIONS_DIR` profile, `state save` files and, with `BROWSE_PERSIST_STATE=1`, the headless
-session state), and prefer Aside for signed-in work where you have it.
+([#3338](https://github.com/garrytan/gstack/issues/3338)).** Chrome blocked
+eight eMudhra intermediate CAs by CRLSet on 2026-10-17, the day their key
+compromise was reported, and scheduled the removal of their root, emSign ECC
+Root CA - G3, from the Chrome Root Store for 2026-10-27. The root store built
+into gstack's pinned Playwright 1.62.1 (Chromium 151) still trusts that root, so
+the headless browser accepts certificates those intermediates issued. That lasts
+until gstack moves to the first Playwright release whose Chromium is
+158.0.8115.0 or later, the first Chrome for Testing build measured to refuse
+them. Until then, don't do signed-in work in this engine on a network you do not
+trust, and prefer Aside for signed-in work where you have it.
 
-To check a build, run `$B stop`, then the same `goto` in the default headless
-mode with `BROWSE_EXTENSIONS_DIR` and `BROWSE_PROXY_URL` unset, the proxy
-variables `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` unset in both cases
-(Chromium reads those itself, even when gstack sets no proxy), and
-`GSTACK_CHROMIUM_PATH` unset (the bundled build) or set to the build you want
-to check. Run it on a network you trust not to inspect TLS, because a captive
-portal or an intercepting proxy can fail some or all sites with the same error,
-and first confirm that a known-good HTTPS site such as
-`$B goto https://example.com/` loads in the same session. Then only
-`ERR_CERT_AUTHORITY_INVALID` on the test host means the root store no longer
-trusts them. `ERR_CERT_REVOKED` only shows that the session has a CRLSet, and a
-DNS, network or other error proves nothing.
+To check a build, run it on a network that does not inspect TLS, because a
+captive portal or an intercepting proxy can fail some or all sites with the
+same error. Run `$B stop`, confirm in the default headless mode that a
+known-good HTTPS site such as `$B goto https://example.com/` loads, then run
+`$B goto https://dv-g3b-emudhra.we-have-a-problem.com/`. Only
+`ERR_CERT_AUTHORITY_INVALID` there means the root store no longer trusts them.
+Any other error proves nothing.
+
+Caveats that depend on your environment (proxy variables, headed and
+per-project profiles, `GSTACK_CHROMIUM_PATH` and `BROWSE_EXTENSIONS_DIR`
+builds, and CRLSet timing in headed mode and `handoff`) are tracked in
+[#3440](https://github.com/garrytan/gstack/issues/3440).
 
 ---
 
