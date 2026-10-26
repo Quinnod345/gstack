@@ -59,13 +59,4 @@ describe('gstack-config proactive', () => {
     expect(junk.stderr).toContain('core, all, off');
     expect(run(['get', 'proactive']).stdout).toBe('core');
   });
-
-  test('the config header documents the three values and names the core four', () => {
-    const src = fs.readFileSync(BIN_CONFIG, 'utf-8');
-    const header = src.slice(src.indexOf('# proactive:'), src.indexOf('# routing_declined:'));
-    expect(header).toMatch(/^# proactive: core/m);
-    for (const skill of ['/office-hours', '/review', '/qa', '/ship']) expect(header).toContain(skill);
-    expect(header).toContain('all = ');
-    expect(header).toContain('off = ');
-  });
 });

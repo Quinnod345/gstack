@@ -133,6 +133,9 @@ find "$_GH/sessions" -mmin +120 -type f -exec rm {} + 2>/dev/null || true
 _SESSIONS=$(find "$_GH/sessions" -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
 
 _PROACTIVE=$("$_BIN/gstack-config" get proactive 2>/dev/null || echo "core")
+# A hand-edited config can hold anything; the router and preambles only know
+# core | all | off (true = all, false = off), so anything else reads as core.
+case "$_PROACTIVE" in core|all|off|true|false) ;; *) _PROACTIVE="core" ;; esac
 _PROACTIVE_PROMPTED=$([ -f "$_GH/.proactive-prompted" ] && echo "yes" || echo "no")
 # Branch name is embedded in concatenated JSON below; strip anything outside
 # the gstack-slug BRANCH alphabet so a hostile ref name can't forge fields.
@@ -562,12 +565,14 @@ fi
 if [ "$_ACTIVATED" = "no" ]; then
   _FT_TIP=""
   case "$_FIRST_TASK" in
-    greenfield) _FT_TIP="Fresh repo — shape it first with \`/spec\` or \`/office-hours\`." ;;
-    code_node|code_python|code_rust|code_go|code_ruby|code_ios) _FT_TIP="There's code here — \`/qa\` to see it work, or \`/investigate\` if something's off." ;;
+    greenfield) _FT_TIP="Fresh repo — shape it first with \`/office-hours\`." ;;
+    code_node|code_python|code_rust|code_go|code_ruby|code_ios) _FT_TIP="There's code here — \`/qa\` to see it work, or \`/review\` on your latest diff." ;;
     branch_ahead) _FT_TIP="Unshipped work on this branch — \`/review\` then \`/ship\`." ;;
     dirty_default) _FT_TIP="Uncommitted changes — \`/review\` before committing." ;;
-    clean_default) _FT_TIP="Pick one: \`/spec\`, \`/investigate\`, or \`/qa\`." ;;
+    clean_default) _FT_TIP="Pick one: \`/office-hours\`, \`/qa\`, or \`/review\`." ;;
   esac
+  # Under off the tips are the suggestions the user turned off.
+  case "$_PROACTIVE" in off|false) _FT_TIP="" ;; esac
   if [ -n "$_FT_TIP" ]; then
     _emit_block first-run-tip <<EOI
 Show this one project-specific line as a heads-up, then CONTINUE with whatever the user actually asked — do NOT halt their task: $_FT_TIP
@@ -576,10 +581,12 @@ EOI
   fi
   touch "$_GH/.activated" 2>/dev/null || true
 elif [ "$_FIRST_LOOP_SHOWN" = "no" ]; then
-  _emit_block first-loop-tip <<EOI
-Say once as a heads-up (then continue): Tip: gstack pays off when you complete one loop — **plan → review → ship**. A common first loop: \`/office-hours\` or \`/spec\` to shape it, \`/plan-eng-review\` to lock it, then \`/ship\`.
+  if [ "$_PROACTIVE" != "off" ] && [ "$_PROACTIVE" != "false" ]; then
+    _emit_block first-loop-tip <<EOI
+Say once as a heads-up (then continue): Tip: gstack pays off when you complete one loop — **plan → review → ship**. A common first loop: \`/office-hours\` to shape it, \`/review\` to check it, then \`/ship\`.
 EOI
-  touch "$_GH/.first-loop-tip-shown" 2>/dev/null || true
+    touch "$_GH/.first-loop-tip-shown" 2>/dev/null || true
+  fi
 fi
 
 # Routing injection (interactive: AUQ + CLAUDE.md append + commit). The body
