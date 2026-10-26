@@ -209,18 +209,21 @@ function allowedOutput(plan: Plan, root: string, rel: string): boolean {
   return matchesAny(p.stamp_paths, rel) || matchesAny(p.stamp_files, rel) || matchesAny(p.release_outputs, rel);
 }
 
-interface Hunk { removed: string[]; added: string[]; at: number }
+interface Hunk { removed: string[]; added: string[]; at: number; addedAt: number[] }
 export interface FileDiff { path: string; binary: boolean; hunks: Hunk[]; status: 'M' | 'A' | 'D' | 'R'; modeChanged?: boolean }
 
 /**
  * Parse `git diff --unified=0` into per-file hunks of removed/added lines (shared with lib/tree-receipt.ts).
  * File headers come only before a file's first hunk: inside a hunk every `-`/`+` line is content, so a
  * body line that begins `--` or `++` (`---`/`+++` in the diff) is never dropped as a header.
+ * `addedAt` holds each added line's 1-based position on the new side, counted through any context
+ * line the hunk carries (`diff.interHunkContext` can join hunks under `--unified=0`).
  */
 export function parseUnifiedDiff(text: string): FileDiff[] {
   const files: FileDiff[] = [];
   let cur: FileDiff | null = null;
   let hunk: Hunk | null = null;
+  let cursor = 0;
   for (const line of text.split('\n')) {
     if (line.startsWith('diff --git ')) {
       const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
@@ -233,9 +236,10 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
     else if (!hunk && (line.startsWith('old mode ') || line.startsWith('new mode '))) cur.modeChanged = true;
     else if (line.startsWith('rename to ')) cur.status = 'R';
     else if (line.startsWith('Binary files')) cur.binary = true;
-    else if (line.startsWith('@@')) { hunk = { removed: [], added: [], at: Number(/^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line)?.[1] ?? 0) }; cur.hunks.push(hunk); }
+    else if (line.startsWith('@@')) { hunk = { removed: [], added: [], at: Number(/^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line)?.[1] ?? 0), addedAt: [] }; cursor = hunk.at; cur.hunks.push(hunk); }
     else if (hunk && line.startsWith('-')) hunk.removed.push(line.slice(1));
-    else if (hunk && line.startsWith('+')) hunk.added.push(line.slice(1));
+    else if (hunk && line.startsWith('+')) { hunk.added.push(line.slice(1)); hunk.addedAt.push(cursor); cursor += 1; }
+    else if (hunk && line.startsWith(' ')) cursor += 1;
   }
   return files;
 }
@@ -245,17 +249,18 @@ export interface AddedLines { text: Set<string>; at: Set<number> }
 
 /**
  * The lines a branch itself added, per stamp file: `git diff --unified=0 <since> -- <files>` in `cwd`
- * against its working tree. Positions come from each hunk's new-side start (no context under
- * `--unified=0`, so a hunk's added lines are consecutive from there), so a base line whose text
- * equals an added line, or a CRLF checkout whose diff is LF-normalized, is told apart by position.
+ * against its working tree. Positions are the parser's per-line count on the new side (context
+ * lines included, and `--inter-hunk-context=0` keeps a `diff.interHunkContext` setting from joining
+ * hunks), so a base line whose text equals an added line, or a CRLF checkout whose diff is
+ * LF-normalized, is told apart by position.
  */
 export function branchAddedLines(cwd: string, since: string, files: string[]): Map<string, AddedLines> {
   const out = new Map<string, AddedLines>();
   if (files.length === 0) return out;
-  const diff = git(cwd, ['diff', '--unified=0', '--no-color', '--no-ext-diff', since, '--', ...files]);
+  const diff = git(cwd, ['diff', '--unified=0', '--inter-hunk-context=0', '--no-color', '--no-ext-diff', since, '--', ...files]);
   for (const f of parseUnifiedDiff(diff.out)) {
     const own = out.get(f.path) ?? { text: new Set<string>(), at: new Set<number>() };
-    for (const h of f.hunks) h.added.forEach((a, i) => { own.text.add(a); own.at.add(h.at + i); });
+    for (const h of f.hunks) h.added.forEach((a, i) => { own.text.add(a); own.at.add(h.addedAt[i]!); });
     out.set(f.path, own);
   }
   return out;

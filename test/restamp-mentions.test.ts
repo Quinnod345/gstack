@@ -181,6 +181,22 @@ describe('a PR whose VERSION already equals the base (gbrain #7640)', () => {
     expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.3.0', 'dup'), '', '', '', row('1.2.4.0', 'dup')]));
   });
 
+  test('diff.interHunkContext joining two hunks around a base row still places each branch row by position', () => {
+    const repo = makeFixtureRepo({ prefix: 'restamp-mentions-ihc-', policy: policy(true) }); repos.push(repo);
+    write(repo, NOTICE, notice(['  { since: "0.0.0.0", id: "first_placeholder" },', row('1.2.3.0', 'base_row'), '  { since: "0.0.0.0", id: "second_placeholder" },']));
+    repo.git('add', '-A'); repo.git('commit', '-qm', 'notice rows'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('config', 'diff.interHunkContext', '1');
+    makePr(repo, 'pr-mine');
+    write(repo, NOTICE, notice([row('1.2.3.0', 'first'), row('1.2.3.0', 'base_row'), row('1.2.3.0', 'second')]));
+    repo.git('commit', '-qam', 'two rows around the base row');
+    // The joined hunk carries the base row as context between the two added lines.
+    expect(repo.git('diff', '--unified=0', 'origin/main', '--', NOTICE)).toMatch(/\n\+  \{ since: '1\.2\.3\.0', id: 'first'.*\n   \{ since: '1\.2\.3\.0', id: 'base_row'.*\n-.*\n\+  \{ since: '1\.2\.3\.0', id: 'second'/);
+    const r = restamp(repo, ['--next']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(stageDetail(r.out, 'stamp_paths')![2]).toContain(`${NOTICE}: 2 moved, 1 kept`);
+    expect(readFile(repo, NOTICE)).toBe(notice([row('1.2.4.0', 'first'), row('1.2.3.0', 'base_row'), row('1.2.4.0', 'second')]));
+  });
+
   test('a CRLF checkout (core.autocrlf, eol=crlf) whose diff is LF-normalized still finds the branch-added row', () => {
     const repo = makeFixtureRepo({ prefix: 'restamp-mentions-crlf-', policy: policy(true) }); repos.push(repo);
     write(repo, '.gitattributes', `${NOTICE} text eol=crlf\n`);
