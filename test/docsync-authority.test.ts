@@ -42,17 +42,27 @@ test('docs write authority permits the authored doc and private JSON/Markdown ar
 // saved section and the compare target under {home}/state, gstack's own state directory
 // (GSTACK_HOME), which the interface never named. The authority is right to refuse the
 // state directory; the interface now names every refused root beside the permitted place.
-test('the declared interface names every refused private-artifact root, and the captured state-dir run stays refused', () => {
+test('the declared interface names every refused private-artifact root', () => {
   const fixture = fixtureDocs('updated');
   try {
     const interfaceText = docsNativeInterface(fixture, [path.join(fixture.home, 'fixture-publish.ts')], false, true);
-    const refused = [fixture.skills.split(path.sep).join('/'), fixture.env.CLAUDE_CONFIG_DIR, fixture.env.GSTACK_HOME, path.join(fixture.home, 'remote.git')];
+    // The interface renders the remote root as `${home}/remote.git` (the same literal form the agent reads), not path.join.
+    const refused = [fixture.skills.split(path.sep).join('/'), fixture.env.CLAUDE_CONFIG_DIR, fixture.env.GSTACK_HOME, `${fixture.home}/remote.git`];
     const sentence = interfaceText.split(/(?<=\.)\s+/).find(part => part.startsWith('A private JSON/Markdown artifact'));
     expect(sentence).toBeDefined();
     for (const root of refused) expect(sentence).toContain(`${root}`);
     expect(sentence).toContain(`directly under ${fixture.home} or in a new directory you create there`);
     expect(sentence).toContain('never inside the repository');
     expect(fixture.env.GSTACK_HOME).toBe(path.join(fixture.home, 'state'));
+  } finally { fixture.clean(); }
+});
+
+// The captured transcript is a Linux run: its Bash commands carry POSIX paths, which the literal
+// command grammar rejects once a Windows home is substituted, so the replay is POSIX-only like the
+// late-result replay below.
+test.skipIf(process.platform === 'win32')('the captured state-dir run stays refused, and passes once relocated under the home', () => {
+  const fixture = fixtureDocs('updated');
+  try {
     const captured = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/docsync-state-dir-artifacts-public.json'), 'utf8')) as
       { calls: SkillTestResult['toolCalls'] };
     const fill = (text: string) => text.replaceAll('{home}', fixture.home);

@@ -546,7 +546,8 @@ describe('Opus consent renders (gate captures)', () => {
       '- **D)** We skip it for now and come back to it later.', '> **D)** Defer: I mark the step blocked on you.',
       'D) Postpone this step.', 'D) Leave it for later.', "D) Wait for now. I'll mark this step as blocked on you.",
       '- **D)** Hold off for now; the step stays blocked on you.', 'D) Not yet: we wait on this step for now.',
-      "D) Let's hold off on it for now."]) expect(offersDefer(option), option).toBe(true);
+      "D) Let's hold off on it for now.", "D) Wait for now\u2014I'll mark this step as blocked on you.", 'D) Let\u2019s hold off on it for now.'])
+      expect(offersDefer(option), option).toBe(true);
   });
 
   test('defer counts only as a lettered option', () => {
@@ -560,7 +561,8 @@ describe('Opus consent renders (gate captures)', () => {
       "B) I drive it in gstack's own browser and wait for your go-ahead for now.", 'A) You wait for now; I drive it in Aside.',
       'D) Do not wait for now; I drive it in Aside at once.', 'A) I drive it in Aside; I wait for now while you sign in.',
       'A) I drive it in your Aside browser. At the sign-in wall I stop. Wait for now while you sign in, then I continue.',
-      'B) Manual instructions: wait for now and do it yourself.', "C) I do it in gstack's own browser. We wait for now only if sign-in is needed."])
+      'B) Manual instructions: wait for now and do it yourself.', "C) I do it in gstack's own browser. We wait for now only if sign-in is needed.",
+      'A) I drive it in Aside. I wait for now.', 'B) I drive it in your Aside browser; hold off for now.'])
       expect(offersDefer(text), text).toBe(false);
   });
 
