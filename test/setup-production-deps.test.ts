@@ -76,18 +76,31 @@ describe.skipIf(process.platform === 'win32')('setup installs production depende
 
   test('every bun install in setup goes through install_runtime_deps', () => {
     const body = setup.replace(sliceFunction(setup, 'install_runtime_deps'), '');
-    const direct = body.split('\n').filter((l) => /\b(bun_cmd|"\$BUN_CMD"|bun)\s+install\b/.test(l) && !l.trim().startsWith('#'));
+    const directInstall = /(?:^|[\s;&|(])(?:bun_cmd|"?\$\{?BUN_CMD\}?"?|bun)\s+install\b/;
+    const direct = body.split('\n').filter((l) => directInstall.test(l) && !l.trim().startsWith('#'));
     expect(direct).toEqual([]);
     // The build, the Codex render and each host render install first.
     expect(setup.match(/^\s+install_runtime_deps$/gm)?.length).toBeGreaterThanOrEqual(7);
-    // Negative control: the pre-GSTA-97 line is caught by the same filter.
-    expect(/\b(bun_cmd|"\$BUN_CMD"|bun)\s+install\b/.test('    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install')).toBe(true);
+    // Negative controls: the pre-GSTA-97 line and every other spelling of a direct install are caught.
+    for (const line of [
+      '    bun_cmd install --frozen-lockfile 2>/dev/null || bun_cmd install',
+      '    "$BUN_CMD" install --frozen-lockfile',
+      '    $BUN_CMD install',
+      '    "${BUN_CMD}" install',
+      '  (cd x && bun install)',
+    ]) expect(directInstall.test(line), line).toBe(true);
+    expect(directInstall.test('    bun_cmd x playwright install chromium')).toBe(false);
   });
 
-  test('gstack-browser-ensure installs production dependencies too', () => {
-    const line = read('bin/gstack-browser-ensure').split('\n').find((l) => /bun install/.test(l) && !l.trim().startsWith('#') && !/log /.test(l))!;
-    expect(line).toContain('bun install --production --frozen-lockfile');
-    expect(line).toContain('|| { bun install --lockfile-only >/dev/null && bun install --production --frozen-lockfile >/dev/null; }');
+  test('gstack-browser-ensure never runs a full bun install', () => {
+    const fullInstalls = (text: string) => text.split('\n')
+      .filter((l) => !l.trim().startsWith('#') && !/^\s*log /.test(l))
+      .flatMap((l) => [...l.matchAll(/\bbun install\b(?! --production| --lockfile-only| failed)/g)].map(() => l.trim()));
+    const ensure = read('bin/gstack-browser-ensure');
+    expect(ensure).toContain('bun install --production --frozen-lockfile');
+    expect(fullInstalls(ensure)).toEqual([]);
+    // Negative control: the pre-GSTA-97 install line is caught.
+    expect(fullInstalls('  (cd "$ROOT" && { bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null; })')).toHaveLength(2);
   });
 
   test('bin/dev-setup installs the full set even over a production-only node_modules', () => {

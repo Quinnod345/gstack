@@ -179,7 +179,7 @@ describe('gstack-browser-ensure installs a missing node_modules production-only 
     expect(r.status).toBe(1);
     expect(calls).toEqual(['install --production --frozen-lockfile', 'install --lockfile-only']);
     expect(lastLine(r.stdout)).toBe(`BROWSER_UNAVAILABLE bun install failed under ${f.root}`);
-    expect(r.stderr).toContain(`fix: cd ${f.root} && ./setup, then re-run`);
+    expect(r.stderr).toContain(`fix: cd ${f.root} && bun install --production --frozen-lockfile, then re-run`);
   });
 });
 
