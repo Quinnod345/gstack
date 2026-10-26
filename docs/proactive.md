@@ -32,14 +32,21 @@ needed, because every skill reads `PROACTIVE` from `gstack-skill-start` at the
 start of each run and the router (`/gstack`) applies it to its routing rules. A
 value gstack does not know (a hand-edited `proactive: maybe`) reads as `core`.
 
-One surface follows the setting only in part: the `## Skill routing` section
-gstack offers to append to your project's CLAUDE.md. Under `off` the offer is
+Two surfaces follow the setting only in part. The first is the `## Skill routing`
+section gstack offers to append to your project's CLAUDE.md. Under `off` the offer is
 not made, because those rules are the auto-invocation you turned off (a section
 already in CLAUDE.md stays; delete it yourself). Under `core` the offered
 section still lists every routing rule and tells the host to invoke any
 matching skill. If you accepted it before the `core` default, trim that section
 to the four core rules (or delete it and let gstack offer it again); making the
 offered section follow `core` is tracked in #3446.
+
+The second is the full skill descriptions, which a `--catalog-mode=full` build
+and the non-Claude hosts keep. Non-core skills still say "Proactively suggest
+when ..." there, and that text does not change with the setting, so a host
+that picks skills from those descriptions can still reach them under `core`.
+The default Claude build uses one-line descriptions without that sentence.
+#3446 tracks that too.
 
 gstack asks once, after the telemetry question, which of the three you want;
 if you stored `off` before that, it takes the answer as given and does not ask.
