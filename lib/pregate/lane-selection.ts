@@ -7,12 +7,16 @@
  * runner-owned selection manifest `.gstack/pregate.json` declares for a
  * planner-computed matrix. Every uncertainty widens the selection.
  */
+import { spawnSync } from 'node:child_process';
 import { GENERATED_PATH } from '../regen';
 import { runBashSync } from '../script-invocation';
 import { matchesAny } from '../ship-policy';
 import { PREGATE_CONFIG_PATH } from './config';
-import { isDocsEmptyLane, isInertNoTests } from './docs-lane';
+import { isDocsEmptyLane, isInertNoTests, isProtectedTree } from './docs-lane';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { buildGraph, isTestFile, listRepoFiles, testsFor, type Graph } from './import-graph';
+import { stampFileKind, versionStampOnly } from './stamp-only';
 import type { PregateContext, RemoteObligation } from './types';
 import type { Lane } from './workflows';
 
@@ -23,6 +27,8 @@ export interface Selection {
   emptyLane: string[];
   /** Assets and dotfile tool config with no import-graph test: files no runner loads, also an empty lane. */
   inert: string[];
+  /** Release manifests whose diff against the merge base changes only version values (lib/pregate/stamp-only.ts): waived, no lane needed. */
+  stampOnly: string[];
   /** Every test the touched files select, sorted. */
   tests: string[];
   /** Tests that run on this machine. */
@@ -70,6 +76,27 @@ export function laneFileSet(ctx: PregateContext, lane: Lane): string[] | '?' | '
   return files.size ? [...files] : 'all';
 }
 
+const STAMP_FILE_CAP = 1024 * 1024;
+/** Strict UTF-8 text of `bytes`, BOM kept as content, or null when invalid (two different invalid bytes would otherwise both decode to U+FFFD and compare equal) or over the cap. */
+function strictText(bytes: Buffer | null | undefined): string | null {
+  if (!bytes || bytes.length > STAMP_FILE_CAP) return null;
+  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return null; }
+}
+/** The file's text at the merge base when it is a regular blob there of mode `mode` (null when absent, a symlink or submodule, another mode, unreadable, invalid UTF-8 or over 1 MiB). */
+function readAtMergeBase(ctx: PregateContext, rel: string, mode: string): string | null {
+  const ls = spawnSync('git', ['ls-tree', ctx.mergeBase, '--', rel], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, env: ctx.env });
+  if (ls.status !== 0 || !(ls.stdout ?? '').startsWith(`${mode} blob `)) return null;
+  const r = spawnSync('git', ['show', `${ctx.mergeBase}:${rel}`], { cwd: ctx.repoRoot, timeout: 60_000, maxBuffer: STAMP_FILE_CAP + 1, env: ctx.env });
+  return r.status === 0 ? strictText(r.stdout as Buffer) : null;
+}
+/** The working-tree file's text and git mode under the same rules (a regular file only; a symlink or a mode change is not a stamp). */
+function readWorkingTree(repoRoot: string, rel: string): { text: string | null; mode: string } {
+  try {
+    const abs = path.join(repoRoot, rel); const st = fs.lstatSync(abs);
+    return { text: st.isFile() && st.size <= STAMP_FILE_CAP ? strictText(fs.readFileSync(abs)) : null, mode: st.mode & 0o111 ? '100755' : '100644' };
+  } catch { return { text: null, mode: '100644' }; }
+}
+
 /** Tracked files matching a registry entry's output globs. */
 function outputsOf(all: readonly string[], globs: readonly string[]): string[] { return all.filter(f => matchesAny(globs, f)); }
 
@@ -83,7 +110,9 @@ export function selectLanes(ctx: PregateContext): Selection {
   const noLane: string[] = [];
   const emptyLane: string[] = [];
   const inert: string[] = [];
+  const stampOnly: string[] = [];
   const seeds = new Map<string, string>();
+  const touchedByPath = new Map(touched.map(t => [t.path, t]));
   for (const t of touched) { seeds.set(t.path, t.status === 'D' ? 'deleted' : 'touched'); if (t.renamedFrom) seeds.set(t.renamedFrom, `renamed to ${t.path}`); }
   for (const e of ctx.registry.entries) {
     if (!touched.some(t => matchesAny(e.inputs, t.path) || matchesAny(e.outputs, t.path))) continue;
@@ -118,6 +147,18 @@ export function selectLanes(ctx: PregateContext): Selection {
       provenance.push(`${file}: no-tests (asset or tool config no runner loads)`);
       continue;
     }
+    // A release manifest the branch only re-stamped: nothing a test could observe changed, so no lane is owed (gbrain #7625). Never under a test, fixture, golden or pin tree: a test may compare against that JSON by a path the graph cannot see.
+    const entry = touchedByPath.get(file);
+    if (entry && entry.status === 'M' && !entry.renamedFrom && stampFileKind(file) && !isProtectedTree(file)) {
+      const after = readWorkingTree(ctx.repoRoot, file);
+      const verdict = versionStampOnly(file, after.text === null ? null : readAtMergeBase(ctx, file, after.mode), after.text);
+      if (verdict.stampOnly) {
+        stampOnly.push(file);
+        provenance.push(`${file}: version-stamp-only against ${ctx.mergeBase.slice(0, 12)} (${verdict.changed.join('; ')}); no lane needed`);
+        continue;
+      }
+      provenance.push(`${file}: not version-stamp-only (${verdict.reason})`);
+    }
     noLane.push(file);
   }
   const laneSets: Record<string, string[] | '?'> = {};
@@ -141,7 +182,7 @@ export function selectLanes(ctx: PregateContext): Selection {
   if (anyLocalAll || ctx.lanes.filter(l => l.runsTests && !l.manual && l.tier !== 'platform').length === 0) for (const t of selected) local.add(t);
   for (const t of selected) if (!local.has(t) && !remote.some(r => r.tests.includes(t))) local.add(t);
   if (local.size && tiers.size === 0) tiers.add('unit');
-  return { noLane: noLane.sort(), emptyLane: emptyLane.sort(), inert: inert.sort(), tests: selected, localTests: [...local].sort(), remote, tiersRan: [...tiers].sort(), laneSets, provenance };
+  return { noLane: noLane.sort(), emptyLane: emptyLane.sort(), inert: inert.sort(), stampOnly: stampOnly.sort(), tests: selected, localTests: [...local].sort(), remote, tiersRan: [...tiers].sort(), laneSets, provenance };
 }
 
 export function isTest(file: string): boolean { return isTestFile(file); }
