@@ -1097,8 +1097,10 @@ PR selection (`scripts/test-pr-profile.ts`) classifies every changed file. A fil
 mapped by a paid case's touchfiles selects that case. These files are exempt and
 select nothing: docs, any non-paid `*.test.ts(x)`, `FREE_ONLY_PR_FILES` (the
 free and paid duration seeds, `scripts/ubicloud/**`, every workflow that runs no
-paid evals, and free-only tools), and the fixtures in `FREE_FIXTURES`
-(`test/helpers/free-fixtures-data.ts`, each fixture with its free consumers).
+paid evals, `captain/templates/**`, and free-only tools), the release metadata
+in `RELEASE_METADATA_FILES` (`NOTICE.md`, `LICENSE`, `licenses/**`), and the
+fixtures in `FREE_FIXTURES` (`test/helpers/free-fixtures-data.ts`, each fixture
+with its free consumers).
 Unmapped files under `DERIVABLE_PREFIXES` (bin/, lib/, scripts/, browse/,
 design/, make-pdf/, hosts/, extension/, model-overlays/, agents/, test/helpers/,
 capy/) are not unknown: `scripts/pr-dependencies.ts` derives the cases whose

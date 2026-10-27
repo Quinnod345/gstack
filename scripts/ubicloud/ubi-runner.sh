@@ -609,8 +609,9 @@ cmd_pack() {
     tmp=$(mktemp -d)
     # The path is baked in: a set -e failure unwinds the function before the trap runs, and a local $tmp is unset there.
     trap "rm -rf $(printf %q "$tmp")" EXIT
-    git init -q --bare "$tmp/.git"
-    git -C "$tmp/.git" fetch -q --no-tags --update-shallow "$src" '+refs/*:refs/*' \
+    # No template hooks from a global init.templateDir, and no auto-gc under the tar.
+    git -c gc.auto=0 init -q --bare --template= "$tmp/.git"
+    git -C "$tmp/.git" -c gc.auto=0 fetch -q --no-tags --update-shallow "$src" '+refs/*:refs/*' \
       || die "pack: could not snapshot the refs of $src"
     if [ -z "$branch" ]; then
       branch="detached-${head:0:12}"
@@ -620,12 +621,21 @@ cmd_pack() {
     git -C "$tmp/.git" config core.bare false
     gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
     while IFS= read -r -d '' entry; do
+      # A key with no value (`[remote "x"] mirror`) is boolean true.
+      case $entry in *$'\n'*) ;; *) entry="$entry"$'\n'true ;; esac
       git -C "$tmp/.git" config --add "${entry%%$'\n'*}" "${entry#*$'\n'}"
     done < <(git -C "$gitdir" config --local --null --get-regexp '^(remote|branch)\.' 2>/dev/null || true)
     # The checkout's index rides along so the VM's status matches, except a
-    # split index, whose shared half lives only in the original git dir.
-    [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" = true ] \
-      || cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+    # split index, whose shared half lives only in the original git dir. Its
+    # staged blobs are not behind any ref, so they travel as a pack of their
+    # own; without them the VM's write-tree (gstack-wtree) cannot read a
+    # staged file.
+    if [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" != true ]; then
+      cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+      git -C "$src" ls-files -s | awk '{print $2}' | sort -u \
+        | git -C "$src" pack-objects -q --stdout 2>/dev/null \
+        | git -C "$tmp/.git" unpack-objects -q
+    fi
     (
       cd "$src"
       git ls-files -z -co --exclude-standard \

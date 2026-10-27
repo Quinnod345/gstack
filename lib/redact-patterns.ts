@@ -333,10 +333,11 @@ export function isNumericMetadataValue(span: string, match: RegExpExecArray): bo
  * receipt, a READY block or an approval record names one (`screen 40477638211
  * GREEN`, `gate=40323989742`, `rerun passed 40287239206`, `run #19368712345`);
  * generic words (id, job, attempt, workflow) exempt nothing, since `customer id
- * 14155551234` is a number, and a span with a leading 1 exempts nothing either:
- * `failed 14155551234` is a US or Chinese national number with its trunk
- * prefix, and Actions run ids passed 20 billion in 2025. The same digits
- * anywhere else still report.
+ * 14155551234` is a number. A national number written without its `+` right
+ * after a run word (`failed 14155551234`) is the accepted residual of the
+ * owner's ruling that a run id is not a phone number; gstack-post's chained-id
+ * allowlist reads the same position the same way. The same digits anywhere
+ * else still report.
  */
 const CI_ID_POSITION_BEFORE =
   /(?:--(?:run|job)(?:-id)?(?:[ \t]+|[ \t]*=[ \t]*)|\bgh[ \t]+run[ \t]+(?:view|watch|rerun|download|cancel)[ \t]+|\/actions\/runs\/|\/jobs?\/|(?:run|job)_id["']?[ \t]*[:=][ \t]*["']?)$/i;
@@ -348,7 +349,7 @@ export function isCiRunIdentifier(span: string, match: RegExpExecArray): boolean
   const { start } = spanBounds(match);
   const lineStart = input.lastIndexOf("\n", start - 1) + 1;
   const before = input.slice(Math.max(lineStart, start - 80), start);
-  return CI_ID_POSITION_BEFORE.test(before) || (span.length === 11 && span[0] !== "1" && CI_RUN_WORD_BEFORE.test(before));
+  return CI_ID_POSITION_BEFORE.test(before) || (span.length === 11 && CI_RUN_WORD_BEFORE.test(before));
 }
 
 /**

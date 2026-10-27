@@ -2376,7 +2376,9 @@ exact tokens it finds in these positions:
   `job`, `attempt` or `workflow` exempts nothing. This position is exempt in
   the scanner itself (`isCiRunIdentifier` in `lib/redact-patterns.ts`), so
   `gstack-approvals add`, `gstack-decision-trail` and the pregate secrets
-  check accept it too, not only `gstack-post`;
+  check accept it too, not only `gstack-post`. A national number written
+  without its `+` right after a run word reads as a run id there; that is the
+  accepted residual of the ruling that a run id is not a phone number;
 - every 11-digit id chained after an allowlisted one through `, `, ` and `,
   ` & `, ` or ` or ` / `, optionally with a `(#1234)` between
   (`screen 40269992077 (#3434) and 40275443393 (#3453)`).

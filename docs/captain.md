@@ -232,7 +232,7 @@ recommendation at full scope. `gstack-owner-brief render --captain` prints it fr
 autoplan run.
 
 **C. The merge ask** ([template](../captain/templates/merge-ask.md)): captioned
-before/after images, why, the Approvals table, and the evidence. /ship writes the PR
+before/after images, why, blast radius, the Approvals table, and the evidence. /ship writes the PR
 body in this shape on Capy; the controller's merge report shows the key image inline.
 
 ## The digest

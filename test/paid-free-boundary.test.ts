@@ -106,13 +106,7 @@ describe('paid/free dependency boundary', () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('only audited free-only dependencies avoid unknown-dependency fallback', () => {
-    for (const file of [...FREE_ONLY_PR_FILES, 'scripts\\test-free-shards.ts']) {
-      const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [file] });
-      expect(result.coverage?.mode).toBe('pr');
-      expect(result.coverage?.unknownFiles).toEqual([]);
-      expect(result.selection).toEqual({ e2e: [], judges: [] });
-    }
+  test('release metadata and crew templates never widen the PR gate; ETHOS.md selects only the prompts that quote it (#3499)', () => {
     // Release metadata no paid case reads keeps the PR profile, alone and beside a mapped prompt (#3499).
     for (const file of ['NOTICE.md', 'LICENSE', 'licenses/MIT-pstack.txt', 'captain/templates/merge-ask.md']) {
       expect(fs.existsSync(path.join(ROOT, file)), file).toBe(true);
@@ -129,6 +123,15 @@ describe('paid/free dependency boundary', () => {
     expect(ethos.selection.e2e).toContain('office-hours-auto-mode');
     expect(ethos.selection.judges).toEqual(['plan-ceo-review/SKILL.md modes']);
     expect(ethos.selection.e2e!.length).toBeLessThan(10);
+  });
+
+  test('only audited free-only dependencies avoid unknown-dependency fallback', () => {
+    for (const file of [...FREE_ONLY_PR_FILES, 'scripts\\test-free-shards.ts']) {
+      const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [file] });
+      expect(result.coverage?.mode).toBe('pr');
+      expect(result.coverage?.unknownFiles).toEqual([]);
+      expect(result.selection).toEqual({ e2e: [], judges: [] });
+    }
     // Tracked files outside every mapping and outside the derivable directories restore the full gate.
     for (const file of ['SECURITY.md', 'conductor.json']) {
       const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [FREE_ONLY_PR_FILES[0], file] });
