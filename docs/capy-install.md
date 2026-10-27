@@ -41,9 +41,30 @@ no host profile, so a workflow started there is refused (`INSTALL: fail verdict
 — … (review-voice certifies only the read-only helpers); fix: run
 GSTACK_CAPY_ROOT=<root> bash <root>/capy/skill/gstack/scripts/install.sh --for
 <skill> …`). A review-voice check never replaces an ok verdict that a fuller
-install wrote for the same HEAD and project. Every /autoplan reviewer prompt
+install wrote for the same HEAD and project. The reverse is an in-place
+upgrade: a reviewer later asked to run a workflow runs the same installer
+`--for <skill>`, which reuses the checkout (`upgrading the review-voice
+install in place to --for <skill> (same checkout ...; no second clone)`),
+applies the project's pins, runs `./setup` and both host profiles, and writes
+the workflow's verdict over the reviewer's. Nothing is removed and nothing is
+cloned twice. Every /autoplan reviewer prompt
 ends with this command (`GSTACK TRAILER`); the warm run's budget, under 20 s,
 is measured by `test/capy-review-voice.test.ts`.
+
+## Machines that run no workflow: `--for none`
+
+A coordinator, liaison or Captain thread runs no gstack workflow on its own
+machine, and `gstack: fail not-installed` there read as a broken install.
+`bash <skill>/scripts/install.sh --check --for none` is that machine's session
+check: it prints `gstack: ok not-needed for=none (no checkout at <root>; before
+the first workflow run: bash <skill>/scripts/install.sh --for <skill>)` (or
+`checkout <v> at <root>, not certified; latest: <ver>; ...` when one exists)
+and exits 0 without cloning, moving, installing or certifying anything;
+install mode with `--for none` behaves the same. The bootstrapper answers it
+itself, so it is honest for any checkout revision, and `bin/gstack-capy-install
+--for none` answers the same way for a machine without the Drive skill. That
+ok admits no workflow: no install verdict is written, so a workflow started
+there is refused with the usual `--for <skill>` fix.
 
 ## Session start
 
@@ -51,7 +72,8 @@ is measured by `test/capy-review-voice.test.ts`.
    a checkout exists). It fetches refs only and never moves the checkout. With
    no checkout it prints `gstack: fail not-installed — ...` and the session
    records that line and continues when it runs no gstack workflow; install
-   right before the first workflow.
+   right before the first workflow. A machine that will run none uses
+   `--check --for none` and records its `gstack: ok not-needed` line instead.
 2. When the trailer is `gstack: fail revision ...` or `gstack: fail runtime ...`
    and a checkout exists, run the same command without `--check`. Below the
    supported minimum, a clean checkout on the remote default branch is
@@ -68,10 +90,16 @@ is measured by `test/capy-review-voice.test.ts`.
    refusal of `gstack-upgrade` applies), prints `SELF_UPGRADE: done <old> ->
    <new>` and re-execs the new checkout's wrapper, which installs from the
    new revision (`GSTACK_CAPY_UPGRADED_FROM` set, so setup is never skipped).
-   A refusal prints `SELF_UPGRADE: skipped (<reason>)`, and the session is
-   never certified ok: the trailer is `gstack: fail behind — installed <rev> is
-   <n> commits behind origin (latest <ver>) and the session-start upgrade was
-   skipped: <reason>; fix: <command> (UPGRADE_BUSY|UPGRADE_REFUSED)`, exit 1.
+   A refusal prints `SELF_UPGRADE: skipped (<reason>)` and a `WARN behind —
+   installed <rev> is <n> commits behind origin (latest <ver>) and the
+   session-start upgrade was skipped: <reason>; fix: <command>
+   (UPGRADE_BUSY|UPGRADE_REFUSED|UPGRADE_SKIPPED)` row; the doctor certifies
+   the installed revision and the trailer stays ok with `behind=<n> (latest:
+   <ver>); upgrade skipped: <reason> (<CODE>); fix: <command>` notes
+   ([UPGRADE_SKIPPED](troubleshooting.md#upgrade-skipped)). A gap above the
+   supported minimum is never a hard fail; the lane reports the `behind=`
+   note, and a project that needs the newer gstack says so with a floor
+   (next section).
    `SELF_UPGRADE: none (current)` when nothing is ahead;
    `GSTACK_CAPY_SELF_UPGRADE=off` (or `GSTACK_CAPY_AUTO_UPGRADE=0`) prints
    `SELF_UPGRADE: disabled (<variable>)`. `--check` never moves the checkout;
@@ -85,6 +113,24 @@ is measured by `test/capy-review-voice.test.ts`.
 4. When the fetch fails (offline), the bootstrapper says `remote minimum
    unknown (fetch failed)` and checks the local install only; it never claims
    the minimum, and nothing is fast-forwarded.
+5. The project's floor. A consuming repository names the oldest gstack it wants
+   its crew on as `min_gstack_version` in its `.gstack/ship-policy.json` (the
+   key `gstack-ship-queue` already validates; a file holding only that key is
+   valid). The doctor's `floor` row reads it from the project the check runs in
+   (`--project`, else the git toplevel): `PASS floor <f> declared by <file>`,
+   `SKIP floor (... declares none)`, or `WARN floor — installed <v> is below the
+   floor <f> that <file> declares (min_gstack_version); fix: bash
+   <skill>/scripts/install.sh --for <skill> (fast-forwards ...), or
+   bin/gstack-upgrade (PROJECT_FLOOR_UNMET)`. The trailer stays ok and carries
+   `floor=<f> (<file>)` and `fix: <command>`; the lane runs the fix before its
+   first workflow. Raising the floor is one commit in the project instead of a
+   message to every thread ([PROJECT_FLOOR_UNMET](troubleshooting.md#project-floor-unmet)).
+6. The project's Node pin. When only the Node pin is unmet (the image's Node
+   behind the repo's pin while every Bun pin is met), `pins` is `WARN pins —
+   ... (node pin only; bun pins pass); fix: ... (PROJECT_NODE_PIN_UNMET)`, not a
+   failure: gstack runs on Bun and the project's tests choose their Node. A
+   Bun pin that is unmet stays `FAIL pins` (`PROJECT_PIN_MISMATCH`)
+   ([PROJECT_NODE_PIN_UNMET](troubleshooting.md#project-node-pin-unmet)).
 
 The upgrade target is always the tip of the default branch: every commit there
 is a stamped release that passed CI. Recovery runs forward, never back: an
@@ -283,19 +329,26 @@ gstack: ok 1.91.96.0 for=autoplan
 gstack: ok 1.91.96.0 for=review (requested: v1.91.90.0 (run <checkout>/bin/gstack-upgrade to move); latest: 1.91.101.0 available)
 gstack: ok 1.91.96.0 for=autoplan (pins: skipped (planning-only))
 gstack: ok 1.91.101.0 for=autoplan (behind=12 (latest: 1.91.107.0); fix: bash <skill>/scripts/install.sh --for autoplan)
+gstack: ok 1.91.240.0 for=ship (behind=5 (latest: 1.91.245.0); floor=1.91.245.0 (<project>/.gstack/ship-policy.json); fix: bash <skill>/scripts/install.sh --for ship)
+gstack: ok 1.91.240.0 for=ship (behind=5 (latest: 1.91.245.0); upgrade skipped: tracked files changed: README.md (UPGRADE_REFUSED); fix: <checkout>/bin/gstack-upgrade)
+gstack: ok not-needed for=none (no checkout at <root>; before the first workflow run: bash <skill>/scripts/install.sh --for <skill>)
 gstack: fail runtime,pins
 ```
 
 An ok trailer carries at most one parenthesised note group, `; `-separated,
 in this order: `requested: …` (an existing checkout at another revision than
 `--revision`), `pins: skipped (planning-only|no project|helper runtime)`, then either
-`behind=<n> (latest: <ver>)` followed by `fix: <command>` (the session ended
-<n> commits behind origin's default branch after a fetch that succeeded in this
-run; `bin/gstack-capy-session` exports `GSTACK_CAPY_BEHIND`, `_BEHIND_TO` and
-`_BEHIND_FIX`, so this works with every bootstrapper revision), or `latest:
+`behind=<n> (latest: <ver>)` (the session ended <n> commits behind origin's
+default branch after a fetch that succeeded in this run; `bin/gstack-capy-session`
+exports `GSTACK_CAPY_BEHIND`, `_BEHIND_TO` and `_BEHIND_FIX`, so this works
+with every bootstrapper revision), optionally followed by `upgrade skipped:
+<reason> (<CODE>)` when an install-mode fast-forward was refused, or `latest:
 <ver> available` (origin's default branch has a newer VERSION; the bootstrapper
 exports it as `GSTACK_CAPY_REMOTE_VERSION` only after a fetch that succeeded
-in this run). A fail trailer never carries notes. Match `^gstack: ok ` or
+in this run); then `floor=<f> (<file>)` when the project's floor is unmet; and
+last exactly one `fix: <command>` whenever `behind=` or `floor=` is present.
+A fail trailer never carries notes. `gstack: ok not-needed for=none (...)` is
+the `--for none` outcome: no revision, nothing certified, no workflow admitted. Match `^gstack: ok ` or
 `^gstack: fail `; never parse past the first space after the version.
 
 Exit 0 only with `gstack: ok`. Read the exit status and the trailer directly:
@@ -456,10 +509,15 @@ floor is not what keeps machines current). It never exceeds VERSION
 changes in a way older copies cannot work with; older Drive copies keep
 working and print an owner action
 ([CAPY_WRAPPER_STALE](troubleshooting.md#capy-wrapper-stale)), and the
-doctor's `wrapper` row warns (an active copy below the minimum is a WARN,
-never a FAIL; `bin/gstack-upgrade` never leaves a pending reinstall for it).
-Wrapper 2 only adds optional exports (the trailer's `latest:` note and the
-`cloned` line), so the minimum stays 1.
+doctor's `wrapper` row warns (a bootstrapper copy below the minimum is a WARN,
+active or found in the Drive by a direct run, never a FAIL; only a
+pre-bootstrapper copy with no `GSTACK_CAPY_WRAPPER=` line fails;
+`bin/gstack-upgrade` never leaves a pending reinstall for it).
+Wrapper 2 only added optional exports (the trailer's `latest:` note and the
+`cloned` line). Wrapper 3 answers `--check --for none` itself (a copy at 1 or 2
+prints `fail not-installed` for a coordinator machine and still works for every
+other call), so the minimum is 3: every older Drive copy prints the owner
+action until the owner recopies `capy/skill/gstack/`.
 
 ## Exit codes
 
