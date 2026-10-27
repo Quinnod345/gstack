@@ -91,4 +91,13 @@ describe('design-shotgun to design-html handoff', () => {
     expect(craft).toContain('<!-- gstack-lint-disable <rule-id>: <reason about this page, 24+ chars> -->');
     for (const text of [html, craft]) for (const gone of ['gstack-design-craft', 'craft_exceptions', '--accepted', 'CRAFT_']) expect(text).not.toContain(gone);
   });
+
+  // Value: protects=the content-realism tells have one checker, the lint's copy tier, and NOTICE.md credits the adapted rules to the file that ships them; fails_when=a merge restores the removed checker, its bin or its suite beside the copy tier, or NOTICE.md still credits the removed files; why_new=the fold deleted the second checker and no other test notices its return; seam=none; no_claim=what each tell detects (test/design-lint.test.ts)
+  test('the content-realism tells have one checker, the lint copy tier, and NOTICE.md credits it', () => {
+    for (const gone of ['lib/design-craft.ts', 'bin/gstack-design-craft', 'test/design-craft.test.ts']) expect(fs.existsSync(path.join(ROOT, gone))).toBe(false);
+    const notice = read('NOTICE.md');
+    expect(notice).toContain('`lib/design-lint/rules/copy.ts`: the content-realism and ship-floor tells');
+    expect(notice).not.toContain('lib/design-craft.ts');
+    expect(notice).not.toContain('bin/gstack-design-craft');
+  });
 });
