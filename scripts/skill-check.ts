@@ -49,7 +49,7 @@ export function validateGeneratedArtifact(renderRoot: string, artifact: Generate
     if (artifact.kind === 'skill') {
       for (const message of validateSkillFrontmatter(content)) invalid(message);
     }
-    if (artifact.kind === 'skill' || artifact.kind === 'section') {
+    if (artifact.kind === 'skill' || artifact.kind === 'section' || artifact.kind === 'preamble') {
       const validation = validateSkill(file);
       for (const command of validation.invalid) invalid(`line ${command.line}: unknown command '${command.command}'`);
       for (const error of validation.snapshotFlagErrors) invalid(`line ${error.command.line}: ${error.error}`);

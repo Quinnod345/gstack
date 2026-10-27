@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { ALL_HOST_CONFIGS } from '../hosts';
 import { discoverTemplates } from '../scripts/discover-skills';
 import { sharedLibsPlanExcerpt } from './helpers/shared-libs-plan-excerpt';
+import { readSkillEffective } from './helpers/skill-startup';
 
 const ROOT = resolve(import.meta.dir, '..');
 let output: string;
@@ -116,7 +117,7 @@ describe('shared-code skill distribution', () => {
   });
 
   test('the bounded plan fixture includes the generated decision prerequisites before Code Quality', () => {
-    const entrypoint = readFileSync(join(output, 'plan-eng-review/SKILL.md'), 'utf8');
+    const entrypoint = readSkillEffective(join(output, 'plan-eng-review/SKILL.md'));
     const review = readFileSync(join(output, 'plan-eng-review/sections/review-sections.md'), 'utf8');
     const excerpt = sharedLibsPlanExcerpt(entrypoint, review);
     const headings = ['## AskUserQuestion Format', '## My engineering preferences',

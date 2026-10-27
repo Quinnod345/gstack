@@ -95,7 +95,7 @@ describe('design-lint eighth cycle: a file costs its length', () => {
   }, 60_000);
 
   test('repeated unclosed <script>, <nav>, <style> and <template> openers cost the copy tier their length', () => {
-    for (const tag of ['<script>', '<nav>', '<style>', '<template>']) {
+    for (const tag of ['<script>', '<nav>', '<style>', '<template>', '<nav><a href="/a">A</a>']) {
       const doc = parseHtml('x.html', HEAD + '</head><body>' + tag.repeat(60_000) + '</body></html>');
       const reporter = new Reporter('page', '/');
       expect(timed(() => runCopy({ docs: [doc] } as never, reporter)), tag).toBeLessThan(3000);

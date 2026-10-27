@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readSkillStartup } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const BANNER = '<!-- AUTO-GENERATED from SKILL.md.tmpl — do not edit directly -->\n<!-- Regenerate: bun run gen:skill-docs -->';
@@ -126,7 +127,7 @@ describe.skipIf(process.platform === 'win32')('full setup repairs the installed 
         expect(fs.existsSync(f.oldRender)).toBe(false);
         expect(fs.readFileSync(path.join(f.skills, 'gstack-review/SKILL.md'), 'utf8')).toContain('gstack-claude-code');
         expect(fs.readFileSync(path.join(f.skills, 'gstack-review/notes.md'), 'utf8')).toBe('user notes\n');
-        expect(fs.readFileSync(path.join(f.root, '.agents/skills/gstack-review/SKILL.md'), 'utf8')).toContain('Model-Specific Behavioral Patch (gpt-5.6-sol)');
+        expect(readSkillStartup(path.join(f.root, '.agents/skills/gstack-review/SKILL.md'))).toContain('Model-Specific Behavioral Patch (gpt-5.6-sol)');
         expect(fs.existsSync(path.join(f.skills, 'gstack/bin/gstack-claude-code'))).toBe(true);
         expect(fs.existsSync(path.join(f.skills, 'gstack/lib/outside-review-result.ts'))).toBe(true);
         const fakeCli = path.join(f.temp, 'fake-reviewer.ts');

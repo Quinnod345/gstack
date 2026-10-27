@@ -85,7 +85,8 @@ hard-code:
   "queue_mode": "stamp-at-merge",
   "release_tool": "bun scripts/gen-agents-digest.ts",
   "release_outputs": ["agents-digest/gstack-AGENTS.md"],
-  "stamp_paths": [],
+  "stamp_paths": ["lib/ship-policy.ts"],
+  "stamp_patterns": ["_KEY_VERSION = '{version}'"],
   "changelog": "CHANGELOG.md",
   "history": "squash-ok",
   "stamp_sensitive_gates": ["tests"]

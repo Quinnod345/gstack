@@ -12,14 +12,14 @@
 //     │                                          design-html anti-slop line (catalogEntries)
 //     ├─ scripts/resolvers/design-checklist.ts   review/design-checklist.md (generated)
 //     ├─ bin/gstack-design-detect.ts             normalizes engine findings by impeccableId
-//     ├─ lib/design-craft.ts                     CRAFT_CHECK ids and their `fix` text (gstack-design-craft)
+//     ├─ lib/design-lint/rules/ids.ts            copy-tier ids but empty-mount-node print the catalog's `fix` (test-enforced)
 //     └─ design/src/brief.ts                     MOCKUP_NEVER_NAMES in the image-generation prompt
 //
 // Rule ids. An entry's `impeccableId` is set only when that id exists in
 // test/fixtures/impeccable-antipatterns.json (test-enforced), and rendered
 // prose brackets an id only in that case, so a reader never meets a bracketed
 // id the detector cannot emit. Everything else is a gstack-only tell that the
-// LLM pass judges (or, for an entry with a `fix`, the craft check counts). The four lists this file replaced (constants.ts, the
+// LLM pass judges (or, for an entry with a `fix`, the design lint's copy tier reports). The four lists this file replaced (constants.ts, the
 // consultation proposal section, design-html's blacklist, and the review
 // checklist) had drifted apart; they now render from here.
 
@@ -60,9 +60,9 @@ export interface DesignSlopEntry {
   /** roles the values are banned for; present iff values is */
   roles?: FontRole[];
   handoff?: Handoff;
-  /** one-line fix the free craft check prints beside this id (lib/design-craft.ts) */
+  /** one-line fix the design lint's copy tier prints beside this id (lib/design-lint/rules/copy.ts) */
   fix?: string;
-  /** reported only by gstack-design-craft, with its fix; never rendered into skill prose (token weight) */
+  /** reported only by gstack-design-lint, with its fix; never rendered into skill prose (token weight) */
   checkerOnly?: true;
   source: 'gstack' | 'impeccable' | 'both';
   /** the 11 originals; AI_SLOP_BLACKLIST derives from these verbatim */
@@ -464,7 +464,7 @@ export const DESIGN_SLOP_CATALOG: DesignSlopEntry[] = [
     handoff: 'harden', source: 'gstack',
   },
 
-  // ── Craft tells (GSTA-92): grep-checkable; the free craft check (lib/design-craft.ts)
+  // ── Craft tells (GSTA-92): grep-checkable; the design lint's copy tier (lib/design-lint/rules/copy.ts)
   // prints each id with its `fix`. checkerOnly keeps them out of the rendered skill lists. Adapted from Elaya's landing-page-design and
   // redesign-skill (MIT); see NOTICE.md.
   {
@@ -828,7 +828,7 @@ export interface RenderCatalogOptions {
   omitImpact?: Impact[];
 }
 
-/** Entries skill prose renders: everything except the craft check's own ids. */
+/** Entries skill prose renders: everything except the lint-only craft ids. */
 export const RENDERED: readonly DesignSlopEntry[] = DESIGN_SLOP_CATALOG.filter(e => !e.checkerOnly);
 
 export function selectCatalog(o: RenderCatalogOptions): DesignSlopEntry[] {

@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { MARKER, failableBun, fakeDetect, setup, config, defaultRender, record, served } from './helpers/claude-overlay-fixture';
 import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, put, setVersion } from './helpers/install-fixture';
+import { readSkillStartup } from './helpers/skill-startup';
 
 afterEach(cleanupFixtures);
 afterAll(cleanupSeed);
@@ -54,7 +55,7 @@ describe.skipIf(process.platform === 'win32')('overlay render lifecycle with gbr
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(existsSync(defaultRender(f))).toBe(false);
     expect(existsSync(`${defaultRender(f)}.overlay`)).toBe(false);
-    expect(served(join(f.home, '.claude/skills'))).toBe(readFileSync(join(src, 'autoplan/SKILL.md'), 'utf8'));
+    expect(served(join(f.home, '.claude/skills'))).toBe(readSkillStartup(join(src, 'autoplan/SKILL.md')));
   }, 180_000);
 
   test('a failed render keeps the previous render; after an upgrade it serves the committed files', () => {
@@ -78,7 +79,7 @@ describe.skipIf(process.platform === 'win32')('overlay render lifecycle with gbr
     expect(upgraded.out).toContain('Claude skill overlay: claude (was sonnet-5).');
     expect(existsSync(defaultRender(f))).toBe(false);
     expect(record(defaultRender(f))).toMatchObject({ overlay: 'claude', source: 'explicit', render: 'committed', version: '9.9.9.9' });
-    expect(served(skills)).toBe(readFileSync(join(src, 'autoplan/SKILL.md'), 'utf8'));
+    expect(served(skills)).toBe(readSkillStartup(join(src, 'autoplan/SKILL.md')));
   }, 240_000);
 
   test('concurrent gbrain-refresh runs leave one valid render and no temp, old or lock dirs', async () => {
@@ -98,7 +99,7 @@ describe.skipIf(process.platform === 'win32')('overlay render lifecycle with gbr
     const renderParent = join(f.home, '.gstack/render');
     expect(readdirSync(renderParent).sort()).toEqual(['claude', 'claude.overlay']);
     expect(readdirSync(defaultRender(f)).filter(name => name.startsWith('claude'))).toEqual([]);
-    expect(readFileSync(join(defaultRender(f), 'autoplan/SKILL.md'), 'utf8')).toContain(MARKER);
+    expect(readSkillStartup(join(defaultRender(f), 'autoplan/SKILL.md'))).toContain(MARKER);
     expect(record(defaultRender(f))).toMatchObject({ overlay: 'opus-4-7', gbrain: 'ok' });
   }, 240_000);
 });

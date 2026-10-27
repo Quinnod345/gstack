@@ -2,11 +2,15 @@
  * Preamble composition root.
  *
  * Each generator lives in its own file under ./preamble/*.ts. This file only
- * wires them together via generatePreamble(). Keep composition declarative —
- * no inline logic beyond tier gating.
+ * wires them together: preambleSections() is the composition, and
+ * generatePreamble() joins it into the full inline render that tests use as
+ * the pre-hoist oracle. {{PREAMBLE}} resolves through ./preamble-hoist.ts,
+ * which renders tier 1 inline and splits tier 2+ into a per-skill pointer plus
+ * the shared sections/preamble.md the skill Reads on load. Keep composition
+ * declarative — no inline logic beyond tier gating.
  *
  * Each skill runs independently via `claude -p` (or the host's equivalent).
- * There is no shared loader. The preamble provides: update checks, session
+ * The preamble provides: update checks, session
  * tracking, user preferences, repo mode detection, model overlays, and
  * telemetry.
  *
@@ -65,6 +69,11 @@ export { generateTestFailureTriage } from './preamble/generate-test-failure-tria
 // (`preamble-tier: N`). Every template that resolves {{PREAMBLE}} must
 // declare it — there is no default.
 export function generatePreamble(ctx: TemplateContext): string {
+  return preambleSections(ctx).join('\n\n');
+}
+
+/** The preamble's generator outputs in render order, empty ones dropped. */
+export function preambleSections(ctx: TemplateContext): string[] {
   const tier = ctx.preambleTier;
   if (tier === undefined) {
     throw new Error(
@@ -111,5 +120,5 @@ export function generatePreamble(ctx: TemplateContext): string {
     ...(tier >= 3 ? [generateRepoModeSection(), generateSearchBeforeBuildingSection(ctx)] : []),
     generateCompletionStatus(ctx),
   ];
-  return sections.filter(s => s && s.trim().length > 0).join('\n\n');
+  return sections.filter(s => s && s.trim().length > 0);
 }

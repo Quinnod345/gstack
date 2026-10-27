@@ -17,7 +17,9 @@ import { collectFiles, contextWaivers, lintStatic, MAX_FILE_BYTES } from '../lib
 import type { LintContext } from '../lib/design-lint/context';
 import { browserAvailable } from './helpers/browser-available';
 import { RULES } from '../lib/design-lint/rules/ids';
-import { CRAFT_IDS } from '../lib/design-craft';
+import { BUZZWORDS, COPY_IDS } from '../lib/design-lint/rules/copy';
+import { catalogEntry, DESIGN_SLOP_CATALOG, detectorSlopEntries, judgmentTellEntries, renderCatalog, selectCatalog } from '../lib/design-catalog';
+import { autoFixEntries, checklistSlopEntries } from '../scripts/resolvers/design-checklist';
 import { FAMILIES } from '../lib/design-lint/rules';
 import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers, suspectedRules } from '../lib/design-lint/waivers';
 
@@ -262,23 +264,152 @@ describe('design-lint: the static tier\'s files and contexts', () => {
 });
 
 describe('design-lint: the copy tier', () => {
-  // Value: protects=design-craft tells reach the lint as findings at line 1 with their count, source copy, under the craft ids; fails_when=the craft bridge drops ids, loses the count suffix, or re-reports the static tier's 100vh and transition: all tells; why_new=no test asserts a single copy-tier finding (the fixtures only check line format); seam=none; no_claim=the craft patterns themselves, which lib/design-craft owns
-  test('lorem, missing alt and alert() report with their counts at line 1 as copy findings; 100vh and transition: all stay with the static tier; a component file gets none', () => {
-    const dir = tmpTree({
-      'index.html': '<!doctype html>\n<html lang="en">\n<head><title>Ledger</title><meta name="description" content="The ledger closes the month."><link rel="icon" href="/icon.svg"><style>.hero { min-height: 100vh; transition: all 0.2s; }</style></head>\n<body><a class="skip" href="#main">Skip to content</a><main id="main"><h1>Lorem ipsum dolor</h1><img src="a.png"><img src="b.png"><p>Lorem ipsum again on the ledger.</p></main>\n<script>alert("saved")</script></body></html>',
-      'Card.tsx': 'export const Card = () => <article className="p-4"><p>Lorem ipsum in a component</p><img src="c.png" /></article>;',
-    });
-    const { findings } = lintStatic([dir], { cwd: dir, warn: (l) => { throw new Error(l); } });
-    const copy = findings.filter((f) => f.source === 'copy');
-    expect(copy.map((f) => [f.grade, f.rule, f.file, f.line, f.evidence])).toEqual([
-      ['blocks', 'lorem', 'index.html', 1, 'lorem ipsum placeholder text, 2 times'],
-      ['ask', 'alert', 'index.html', 1, 'alert() for a message'],
-      ['blocks', 'img-no-alt', 'index.html', 1, 'an <img> without alt, 2 times'],
-    ]);
-    expect(copy.find((f) => f.rule === 'img-no-alt')?.fix).toBe('add alt text (alt="" when decorative)');
-    expect(findings.filter((f) => f.rule === 'vh-height').map((f) => [f.source, f.grade])).toEqual([['static', 'blocks']]);
-    expect(findings.filter((f) => f.rule === 'layout-transition').map((f) => f.source)).toEqual(['static']);
-    expect(findings.some((f) => f.file === 'Card.tsx' && f.source === 'copy')).toBe(false);
+  const DIRTY = `<!doctype html><html><head><style>.hero{height:100vh;transition: all .3s}</style></head><body>
+<nav><a href="#">Docs</a><a href="/">Home</a><a href="/pricing">Pricing</a></nav>
+<h1>Elevate your workflow seamlessly</h1><p>Trusted by Acme and John Doe. 99.99% uptime, 50% faster, 10,000+ happy users. [Needs proof: logo]</p>
+<img src="a.png"><p>Oops! Something broke. Lorem ipsum.</p>
+<script>window.addEventListener('scroll', () => {}); alert('hi'); showAlert(1);</script></body></html>`;
+
+  const CLEAN = `<!doctype html><html lang="en"><head><title>Ledgerline: close the books in 2 days</title>
+<meta name="description" content="Close faster."><meta property="og:image" content="/og.png"><link rel="icon" href="/favicon.svg">
+<style>.hero{min-height:100vh;min-height:100dvh;transition: transform .4s var(--ease-out)} .w{width:100%}</style></head>
+<body><a href="#main">Skip to content</a><a href="#pricing">Pricing</a><nav><a href="/" aria-current="page">Home</a><a href="/pricing">Pricing</a></nav>
+<main id="main"><h1>Close the books in 2 days, not 9</h1><p>Teams at Halvorsen Freight cut month-end by 47.2%. Save 20% yearly. 100% open source. 30-day refund.</p><img src="x.png" alt=""></main>
+<script>const io = new IntersectionObserver(() => {}); window.showAlert = () => {};</script></body></html>`;
+
+  const copy = (html: string, scope: 'page' | 'component' = 'page') => {
+    const file = tmpPage(html);
+    return lintStatic([file], { cwd: path.dirname(file), scope, warn: () => {} }).findings.filter((f) => f.source === 'copy');
+  };
+  const ids = (html: string) => [...new Set(copy(html).map((f) => f.rule))].sort();
+
+  // Value: protects=every copy-tier tell reports at the line that holds it, under the craft ids and catalog fixes; fails_when=a rule reports at line 1, drops a tell or re-reports the static tier's 100vh and transition: all; why_new=the fold replaced lib/design-craft's counts with positions; seam=none; no_claim=render-tier findings
+  test('a page with every tell reports each one at its line, with what matched; 100vh and transition: all stay with the static tier', () => {
+    const found = copy(DIRTY).map((f) => [f.rule, f.line, f.evidence]);
+    expect(found).toEqual(expect.arrayContaining([
+      ['dead-link', 2, 'a dead link (href="#")'],
+      ['missing-aria-current', 2, 'route navigation without aria-current'],
+      ['marketing-buzzword', 3, 'a marketing buzzword: "Elevate", "seamlessly"'],
+      ['placeholder-brand', 3, 'a placeholder brand (Acme, Nexus): "Acme"'],
+      ['placeholder-name', 3, 'a placeholder name (John Doe): "John Doe"'],
+      ['round-number', 3, 'a round invented number: "99.99% uptime", "50% faster", "10,000+ happy users"'],
+      ['needs-proof', 3, 'a [Needs proof] marker left in the page: "[Needs proof:"'],
+      ['img-no-alt', 4, 'an <img> without alt'],
+      ['oops', 4, '"oops" as an error message: "Oops"'],
+      ['lorem', 4, 'lorem ipsum placeholder text: "Lorem ipsum"'],
+      ['scroll-listener', 5, 'a scroll event listener'],
+      ['alert', 5, 'alert() for a message'],
+      ['missing-title', 1, 'a document without a <title>'],
+    ]));
+    expect(ids(DIRTY)).toEqual(['alert', 'dead-link', 'img-no-alt', 'lorem', 'marketing-buzzword', 'missing-aria-current', 'missing-favicon', 'missing-meta-description', 'missing-skip-link', 'missing-title', 'needs-proof', 'oops', 'placeholder-brand', 'placeholder-name', 'round-number', 'scroll-listener']);
+    for (const f of copy(DIRTY)) expect(f.fix, f.rule).toBe(catalogEntry(f.rule)!.fix!);
+    const file = tmpPage(DIRTY);
+    const all = lintStatic([file], { cwd: path.dirname(file), warn: () => {} }).findings;
+    expect(all.filter((f) => f.rule === 'vh-height').map((f) => f.source)).toEqual(['static']);
+    expect(all.filter((f) => f.rule === 'layout-transition').map((f) => f.source)).toEqual(['static']);
+  });
+
+  test('a finished page is clean: CSS 100%, in-page anchors, a showAlert helper and inlined Pretext are not flagged', () => {
+    expect(copy(CLEAN)).toEqual([]);
+    const pretext = fs.readFileSync(path.join(ROOT, 'design-html', 'vendor', 'pretext.js'), 'utf-8');
+    expect(copy(CLEAN.replace('</body>', `<script type="module">${pretext}</script></body>`))).toEqual([]);
+  });
+
+  test('every copy-tier id is a lint rule; each but the shell check is a grep-detectable catalog entry whose fix the lint prints', () => {
+    expect(new Set(COPY_IDS).size).toBe(COPY_IDS.length);
+    for (const id of COPY_IDS) {
+      expect(RULES[id]?.gate, id).toBe('craft');
+      if (id === 'empty-mount-node') continue;
+      expect(catalogEntry(id)?.detect, id).toContain('grep');
+      expect(RULES[id].fix, id).toBe(catalogEntry(id)!.fix!);
+    }
+    expect(Object.keys(RULES).filter((id) => RULES[id].gate === 'craft').sort()).toEqual([...COPY_IDS].sort());
+  });
+
+  // Value: protects=checker-only craft entries render into no skill prose or checklist, and the lint reports each; fails_when=a renderer reads DESIGN_SLOP_CATALOG, not RENDERED, or a checker-only id has no lint rule; why_new=moved from test/design-craft.test.ts with the checker; seam=none; no_claim=byte size of any one skill (size guard owns it)
+  test('checker-only catalog entries are lint rules that no rendered list carries; catalog entries with a fix still render', () => {
+    const checkerOnly = DESIGN_SLOP_CATALOG.filter((e) => e.checkerOnly);
+    expect(checkerOnly.length).toBeGreaterThan(0);
+    const rendered = new Set([selectCatalog({}), detectorSlopEntries(), judgmentTellEntries(), checklistSlopEntries(), autoFixEntries()].flat().map((e) => e.id));
+    const prose = renderCatalog({ kind: 'slop' });
+    for (const e of checkerOnly) {
+      expect(RULES[e.id], e.id).toBeDefined();
+      expect(rendered.has(e.id), e.id).toBe(false);
+      expect(prose, e.id).not.toContain(e.prose);
+    }
+    for (const id of ['marketing-buzzword', 'layout-transition']) expect(rendered.has(id), id).toBe(true);
+  });
+
+  test('BUZZWORDS covers every word the catalog heuristic and the craft section name, and matches stems, not look-alikes', () => {
+    const heuristic = catalogEntry('marketing-buzzword')?.heuristic ?? '';
+    const words = heuristic.replace(/^.*?for /, '').replace(/\.$/, '').split(/,\s*/);
+    expect(words.length).toBeGreaterThan(5);
+    for (const word of words) expect(BUZZWORDS).toContain(word);
+    const section = fs.readFileSync(path.join(ROOT, 'design-html', 'sections', 'craft.md.tmpl'), 'utf-8');
+    const buzz = section.match(/No buzzwords: ([^\n]+)\.\n/)?.[1].replace(/"/g, '').split(/,\s*/) ?? [];
+    expect(buzz.length).toBeGreaterThan(10);
+    for (const word of buzz) expect(BUZZWORDS).toContain(word);
+    expect(copy('<p>Unlocking seamless, next gen workflows that elevate teams</p>').map((f) => f.evidence)).toEqual(['a marketing buzzword: "Unlocking", "seamless", "next gen", "elevate"']);
+    expect(copy('<p>Take the elevator to the elevation map; streamers sold here</p>')).toEqual([]);
+    const names = section.match(/No placeholder people or brands \(([^)]+)\)/)?.[1].split(/,\s*/) ?? [];
+    expect(names.length).toBe(5);
+    for (const name of names) expect(ids(`<p>${name}</p>`)).toEqual([/Doe/.test(name) ? 'placeholder-name' : 'placeholder-brand']);
+  });
+
+  test('the skip link is judged by position and target; aria-current is required only for route navigation', () => {
+    expect(ids(CLEAN.replace('id="main"', 'id="content"'))).toEqual(['missing-skip-link']);
+    expect(ids(CLEAN.replace('id="main"', 'data-id="main"'))).toEqual(['missing-skip-link']);
+    expect(ids(CLEAN.replace('>Skip to content<', '>Zum Inhalt springen<'))).toEqual([]);
+    expect(ids(CLEAN.replace('<a href="#main">Skip to content</a>', ''))).toEqual(['missing-skip-link']);
+    expect(ids(CLEAN.replace('<a href="/" aria-current="page">Home</a><a href="/pricing">Pricing</a>', '<a href="#features">Features</a><a href="#faq">FAQ</a>'))).toEqual([]);
+    expect(copy(CLEAN.replace(' aria-current="page"', '')).map((f) => [f.rule, f.line])).toEqual([['missing-aria-current', 4]]);
+  });
+
+  test('copy reads visible text: entities decode, svg text counts, and comments, scripts, styles and templates do not', () => {
+    expect(ids('<p>&#91;Needs proof: logo]</p>')).toEqual(['needs-proof']);
+    expect(ids('<img src="a.png" data-alt="x">')).toEqual(['img-no-alt']);
+    expect(ids('<svg><text>Acme</text></svg>')).toEqual(['placeholder-brand']);
+    expect(ids('<p>Set a price alert (free)</p>')).toEqual([]);
+    expect(ids('<style>.a{content:"Acme"}</style><script>// John Doe</script><template><p>Lorem ipsum</p></template><p>Halvorsen</p>')).toEqual([]);
+    expect(ids('<section><h2>Pricing</h2><a href="/buy">Start free trial</a></section>')).toEqual([]);
+  });
+
+  // Value: protects=the documented craft-checker limits stay fixed in the fold: script payloads, single-quoted handlers, script text as presence, commented markup; fails_when=a code or presence rule reads the raw source again; why_new=#3433 listed these as checker limits for the follow-up; seam=none; no_claim=external scripts, which the lint does not fetch
+  test('a hydration payload, commented-out markup and script text are not page content; single-quoted handlers are read', () => {
+    expect(ids('<p>Halvorsen</p><script>window.__DATA__ = "<img src=a.png><a href=\\"#\\">x</a>";</script>')).toEqual([]);
+    expect(ids('<!-- <img src="a.png"><p>Lorem ipsum</p><a href="#">x</a> --><p>Halvorsen</p>')).toEqual([]);
+    expect(copy("<button onclick='alert(1)'>Go</button>\n<button onclick=\"alert(2)\">Go</button>").map((f) => [f.rule, f.line])).toEqual([['alert', 1], ['alert', 2]]);
+    const head = '<!doctype html><html lang="en"><head><meta name="description" content="d"><link rel="icon" href="/i.svg"><script>const t = "<title>Ledger</title>";</script></head><body><a href="#m">Skip</a><main id="m"><p>Halvorsen</p></main></body></html>';
+    expect(ids(head)).toEqual(['missing-title']);
+  });
+
+  // Value: protects=a client-rendered shell is named an empty mount node instead of passing as clean; fails_when=a <noscript> notice counts as body text, or an image-only page with no script is called a shell; why_new=#3433's craft audit left "mount-node shell" undefined and the checker gave shells a clean result; seam=none; no_claim=that the rendered page is clean
+  test('an empty mount node is reported at its line; a noscript notice does not count as content, an image-only page is not a shell', () => {
+    const shell = '<!doctype html><html lang="en"><head><title>App</title></head>\n<body>\n<noscript>You need to enable JavaScript to run this app.</noscript>\n<div id="root"></div>\n<script src="/main.js"></script></body></html>';
+    expect(copy(shell).filter((f) => f.rule === 'empty-mount-node').map((f) => [f.grade, f.line, f.evidence])).toEqual([['ask', 4, `${RULES['empty-mount-node'].title}: <div id="root">`]]);
+    expect(copy('<!doctype html><html><head><title>A</title></head><body><my-app></my-app><script type="module" src="/a.js"></script></body></html>').some((f) => f.rule === 'empty-mount-node')).toBe(true);
+    expect(ids('<!doctype html><html><head><title>A</title></head><body><img src="a.png" alt="A harbour at dusk"></body></html>')).not.toContain('empty-mount-node');
+    expect(ids(CLEAN)).not.toContain('empty-mount-node');
+    expect(copy(shell, 'component').some((f) => f.rule === 'empty-mount-node')).toBe(false);
+  });
+
+  // Value: protects=the five content-realism ids sit at ask so a page waiver answers a supplied name or figure, as the owner chose; fails_when=one moves back to blocks, or a waiver beside a copy-tier tell is refused or ignored; why_new=option (a) moved them and no test pinned the tier or the waived grade; seam=none; no_claim=how far one page waiver reaches
+  test('the content-realism ids sit at ask, and a waiver about the page answers a copy-tier tell', () => {
+    for (const id of ['placeholder-name', 'placeholder-brand', 'lorem', 'round-number', 'needs-proof']) expect(RULES[id].tier, id).toBe('ask');
+    const page = '<!doctype html><html lang="en"><head><title>Freight ledger</title></head><body>\n<!-- gstack-lint-disable placeholder-brand: Nexus is the freight customer this ledger page was built for -->\n<p>Nexus closes its freight ledger in two days.</p></body></html>';
+    expect(copy(page).filter((f) => f.rule === 'placeholder-brand').map((f) => [f.grade, f.line, f.waiver])).toEqual([['waived', 3, 'Nexus is the freight customer this ledger page was built for']]);
+  });
+
+  // Value: protects=an inline handler's tell reports at the line its code is on, and a shell with no <body> tag is still an empty mount node; fails_when=the handler position is the attribute's start, or the <title> text counts as body text; why_new=the /ship review found both; seam=none; no_claim=every implicit-body layout
+  test('an inline handler reports at its value\'s line; a shell without a <body> tag is an empty mount node', () => {
+    expect(copy('<button\nonclick="alert(1)">Go</button>').map((f) => [f.rule, f.line])).toEqual([['alert', 2]]);
+    const bare = '<!doctype html><html lang="en"><head><title>App</title></head>\n<div id="root"></div><script src="/app.js"></script></html>';
+    expect(copy(bare).filter((f) => f.rule === 'empty-mount-node').map((f) => f.line)).toEqual([2]);
+  });
+
+  test('a component file gets no copy findings', () => {
+    const dir = tmpTree({ 'Card.tsx': 'export const Card = () => <article className="p-4"><p>Lorem ipsum in a component</p><img src="c.png" /></article>;' });
+    expect(lintStatic([dir], { cwd: dir, warn: () => {} }).findings.some((f) => f.source === 'copy')).toBe(false);
   });
 });
 
@@ -396,13 +527,6 @@ describe('design-lint: third review cycle', () => {
     const files = collectFiles([dir], (l) => warned.push(l));
     expect(files.map((f) => path.relative(dir, f))).toEqual(['site/index.html']);
     expect(warned).toEqual([`design-lint: skipped ${path.join(dir, 'site', 'big.css')} (2 MB, over the 2 MB limit)`]);
-  });
-
-  test('every id gstack-design-craft can emit has a lint rule or belongs to the static tier', () => {
-    const ids = [...CRAFT_IDS];
-    expect(ids.length).toBeGreaterThan(15);
-    expect(ids.filter((id) => !(id in RULES))).toEqual([]);
-    expect(ids.filter((id) => RULES[id].gate !== 'craft')).toEqual(['layout-transition', 'vh-height']);
   });
 });
 
