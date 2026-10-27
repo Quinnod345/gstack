@@ -129,7 +129,7 @@ describe('--for review-voice through the no-Drive brief', () => {
     const next = run(`"${root}/bin/gstack-autoplan" next --out "${path.join(host.base, 'run')}" --plan "${plan}"`, sub, env, 120_000);
     expect(next.status, next.stdout + next.stderr).toBe(3);
     const real = fs.realpathSync(root);
-    const fix = `run GSTACK_CAPY_ROOT=${real} bash ${real}/capy/skill/gstack/scripts/install.sh --for autoplan (the full install: ./setup and host profiles)`;
+    const fix = `run GSTACK_CAPY_ROOT=${real} bash ${real}/capy/skill/gstack/scripts/install.sh --for autoplan (upgrades this checkout in place: ./setup and host profiles, no second clone)`;
     expect(next.stderr + next.stdout).toContain('which does not cover claude that autoplan needs (review-voice certifies only the read-only helpers)');
     const bash = run([
       `. "${root}/bin/gstack-bun-version.sh"`, `. "${root}/bin/gstack-doctor-components.sh"`, `. "${root}/bin/gstack-install-verdict.sh"`,

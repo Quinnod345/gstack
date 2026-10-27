@@ -196,9 +196,9 @@ describe('ready under a train policy: the screen choice', () => {
     expect(queue(fx, ['ready', '--pr', '1', '--broad']).status).toBe(EXIT.usage);
   }, 120_000);
 
-  // Value: protects=--screen never dispatches against a merge ref GitHub has not recomputed for the PR head (GSTA-95 on #3431: a stale ref made evals.yml plan 0 cases and report success);
-  // fails_when=the merge ref's second parent is not compared with the PR head, or a missing merge ref keeps the old QUEUE_NOT_READY code; why_new=the --screen test above only sees a fresh merge ref; seam=none; no_claim=GitHub's real recompute timing (a bare origin stands in)
-  test('--screen refuses QUEUE_SCREEN_STALE_REF when refs/pull/<n>/merge lags the PR head or is missing, dispatching nothing; a recomputed merge ref admits it', () => {
+  // Value: protects=--screen never dispatches against a merge ref GitHub has not recomputed for the PR head (GSTA-95 on #3431: a stale ref made evals.yml plan 0 cases and report success): a lagging, missing or unfetchable ref is replaced by a scratch merge of the head onto current main (#3465), and an unreachable remote is still refused;
+  // fails_when=the merge ref's parents are not compared with the PR head and current main, or the scratch merge is skipped; why_new=the --screen test above only sees a fresh merge ref; seam=none; no_claim=GitHub's real recompute timing (a bare origin stands in)
+  test('--screen plans the screen on a scratch merge when refs/pull/<n>/merge lags the PR head, is missing or cannot be fetched; an unreachable remote is POLICY_SOURCE_UNAVAILABLE; a recomputed merge ref is used as is', () => {
     const { fx, head, pregate } = readyFixture();
     const { repo } = fx;
     fs.appendFileSync(path.join(repo.work, 'pr-1.txt'), 'pushed after the merge ref was computed\n');
@@ -208,41 +208,41 @@ describe('ready under a train policy: the screen choice', () => {
     fx.write(d => { (d.prs['1'] as any).headRefOid = moved; (d.prs['1'] as any).body = shippedBody('1', moved); d.ci[moved] = [{ status: 'completed', conclusion: 'success' }]; });
     const pregate2 = path.join(repo.root, 'pregate2.json');
     fs.writeFileSync(pregate2, JSON.stringify({ schema_version: 1, tree: runBin(repo, 'gstack-wtree', []).out.trim(), head: moved, verdict: 'pass', checks: [{ id: 'unit', status: 'pass' }] }));
-    const stale = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
-    expect(stale.status).toBe(EXIT.refused);
-    expect(stale.err).toMatch(new RegExp(`refs/pull/1/merge \\([0-9a-f]{12}\\) merges ${head.slice(0, 12)}, not the PR head ${moved.slice(0, 12)}.*\\(QUEUE_SCREEN_STALE_REF\\)`));
-    expect(line(stale.out, 'NEXT:')).toBe('NEXT: resolve the conflict with main (or wait for GitHub to recompute refs/pull/1/merge), push, then gstack-ship-queue ready --pr 1 --screen; a screen dispatched on a stale merge ref plans no cases');
+    const stale = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen', '--dry-run']);
+    expect([stale.status, stale.err]).toEqual([EXIT.ok, '']);
+    expect(line(stale.out, 'SCREEN_MERGE:')).toMatch(new RegExp(`^SCREEN_MERGE: scratch merge [0-9a-f]{12} of #1@${moved.slice(0, 12)} onto main@[0-9a-f]{12} \\(refs/pull/1/merge [0-9a-f]{12} merges ${head.slice(0, 12)}, not ${moved.slice(0, 12)}\\); would push screen/1-${moved.slice(0, 12)} \\(dry run\\)$`));
     repo.git('push', '-q', 'origin', ':refs/pull/1/merge');
-    const missing = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
-    expect(missing.status).toBe(EXIT.refused);
-    expect(missing.err).toMatch(/has no refs\/pull\/1\/merge.*\(QUEUE_SCREEN_STALE_REF\)/);
+    const missing = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen', '--dry-run']);
+    expect([missing.status, missing.err]).toEqual([EXIT.ok, '']);
+    expect(line(missing.out, 'SCREEN_MERGE:')).toContain('(origin has no refs/pull/1/merge); would push');
     const tree = repo.git('rev-parse', `${moved}^{tree}`);
     const main = repo.git('rev-parse', 'origin/main');
     const badMerge = spawnSync('git', ['-C', repo.origin, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally'], { input: `tree ${tree}\nparent ${main}\nparent ${moved}\nauthor A <a@example.com> 1700000000 +0000\ncommitter B 1700000000 +0000\n\nmerge without a committer email\n`, encoding: 'utf8', timeout: 30_000 }).stdout.trim();
     spawnSync('git', ['-C', repo.origin, 'update-ref', 'refs/pull/1/merge', badMerge], { timeout: 30_000 });
     repo.git('config', 'fetch.fsckObjects', 'true');
-    const unfetchable = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
-    expect(unfetchable.status).toBe(EXIT.refused);
-    expect(unfetchable.err).toMatch(/could not fetch refs\/pull\/1\/merge from origin: .*\(QUEUE_SCREEN_STALE_REF\)/);
-    expect(line(unfetchable.out, 'NEXT:')).toBe('NEXT: check the remote, then gstack-ship-queue ready --pr 1 --screen');
+    const unfetchable = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen', '--dry-run']);
+    expect([unfetchable.status, unfetchable.err]).toEqual([EXIT.ok, '']);
+    expect(line(unfetchable.out, 'SCREEN_MERGE:')).toMatch(/\(refs\/pull\/1\/merge [0-9a-f]{12} could not be fetched\); would push/);
     repo.git('config', '--unset', 'fetch.fsckObjects');
     const originUrl = repo.git('remote', 'get-url', 'origin');
     repo.git('remote', 'set-url', 'origin', path.join(repo.root, 'no-such-origin.git'));
     const unlisted = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen']);
     repo.git('remote', 'set-url', 'origin', originUrl);
     expect(unlisted.status).toBe(EXIT.refused);
-    expect(unlisted.err).toMatch(/could not list origin's refs: .*\(QUEUE_SCREEN_STALE_REF\)/);
+    expect(unlisted.err).toMatch(/git fetch origin main failed: .*\(POLICY_SOURCE_UNAVAILABLE\)/);
     expect(unlisted.err.split('\n').filter(Boolean).length).toBe(1);
     expect(dispatches(fx)).toEqual([]);
     expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready'))).toBe(false);
     repo.git('push', '-q', '-f', 'origin', `${mergeRefCommit(fx, moved)}:refs/pull/1/merge`);
     const fresh = queue(fx, ['ready', '--pr', '1', '--pregate', pregate2, '--screen', '--dry-run']);
     expect([fresh.status, fresh.err]).toEqual([EXIT.ok, '']);
+    expect(line(fresh.out, 'SCREEN_MERGE:')).toMatch(new RegExp(`^SCREEN_MERGE: GitHub's refs/pull/1/merge [0-9a-f]{12} merges the head ${moved.slice(0, 12)} onto main@[0-9a-f]{12}$`));
     expect(line(fresh.out, 'SCREEN_DISPATCH:')).toContain('(dry run: not dispatched)');
+    expect(repo.git('ls-remote', 'origin', 'refs/heads/screen/*')).toBe('');
   }, 120_000);
 
   // Value: protects=a finished screen that planned 0 cases never counts as a screen: ready dispatches a fresh one instead of adopting it and train build seats the slot unscreened with a SCREEN: line;
-  // fails_when=the census is not read (a hollow run is followed, or ORDER says screened); why_new=no test reads a screen run's record; seam=none; no_claim=evals.yml's real artifact (the shim's record stands in)
+  // fails_when=the census is not read (a not-run screen is followed, or ORDER says screened); why_new=no test reads a screen run's record; seam=none; no_claim=evals.yml's real artifact (the shim's record stands in)
   test('a screen run that planned 0 cases is not followed by ready and is counted as not-run by train build', () => {
     const { fx, head, pregate } = readyFixture();
     fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: null }; });
@@ -260,7 +260,7 @@ describe('ready under a train policy: the screen choice', () => {
     fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 0 } }; });
     const emptyPlan = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(line(emptyPlan.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 102 .*not following run 101 planned no cases/);
-    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 3 } }; });
+    fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success', plan: { planned: 3 }, binding: { verdict: 'GREEN' } }; });
     const live = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--screen']);
     expect(live.status).toBe(EXIT.ok);
     expect(line(live.out, 'SCREEN_DISPATCH:')).toMatch(/^SCREEN_DISPATCH: evals\.yml run 103 .*not following run 102 planned no cases \(an empty plan manifest; concluded success\)/);
@@ -269,10 +269,11 @@ describe('ready under a train policy: the screen choice', () => {
     expect(line(followed.out, 'SCREEN_DISPATCH:')).toBe('SCREEN_DISPATCH: following run 103 (same merge SHA, base and policy; no duplicate)');
     expect(dispatches(fx, 'evals.yml').length).toBe(4);
     const liveBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
-    expect([liveBuild.status, line(liveBuild.out, 'ORDER:'), line(liveBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
-    fx.write(d => { d.rules['evals.yml'] = { status: 'in_progress', conclusion: null }; });
+    expect([liveBuild.status, line(liveBuild.out, 'ORDER:'), line(liveBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 run 103 GREEN']);
+    fx.write(d => { for (const run of d.runs) if ((run as any).databaseId === 103) Object.assign(run, { status: 'in_progress', conclusion: null }); });
     const runningBuild = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
-    expect([runningBuild.status, line(runningBuild.out, 'ORDER:'), line(runningBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', '']);
+    expect([runningBuild.status, line(runningBuild.out, 'ORDER:'), line(runningBuild.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', 'SCREEN: #1 run 103 still running; counted as screened']);
+    fx.write(d => { for (const run of d.runs) if ((run as any).databaseId === 103) Object.assign(run, { status: 'completed', conclusion: 'success' }); });
     fx.write(d => { d.rules['evals.yml'] = { status: 'completed', conclusion: 'success' }; d.artifacts['103']['paid-plan'] = { reuse: 'confirmed' }; });
     const unreadable = queue(fx, ['train', 'build', '--prs', `1@${head}`, '--dry-run']);
     expect([unreadable.status, line(unreadable.out, 'ORDER:'), line(unreadable.out, 'SCREEN:')]).toEqual([EXIT.ok, 'ORDER: 1:#1(screened)', "SCREEN: #1 run 103's paid-plan manifest.json is unreadable; counted as screened, unverified"]);
