@@ -753,7 +753,7 @@ do not launch the downstream skill or open a browser.`,
     behavioral: 'none',
     maxSkeletonBytes: 137_767, // measured 137767 (2026-10-26; 137773 on 2026-10-25 before the shorter craft-audit trigger): the Section index the external-host carve test requires, its craft-audit row, and the STOP pointer (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
     minUnionBytes: 143_300, // measured union 145037 (2026-10-26)
-    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-craft', 'Proof beside each claim', 'holds session data'],
+    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-lint', 'Proof beside each claim', 'holds session data'],
     maxSizeRatio: 1.3704, // first parity guard for design-review: measured 145082 / 105,842 = 1.3708 (2026-10-25; 145077 after the /ship review fixes, 145068 = 1.3707 after the line-13 reword, 145049 = 1.3705 after the post-merge /ship review, 145037 = 1.3704 after its second pass, 2026-10-26), the skeleton's growth since v1.64.1.0 plus the craft audit (Garry 2026-10-25 'Do it' (GSTA-92)).
   },
 

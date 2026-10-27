@@ -46,8 +46,8 @@ signature components are not carried over):
   line-break and motion rules from landing-page-design Part B, the website
   context of design-to-motion and the redesign-skill audit; and the generated
   `design-html/SKILL.md` / `sections/craft.md`.
-- `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
-  ship-floor tells, turned into a free check.
+- `lib/design-lint/rules/copy.ts`: the content-realism and ship-floor tells,
+  the design lint's copy tier.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
 - `design-review/sections/craft-audit.md.tmpl` (and the generated
   `sections/craft-audit.md`): the redesign-skill audit of an existing site,
