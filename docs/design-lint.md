@@ -313,7 +313,7 @@ literal on a page with no tokens bypasses nothing; its Tailwind half, an
 arbitrary value like `bg-[#0b0b12]` or `font-['Inter']`, fires on any page,
 since Tailwind's theme is the token block it bypasses). A project that names its
 tokens `--bg` or `--brand` gets none of those checks and no signal that they
-did not run; Phase 2 reads the roles from DESIGN.md.
+did not run; reading the roles from DESIGN.md is left to a later phase.
 
 The token block is `:root`, `html`, a `[data-theme|mode|scheme]` scope, `@theme`,
 `@font-face` and anything in a `tokens.css`. Its values are read in one mode:
@@ -351,7 +351,7 @@ measures layout, it does not read the copy.
 (the second time in each comma part) or its `transition-delay`, 100ms and
 over; a `0.2s` or `200ms` fade is a duration, not a delay. Where a rule id is shared with
 `lib/design-catalog.ts`, the tier here follows hallmark's gate (several
-catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
+catalog `ask` rows are `blocks` here); a later phase reconciles the two before a
 catalog row is marked `detect: lint`. Also outside the lint: `system-ui` or
 `-apple-system` as the body's first face (`system-font-primary`; the
 `overused-font` rule reads display tokens and heading selectors, as hallmark's
@@ -395,4 +395,4 @@ range).
 hallmark's theme stamp (the CSS comment that declares a theme, a posture and a
 hero shape) and every guard that reads it; the genre flag; the judged gates
 (the AI template shape, section rhythm, hover by judgement, toasts, the
-reviews); the `--before` / `--kept` redesign record (Phase 2); the photo index.
+reviews); the `--before` / `--kept` redesign record (left to a later phase); the photo index.
