@@ -144,10 +144,11 @@ function unionChangelog(ours: string, theirs: string): string {
 /**
  * One train merge, in object storage: the PR head onto the previous prefix.
  * Version files take the prefix's side; the CHANGELOG merges by section (the
- * gate-ahead rule, else a union of sections, since each heading is restamped
- * at merge), unless a side damaged released history (changelogDamage), which
- * is a conflict the lane resolves. Any other conflict is reported with every
- * conflicting path.
+ * gate-ahead rule with the merge base, which also carries a stacked child
+ * past its released parent, else a union of sections, since each heading is
+ * restamped at merge), unless a side damaged released history
+ * (changelogDamage), which is a conflict the lane resolves. Any other
+ * conflict is reported with every conflicting path.
  */
 export function mergeStep(repoRoot: string, pred: string, head: string, policy: ShipPolicy): { tree: string } | { conflicts: string[] } {
   const r = git(repoRoot, ['merge-tree', '--write-tree', head, pred]);
@@ -175,10 +176,10 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
     else if (file === policy.changelog) {
       const text = (sha: string) => git(repoRoot, ['cat-file', 'blob', sha]).out + '\n';
       const base = entry.get(1);
-      const damage = changelogDamage(text(ours), text(theirs), base ? text(base) : undefined);
+      const merged = mergeChangelogs(text(ours), text(theirs), base ? text(base) : undefined);
+      const damage = merged ? null : changelogDamage(text(ours), text(theirs), base ? text(base) : undefined);
       if (damage) { conflicts.push(`${file} (${damage})`); continue; }
-      const merged = mergeChangelogs(text(ours), text(theirs)) ?? unionChangelog(text(ours), text(theirs));
-      const blob = git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged);
+      const blob = git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged ?? unionChangelog(text(ours), text(theirs)));
       if (blob.ok) resolved.push({ path: file, blob: blob.out }); else conflicts.push(file);
     } else if (stampFiles.includes(file)) resolved.push({ path: file, blob: theirs });
     else conflicts.push(file);
@@ -605,7 +606,7 @@ export function trainStatus(ctx: QueueContext, o: { train?: string }): TrainOut 
 }
 
 /** A PR's state on GitHub for the stale check: MERGED, CLOSED, OPEN, or unreadable. */
-function prState(ctx: QueueContext, pr: string): string {
+export function prState(ctx: QueueContext, pr: string): string {
   const info = prInfo(ctx, pr);
   return 'error' in info ? 'unreadable' : info.state.toUpperCase();
 }

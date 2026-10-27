@@ -539,13 +539,54 @@ EVAL_POLICY records it. Bisect results never turn a train green.
 ```bash
 git fetch origin main
 git merge --no-ff --no-commit origin/main        # expect a CHANGELOG.md conflict only
-bun --no-env-file --config=/dev/null -e "import { mergeChangelogs } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogs(s(2), s(3), s(1)); if (!m) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m);"
+bun --no-env-file --config=/dev/null -e "import { mergeChangelogsWithNotes } from './lib/changelog-check'; import { spawnSync } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const s = (n) => spawnSync('git', ['show', ':' + n + ':CHANGELOG.md'], { encoding: 'utf8', maxBuffer: 1 << 26, timeout: 30000 }).stdout; const m = mergeChangelogsWithNotes(s(2), s(3), s(1)); for (const n of m.notes) console.error('CHANGELOG: carried as a Gate integrity correction: ' + n); if (!m.text) { console.error('CHANGELOG needs a hand merge'); process.exit(1); } writeFileSync('CHANGELOG.md', m.text);"
 git add CHANGELOG.md && git commit --no-edit
 gstack-restamp --next --base main --pr 42 --expect-base <main sha> --expect-order <order> --allow-repo-commands
 git add CHANGELOG.md VERSION package.json <release outputs> && git commit -m "v<X> stamp" && git push
 ```
 
 A conflict in any file other than CHANGELOG.md means the merge isn't the train's prefix. Stop and report it. When the helper says the CHANGELOG needs a hand merge, take main's CHANGELOG unchanged and put your own entry above it. `verify` accepts the resulting head because it contains main and its tree equals T<i> modulo stamps, with its CHANGELOG judged as main's plus lines your pin added, however the conflict was resolved; the `head:` line says "T<i> with main merged in".
+
+**The stamp commit is the base merge plus the stamp files, never a fifth.** The
+restamp writes the version files, the CHANGELOG, the `release_outputs` and the
+`stamp_paths` lines the branch itself added (gstack: `CHANGELOG.md`, `VERSION`,
+`package.json`, `agents-digest/gstack-AGENTS.md`, and a `*_KEY_VERSION` the PR
+introduced). A line the base added since the pin's fork point is the base's,
+whether the base merge is committed or still staged (`stage stamp_paths` says
+"N line(s) the base added since the fork point are the base's"; train 24,
+2026-10-27, moved main's `DOCS_CAPS_KEY_VERSION` in both slots before this
+rule). A file the restamp lists that the slot call did not name is not a stamp:
+leave it out and report it. The tree receipt refuses such a move after the fact
+only while the moved version is older than the base's at the build, so the
+restamp, not the receipt, is what keeps the base's key in place.
+
+**A stacked child whose parent merged earlier.** When the pin was stacked on a
+PR that squash-merged in an earlier slot or train, the base merge conflicts
+beyond the CHANGELOG wherever the parent's squash and the pin touched the same
+lines. Take the pin's bytes for those files: `verify` checks the tree against
+T<i>, the train's own merge of that pin, so the parent's content is already in
+the prefix. The CHANGELOG is `mergeChangelogs`' job and needs no hand merge for
+this shape: the pin's `[Unreleased]` still holds the parent's entry (as forked,
+maybe edited) while main carries it under a released heading the merge base
+lacks, so the parent's lines leave the child's section and each edit the child
+made to them becomes a `- Correction to the <version> entry below: "<old>"
+should read "<new>".` bullet under the child's own `### Gate integrity` (the
+one-liner prints each carried correction). The released entry stays main's byte
+for byte, and `verify` accepts those bullets as the pin's own lines because
+the tool writes them. A pin that does not carry base can still be refused here
+(`ours's Unreleased section holds released <version> text`): that is the
+GSTA-67 shape, a released heading dropped by hand, and stays a hand merge.
+
+**A generator change on an unstamped head.** A release output such as
+`agents-digest/gstack-AGENTS.md` is stamped at the slot, and an unstamped PR
+changes it the ordinary way: edit the generator, regenerate at the branch's
+own `VERSION` (its merge base's), and commit both. CI's Version Gate
+regenerates the output at that VERSION and reads a byte-identical result as
+unstamped ([what /ship reads](#ship), since 1.91.237.0); the freshness test
+compares against the checkout's VERSION, so it passes before and after the
+slot's restamp regenerates the file at the new version. Never revert a
+regenerated output to the base's bytes to get past the gate (#3434 did, on a
+gate older than that rule, and shipped a stale digest line until its merge).
 
 **5. Coordinator: verify, merge, verify again.** For each slot in order:
 
@@ -558,15 +599,23 @@ gstack-ship-queue verify --pr 41 --train <nonce>   # VERIFY_TRAIN: #41 merged; m
 Before a merge, main's tree must equal the prefix before the PR modulo stamps
 and the PR must be at its pin (stamps aside) or contain main and be T<i>
 modulo stamps (its pin with main merged in; its CHANGELOG must be main's with
-only lines from the pin's own CHANGELOG diff above it); after it, main's tree
-must equal the prefix after it. Anything else is `QUEUE_TRAIN_TREE_MISMATCH`
-(or `QUEUE_TRAIN_MOVED`). When nothing of the train has merged, that is a plain
-refusal: build a new train on current main. When earlier slots already
-merged, main holds a prefix no gate covered on its own, so verify freezes the
-queue: the freeze goes to local state and the notes ref first, then the full
-gate is dispatched on main's SHA at once (the backstop), and the
-`QUEUE_TRAIN_FROZEN:` line lists the merged PRs, main's tree and the backstop
-run. While frozen, ordinary trains and other trains' merges are refused
+only lines from the pin's own CHANGELOG diff, or lines `mergeChangelogs`
+writes for that pin against main, above it); after it, main's tree must equal
+the prefix after it modulo stamps, or differ from it in the CHANGELOG alone
+while being its own first parent's CHANGELOG (the main the pre-merge verify
+saw, itself the prefix before modulo stamps) plus the PR's own entry under the
+same rule. One CHANGELOG rule, before and after: a head the pre-merge verify
+accepted confirms after its squash merge with the same CHANGELOG, and a
+stacked child whose one `[Unreleased]` became two released sections is not a
+mismatch (train 24, 2026-10-27, froze on exactly that). Anything else is
+`QUEUE_TRAIN_TREE_MISMATCH` (or `QUEUE_TRAIN_MOVED`). When nothing of the train
+has merged, that is a plain refusal: build a new train on current main. When
+earlier slots already merged, main holds a prefix no gate covered on its own,
+so verify freezes the queue: the freeze goes to local state and the notes ref
+first, then the full gate is dispatched on main's SHA at once (the backstop),
+and the `QUEUE_TRAIN_FROZEN:` line lists the merged PRs, main's tree and the
+backstop run. A slot GitHub reports MERGED counts as merged in that record,
+verified tree or not, so the rebuild after the repair never seats it again. While frozen, ordinary trains and other trains' merges are refused
 (`QUEUE_TRAIN_FROZEN`). Admit one repair PR at its exact head:
 
 ```bash

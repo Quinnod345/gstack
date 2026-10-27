@@ -15,6 +15,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { mergeChangelogs, parseChangelog } from '../lib/changelog-check';
 import { EXIT } from '../lib/headless-artifacts';
 import { baseOverlap } from '../lib/ship-queue-train';
 import { TRAIN_HELP } from '../lib/ship-queue-train-cli';
@@ -919,5 +920,78 @@ describe('verify, freeze, repair and clear', () => {
     const noMain = v();
     expect(noMain.status).toBe(EXIT.fail);
     expect(noMain.err).toContain(`(${orphan.slice(0, 12)}: does not contain main ${main1.slice(0, 12)}; against the pin it differs: `);
+  }, 300_000);
+  // fails_when=the post-merge verify of a merged-in head the pre-merge verify accepted freezes the queue because T<i>'s single [Unreleased] became two released sections, or the pre-merge verify refuses the correction bullet mergeChangelogs itself wrote; why_new=the GSTA-67 test above never publishes the accepted head and never stacks a child on a released parent; seam=none (real git, the fixture's gh); no_claim=what the squash commit's message says
+  test("train 24 (GSTA-96): a stacked child's head the pre-merge verify accepted confirms after its squash merge under the same CHANGELOG rule, corrections to the released parent included", () => {
+    const fx = make();
+    const { repo } = fx;
+    const h1 = openPr(fx, '1', { changelog: cl => cl.replace('# Changelog\n', '# Changelog\n\n## [Unreleased]\n\n**Parent entry of #1.**\n\n### Changed\n- #1 change, the first wording\n- #1 second bullet, unchanged\n') });
+    const h2 = openPr(fx, '2', { from: 'pr-1', changelog: cl => cl.replace('## [Unreleased]\n\n**Parent entry of #1.**', '## [Unreleased]\n\n**Child entry of #2.**\n\n### Changed\n- #2 change\n\n**Parent entry of #1.**').replace('- #1 change, the first wording', '- #1 change, the better wording') });
+    readyReceipt(fx, '1', h1);
+    readyReceipt(fx, '2', h2);
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const nonce = nonceOf(queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`]).out);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    expect(parseChangelog(repo.git('show', `${t.prefixes[2].commit}:CHANGELOG.md`)).sections.map(s => s.version ?? 'Unreleased')).toEqual(['Unreleased', '1.2.3.0', '1.2.2.0']);
+    const coord = coordinatorClone(fx.repo);
+    const v = (pr: string) => queue(fx, ['verify', '--pr', pr, '--train', nonce], {}, coord);
+
+    // Slot 1: #1 squash-merges and is released as 1.2.4.0 (its [Unreleased] re-headed).
+    expect(line(v('1').out, 'MERGE_CONDITION:')).toBe(`MERGE_CONDITION: sha=${h1}`);
+    const main1 = publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: repo.git('show', `${t.prefixes[1].commit}:CHANGELOG.md`).replace('## [Unreleased]', '## [1.2.4.0] - 2026-10-18') + '\n' });
+    expect(v('1').out).toContain(`VERIFY_TRAIN: #1 merged; main's tree is T1 of train ${nonce} (1/2 merged)`);
+
+    // Slot 2: the lane merges main into its pin; mergeChangelogs carries the child past its released parent.
+    const merged = mergeChangelogs(repo.git('show', `${h2}:CHANGELOG.md`) + '\n', repo.git('show', `${main1}:CHANGELOG.md`) + '\n', repo.git('show', `${h1}:CHANGELOG.md`) + '\n')!;
+    expect(merged).toContain('- Correction to the 1.2.4.0 entry below: "first" should read "better".');
+    repo.git('reset', '-q', '--hard');
+    repo.git('checkout', '-q', '-B', 'lane2', h2);
+    repo.git('rm', '-rq', '.');
+    repo.git('checkout', t.prefixes[2].commit, '--', '.');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), merged.replace('## [Unreleased]', '## [1.2.5.0] - 2026-10-18'));
+    repo.git('add', '-A');
+    const laneHead = repo.git('commit-tree', repo.git('write-tree'), '-p', h2, '-p', main1, '-m', 'merge main into #2, stamp 1.2.5.0');
+    repo.git('push', '-q', '-f', 'origin', `${laneHead}:refs/pull/2/head`);
+    repo.git('reset', '-q', '--hard');
+    const pre = v('2');
+    expect([pre.status, pre.err]).toEqual([EXIT.ok, '']);
+    expect(pre.out).toContain(`head: ${laneHead} (T2 with main merged in, same modulo stamps (1 stamp file(s)) except CHANGELOG.md, resolved as main's CHANGELOG.md plus #2's own entry)`);
+    expect(line(pre.out, 'MERGE_CONDITION:')).toBe(`MERGE_CONDITION: sha=${laneHead}`);
+
+    // The squash merge publishes exactly that tree; the post-merge verify confirms it instead of freezing the queue.
+    const main2 = publishMain(fx, laneHead, '1.2.5.0');
+    expect(repo.git('rev-parse', `${main2}^{tree}`)).toBe(repo.git('rev-parse', `${laneHead}^{tree}`));
+    const post = v('2');
+    expect([post.status, post.err]).toEqual([EXIT.ok, '']);
+    expect(line(post.out, 'main:')).toBe(`main: ${main2} = T2 (same modulo stamps (1 stamp file(s)) except CHANGELOG.md, main ${main1.slice(0, 12)}'s CHANGELOG.md plus #2's own entry)`);
+    expect(post.out).toContain(`VERIFY_TRAIN: #2 merged; main's tree is T2 of train ${nonce} (2/2 merged)`);
+    expect(queue(fx, ['train', 'status']).out).not.toContain('QUEUE_TRAIN_FROZEN');
+  }, 300_000);
+
+  // fails_when=a freeze lists a PR GitHub reports MERGED as unmerged (train 24's freeze named #3453), or a post-merge CHANGELOG with a line the pin never wrote confirms; why_new=the freeze test above merges nothing of the slot it freezes on; seam=the fixture's gh pr view state; no_claim=the backstop's outcome
+  test('a post-merge CHANGELOG beyond the rule still freezes, and the freeze lists the slot GitHub reports MERGED as merged, not unmerged', () => {
+    const fx = make();
+    const { h2, nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    const coord = coordinatorClone(fx.repo);
+    const v = (pr: string) => queue(fx, ['verify', '--pr', pr, '--train', nonce], {}, coord);
+    const released = (prefix: string, version: string) => fx.repo.git('show', `${prefix}:CHANGELOG.md`).replace('## [Unreleased]', `## [${version}] - 2026-10-18`) + '\n';
+    const main1 = publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: released(t.prefixes[1].commit, '1.2.4.0') });
+    expect(v('1').status).toBe(EXIT.ok);
+    expect(line(v('2').out, 'MERGE_CONDITION:')).toBe(`MERGE_CONDITION: sha=${h2}`);
+    // Main's CHANGELOG plus #2's stamped entry, with one line the pin never wrote.
+    const smuggled = fx.repo.git('show', `${main1}:CHANGELOG.md`).replace('# Changelog\n', '# Changelog\n\n## [1.2.5.0] - 2026-10-18\n\n- #2 change\n- added after the gate\n') + '\n';
+    const broken = publishMain(fx, t.prefixes[2].commit, '1.2.5.0', { file: 'CHANGELOG.md', text: smuggled });
+    fx.write(d => { (d.prs['2'] as any).state = 'MERGED'; });
+    const frozen = v('2');
+    expect(frozen.status).toBe(EXIT.fail);
+    expect(frozen.err).toContain(`main ${broken.slice(0, 12)} is neither T1 nor T2 modulo stamps (vs T2: differs: CHANGELOG.md, which is not main ${main1.slice(0, 12)}'s plus #2's own entry: the PR's entry holds a line its pin never added: "- added after the gate")`);
+    expect(line(frozen.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1,#2; main /);
+    expect(line(frozen.out, 'freeze:')).toMatch(/; #2 merged on GitHub without a verified tree; unmerged \(none\); repair none admitted$/);
+    const freezeFile = path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`);
+    expect(JSON.parse(fs.readFileSync(freezeFile, 'utf8'))).toMatchObject({ merged: ['1', '2'], unmerged: [] });
   }, 300_000);
 });
