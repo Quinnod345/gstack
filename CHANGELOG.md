@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.283.0] - 2026-10-27
 
 **/benchmark's collection, comparison, budget and trend phases now agree with its vet-the-number section.** The 2026-10-27 flaky pass (GSTA-128) read the `benchmark/SKILL.md perf collection` judge's six samples from run 40558235014: every sample named the same contradictions, so the prose was repaired and no threshold moved.
 
