@@ -47,6 +47,8 @@ export interface ShimData {
   ci: Record<string, unknown[]>; rules: Record<string, Rule>; artifact: string; log: Array<Record<string, unknown>>;
   /** Commit statuses (the legacy status API) at a sha, beside the check runs in `ci`. */
   statuses?: Record<string, Array<{ state: string; context: string }>>;
+  /** Per PR, how many more `gh pr view` calls answer before the PR reads as not found (a GitHub answer that changes between two reads). */
+  vanish?: Record<string, number>;
 }
 
 export interface TrainFixture { repo: FixtureRepo; state: string; dataFile: string; env: Record<string, string>; read: () => ShimData; write: (fn: (d: ShimData) => void) => void }
@@ -156,7 +158,7 @@ function shimSource(): string {
     "const rev = r => { const x = cp.spawnSync('git', ['--git-dir', d.origin, 'rev-parse', '--verify', '--quiet', r], { encoding: 'utf8', timeout: 30000 }); return x.status === 0 ? x.stdout.trim() : ''; };",
     "d.log.push({ cmd: a.slice(0, 2).join(' '), args: a });",
     "if (a[0] === 'repo' && a[1] === 'view') out({ nameWithOwner: d.repo });",
-    "if (a[0] === 'pr' && a[1] === 'view') { const p = d.prs[a[2]]; if (!p) fail('no pull request found'); out(p); }",
+    "if (a[0] === 'pr' && a[1] === 'view') { const p = d.prs[a[2]]; const left = d.vanish && d.vanish[a[2]]; if (left !== undefined) { if (left <= 0) fail('no pull request found'); d.vanish[a[2]] = left - 1; } if (!p) fail('no pull request found'); out(p); }",
     "if (a[0] === 'workflow' && a[1] === 'run') {",
     "  const w = a[2]; const ref = opt('--ref'); const inputs = {};",
     "  a.forEach((x, i) => { if (x === '-f') { const kv = a[i + 1]; const k = kv.slice(0, kv.indexOf('=')); inputs[k] = kv.slice(kv.indexOf('=') + 1); } });",

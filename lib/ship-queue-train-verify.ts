@@ -21,9 +21,9 @@ import { bindReceipt } from './ship-receipt';
 import { checkRun, execFor, prInfo, repoSlug } from './ship-queue-train-github';
 import { activeFreeze, attemptsOf, nowIso, persist, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
 import {
-  effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
+  effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prState, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
 } from './ship-queue-train';
-import { ownEntryAboveMain } from './changelog-check';
+import { mergeChangelogs, ownEntryAboveMain, parseChangelog } from './changelog-check';
 import { buildReceipt } from './tree-receipt';
 
 const Q = 'gstack-ship-queue';
@@ -35,12 +35,40 @@ function sameModuloStamps(env: TrainEnv, gated: string, current: string): { same
 }
 
 /**
+ * The one CHANGELOG rule of a slot, applied before and after the merge:
+ * `current`'s CHANGELOG must be `mainBefore`'s with the PR's own entry above it
+ * (ownEntryAboveMain), the own lines being those the pin's CHANGELOG diff from
+ * its fork point added, or those `mergeChangelogs` itself writes for the pin
+ * against that main (a released parent's carried corrections, GSTA-96). Pre-merge
+ * `current` is the lane's head and `mainBefore` is main; post-merge `current` is
+ * main and `mainBefore` its first parent, the main the pre-merge verify saw.
+ * Null when it holds, else why not.
+ */
+function changelogIsMainPlusOwn(env: TrainEnv, t: TrainRecord, i: number, current: string, mainBefore: string): string | null {
+  const cl = env.policy.policy.changelog!;
+  const root = env.ctx.repoRoot;
+  const pin = t.slots[i]!.head;
+  const forkPoint = git(root, ['merge-base', pin, t.prefixes[0]!.commit]).out;
+  const diff = git(root, ['diff', '--unified=0', '--no-color', '--no-ext-diff', forkPoint, pin, '--', cl]);
+  const show = (rev: string) => git(root, ['show', `${rev}:${cl}`]);
+  const [currentCl, mainCl, pinCl, forkCl] = [show(current), show(mainBefore), show(pin), show(forkPoint)];
+  if (!forkPoint || !diff.ok || !currentCl.ok || !mainCl.ok) return `cannot read ${cl} at the pin, ${current.slice(0, 12)} or main ${mainBefore.slice(0, 12)}`;
+  const authored = new Set(diff.out.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)));
+  const tool = pinCl.ok ? mergeChangelogs(pinCl.out + '\n', mainCl.out + '\n', forkCl.ok ? forkCl.out + '\n' : undefined) : null;
+  if (tool) {
+    const mainKeys = new Set(parseChangelog(mainCl.out).sections.map(s => s.version ?? 'Unreleased'));
+    for (const s of parseChangelog(tool).sections.filter(s => !mainKeys.has(s.version ?? 'Unreleased'))) for (const l of s.lines.slice(1)) authored.add(l);
+  }
+  return ownEntryAboveMain(currentCl.out, mainCl.out, authored);
+}
+
+/**
  * A slot head with main merged in (from slot 2 on the lane merges main into
  * its pin so GitHub can merge it): it must contain main, and its tree must be
  * the slot's prefix T<i> modulo stamps. The CHANGELOG is judged against main
- * instead of T<i>'s mechanical merge, so a hand resolve is accepted when it
- * is main's CHANGELOG plus the PR's own entry (ownEntryAboveMain); any other
- * difference is refused.
+ * instead of T<i>'s mechanical merge (changelogIsMainPlusOwn), so a hand
+ * resolve is accepted when it is main's CHANGELOG plus the PR's own entry;
+ * any other difference is refused.
  */
 function mergedIn(env: TrainEnv, t: TrainRecord, i: number, head: string, main: string): { same: boolean; detail: string } {
   const after = t.prefixes[i + 1]!;
@@ -53,28 +81,55 @@ function mergedIn(env: TrainEnv, t: TrainRecord, i: number, head: string, main: 
   const cl = env.policy.policy.changelog;
   const beyond = r.residual.filter(f => f !== cl);
   if (beyond.length || !cl) return { same: false, detail: `differs from T${after.index}: ${r.residual.slice(0, 8).join(', ')}` };
-  const pin = t.slots[i]!.head;
-  const forkPoint = git(root, ['merge-base', pin, t.prefixes[0]!.commit]).out;
-  const diff = git(root, ['diff', '--unified=0', '--no-color', '--no-ext-diff', forkPoint, pin, '--', cl]);
-  const show = (rev: string) => git(root, ['show', `${rev}:${cl}`]);
-  const [headCl, mainCl] = [show(head), show(main)];
-  if (!forkPoint || !diff.ok || !headCl.ok || !mainCl.ok) return { same: false, detail: `cannot read ${cl} at the pin, the head or main` };
-  const authored = new Set(diff.out.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)));
-  const why = ownEntryAboveMain(headCl.out, mainCl.out, authored);
+  const why = changelogIsMainPlusOwn(env, t, i, head, main);
   if (why) return { same: false, detail: `differs from T${after.index} in ${cl}, which is not main's plus #${t.slots[i]!.pr}'s own entry: ${why}` };
   return { same: true, detail: `T${after.index} with main merged in, same modulo stamps (${stamps}) except ${cl}, resolved as main's ${cl} plus #${t.slots[i]!.pr}'s own entry` };
 }
 
 /**
+ * Post-merge, the same rule the pre-merge verify applied: main is T<i> modulo
+ * stamps, or differs from it in the CHANGELOG alone while being its own first
+ * parent (the main the pre-merge verify saw, itself T<i-1> modulo stamps) plus
+ * the PR's own entry. A merge the pre-merge verify accepted therefore confirms
+ * here with the same CHANGELOG (train 24, 2026-10-27: #3453's accepted head
+ * froze the queue post-merge because T2's one [Unreleased] had become two
+ * released sections).
+ */
+function published(env: TrainEnv, t: TrainRecord, i: number, main: string): { same: boolean; detail: string } {
+  const after = t.prefixes[i + 1]!;
+  const post = sameModuloStamps(env, after.commit, main);
+  if (post.same) return post;
+  const cl = env.policy.policy.changelog;
+  const r = buildReceipt({ repoRoot: env.ctx.repoRoot, gated: after.commit, current: main, policy: env.policy.policy, policyLabel: env.policy.source.label });
+  if ('error' in r || !cl || r.residual.some(f => f !== cl)) return post;
+  const parent = git(env.ctx.repoRoot, ['rev-parse', '--verify', '-q', `${main}^`]).out;
+  if (!parent || !sameModuloStamps(env, t.prefixes[i]!.commit, parent).same) return { same: false, detail: `${post.detail}; main's parent ${parent.slice(0, 12) || '(none)'} is not T${t.prefixes[i]!.index} modulo stamps` };
+  const why = changelogIsMainPlusOwn(env, t, i, main, parent);
+  if (why) return { same: false, detail: `${post.detail}, which is not main ${parent.slice(0, 12)}'s plus #${t.slots[i]!.pr}'s own entry: ${why}` };
+  return { same: true, detail: `same modulo stamps (${r.files.filter(f => f.verdict === 'stamp').length} stamp file(s)) except ${cl}, main ${parent.slice(0, 12)}'s ${cl} plus #${t.slots[i]!.pr}'s own entry` };
+}
+
+/**
  * Freeze the queue: the record goes to local state and the notes ref before
  * anything remote, then the backstop gate is dispatched on main's sha.
+ * `states` is the one GitHub read of every unverified slot, made by the
+ * caller: a slot that read MERGED is merged, verified tree or not, and a slot
+ * that could not be read is left out of `unmerged` and named in the reason
+ * (nothing reads it again; the operator seats it by hand once gh answers), so
+ * the rebuild after the repair never seats a PR that may already be in.
  */
-async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string): Promise<FreezeRecord> {
+async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string, states: ReadonlyMap<string, string>): Promise<FreezeRecord> {
   const now = nowIso();
+  const unverified = t.slots.filter(s => !t.merged.some(m => m.pr === s.pr));
+  const landed = unverified.filter(s => states.get(s.pr) === 'MERGED').map(s => s.pr);
+  const unreadable = unverified.filter(s => states.get(s.pr) === 'unreadable').map(s => s.pr);
+  const prs = (list: string[]) => list.map(p => '#' + p).join(', ');
   const f: FreezeRecord = {
-    schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: t.merged.map(m => m.pr),
-    unmerged: t.slots.filter(s => !t.merged.some(m => m.pr === s.pr)).map(s => ({ pr: s.pr, head: s.head })),
-    main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out }, reason, backstop: null, repair: null,
+    schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: [...t.merged.map(m => m.pr), ...landed],
+    unmerged: unverified.filter(s => !landed.includes(s.pr) && !unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
+    main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out },
+    reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers` : ''].filter(Boolean).join('; '),
+    backstop: null, repair: null,
     created_at: now, cleared_at: null, cleared_by: null, updated_at: now,
   };
   persist(env.ctx.repoRoot, [f], { remote: env.remote });
@@ -91,11 +146,22 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
   return f;
 }
 
-/** Interrupted publication: freeze when earlier slots merged; otherwise a plain refusal (nothing was published). */
+/**
+ * Interrupted publication: freeze when a slot merged, verified or merged on
+ * GitHub without a verified tree (slot 1's own squash failing the post-merge
+ * check leaves main unverified with nothing in `merged` yet); otherwise a
+ * plain refusal (nothing was published). A GitHub state that cannot be read
+ * is neither: the verify refuses and asks to be rerun, never "nothing merged".
+ */
 async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[]): Promise<TrainOut> {
   const run = trainFile(t.nonce);
-  if (!t.merged.length) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
-  const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha);
+  // One GitHub read per unverified slot decides both the freeze and its record.
+  const states = new Map(t.slots.filter(s => !t.merged.some(m => m.pr === s.pr)).map(s => [s.pr, prState(env.ctx, s.pr)] as const));
+  const landed = t.merged.length > 0 || [...states.values()].includes('MERGED');
+  const unreadable = landed ? [] : [...states].filter(([, state]) => state === 'unreadable').map(([pr]) => `#${pr}`);
+  if (unreadable.length) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `${message}; whether ${unreadable.join(', ')} merged on GitHub could not be read, so whether the queue must freeze is unknown` }, lines, `${Q} verify --pr ${t.slots[0]!.pr} --train ${t.nonce} (once gh pr view answers)`, run);
+  if (!landed) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
+  const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha, states);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
 }
 
@@ -121,7 +187,7 @@ export async function verifyTrain(ctx: QueueContext, o: { pr: string; train: str
   if (freeze && freeze.repair?.train !== t.nonce) return outRefused({ code: 'QUEUE_TRAIN_FROZEN', message: `the queue is frozen (${freeze.reason}); only the admitted repair train merges` }, frozenLines(freeze), `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
   const after = t.prefixes[i + 1]!;
   const before = t.prefixes[i]!;
-  const post = sameModuloStamps(env, after.commit, main);
+  const post = published(env, t, i, main);
   const lines = [`TRAIN: ${t.nonce} slot ${i + 1}/${t.slots.length} #${o.pr} pinned ${t.slots[i]!.head}`];
   if (post.same) return confirmMerged(env, t, o.pr, main, after.index, [...lines, `main: ${main} = T${after.index} (${post.detail})`]);
   const pre = sameModuloStamps(env, before.commit, main);

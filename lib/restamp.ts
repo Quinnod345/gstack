@@ -266,22 +266,29 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
 }
 
 /** The lines a branch itself added to one file: their text, and their 1-based positions in the working-tree file. */
-export interface AddedLines { text: Set<string>; at: Set<number> }
+export interface AddedLines { text: Set<string>; at: Set<number>; /** Lines the diff shows that `notOwn` names: the base's, left out. */ notOwn: number }
 
 /**
  * The lines a branch itself added, per stamp file: `git diff --unified=0 <since> -- <files>` in `cwd`
- * against its working tree. Positions are the parser's per-line count on the new side (context
- * lines included, and `--inter-hunk-context=0` keeps a `diff.interHunkContext` setting from joining
- * hunks), so a base line whose text equals an added line, or a CRLF checkout whose diff is
- * LF-normalized, is told apart by position.
+ * against its working tree (or against `to` when given). Positions are the parser's per-line count
+ * on the new side (context lines included, and `--inter-hunk-context=0` keeps a
+ * `diff.interHunkContext` setting from joining hunks), so a base line whose text equals an added
+ * line, or a CRLF checkout whose diff is LF-normalized, is told apart by position. A line in
+ * `notOwn` for the file (the base's own additions since `since`) is never the branch's: when the
+ * base is merged into the working tree uncommitted, HEAD still forks before that merge and the
+ * diff from the fork carries every line the base added since, main's own release keys included
+ * (train 24, 2026-10-27: `DOCS_CAPS_KEY_VERSION` from #3511 moved in both slots).
  */
-export function branchAddedLines(cwd: string, since: string, files: string[]): Map<string, AddedLines> {
+export function branchAddedLines(cwd: string, since: string, files: string[], to?: string, notOwn?: Map<string, AddedLines>): Map<string, AddedLines> {
   const out = new Map<string, AddedLines>();
   if (files.length === 0) return out;
-  const diff = git(cwd, ['diff', '--unified=0', '--inter-hunk-context=0', '--no-color', '--no-ext-diff', since, '--', ...files]);
+  const diff = git(cwd, ['diff', '--unified=0', '--inter-hunk-context=0', '--no-color', '--no-ext-diff', since, ...(to ? [to] : []), '--', ...files]);
+  // A failed diff must not read as "the branch added nothing" (or "the base added nothing"), which would move the base's lines again.
+  if (!diff.ok) throw new Refusal('POLICY_SOURCE_UNAVAILABLE', `cannot diff ${since.slice(0, 12)}..${to ? to.slice(0, 12) : 'the worktree'} for the stamp_paths stage (${(diff.err || diff.out).split('\n')[0]}); nothing written`);
   for (const f of parseUnifiedDiff(diff.out)) {
-    const own = out.get(f.path) ?? { text: new Set<string>(), at: new Set<number>() };
-    for (const h of f.hunks) h.added.forEach((a, i) => { own.text.add(a); own.at.add(h.addedAt[i]!); });
+    const own = out.get(f.path) ?? { text: new Set<string>(), at: new Set<number>(), notOwn: 0 };
+    const base = notOwn?.get(f.path)?.text;
+    for (const h of f.hunks) h.added.forEach((a, i) => { if (base?.has(a)) { own.notOwn += 1; return; } own.text.add(a); own.at.add(h.addedAt[i]!); });
     out.set(f.path, own);
   }
   return out;
@@ -516,7 +523,8 @@ function rewriteStampPaths(o: RestampOptions, plan: Plan, staging: string, since
     const why = assertInsideRoot(staging, rel);
     if (why) throw new Refusal('POLICY_CONTAINMENT', `${why}; nothing written`);
   }
-  const added = branchAddedLines(staging, since, files);
+  const baseAdded = branchAddedLines(o.repoRoot, since, files, plan.baseSha);
+  const added = branchAddedLines(staging, since, files, undefined, baseAdded);
   const explicit = new Set([...(o.was ? [o.was] : []), ...(plan.branchStamp ? [plan.branchStamp] : [])].filter(v => v !== plan.newVersion));
   const tentative = new Set(tentativeMentions(new Map([...added].map(([rel, own]) => [rel, own.text])), plan.forkVersion, plan.newVersion, templates).filter(v => !explicit.has(v)));
   const equalBase = !o.was && !plan.branchStamp && plan.baseVersion !== plan.newVersion ? plan.baseVersion : null;
@@ -559,9 +567,11 @@ function rewriteStampPaths(o: RestampOptions, plan: Plan, staging: string, since
     ? `; VERSION equals base ${equalBase}, so ${equalBase} moved only on lines this branch added and stayed on the base's own lines (${baseSide.join('; ')})`
     : '';
   const searched = explicit.size ? `no mention of ${[...explicit].join(', ')} in the stamp files and ` : '';
-  sp.detail = olds.length
+  const baseOwn = [...added].filter(([, own]) => own.notOwn);
+  const baseOwnNote = baseOwn.length ? `; ${baseOwn.reduce((n, [, own]) => n + own.notOwn, 0)} line(s) the base added since the fork point are the base's, not this branch's, and stay (${baseOwn.map(([rel, own]) => `${rel}: ${own.notOwn}`).join('; ')})` : '';
+  sp.detail = (olds.length
     ? `${total} mention(s) in ${touched} file(s) (${olds.join(', ')} -> ${plan.newVersion})${equalNote}`
-    : `${searched}no tentative mention newer than the fork version ${plan.forkVersion}${equalBase ? ` and none of base ${equalBase} on a line this branch added` : ''}${equalNote}`;
+    : `${searched}no tentative mention newer than the fork version ${plan.forkVersion}${equalBase ? ` and none of base ${equalBase} on a line this branch added` : ''}${equalNote}`) + baseOwnNote;
 }
 
 function applyToBranch(o: RestampOptions, staging: string, wtree: string, files: string[], journal: Journal, journalPath: string): JournalWrite[] {
