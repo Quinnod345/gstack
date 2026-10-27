@@ -478,6 +478,8 @@ After rendering the table, suggest ONE of:
 3. **If everything looks clean:**
    "Queue is clean. Next /ship will claim a slot without conflict."
 
+If the sibling table shows worktrees whose last commit is weeks old, offer `bin/gstack-worktree-audit` (read-only: size, merge state, tracked edits, remote, PR, last chat and a suggested bucket per worktree; it removes nothing).
+
 ---
 
 ## Plan Mode

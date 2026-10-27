@@ -124,3 +124,20 @@ design is not a defect, missing context; independent agreement as the strongest 
 `docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
 text is carried; this entry is a courtesy.
 Also ideas, not text, from `pstack/skills/principle-*`, `poteto-mode` and its eval playbook: ETHOS.md principles 5 to 8, the observable-questions rule in `plan-tune/SKILL.md.tmpl` and `docs/proactive.md`, the blinding rules in `eval-plan/SKILL.md.tmpl` and `docs/TESTING_INTERNALS.md`, and the limiter sentence in AGENTS.md step 4 (GSTA-124).
+
+## pstack, ported scripts — Copyright (c) 2026 Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/` at 99b609a7). License text:
+`licenses/MIT-pstack.txt`. Unlike the ideas entry above, these two are code
+ports, so the license text is carried and each file's header names its source.
+
+Derived, modified:
+
+- `bin/gstack-decision-trail`: `pstack/skills/show-me-your-work/scripts/log.sh`
+  in TypeScript: the header-once append, the one-line cells and the
+  spreadsheet formula guard (a leading quote on cells starting with `=`, `+`,
+  `-` or `@`). The `start` subcommand and the `--run` admission check are
+  gstack's.
+- `bin/gstack-worktree-audit`: `pstack/skills/poteto-mode/scripts/worktree-audit.sh`,
+  with the PR column read through `gh --jq` alone, the chat column read from
+  Claude Code's per-worktree transcript directory, and a `--no-fetch` flag.
