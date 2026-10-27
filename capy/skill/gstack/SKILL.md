@@ -44,14 +44,14 @@ Capy checklist for `/autoplan`: drive `gstack-autoplan`, never a hand adaptation
 
 ## Plan, approve, ship
 
-Every Capy thread that uses gstack, under a Captain or on its own, follows these for new work. The full rule for crews is `docs/captain.md`, section "Plan before build", in the gstack checkout; the lane side is section 3 of captain.md in this folder.
+Every Capy thread that uses gstack follows these for new work, under a Captain or on its own. The rule in full is `docs/captain.md`, "Plan before build"; the lane side is section 3 of captain.md in this folder.
 
-- **Plan before build.** Before building new functionality (a new thread's scope, or scope taken on part-way), run `/autoplan` on it as the first act, sized to the work: the scope flags and `--max-rounds` size the run, and a one-file fix gets `--no-ui --no-dx --max-rounds 1` with a small `--spend-cap`, never no run. Drive `gstack-autoplan` as "Unattended runs" above says.
-- **ELI5, then the word.** Send the plan and its gate to the person, or to the Captain when there is one, in plain language someone outside the project can follow (what, why now, what changes, cost, your pick): `gstack-owner-brief render --captain --out <run dir>`, with `rec` (every recommendation taken) as the one-word default and a "do it" reply that takes every recommendation at full scope. Build only after their word is answered into the run (`gstack-autoplan answer … --owner-reply "<their words>"`), accepted plan changes are incorporated, and the run reports `APPROVED`; then `gstack-approvals import --autoplan <run dir>`.
-- **/ship before ready.** Run /ship on the branch at the final pushed head before a PR is called ready; `SHIP_RECEIPT: pr=<n> head=<head>` must name that exact head, and a later push needs a new /ship. The review inside /ship, like the autoplan, is sized to the change (`docs/review-policy.md`).
-- **No merge without the owner's word.** A thread never merges on its own. Under a Captain the controller merges on the owner's recorded standing approval; a thread with no Captain asks the person.
+- **Plan first.** Before building new functionality, run `/autoplan` on it as the first act, sized to the work (scope flags and `--max-rounds`; a one-file fix gets `--no-ui --no-dx --max-rounds 1` and a small `--spend-cap`, never no run).
+- **ELI5, then the word.** Send the plan and gate to the person, or the Captain, in plain language: `gstack-owner-brief render --captain --out <run dir>`, with `rec` as the one-word default and a "do it" reply that takes every recommendation at full scope. Build only after their word is answered into the run and it reports `APPROVED`; then `gstack-approvals import --autoplan <run dir>`.
+- **/ship before ready.** Run /ship at the final pushed head before a PR is called ready; `SHIP_RECEIPT: pr=<n> head=<head>` must name that head, and a later push needs a new /ship. The review inside /ship, like the autoplan, is sized to the change.
+- **No merge without the owner's word.** A thread never merges on its own; under a Captain the controller merges on a recorded standing approval, and a thread with no Captain asks the person.
 
-Exempt from the plan step: read-only work (triage, research, measurement, a review voice), the daily flaky pass's repairs, slot stamps, CHANGELOG-only resolves and cap re-pins under a written grant.
+Exempt from the plan step: read-only work, the daily flaky pass's repairs, slot stamps, CHANGELOG-only resolves and cap re-pins under a written grant.
 
 ## Working under a Captain
 
