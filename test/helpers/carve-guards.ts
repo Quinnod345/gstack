@@ -201,7 +201,7 @@ export const CARVE_GUARDS: Record<string, CarveGuard> = {
       'Review the plan in PLAN.md. Accept the current scope. Run the full engineering review (architecture, code quality, tests, performance) and produce the review report.',
     staticInvariants: {
       mustStayInSkeleton: ['### Step 0: Scope Challenge'],
-      mustMoveToSection: ['### 1. Architecture review'],
+      mustMoveToSection: ['### 1. Architecture review', '### Two shapes before one (design-twice)', '**The eight red flags.**'],
       gateAfterStop: 'EXIT PLAN MODE GATE',
     },
     behavioral: 'plan',
@@ -214,7 +214,7 @@ export const CARVE_GUARDS: Record<string, CarveGuard> = {
     // skeleton ~1.5KB (entry resolution emitted once per SKILL.md).
     maxSkeletonBytes: 57_800, // Scoped reuse entry guidance; measured 57,549 bytes (2026-09-16). Shared rubric remains in the existing section.
     minUnionBytes: 99_800, // token-reduction Phases 1-2 (v1.69.x branch); measured union 110,910
-    mustContain: ['Architecture', 'Code Quality', 'Test', 'Performance'],
+    mustContain: ['Architecture', 'Code Quality', 'Test', 'Performance', 'interface depth'],
     // Cross-cutting preamble growth (v1.57.2.0 AUQ-failure prose fallback + the
     // decision-memory nudge + the v1.57.4.0 Boil-the-Ocean rename) plus the
     // default-on Codex outside-voice (codexPreflight block + CODEX_MODE branch
@@ -223,7 +223,7 @@ export const CARVE_GUARDS: Record<string, CarveGuard> = {
     // 1.08 → 1.10: the scope-gate exceptions block (+ its adversarial-review
     // hardening: host-anchored mode signal, precedence, passing-mention
     // guards) and the plan-mode preamble reword land the union at 1.092.
-    maxSizeRatio: 1.2196, // + clarity rules for saved decisions/setup gates + the Aside probe's failure reason; measured 1.1504. + test value bar and Tests to Retire in the lazy Test review section (~2.6KB); measured 1.168 + W1 guarded state-root resolution (`eval gstack-paths; : "${GSTACK_STATE_ROOT:?…}"`) in the Context Recovery preamble, the eureka log and each state-writing bash block; measured 1.173 (2026-09-30). + v1.91.12.0 merge of #2999 (headless rule: a disallowed question tool never qualifies) with #3002; measured 1.1741 (2026-10-01). + Oct 6 fix wave A3/CEO-12: free text reaches commands only through agent-written mktemp files (mktemp block, write rule, path rebuild and refusal at each posting, prompt and brief site); measured 146,905 / 124,597 = 1.1790 (2026-10-06). Combined Oct 6 wave head (A and B): measured 147,524 / 124,597 = 1.1840 (2026-10-06). + Oct 7 wave B3: the Codex probe runs as a command (select-model capture lines, check-sandbox/probe-model/run-with-timeout subcommands) instead of being sourced; measured 147,693 / 124,597 = 1.1854 (2026-10-07). + Oct 7 wave CEO-28/DX-11: review prompts ask for a severity per finding and design proposals use the proposal gate; measured 147,752 / 124,597 = 1.1858 (2026-10-07). + fix wave PR D: the prerequisite offer is skipped in spawned/headless sessions (#1958); measured 147,864 / 124,597 = 1.1867 (2026-10-07). + Oct 10 multi-agent wave PR D1 (reality rows): the Scope Challenge reality-rows block, the deep incident table (18 rows, each tied to the incident that earned it), the Completion summary line and the checklist row; measured 151,423 / 124,597 = 1.2153 (2026-10-10). + #280: the Design Doc Check finds the CEO plan (`gstack-ceo-plan-find`) and names it in the data rule, +325 bytes on main's 151,630; measured 151,955 / 124,597 = 1.2196 (2026-10-12). Fix wave PR 4 (owner-approved raise 1.2170 → 1.2196): #3182's timer-bounded native fallback (net −17 bytes) plus #280's cross-branch rule, offset by tightening the Design Doc Check; measured 151,950 / 124,597 = 1.2195 (2026-10-15).
+    maxSizeRatio: 1.2400, // pstack item 9 (Garry 2026-10-26 "do it"): the design-twice pass (two shapes, eight red flags, ~2.4 KB) joins Section 1 of the lazy review section; measured 154,366 / 124,597 = 1.2389 (2026-10-26). Earlier history: + clarity rules for saved decisions/setup gates + the Aside probe's failure reason; measured 1.1504. + test value bar and Tests to Retire in the lazy Test review section (~2.6KB); measured 1.168 + W1 guarded state-root resolution (`eval gstack-paths; : "${GSTACK_STATE_ROOT:?…}"`) in the Context Recovery preamble, the eureka log and each state-writing bash block; measured 1.173 (2026-09-30). + v1.91.12.0 merge of #2999 (headless rule: a disallowed question tool never qualifies) with #3002; measured 1.1741 (2026-10-01). + Oct 6 fix wave A3/CEO-12: free text reaches commands only through agent-written mktemp files (mktemp block, write rule, path rebuild and refusal at each posting, prompt and brief site); measured 146,905 / 124,597 = 1.1790 (2026-10-06). Combined Oct 6 wave head (A and B): measured 147,524 / 124,597 = 1.1840 (2026-10-06). + Oct 7 wave B3: the Codex probe runs as a command (select-model capture lines, check-sandbox/probe-model/run-with-timeout subcommands) instead of being sourced; measured 147,693 / 124,597 = 1.1854 (2026-10-07). + Oct 7 wave CEO-28/DX-11: review prompts ask for a severity per finding and design proposals use the proposal gate; measured 147,752 / 124,597 = 1.1858 (2026-10-07). + fix wave PR D: the prerequisite offer is skipped in spawned/headless sessions (#1958); measured 147,864 / 124,597 = 1.1867 (2026-10-07). + Oct 10 multi-agent wave PR D1 (reality rows): the Scope Challenge reality-rows block, the deep incident table (18 rows, each tied to the incident that earned it), the Completion summary line and the checklist row; measured 151,423 / 124,597 = 1.2153 (2026-10-10). + #280: the Design Doc Check finds the CEO plan (`gstack-ceo-plan-find`) and names it in the data rule, +325 bytes on main's 151,630; measured 151,955 / 124,597 = 1.2196 (2026-10-12). Fix wave PR 4 (owner-approved raise 1.2170 → 1.2196): #3182's timer-bounded native fallback (net −17 bytes) plus #280's cross-branch rule, offset by tightening the Design Doc Check; measured 151,950 / 124,597 = 1.2195 (2026-10-15).
   },
   'plan-design-review': {
     skill: 'plan-design-review',
@@ -858,7 +858,7 @@ do not launch the downstream skill or open a browser.`,
   // Iron Law and the Scope Lock stay always-loaded.
   investigate: {
     skill: 'investigate',
-    expectedSections: ['flake.md', 'polluter.md', 'race.md', 'eval-bisect.md', 'backlog.md'],
+    expectedSections: ['flake.md', 'polluter.md', 'race.md', 'eval-bisect.md', 'backlog.md', 'blast-radius.md'],
     requiredReads: ['flake.md'],
     scenario:
       'Walk /investigate in SIMULATION — do not run bash, edit files or acquire a freeze lock. The symptom: test/widget.test.ts fails in CI about one run in eight ("expected 3 events, got 2") and passes locally every time; the PR under review only touched src/widget.ts. Do NOT use AskUserQuestion. Read each pointed section before doing its step, apply the matching recipe, and report the investigation plan: what you would run on main and on the branch, the forced probe, and the exact `## Flake evidence` section you would require in the PR body. Stop before Phase 4.',
@@ -881,14 +881,64 @@ do not launch the downstream skill or open a browser.`,
         '## Backlog mode (`/investigate --backlog`)',
         '## Flake evidence',
         'ship-measure.ts free --files',
+        '## Blast radius',
+        'Look where grep stops',
       ],
       gateAfterStop: undefined, // operational skill, no plan-mode gate
     },
     behavioral: 'prompt',
-    maxSkeletonBytes: 52_000, // D3 carve: Arguments table, Section index, Phase 1 call-site and update-index additions, five STOP pointers; measured 51,532 (2026-10-10)
+    maxSkeletonBytes: 52_000, // D3 carve: Arguments table, Section index, Phase 1 call-site and update-index additions, five STOP pointers; measured 51,532 (2026-10-10). + pstack item 2(b)/8 (Garry 2026-10-26 "do it"): the blast-radius STOP pointer and index row plus the shared-premise red flag; measured 51,623 (2026-10-26), inside the existing cap.
     minUnionBytes: 55_000, // D3 carve: skeleton + five recipes; measured union 61,513 (2026-10-10)
-    mustContain: ['root cause', 'hypothes', 'Flake evidence', 'still_open', 'already_fixed', 'P(fail | regression)'],
-    maxSizeRatio: 1.12, // the monolith's cap (parity-harness MONOLITH_INVARIANTS before the carve); measured 61,513 / 60,600 = 1.0151 (2026-10-10)
+    mustContain: ['root cause', 'hypothes', 'Flake evidence', 'still_open', 'already_fixed', 'P(fail | regression)', 'the one fact it is safe because of'],
+    maxSizeRatio: 1.12, // the monolith's cap (parity-harness MONOLITH_INVARIANTS before the carve); measured 61,513 / 60,600 = 1.0151 (2026-10-10). + the blast-radius section (2.8 KB); measured 66,167 / 60,600 = 1.0919 (2026-10-26).
+  },
+
+  // ── pstack absorb C1 (2026-10-26, Garry "do it"): context-restore's first carve ──
+  // One lazy section: the no-checkpoint fallback that mines this workspace's
+  // own transcripts (host stores from hosts/*.ts, a fixed window, never another
+  // project's folder, cheap subagents return only findings, git and gh verify
+  // every artifact, the status-tagged brief). Detect, Step 1 and the summary
+  // stay always-loaded.
+  'context-restore': {
+    skill: 'context-restore',
+    expectedSections: ['transcripts.md'],
+    requiredReads: ['transcripts.md'],
+    scenario:
+      'Walk /context-restore in SIMULATION — do not run bash or read any transcript. Step 1 printed exactly NO_CHECKPOINTS and nothing else (no BELOW_CWD, POINTER or LEGACY_BUCKET line). Do NOT use AskUserQuestion. Read the pointed section and report the plan: which transcript store you would list on this host and how this workspace\'s folder is told apart from another project\'s, the window you would use, how the files would be read and what returns to this conversation, what you would verify with git and gh, and the four headings of the brief with the status tags a thread line may carry.',
+    staticInvariants: {
+      mustStayInSkeleton: ['## Detect command', '### Step 1: Find saved contexts', '## If no saved contexts exist', 'RESUMING CONTEXT', '## Important Rules'],
+      mustPrecedeStop: ['### Step 1: Find saved contexts'],
+      mustMoveToSection: ["## No saved context: mine this workspace's transcripts", '[verified, uncommitted]', 'TRANSCRIPT_DAYS'],
+      gateAfterStop: undefined, // operational skill, no plan-mode gate
+    },
+    behavioral: 'prompt',
+    maxSkeletonBytes: 46_300, // first carve: Section index and one STOP pointer on the 45.0k monolith; measured 45,848 (2026-10-26)
+    minUnionBytes: 50_000, // skeleton + transcripts section; measured union 52,510 (2026-10-26)
+    mustContain: ['NO_CHECKPOINTS', 'RESUMING CONTEXT', '[merged #N]', "never open another project's", 'gstack-redact', 'last 7 days'],
+    // The v1.64.1.0 baseline measured the 53.5k monolith; the carved union is below it.
+  },
+
+  // ── pstack absorb C1 (2026-10-26, Garry "do it"): benchmark's first carve ──
+  // One lazy section: the seven questions that vet a measured speedup or
+  // regression before Phase 5 reports it. Setup, collection, baseline, budget
+  // and trend phases stay always-loaded.
+  benchmark: {
+    skill: 'benchmark',
+    expectedSections: ['vet-the-number.md'],
+    requiredReads: ['vet-the-number.md'],
+    scenario:
+      'Walk /benchmark in SIMULATION — do not run bash, aside or a browser. A baseline exists and the current run already measured the dashboard page: LCP 1.6 s on the baseline, 1.1 s now, from one run per side on a laptop that was also building. Do NOT use AskUserQuestion. Before writing the Phase 5 comparison, read the pointed section, then report the verdict you would give for this delta and which of its questions decide it, and what you would run before calling it a speedup.',
+    staticInvariants: {
+      mustStayInSkeleton: ['## Arguments', '### Phase 3: Performance Data Collection', '### Phase 5: Comparison', '### Phase 7: Performance Budget', '## Important Rules'],
+      mustPrecedeStop: ['## Arguments'],
+      mustMoveToSection: ['## Vet the number', '**Why not double?**', '**Did it even happen?**'],
+      gateAfterStop: undefined, // operational skill, no plan-mode gate
+    },
+    behavioral: 'prompt',
+    maxSkeletonBytes: 31_300, // first carve: Section index, one STOP pointer and the vet rule on the 29.9k monolith; measured 30,781 (2026-10-26)
+    minUnionBytes: 33_000, // skeleton + vet-the-number section; measured union 34,527 (2026-10-26)
+    mustContain: ['performance.getEntries()', 'REGRESSION', 'Name the limiter', 'run-to-run variation', 'inconclusive'],
+    // The v1.64.1.0 baseline measured the 37.2k monolith; the carved union is below it.
   },
 };
 

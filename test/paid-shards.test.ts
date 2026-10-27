@@ -811,7 +811,9 @@ console.log("Ran 1 tests across 1 files. [1ms]"); process.exit(${fail ? 1 : 0});
     // The report's after-a-repair command selects exactly one case: --case when it resolves, else that shard's file.
     expect(afterRepairCommand('gate', 'plan-mode-no-op', 'test/skill-e2e-plan-mode-no-op.test.ts')).toBe('bun run scripts/test-paid-shards.ts --tier gate --case plan-mode-no-op');
     expect(afterRepairCommand('periodic', 'carve-section-loading', 'test/carve-section-loading-qa.test.ts')).toBe('EVALS=1 EVALS_TIER=periodic bun test test/carve-section-loading-qa.test.ts');
-  });
+  // caseSelection parses every paid file once per registered id; the loop took 4.97 s
+  // on a 4-core machine at main (2026-10-26), so the default 5 s budget is not a measurement of anything.
+  }, 30_000);
 
   test('B4: --list prints the selection; an unknown id exits non-zero before any process starts', () => {
     const run = (args: string[]) => spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-paid-shards.ts'), ...args], { encoding: 'utf8', timeout: 60_000, cwd: ROOT });

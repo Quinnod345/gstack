@@ -123,6 +123,17 @@ design is not a defect, missing context; independent agreement as the strongest 
 `NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
 `docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
 text is carried; this entry is a courtesy.
+Also ideas, not text, from `pstack/skills/blast-radius`, `recall`, `benchmark-checklist`,
+`architect` (`references/design-red-flags.md`) and `principle-attack-the-premise`
+(Garry, 2026-10-26: "Do it, send"): the one safety fact, the five-rung evidence ladder and
+the shared-premise red flag in `investigate/sections/blast-radius.md.tmpl` and
+`investigate/SKILL.md.tmpl`; the transcript-mining fallback and its status-tagged brief in
+`context-restore/sections/transcripts.md.tmpl`; the seven questions in
+`benchmark/sections/vet-the-number.md.tmpl`; the second-shape comparison and the eight
+design red flags in Section 1 of `plan-eng-review/sections/review-sections.md.tmpl`; and the generated
+`SKILL.md` / `sections/*.md` files. Each section names its source in a first-line comment.
+Written in gstack's words; no sentence is copied, so no license text is carried.
+
 Also ideas, not text, from `pstack/skills/principle-*`, `poteto-mode` and its eval playbook: ETHOS.md principles 5 to 8, the observable-questions rule in `plan-tune/SKILL.md.tmpl` and `docs/proactive.md`, the blinding rules in `eval-plan/SKILL.md.tmpl` and `docs/TESTING_INTERNALS.md`, and the limiter sentence in AGENTS.md step 4 (GSTA-124).
 
 ## pstack, ported scripts — Copyright (c) 2026 Lauren Tan — MIT License
