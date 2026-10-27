@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.269.0] - 2026-10-27
 
 **An autoplan gate now arrives with its price, and the approvals record lands where the whole crew can read it.** Captains reported the same two frictions: review rounds and reviewer subagents had no credit figure at the gate, and the approvals mirror sat in a private project-user folder no sibling thread could read. The Eng phase also gains the performance-budget question, after a correctness pass doubled a consumer's p95 with no bench step to catch it. (The standing "take the recommendations" answer planned beside these, `answer --owner-standing rec`, was cut from this release after review: a keyword grammar over the owner's words could still read a refusal as a grant, so it returns with a structured grant in its own change.)
 
