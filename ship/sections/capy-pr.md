@@ -7,8 +7,8 @@ the READY report, through a Captain, so the body shows what changed in pictures,
 approved what. Guide: `captain.md` beside the Capy `gstack` skill's SKILL.md.
 
 **Order.** The `gstack-ship-receipt` block stays first when Step 19 writes one. Then `## What changed`,
-`## Why` and `## Approvals`, then the standard sections below. Keep `## Summary` to commit themes;
-do not repeat the captions.
+`## Why`, `## Blast radius` and `## Approvals`, then the standard sections below. Keep `## Summary` to
+commit themes; do not repeat the captions.
 
 1. **Pick the evidence:** one to three before/after pairs, highest-signal first. The first is the
    key image.
@@ -33,10 +33,13 @@ do not repeat the captions.
    `image upload failed: <reason>` under the caption. Never block publication on an image.
 4. **Under every image:** a one-line caption saying what changed and why, then the contents of the
    printed `text.md` (a collapsed text before/after, for readers who cannot see the image and for search).
-5. **`## Why`:** two or three sentences covering the cause (issue, failed run, or the person's request,
-   quoted) and the effect the user will see.
-6. **`## Approvals`:** the output of `~/.claude/skills/gstack/bin/gstack-approvals render`, verbatim. It
+5. **`## Why`:** two or three sentences. The first states the problem in the person's words (the issue,
+   the failed run, or their request, quoted); the rest say what changes for them. No inventory: BAD "Adds
+   a lint and a CI step." GOOD "'The review loop is too overzealous.' Pass 2 now reads only pass 1's range."
+6. **`## Blast radius`:** the body template's item, written once, here: what else the change touches and
+   the one fact that makes that safe, with the evidence-ladder rung it reached (the `/investigate` skill's Blast radius section, when present).
+7. **`## Approvals`:** the output of `~/.claude/skills/gstack/bin/gstack-approvals render`, verbatim. It
    escapes its cells, and the receipt never reads it as an approval citation. On
    `APPROVAL_RECORD_UNAVAILABLE` keep its text and say so in the READY report. Never type rows by hand.
-7. **READY report:** attach the key image's PNG to the report you send (Capy's message
+8. **READY report:** attach the key image's PNG to the report you send (Capy's message
    attachments) and give its uploaded URL, so the Captain can show it inline.

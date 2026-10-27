@@ -382,6 +382,15 @@ Parse the user's input:
   lives on the save side" and exit. No mode detection here.
 
 ---
+## Section index — Read each section when its situation applies
+
+This skill is a decision-tree skeleton. The steps below point to on-demand
+sections. Read a section in full before doing its step; do not work from memory.
+
+| When | Read this section |
+|------|-------------------|
+| rebuilding context after Step 1 printed `NO_CHECKPOINTS` with no `BELOW_CWD` or `POINTER` line (nothing saved to restore) | `sections/transcripts.md` |
+---
 
 ## Restore flow
 
@@ -639,10 +648,12 @@ unverified earlier one.
 
 ## If no saved contexts exist
 
-If Step 1 printed `NO_CHECKPOINTS` and no `BELOW_CWD` or `POINTER` line, tell the user:
+If Step 1 printed `NO_CHECKPOINTS` and no `BELOW_CWD` or `POINTER` line, tell the user
+in one line that nothing was saved with `/context-save`, then rebuild the context from
+what the machine already holds:
 
-"No saved contexts yet. Run `/context-save` first to save your current working
-state, then `/context-restore` will find it."
+> **STOP.** Before rebuilding context after Step 1 printed `NO_CHECKPOINTS` with no `BELOW_CWD` or `POINTER` line (nothing saved to restore), Read `~/.claude/skills/gstack/context-restore/sections/transcripts.md` and execute it
+> in full. Do not work from memory — that section is the source of truth for this step.
 
 If it also printed `LEGACY_BUCKET`, relay that line: earlier checkpoints are kept
 in the old bucket until the user copies them with `gstack-slug --adopt-legacy`.
@@ -651,7 +662,8 @@ in the old bucket until the user copies them with `gstack-slug --adopt-legacy`.
 
 ## Important Rules
 
-- **Never modify code.** This skill only reads saved files and presents them.
+- **Never modify code.** This skill only reads saved files, this workspace's own
+  transcripts and git state, and presents them.
 - **Prefer the current branch's own checkpoint, but keep all branches in the
   fallback set.** Cross-branch resume (Conductor handoff) works when the
   current branch has no checkpoint, and a sibling worktree's newer save never

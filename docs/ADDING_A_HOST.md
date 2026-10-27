@@ -459,6 +459,7 @@ Key fields:
 | `suppressedResolvers` | Resolver functions that return empty for this host |
 | `coAuthorTrailer` | Git co-author string for commits |
 | `boundaryInstruction` | Anti-prompt-injection warning for cross-model invocations |
+| `transcripts` | Optional `{ root, layout }`: where the host keeps its own chat transcripts on disk and how this workspace's files are told apart, rendered by `/context-restore`'s no-checkpoint fallback (`{{TRANSCRIPT_SOURCES}}`, `{{TRANSCRIPT_DISCOVERY}}`); a declared store also needs a discovery body in `scripts/resolvers/transcripts.ts`. Absent: the host declares no transcript store. |
 
 ## Validation
 
