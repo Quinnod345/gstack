@@ -97,7 +97,7 @@ export interface HostConfig {
 
   // --- Generation ---
   generation: {
-    /** Whether to create a metadata file alongside skills (always openai.yaml; gen-skill-docs hardcodes the format). */
+    /** Whether to create a metadata file alongside skills (always openai.yaml; gen-skill-docs hardcodes the format and reads the template's `codex_default_prompt:` key for its default_prompt). */
     generateMetadata: boolean;
     /** Skill directories to exclude from generation for this host. */
     skipSkills?: string[];

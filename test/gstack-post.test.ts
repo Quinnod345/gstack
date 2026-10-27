@@ -7,7 +7,7 @@
  * the real executable against stub gh/glab on POSIX.
  */
 import { describe, expect, test } from "bun:test";
-import { EXIT, mergeBodySections, runPost, type PostEnv } from "../lib/gstack-post";
+import { EXIT, attributionCallout, mergeBodySections, runPost, type PostEnv } from "../lib/gstack-post";
 
 interface Call { cmd: string; args: string[]; input?: string }
 
@@ -273,6 +273,74 @@ describe("gstack-post owns the redaction scan", () => {
     expect(f.stdout()).toContain("RULE: pii.email LINE: 1 PART: title");
     const own = fakeEnv({ files: { "/b": "Ping jane.roe@acme-corp.io" }, email: "jane.roe@acme-corp.io" });
     expect(run(["pr-comment", "1", "--body-file", "/b"], own)).toBe(EXIT.posted);
+  });
+});
+
+describe("gstack-post --attribute labels a comment, opt-in and off by default", () => {
+  const CALLOUT = "> [!NOTE]\n> 🤖 **Claude Opus on behalf of octocat**\n\n";
+  test("without the flag the body is sent exactly as written", () => {
+    const f = fakeEnv({ files: { "/b": "Fixed in abc123.\n" } });
+    expect(run(["pr-comment", "12", "--body-file", "/b"], f)).toBe(EXIT.posted);
+    expect(f.posts()[0]!.input).toBe("Fixed in abc123.\n");
+    expect(f.stdout()).not.toContain("attributed");
+  });
+
+  test("with the flag every comment operation opens with the callout and the body follows unchanged", () => {
+    expect(attributionCallout("Claude Opus on behalf of octocat")).toBe(CALLOUT);
+    const body = "Fixed in abc123.\n";
+    const cases: Array<[string[], string[]]> = [
+      [["pr-comment", "12"], ["pr", "comment", "12", "--body-file=-"]],
+      [["issue-comment", "3"], ["issue", "comment", "3", "--body-file=-"]],
+      [["reply", "4", "--to", "991"], ["api", "--method=POST", "repos/{owner}/{repo}/pulls/4/comments/991/replies", "--field=body=@-"]],
+    ];
+    for (const [argv, args] of cases) {
+      const f = fakeEnv({ files: { "/b": body } });
+      expect(run([...argv, "--body-file", "/b", "--attribute", "Claude Opus on behalf of octocat"], f)).toBe(EXIT.posted);
+      expect(f.posts()).toEqual([{ cmd: "gh", args, input: CALLOUT + body }]);
+      expect(f.stdout()).toContain(`POSTED: ${argv[0]} ${argv[1]} (attributed: Claude Opus on behalf of octocat)`);
+    }
+    const gl = fakeEnv({ files: { "/b": body }, remote: "https://gitlab.com/grp/proj.git" });
+    expect(run(["pr-comment", "8", "--body-file", "/b", "--attribute", "Claude Opus on behalf of octocat"], gl)).toBe(EXIT.posted);
+    expect(gl.posts()[0]!.args).toEqual(["mr", "note", "8", `--message=${CALLOUT}${body}`]);
+  });
+
+  test("the scan and the confirmation token cover the callout bytes too", () => {
+    const files = { "/b": "Ping jane.roe@acme-corp.io about it.\n" };
+    const first = fakeEnv({ files, visibility: "public" });
+    expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", "GPT on behalf of octocat"], first)).toBe(EXIT.confirm);
+    expect(first.stdout()).toContain("RULE: pii.email LINE: 1 PART: body");
+    const t = token(first.stdout())!;
+    const plain = fakeEnv({ files, visibility: "public" });
+    expect(run(["pr-comment", "9", "--body-file", "/b"], plain)).toBe(EXIT.confirm);
+    expect(token(plain.stdout())).not.toBe(t);
+    const other = fakeEnv({ files, visibility: "public" });
+    expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", "GPT on behalf of someone-else", "--confirm", t], other)).toBe(EXIT.confirm);
+    expect(other.posts()).toEqual([]);
+    const second = fakeEnv({ files, visibility: "public" });
+    expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", "GPT on behalf of octocat", "--confirm", t], second)).toBe(EXIT.posted);
+    expect(second.posts()[0]!.input).toBe(attributionCallout("GPT on behalf of octocat") + files["/b"]);
+    const secret = fakeEnv({ files: { "/b": "ok\n" } });
+    expect(run(["pr-comment", "9", "--body-file", "/b", "--attribute", `key ${AWS}`], secret)).toBe(EXIT.refused);
+    expect(secret.stdout()).toContain("HIGH RULE: aws.access_key LINE: 1 PART: attribute");
+    expect(secret.posts()).toEqual([]);
+  });
+
+  test("the flag is refused on non-comment operations and for empty or multi-line text", () => {
+    const files = { "/t": "v1.2.3 fix: title", "/b": "body" };
+    for (const argv of [
+      ["pr-body", "5", "--body-file", "/b", "--attribute", "x on behalf of y"],
+      ["pr-title", "5", "--title-file", "/t", "--attribute", "x on behalf of y"],
+      ["pr-create", "--base", "main", "--title-file", "/t", "--body-file", "/b", "--attribute", "x on behalf of y"],
+      ["issue-create", "--title-file", "/t", "--body-file", "/b", "--attribute", "x on behalf of y"],
+      ["pr-comment", "5", "--body-file", "/b", "--attribute", "   "],
+      ["pr-comment", "5", "--body-file", "/b", "--attribute", "two\nlines"],
+      ["pr-comment", "5", "--body-file", "/b", "--attribute", "x".repeat(201)],
+      ["pr-comment", "5", "--body-file", "/b", "--attribute"],
+    ]) {
+      const f = fakeEnv({ files });
+      expect(run(argv, f), argv.join(" ")).toBe(EXIT.usage);
+      expect(f.posts()).toEqual([]);
+    }
   });
 });
 

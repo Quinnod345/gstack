@@ -164,7 +164,8 @@ _gstack_hr_generated() {
       skill="${f%/agents/openai.yaml}"; skill="${skill##*/}"
       [ "$(head -1 "$f" 2>/dev/null)" = "interface:" ] \
         && grep -qxF "  display_name: \"$skill\"" "$f" \
-        && grep -qxF "  default_prompt: \"Use $skill for this task.\"" "$f" \
+        && grep -q '^  default_prompt: "' "$f" \
+        && grep -qxF "policy:" "$f" \
         && [ "$(wc -l < "$f" | tr -d ' ')" -le 6 ] && return 0 ;;
     */.gstack-owned|*/.source-path)
       first="$(head -1 "$f" 2>/dev/null)"

@@ -453,6 +453,7 @@ Key fields:
 | `frontmatter.descriptionLimitBehavior` | `error` (fail build), `truncate`, `warn` |
 | `frontmatter.conditionalFields` | Add fields based on template values (e.g., sensitive → disable-model-invocation) |
 | `frontmatter.renameFields` | Rename template fields (e.g., voice-triggers → triggers) |
+| `generation.generateMetadata` | Emit `agents/openai.yaml` beside each skill (Codex only today; the format is hardcoded in `gen-skill-docs.ts`). Its `default_prompt` comes from the template's `codex_default_prompt:` frontmatter key, else `Use <name> for this task.` |
 | `pathRewrites` | Literal replaceAll on content. Order matters. Replaces the derived trio. |
 | `extraPathRewrites` | (defineHost input only) Appended after the derived trio. |
 | `toolRewrites` | Rewrite Claude tool names (e.g., "use the Bash tool" → "run this command") |

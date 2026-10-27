@@ -19,7 +19,9 @@ const codex = defineHost({
   },
 
   // generateMetadata emits agents/openai.yaml (the format is hardcoded in
-  // gen-skill-docs.ts). Codex also gets a repo-local sidecar at
+  // gen-skill-docs.ts; a template's `codex_default_prompt:` frontmatter key
+  // sets its default_prompt, else "Use <name> for this task."). Codex also
+  // gets a repo-local sidecar at
   // .agents/skills/gstack (symlinked runtime assets: bin, lib, browse, review,
   // qa, design/dist, make-pdf/dist, ETHOS.md) — that behavior lives in setup's
   // create_agents_sidecar, not here.

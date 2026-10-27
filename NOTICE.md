@@ -104,6 +104,11 @@ grew the diff cuts first; the end of the budget is not approval) in
 `ship/sections/review-army.md.tmpl`, `review/checklist.md` and `docs/review-policy.md`
 are written in gstack's words and mapped onto gstack's blocking floor. No sentence is copied,
 so no license text is carried; this entry is a courtesy.
+Also ideas, not text (`skills/modernize`, `skills/leaving-pr-comments`, `skills/full-send`,
+`agents/openai.yaml`, at 7de017b3): the MODERNIZE / REWORK / CLOSE verdict names in
+`modernize/SKILL.md.tmpl`, the `> [!NOTE]` author callout behind `gstack-post --attribute`, the
+three-bullet unattended grant in `docs/unattended.md`, and a per-skill Codex `default_prompt`;
+all written fresh in gstack's words.
 
 Design port (`skills/babysit-pr/scripts/pr-wait`, at 7de017b3; license text:
 `licenses/MIT-tstack.txt`): `bin/gstack-pr-wait`, `lib/pr-wait.ts` and

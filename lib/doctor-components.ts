@@ -185,6 +185,7 @@ export const SKILL_REQUIREMENTS: Readonly<Record<string, SkillRequirement>> = {
   'ios-sync': CLAUDE_ONLY,
   'landing-report': CLAUDE_ONLY,
   learn: CLAUDE_ONLY,
+  modernize: CLAUDE_ONLY,
   retro: CLAUDE_ONLY,
   'setup-deploy': CLAUDE_ONLY,
   'setup-gbrain': CLAUDE_ONLY,

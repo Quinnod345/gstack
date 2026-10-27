@@ -22,6 +22,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/skillify`](#browse) | **Skill Codifier** | Fallback-browser skill: walks back through your conversation, finds the last `/scrape` prototype, synthesizes script + test + fixture, runs the test, asks before committing. On Aside, durable per-site automation belongs to Aside's own skills. |
 | [`/ship`](#ship) | **Release Engineer** | Sync main, run tests, explore changed behavior within a bound, audit coverage and docs before final verification, then push and open or update a PR. Bootstraps test frameworks when appropriate. |
 | [`/land-and-deploy`](#land-and-deploy) | **Release Engineer** | Merge the PR, wait for CI and deploy, verify production health. One command from "approved" to "verified in production." |
+| [`/modernize`](#modernize) | **Stale-PR Maintainer** | Bring an aging PR onto its current base and decide whether it should still exist: MODERNIZE, REWORK or CLOSE. Reads what moved under the PR for conflicts in meaning, proves the rebase with `git range-diff`, pushes with a lease pinned to the observed head, and never closes a PR on its own. |
 | [`/canary`](#canary) | **SRE** | Post-deploy monitoring loop. Watches for console errors, performance regressions, and page failures in your Aside browser. |
 | [`/benchmark`](#benchmark) | **Performance Engineer** | Baseline page load times, Core Web Vitals, and resource sizes. Compare before/after on every PR. Track trends over time. |
 | [`/ubicloud`](#ubicloud) | **Remote Runner** | Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs with a reaper, quota preflight, a hang watchdog and one committed verify per repository. |
@@ -800,6 +801,39 @@ Claude: Merging PR #42...
 
 ---
 
+## `/modernize`
+
+`/ship` merges the base into a branch you are working on. `/modernize` is for the other
+case: a pull request that has sat for weeks, often someone else's, where the real question
+is not "does it rebase" but "should it still exist".
+
+```
+You: /modernize 2187
+
+Claude: Claim: #2187 caches the skill census so `bun run skill:check` stops
+        re-reading 57 directories. It relies on the census being read once per run.
+
+        Moved under it: 41 base commits since the merge base; 3 touch its files.
+        Conceptual: a2f9c01 (v1.91.240.0) made the census a shared helper that
+        already memoizes per process. The cache the PR adds would be a second one.
+
+        Verdict: CLOSE. The base solves the problem another way (a2f9c01). Nothing
+        was pushed and the PR stays open; say "close it" and I will post the reason
+        and the superseding commit, with thanks to its author.
+```
+
+Three verdicts, one chosen before anything is pushed. **MODERNIZE**: the claim still
+holds, so the branch is rebased with the author's commits kept as theirs, `git
+range-diff` proves no intent was lost (every changed hunk gets a one-line reason), the
+repository's own tests run, and the push is `--force-with-lease=<branch>:<sha observed
+before the rebase>`, so a push someone else made meanwhile is refused rather than
+overwritten. **REWORK**: the problem is real but this diff is no longer the way to solve
+it; the skill says what the new change would be and pushes nothing. **CLOSE**: the
+problem is gone, solved another way, or decided against; the skill recommends closing
+with the superseding commit and leaves the PR open until someone with the authority says
+otherwise. A clean `git rebase` is not evidence the PR is current, and the age of a PR
+is not evidence either way.
+
 ## `/canary`
 
 This is my **post-deploy monitoring mode**.
@@ -901,12 +935,12 @@ This is my **performance engineer mode**.
 
 `/benchmark` establishes performance baselines for your pages: load time, Core Web Vitals (LCP, CLS, INP), resource counts, and total transfer size. Run it before and after a PR to catch regressions.
 
-It measures in your Aside browser — the page's own `performance` navigation and resource entries from a real load, not synthetic estimates. Multiple runs averaged. Results persist so you can track trends across PRs.
+It measures in your Aside browser — the page's own `performance` navigation and resource entries from a real load, not synthetic estimates. Each page runs five times and is reported as the median with its range (`--quick` is a single-run ballpark). Results persist so you can track trends across PRs.
 
 ```
 You:   /benchmark https://myapp.com
 
-Claude: Benchmarking 5 pages (3 runs each)...
+Claude: Benchmarking 5 pages (5 runs each)...
 
         /           load: 1.2s  LCP: 0.9s  CLS: 0.01  resources: 24 (890KB)
         /dashboard  load: 2.1s  LCP: 1.8s  CLS: 0.03  resources: 31 (1.4MB)
