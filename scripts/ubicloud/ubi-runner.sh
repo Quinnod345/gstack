@@ -393,7 +393,7 @@ vcpus() { [[ "$1" =~ -([0-9]+)$ ]] && echo "${BASH_REMATCH[1]}"; }
 # maximum the last refusal printed; without either the API's own refusal rules.
 QUOTA_CACHE_MAX_AGE=86400
 quota_preflight() {
-  local location=$1 name=$2 size=$3 need max used wait_until remaining source="UBI_QUOTA_VCPUS" cache="$STATE_ROOT/quota-max"
+  local location=$1 name=$2 size=$3 need max used remaining step source="UBI_QUOTA_VCPUS" cache="$STATE_ROOT/quota-max"
   need=$(vcpus "$size") || return 0
   max=$QUOTA_VCPUS
   if [ -z "$max" ] && [ -f "$cache" ]; then
@@ -406,19 +406,22 @@ quota_preflight() {
     fi
   fi
   [[ "$max" =~ ^[0-9]+$ ]] || return 0
-  wait_until=$(( $(date +%s) + QUOTA_WAIT ))
+  # The budget counts seconds spent waiting for room, not the usage calls
+  # between them: a slow first usage read must not shave the printed budget.
+  remaining=$QUOTA_WAIT
   while :; do
     used=$(cmd_usage 2>/dev/null | awk '$1=="total" {print $3}')
     [[ "$used" =~ ^[0-9]+$ ]] || return 0
     [ $(( used + need )) -gt "$max" ] || return 0
-    remaining=$(( wait_until - $(date +%s) ))
     if [ "$remaining" -le 0 ]; then
       log "quota preflight refused $location/$name ($size): it needs $need vCPUs and the project's VMs already use $used of $max (ceiling from $source; other usage such as managed runners counts on top)"
       cmd_usage >&2 || true
       die "create refused before any request: vCPU quota exhausted (quota full); wait for running VMs to finish (UBI_QUOTA_WAIT=<seconds> waits here), run $0 reap, use a smaller size, or set UBI_QUOTA_VCPUS to the project's real ceiling"
     fi
     log "quota: $used of $max vCPUs in use and $need needed; waiting up to ${remaining}s more for room"
-    sleep $(( remaining < 30 ? remaining : 30 ))
+    step=$(( remaining < 30 ? remaining : 30 ))
+    sleep "$step"
+    remaining=$(( remaining - step ))
   done
 }
 

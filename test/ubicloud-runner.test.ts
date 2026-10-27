@@ -395,7 +395,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       const setup = join(f.root, 'setup.sh'); writeFileSync(setup, 'echo hi\n');
       const r = run(f, ['run', '--src', f.root, '--setup', setup, '--', 'make test'], { UBI_IDLE_TIMEOUT: '2' });
       const err = r.stderr.toString();
-      expect(r.exitCode).toBe(124);
+      expect(r.exitCode, err).toBe(124);
       expect(err).toMatch(/watchdog: setup printed nothing for \d+s \(UBI_IDLE_TIMEOUT=2\)/);
       expect(err).toContain('setup failed (exit 124)');
       expect(f.ssh()).not.toContain('bash -lc');
