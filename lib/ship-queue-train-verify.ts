@@ -19,7 +19,7 @@ import type { QueueContext } from './ship-queue';
 import { git } from './ship-queue-gate';
 import { bindReceipt } from './ship-receipt';
 import { checkRun, execFor, prInfo, repoSlug } from './ship-queue-train-github';
-import { activeFreeze, attemptsOf, nowIso, persist, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
+import { activeFreeze, attemptsOf, listTrains, nowIso, persist, rebuildFromNotes, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
 import {
   effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prState, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
 } from './ship-queue-train';
@@ -127,6 +127,7 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
   const f: FreezeRecord = {
     schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: [...t.merged.map(m => m.pr), ...landed],
     unmerged: unverified.filter(s => !landed.includes(s.pr) && !unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
+    unreadable: unverified.filter(s => unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
     main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out },
     reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers` : ''].filter(Boolean).join('; '),
     backstop: null, repair: null,
@@ -147,6 +148,21 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
 }
 
 /**
+ * Where another train's verify confirmed main's exact sha as one of its merged
+ * prefixes, read from local records after the notes ref (a machine that never
+ * ran that train still sees it). Null when none did.
+ */
+function verifiedElsewhere(env: TrainEnv, t: TrainRecord, mainSha: string): string | null {
+  rebuildFromNotes(env.ctx.repoRoot, env.remote);
+  for (const other of listTrains(env.repo.keys)) {
+    if (other.nonce === t.nonce) continue;
+    const m = other.merged.find(x => x.sha === mainSha);
+    if (m) return `T${other.prefixes.find(p => p.pr === m.pr)?.index ?? '?'} of train ${other.nonce} (#${m.pr}, verified at ${m.at})`;
+  }
+  return null;
+}
+
+/**
  * Interrupted publication: freeze when a slot merged, verified or merged on
  * GitHub without a verified tree (slot 1's own squash failing the post-merge
  * check leaves main unverified with nothing in `merged` yet); otherwise a
@@ -161,6 +177,8 @@ async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MI
   const unreadable = landed ? [] : [...states].filter(([, state]) => state === 'unreadable').map(([pr]) => `#${pr}`);
   if (unreadable.length) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `${message}; whether ${unreadable.join(', ')} merged on GitHub could not be read, so whether the queue must freeze is unknown` }, lines, `${Q} verify --pr ${t.slots[0]!.pr} --train ${t.nonce} (once gh pr view answers)`, run);
   if (!landed) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
+  const later = t.slots.every(s => t.merged.some(m => m.pr === s.pr) || states.get(s.pr) === 'MERGED') ? verifiedElsewhere(env, t, mainSha) : null;
+  if (later) return outRefused({ code: 'QUEUE_TRAIN_STALE', message: `${message}; every slot of train ${t.nonce} merged on GitHub and main ${mainSha.slice(0, 12)} is ${later}, so this record is stale and the queue is not frozen` }, lines, `${Q} train prune --stale --train ${t.nonce}`, run);
   const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha, states);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
 }
@@ -222,7 +240,10 @@ function confirmMerged(env: TrainEnv, t: TrainRecord, pr: string, main: string, 
     freeze.updated_at = freeze.cleared_at;
     persist(env.ctx.repoRoot, [freeze], { remote: env.remote });
     lines.push(`FREEZE: cleared (${freeze.cleared_by})`);
-    return outOk(lines, freeze.unmerged.length ? `${Q} train build --prs ${pinList(freeze.unmerged)}` : 'none', run);
+    const rebuild = freeze.unmerged.length ? `${Q} train build --prs ${pinList(freeze.unmerged)}` : '';
+    const unread = (freeze.unreadable ?? []).map(u => `#${u.pr}@${u.head.slice(0, 12)}`);
+    const check = unread.length ? `gh pr view ${unread.join(', ')} (unreadable at the freeze); seat each that is OPEN in a train` : '';
+    return outOk(lines, [rebuild, check].filter(Boolean).join('; then ') || 'none', run);
   }
   return outOk(lines, nextFor(t), run);
 }

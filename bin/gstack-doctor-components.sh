@@ -282,6 +282,7 @@ gstack_result_anchor() {
     QUEUE_TRAIN_PREFIX_INVALID) printf '%s' 'queue-train-prefix-invalid' ;;
     QUEUE_TRAIN_REBUILD_REFUSED) printf '%s' 'queue-train-rebuild-refused' ;;
     QUEUE_TRAIN_TREE_MISMATCH) printf '%s' 'queue-train-tree-mismatch' ;;
+    QUEUE_TRAIN_STALE) printf '%s' 'queue-train-stale' ;;
     QUEUE_TRAIN_FROZEN) printf '%s' 'queue-train-frozen' ;;
     QUEUE_RECEIPT_MISSING) printf '%s' 'queue-receipt-missing' ;;
     QUEUE_RECEIPT_STALE) printf '%s' 'queue-receipt-stale' ;;
