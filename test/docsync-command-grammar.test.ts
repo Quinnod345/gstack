@@ -540,6 +540,20 @@ test('Step 14.5 housekeeping commands and the docs record are declared exactly a
   expect(docsWriteFailures(observed(['.qa-state/.observer-check', ...DOCS_AUDIT_RECORD_PATHS]), [])).toEqual([]);
   expect(docsWriteFailures(observed(['.git/info/attributes']), [])).toEqual(['forbidden docs write: .git/info/attributes']);
   expect(docsWriteFailures(observed(['.gstack/tmp/review-loop.json']), [DOC_PATH])).toEqual(['forbidden docs write: .gstack/tmp/review-loop.json']);
+  // The Write tool lands the record through `<record>.tmp.<pid>.<12 hex>` + rename (gate: both lifecycle cases red at 0230fc2 on exactly
+  // that sibling). The sibling is admitted only as the cookie-paired source of a move onto the record that leaves nothing behind.
+  const temp = `${DOCS_AUDIT_RECORD}.tmp.564.6161e6c7f0b7`;
+  const moved = (edits: { path: string; mask: number; cookie?: number }[], after: Record<string, string> = {}) => ({
+    complete: true, failures: [], events: edits.map((e, at) => ({ path: e.path, mask: e.mask, cookie: e.cookie ?? 0, at })), changed: Object.keys(after), before: {}, after, limits: [],
+  });
+  const landing = [{ path: temp, mask: 0x100 }, { path: temp, mask: 0x2 }, { path: temp, mask: 0x8 }, { path: temp, mask: 0x40, cookie: 7 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 7 }];
+  expect(docsWriteFailures(moved(landing), [])).toEqual([]);
+  expect(docsWriteFailures(moved(landing.slice(1)), [])).toEqual([]);
+  expect(docsWriteFailures(moved(landing, { [temp]: '0:' + 'a'.repeat(64) }), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved(landing.slice(0, 3)), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved([...landing.slice(0, 4), { path: '.gstack/tmp/other.json', mask: 0x80, cookie: 7 }]), [])).toEqual([`forbidden docs write: ${temp}`, 'forbidden docs write: .gstack/tmp/other.json']);
+  expect(docsWriteFailures(moved([...landing.slice(0, 3), { path: temp, mask: 0x40, cookie: 7 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 7 }, { path: temp, mask: 0x100 }]), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved([{ path: `${DOC_PATH}.tmp.564.6161e6c7f0b7`, mask: 0x40, cookie: 9 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 9 }]), [])).toEqual([`forbidden docs write: ${DOC_PATH}.tmp.564.6161e6c7f0b7`]);
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/tmp/review-loop.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/ship-policy.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(gitAt(fixture.repo, 'rev-parse', '--verify', 'origin/main')).toBe(gitAt(fixture.repo, 'rev-parse', '--verify', 'main'));

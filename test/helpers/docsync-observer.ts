@@ -12,7 +12,26 @@ import { readOnlyCommandAllowed } from './read-only-commands';
 export { docsNativeInterface };
 
 export async function observeDocsWrites(fixture: ReturnType<typeof fixtureDocs>) {
-  return observeQAWrites(fixture.repo, { atomicTargets: [DOC_PATH] });
+  return observeQAWrites(fixture.repo, { atomicTargets: [DOC_PATH, DOCS_AUDIT_RECORD] });
+}
+
+/** Temp files the Write/Edit tool renamed onto the receipt record (`<record>.tmp.<pid>.<12 hex>`): created, written and closed
+ *  under the record's directory, then moved onto the record by a cookie-paired MOVED_FROM/MOVED_TO, and not left behind. */
+function docsRecordSources(observation: QAWriteObservation): Set<string> {
+  const sources = new Set<string>();
+  const events = observation.events;
+  for (const [index, event] of events.entries()) {
+    if (event.path !== DOCS_AUDIT_RECORD || event.mask !== 0x80 || !Number.isInteger(event.cookie) || event.cookie <= 0) continue;
+    const pair = events.flatMap((candidate, at) => candidate.cookie === event.cookie ? [at] : []);
+    if (pair.length !== 2 || pair[1] !== index) continue;
+    const source = events[pair[0]];
+    if (source.mask !== 0x40 || !source.path.startsWith(DOCS_AUDIT_RECORD + '.tmp.') || !/^\.tmp\.[1-9]\d*\.[0-9a-f]{12}$/.test(source.path.slice(DOCS_AUDIT_RECORD.length))
+      || Object.hasOwn(observation.before, source.path) || Object.hasOwn(observation.after, source.path) || observation.changed.includes(source.path)) continue;
+    const lifecycle = events.filter(candidate => candidate.path === source.path);
+    if (lifecycle.at(-1) !== source || lifecycle.some(candidate => candidate !== source && (candidate.cookie !== 0 || ![0x100, 0x2, 0x4, 0x8].includes(candidate.mask)))) continue;
+    sources.add(source.path);
+  }
+  return sources;
 }
 
 type DocsWriteContext = {
@@ -136,8 +155,9 @@ export function docsWriteFailures(observation: QAWriteObservation, allowed: stri
   const failures = [...observation.failures];
   if (!observation.complete) failures.push('incomplete docs write observation');
   const atomicSources = docsAtomicSources(observation, allowed, context);
+  const recordSources = docsRecordSources(observation);
   for (const file of new Set([...observation.events.map(e => e.path), ...observation.changed])) {
-    if (file !== '.qa-state/.observer-check' && !allowed.includes(file) && !DOCS_AUDIT_RECORD_PATHS.includes(file) && !atomicSources.has(file))
+    if (file !== '.qa-state/.observer-check' && !allowed.includes(file) && !DOCS_AUDIT_RECORD_PATHS.includes(file) && !atomicSources.has(file) && !recordSources.has(file))
       failures.push(`forbidden docs write: ${file}${atomicSources.deniedAt && path.dirname(file) === path.dirname(DOC_PATH) ? ` (atomic replacement unproven at ${atomicSources.deniedAt})` : ''}`);
     if (allowed.includes(file) && observation.before[file] && observation.after[file] &&
         observation.before[file].split(':')[0] !== observation.after[file].split(':')[0]) failures.push(`document mode changed: ${file}`);
