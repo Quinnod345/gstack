@@ -654,7 +654,7 @@ describe('outside-voice commitment queue', () => {
       const routing = eng.slice(eng.indexOf('**Outcome routing:**'), eng.indexOf('**Disabled is a terminal branch'));
       const preflight = eng.match(/```bash\n([\s\S]*?)\n```/)![1];
       expect(preflight).toContain(mismatch);
-      expectAll(routing, [/other preflight mode, including harness mismatch/i, /outside execution or output validation fails/i, /then use Native fallback/i]);
+      expectAll(routing, [/any other mode \(`not_installed`, `under_current_harness`\)/i, /outside execution or output validation fails/i, /then use Native fallback/i]);
       const bounded = eng.slice(eng.indexOf('**Bounded outside-voice wait'), eng.indexOf('**Cross-model tension:**'));
       expectMentions(bounded, [['never', 'supplies', 'coverage']], 'bounded');
       expect(eng).toMatch(/SOURCE=in-host, OUTSIDE_STATUS=unavailable, and STATUS=clean or issues_found/);
