@@ -34,7 +34,9 @@ const ESCAPE = /[.*+?^${}()|[\]\\]/g;
  * is not a `pass` claim), compared with the receipt. A leaf key shared by
  * several counters (`pass` under every gate lane, `passed` under gate and ci)
  * names any of them: the claim matches when its number equals one of those
- * counters, and a mismatch names the first of them.
+ * counters, and a mismatch names the first of them. A number that is the value
+ * of a `key=` or `key:` pair is that key's claim alone, never the start of a
+ * `<n> <name>` claim about the next key (#3513).
  */
 export function checkReceiptProse(receipt: Record<string, unknown>, body: string): ProseCheck {
   const prose = body.replace(BLOCK_RE, '');
@@ -47,7 +49,9 @@ export function checkReceiptProse(receipt: Record<string, unknown>, body: string
   let checked = 0;
   for (const [leaf, counters] of byLeaf) {
     const name = leaf.replace(ESCAPE, '\\$&').replaceAll('_', '[ _-]');
-    const re = new RegExp(`(?:(?<![\\w-])${name}\\s*[=:]\\s*(\\d+)\\b|\\b(\\d+)\\s+${name}(?![\\w-]))`, 'gi');
+    // The number-then-name branch must not start on a `key=value` pair's value: in `passes=2 blocking_found=1` the 2 is
+    // passes' claim, not a "2 blocking_found" one, so a digit that follows =, : or a word character is not a claim start.
+    const re = new RegExp(`(?:(?<![\\w-])${name}\\s*[=:]\\s*(\\d+)\\b|(?<![=:\\w.-])(\\d+)\\s+${name}(?![\\w-]))`, 'gi');
     for (const m of prose.matchAll(re)) {
       checked++;
       const n = Number(m[1] ?? m[2]);

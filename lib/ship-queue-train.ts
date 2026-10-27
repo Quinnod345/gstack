@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { DISPATCH_INPUTS, awaitNonceRun, dispatchWorkflow, listDispatchRuns, makeNonce, runForNonce, type WorkflowDispatch } from '../scripts/eval-bg';
 import { changelogDamage, mergeChangelogs, parseChangelog, type ChangelogSection } from './changelog-check';
 import type { ResultStatus } from './headless-artifacts';
+import { baseOverlapLine } from './pr-wait';
 import { versionAtRef, versionFiles } from './restamp';
 import type { LoadedPolicy, ShipPolicy, TrainPolicy } from './ship-policy';
 import { loadBasePolicy, type QueueContext } from './ship-queue';
@@ -194,6 +195,29 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
   return 'error' in out ? { conflicts: [`(${out.error})`] } : { tree: out.tree };
 }
 
+export interface BaseOverlap { touched: string[]; conflicts: string[] | null; line: string | null }
+
+/**
+ * What gstack-pr-wait's base-overlap event tells a lane, read from git at
+ * READY and at train build (handoff GSTA-119, rule 25): the files the base
+ * changed since this head forked that the head also changes, and whether the
+ * train's own merge of the head onto the base is clean. A base that moved
+ * onto nothing the PR touches is one line of fact; a conflict is what
+ * QUEUE_TRAIN_CONFLICT would otherwise discover at the scratch merge.
+ */
+export function baseOverlap(repoRoot: string, base: string, baseSha: string, head: string, policy: ShipPolicy): BaseOverlap {
+  const fork = git(repoRoot, ['merge-base', baseSha, head]);
+  if (!fork.ok || !fork.out || fork.out === baseSha) return { touched: [], conflicts: null, line: null };
+  const names = (from: string, to: string) => new Set(git(repoRoot, ['diff', '--name-only', from, to]).out.split('\n').filter(Boolean));
+  const theirs = names(fork.out, baseSha);
+  const touched = [...names(fork.out, head)].filter(f => theirs.has(f)).sort();
+  if (!touched.length) return { touched, conflicts: null, line: `BASE: ${base} moved to ${baseSha.slice(0, 7)} since this PR forked; its new commits touch no file this PR changes` };
+  const m = mergeStep(repoRoot, baseSha, head, policy);
+  const conflicts = 'conflicts' in m ? m.conflicts : null;
+  const verdict = conflicts ? `the train's merge onto ${base} conflicts beyond the CHANGELOG and the stamp files (${conflicts.join(', ')})` : `the train's merge onto ${base} is clean`;
+  return { touched, conflicts, line: `BASE_OVERLAP: ${baseOverlapLine(base, baseSha, touched)}; ${verdict}` };
+}
+
 const TRAIN_IDENTITY = { GIT_AUTHOR_NAME: 'gstack-ship-queue', GIT_AUTHOR_EMAIL: 'ship-queue@gstack.local', GIT_COMMITTER_NAME: 'gstack-ship-queue',
   GIT_COMMITTER_EMAIL: 'ship-queue@gstack.local', GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' };
 
@@ -353,12 +377,14 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
     `ORDER: ${order.train.map((s, i) => `${i + 1}:#${s.pr}(${s.screen.choice === 'screen' ? 'screened' : 'unscreened'})`).join(' ')}${explicit ? ' (explicit --order)' : ''}`,
     ...(order.held.length ? [`HELD: ${order.held.map(s => '#' + s.pr).join(',')} (${order.split ? 'unscreened PRs form their own train' : `over the train size ${env.train.max_size}`})`] : []),
   ];
-  const due = fillDue(order.train, env.train, nowIso(), o.urgent || o.repair);
-  if (due && !o.dryRun) return outPending({ code: 'QUEUE_TRAIN_WAITING', message: `${order.train.length} of ${env.train.max_size} PRs; the oldest READY dispatches at ${due}` }, lines, `${Q} train build ${prsArgs(order.train, !!explicit)} (after ${due}, or with more PRs, or --urgent for one)`, 'none');
   const baseSha = git(env.ctx.repoRoot, ['rev-parse', `${env.remote}/${env.ctx.base}`]).out;
   const key = sha256(JSON.stringify({ base: baseSha, slots: order.train.map(s => `${s.pr}@${s.head}`) }));
-  const live = listTrains(env.repo.keys).find(t => t.key === key && !TERMINAL_STATES.includes(t.state) && t.state !== 'red' && t.state !== 'unattributed');
-  if (live) return { t: Object.assign(live, { held: order.held.map(s => s.pr) }), lines };
+  // The scratch merges run before the fill rule (#3485, rule 25): a QUEUE_TRAIN_WAITING result is also a clean dry-run merge
+  // of every seated pin, and a pin the base moved onto is named before the train is refused for it.
+  for (const s of order.train) {
+    const overlap = baseOverlap(env.ctx.repoRoot, env.ctx.base, baseSha, s.head, env.policy.policy);
+    if (overlap.touched.length) lines.push(`#${s.pr} ${overlap.line}`);
+  }
   const chain = buildChain(env.ctx.repoRoot, baseSha, order.train, env.policy.policy);
   if ('stoppedAt' in chain) {
     const without = order.train.filter(s => s.pr !== chain.stoppedAt);
@@ -366,6 +392,11 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
       `QUEUE_TRAIN_CONFLICT: train ${key.slice(0, 12)} stopped at #${chain.stoppedAt} (conflicts: ${chain.conflicts.join(', ')}) after merging ${chain.merged.map(p => '#' + p).join(',') || '(none)'}; nothing dispatched, no branch pushed; fix: ${Q} train build ${prsArgs(without, !!explicit)}`],
     without.length ? `${Q} train build ${prsArgs(without, !!explicit)}` : 'none', 'none');
   }
+  lines.push(`MERGE_CHECK: T1..T${order.train.length} merge clean onto ${env.ctx.base}@${baseSha.slice(0, 12)} (dry run in object storage; nothing pushed)`);
+  const due = fillDue(order.train, env.train, nowIso(), o.urgent || o.repair);
+  if (due && !o.dryRun) return outPending({ code: 'QUEUE_TRAIN_WAITING', message: `${order.train.length} of ${env.train.max_size} PRs; the oldest READY dispatches at ${due}` }, lines, `${Q} train build ${prsArgs(order.train, !!explicit)} (after ${due}, or with more PRs, or --urgent for one)`, 'none');
+  const live = listTrains(env.repo.keys).find(t => t.key === key && !TERMINAL_STATES.includes(t.state) && t.state !== 'red' && t.state !== 'unattributed');
+  if (live) return { t: Object.assign(live, { held: order.held.map(s => s.pr) }), lines };
   const head = chain.prefixes.at(-1)!;
   const nonce = makeNonce('gate', head.commit, baseSha, randomBytes(3).toString('hex'), { purpose: 'train' });
   const now = nowIso();
