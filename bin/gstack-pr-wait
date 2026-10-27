@@ -2,7 +2,7 @@
 /**
  * gstack-pr-wait — watch one pull request and print one line per real event.
  *
- *   gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS] [--timeout MINUTES]
+ *   gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS] [--timeout MINUTES] [--exclude CHECK,...]
  *
  * Exit 0 when the --until condition is met or the PR merged, 1 when it needs
  * action (PR_WAIT_BLOCKED), 2 on bad input, a duplicate watcher or a local

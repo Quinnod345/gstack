@@ -8,7 +8,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { cleanup, ghShim, makeFixtureRepo, makePr, readFile, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
+import { stampOnlyLine } from '../lib/restamp';
+import { BASE_POLICY, cleanup, ghShim, makeFixtureRepo, makePr, readFile, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
 const fixture = (opts?: Parameters<typeof makeFixtureRepo>[0]) => { const r = makeFixtureRepo({ prefix: 'tree-receipt-', ...opts }); repos.push(r); return r; };
@@ -53,6 +54,55 @@ describe('tree receipt: stamps, stamp-sensitive gates and negative fixtures', ()
     expect(r.out).toContain('-since: 1.2.4.0');
     expect(r.out).toContain('+since: 1.2.5.0');
     expect(r.out).not.toContain('pr-a.txt');
+  });
+
+  // #3512: under the next-minor convention a new `*_KEY_VERSION` constant is written as a tentative future version, which the
+  // stamp_paths stage moves to the released one at the slot. The receipt accepted a stamp_paths pair only as base -> new, so the
+  // moved constant classified the file `changed` and the train refused the stamp commit (QUEUE_STAMP_NOT_STAMP_ONLY).
+  test('a tentative key version a restamp moved is a stamp, like the base version; a line that changes more than the mention is not', () => {
+    const repo = fixture({ policy: { ...BASE_POLICY, stamp_paths: ['docs/**/*.md', 'lib/policy.ts'], stamp_patterns: ["_KEY_VERSION = '{version}'"] } });
+    makePr(repo, 'pr-a', { expects: '1.2.4.0' });
+    fs.mkdirSync(path.join(repo.work, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.3.0.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\n");
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'a new policy key, tentative next minor');
+    const bundle = path.join(repo.root, 'bundle.json');
+    recordAndBundle(repo, repo.work, LANES, bundle);
+    const gatedHead = repo.git('rev-parse', 'HEAD');
+    expect(restamp(repo, ['--version', '1.2.4.0']).status).toBe(EXIT.ok);
+    // The tentative 1.3.0.0 moved; the released 1.2.2.0 stayed.
+    expect(readFile(repo, 'lib/policy.ts')).toBe("export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\n");
+    repo.git('commit', '-qam', 'stamp 1.2.4.0');
+    const r = receipt(repo, ['--gated', gatedHead, '--bundle', bundle]);
+    expect(r.status).toBe(EXIT.ok);
+    expect(r.out).toMatch(/^version:\s+1\.2\.3\.0 -> 1\.2\.4\.0$/m);
+    expect(r.out).toMatch(/^  stamp   lib\/policy\.ts \(stamp_paths\)$/m);
+    expect(r.out).toMatch(/^TREE: same-modulo-stamps$/m);
+    expect(r.out).toMatch(/^gate-reuse: eligible/m);
+    // Negative: the version moves and the key is renamed on the same line; a tentative value moved by hand to the wrong version.
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_CAPS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\n");
+    repo.git('commit', '-qam', 'rename the key too');
+    const renamed = receipt(repo, ['--gated', gatedHead, '--bundle', bundle]);
+    expect(renamed.status).toBe(EXIT.fail);
+    expect(renamed.out).toMatch(/^  changed lib\/policy\.ts \(stamp_paths: "export const DOCS_KEY_VERSION = '1\.3\.0\.0';" -> "export const DOCS_CAPS_KEY_VERSION = '1\.2\.4\.0';"\)$/m);
+    repo.git('reset', '-q', '--hard', 'HEAD~1');
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.4.0';\n");
+    repo.git('commit', '-qam', 'move a released key by hand');
+    const wrong = receipt(repo, ['--gated', gatedHead, '--bundle', bundle]);
+    expect(wrong.status).toBe(EXIT.fail);
+    expect(wrong.out).toMatch(/^TREE: changed \(lib\/policy\.ts\)$/m);
+    // A mention of another width (a 3-digit pin in a 4-digit repo) is never a stamp candidate, so moving it by hand to the
+    // new version is a product change even though it reads newer than the gated head (pre-landing review, pass 1).
+    repo.git('reset', '-q', '--hard', 'HEAD~1');
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\nexport const PIN_KEY_VERSION = '9.9.9';\n");
+    repo.git('commit', '-qam', 'a 3-digit pin');
+    const pinned = repo.git('rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\nexport const PIN_KEY_VERSION = '1.2.4.0';\n");
+    repo.git('commit', '-qam', 'move the 3-digit pin by hand');
+    expect(stampOnlyLine("export const PIN_KEY_VERSION = '9.9.9';", "export const PIN_KEY_VERSION = '1.2.4.0';", '1.2.3.0', '1.2.4.0', ["_KEY_VERSION = '{version}'"])).toBe(false);
+    expect(stampOnlyLine('left-pad since: 1.2.3', 'left-pad since: 1.2.4.0', '1.2.3.0', '1.2.4.0')).toBe(false);
+    const width = receipt(repo, ['--gated', pinned, '--bundle', bundle]);
+    expect(width.status).toBe(EXIT.fail);
+    expect(width.out).toMatch(/^TREE: changed \(lib\/policy\.ts\)$/m);
   });
 
   test('negative fixture: a dependency pin equal to the old version is `changed`, not a stamp, even inside stamp_paths', () => {

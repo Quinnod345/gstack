@@ -11,6 +11,7 @@ import { approvalSummary } from './approval-citations';
 import { renderIssueLines } from './issue-links';
 import { matchesAny } from './ship-policy';
 import { stampFileKind, versionStampOnly } from './pregate/stamp-only';
+import { stampOnlyLine } from './restamp';
 
 export const RECEIPT_FENCE = 'gstack-ship-receipt';
 const KEY_ORDER: Array<keyof ShipReceipt | 'docs'> = [
@@ -165,22 +166,32 @@ export interface CarryPlanInput {
 export interface CarryRecord { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[] }
 export type CarryPlan = { ok: true; carry: CarryRecord } | { ok: false; code: 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_CARRY_REFUSED'; message: string };
 
-/** The file's text at the reviewed head and at HEAD, with the release version each head carries (from `VERSION`, else `package.json`). */
-export interface CarryChange { before: string | null; after: string | null; oldVersion?: string | null; newVersion?: string | null }
+/**
+ * The file's text at the reviewed head and at HEAD, with the release version each head carries (from `VERSION`, else
+ * `package.json`) and the base policy's `stamp_patterns` templates.
+ */
+export interface CarryChange { before: string | null; after: string | null; oldVersion?: string | null; newVersion?: string | null; templates?: readonly string[] }
 
 /**
  * A policy-named stamp path's change is a stamp when the new text reads as the
- * old text once every new version in it is the old one: the rule the tree receipt
- * applies to the same `stamp_paths`, `stamp_files` and `release_outputs` before
- * the train accepts a stamp commit. No version change, or a file missing on
- * either side, is not a stamp.
+ * old text once every new version in it is the old one, or when every changed
+ * line is a stamp-form rewrite to the new version (`stampOnlyLine`: the old
+ * version or a newer tentative `*_KEY_VERSION` the slot stamp moved, #3512): the rule
+ * the tree receipt applies to the same `stamp_paths`, `stamp_files` and
+ * `release_outputs` before the train accepts a stamp commit. No version
+ * change, or a file missing on either side, is not a stamp.
  */
 export function stampOnlyText(change: CarryChange): boolean {
   const { before, after, oldVersion, newVersion } = change;
   if (before === null || after === null || !oldVersion || !newVersion || oldVersion === newVersion) return false;
   // Digit-bounded: replacing 1.2.3 inside 11.2.3 or 1.2.34 would read a different version's stamp as this one's.
   const escaped = newVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return after.replace(new RegExp(`(?<![0-9])${escaped}(?![0-9])`, 'g'), oldVersion) === before;
+  if (after.replace(new RegExp(`(?<![0-9])${escaped}(?![0-9])`, 'g'), oldVersion) === before) return true;
+  const was = before.split('\n');
+  const now = after.split('\n');
+  if (was.length !== now.length) return false;
+  const changed = was.map((line, i) => i).filter(i => was[i] !== now[i]);
+  return changed.length > 0 && changed.every(i => stampOnlyLine(was[i]!, now[i]!, oldVersion, newVersion, change.templates ?? []));
 }
 
 /**

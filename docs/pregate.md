@@ -456,7 +456,9 @@ receipt for H when the two trees differ only as a stamp does:
   that does not account for every path `git diff-tree` lists between the two
   trees. The version rule is the tree
   receipt's: a `stamp_files`, `stamp_paths` or `release_outputs` hunk is a stamp
-  only as the rewrite from the gated tree's version to the head's (so two trees
+  only as the rewrite to the head's version from the gated tree's version, or
+  from a newer tentative version of the repo's width that the stamp moved (a
+  `*_KEY_VERSION` written as the next minor, #3512) (so two trees
   at the same version refuse such a hunk as `other`), while the built-in
   version-file, manifest, lockfile and CHANGELOG rules compare content and do
   not check the direction of the version move. The obligation stays uncleared; rerun
