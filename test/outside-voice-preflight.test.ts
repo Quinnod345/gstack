@@ -78,7 +78,7 @@ test('CEO and Eng describe the actual disabled route and completion validator', 
       if (skillName === 'plan-eng-review') {
         const routing = output.slice(output.indexOf('**Outcome routing:**'), output.indexOf('**Disabled is a terminal branch'));
         expect(routing).toMatch(/\| Disabled \|[^\n]*No prompt, outside process or native replacement\./);
-        expect(routing).toMatch(/\| Other preflight mode, including harness mismatch \|[^\n]*Native fallback\./);
+        expect(routing).toMatch(/\| Any other mode \(`not_installed`, `under_current_harness`\) \|[^\n]*Native fallback\./);
         expect(routing).toMatch(/\| Outside execution or output validation fails \|[^\n]*finish termination, then use Native fallback\./);
         expect(routing).toMatch(/\| Native fallback unavailable or fails \|[^\n]*No clean-review credit\./);
         const fallback = output.slice(output.indexOf('**Native fallback'), output.indexOf('Dispatch via the Agent tool'));

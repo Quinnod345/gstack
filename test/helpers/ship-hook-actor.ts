@@ -134,9 +134,13 @@ export function shipHookFailures(fixture: ReturnType<typeof createShipHookFixtur
     } else {
       check(evidence.localHook === localPolicy, 'existing local policy changed');
       check(evidence.interactions.length === 0, 'existing local policy requires manual integration, not consent to overwrite');
-      // Manual integration: "manual", or one sentence asking the user (or someone) to integrate it by hand.
-      const toUser = (sentence: string) => /\b(?:integrate|combine|merge|set\s+(?:(?:it|them|this|that|both)\s+)?up|wire[sd]?\s+(?:(?:it|them|this|that|both)\s+)?(?:up|in)|add)\b/i.test(sentence) &&
-        (/\byourself\b/i.test(sentence) || (/\bby\s+hand\b/i.test(sentence) && /\b(?:your?|someone|needs?\s+to\s+be|has\s+to\s+be|must\s+be)\b/i.test(sentence)));
+      // Manual integration: "manual", or one sentence asking the user (or someone) to integrate it by hand. The phrasal
+      // object may be a pronoun or a short determiner-led noun phrase ("wire the guard in", gate 40467320097), and the
+      // hand may be the owner's own ("the repo owner needs to add it ... themselves").
+      const phrasalObject = '(?:(?:it|them|this|that|both|(?:the|this|that|its|your|these|those|both)\\s+(?:\\S+\\s+){0,2}?)\\s*)?';
+      const toUser = (sentence: string) => new RegExp(`\\b(?:integrate|combine|merge|set\\s+${phrasalObject}up|wire[sd]?\\s+${phrasalObject}(?:up|in)|add)\\b`, 'i').test(sentence) &&
+        (/\byourself\b/i.test(sentence) || (/\b(?:owner|maintainer|someone|whoever|user|team)\b/i.test(sentence) && /\b(?:them|him|her)sel(?:f|ves)\b/i.test(sentence)) ||
+          (/\bby\s+hand\b/i.test(sentence) && /\b(?:your?|someone|needs?\s+to\s+be|has\s+to\s+be|must\s+be)\b/i.test(sentence)));
       check(/manual/i.test(result.output) || result.output.split(/[.!?](?:\s|$)|\n/).some(toUser), 'manual integration was not reported');
     }
   }

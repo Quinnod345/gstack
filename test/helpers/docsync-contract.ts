@@ -64,7 +64,16 @@ export function extractDocsDispatch(section: string): string {
 }
 
 export function docsDispatchIndex(calls: Array<{ tool: string; input: unknown }>): number {
-  return calls.findIndex(call => ['Agent', 'Task'].includes(call.tool) &&
+  return docsDispatchIndices(calls)[0] ?? -1;
+}
+
+/**
+ * Every /document-release dispatch, in order. The audit gate's attempt budget is an initial audit plus one repair/re-audit, so a
+ * run has one or two; the parent's accepted contract is the last (gate 40465691803: the parent rejected attempt 1 for a false
+ * claim in its section, re-audited over its retained edit, and reported attempt 2's section).
+ */
+export function docsDispatchIndices(calls: Array<{ tool: string; input: unknown }>): number[] {
+  return calls.flatMap((call, index) => ['Agent', 'Task'].includes(call.tool) &&
     /document-release\/SKILL\.md|executing the \/document-release workflow/i.test(JSON.stringify(call.input)) &&
-    !/Parent processing:|## Step 19: Create PR\/MR/.test(JSON.stringify(call.input)));
+    !/Parent processing:|## Step 19: Create PR\/MR/.test(JSON.stringify(call.input)) ? [index] : []);
 }

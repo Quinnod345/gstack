@@ -398,7 +398,7 @@ identify that evidence and the affected answer.
 THE PLAN:
 <plan content>"
 
-**If `CODEX_MODE: ready` (or `unverified`) — run Codex:**
+**If `CODEX_MODE: ready` — run Codex:**
 
 Run the selected backend in the one foreground Bash invocation described below.
 Finish a failed attempt's termination before fallback; consume only its completed
