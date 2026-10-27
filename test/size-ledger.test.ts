@@ -45,6 +45,7 @@ function mainRepo(): { root: string; main: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'size-ledger-'));
   roots.push(root);
   git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'core.autocrlf', 'false');
   write(root, 'demo/sections/a.md', '# A\n');
   write(root, 'demo/sections/b.md', '# B\n');
   write(root, 'demo/SKILL.md', '## Preamble\n' + 'x'.repeat(MAIN_UNION - 8 - 13) + '\n');

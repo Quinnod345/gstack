@@ -4358,8 +4358,10 @@ did both on a main train 28 had verified, #3519). Other trains are read after
 the notes ref, so a machine that never ran the later train still sees it.
 
 **Fix.** `gstack-ship-queue train prune --stale --train <nonce>` settles the
-record. When some slot is not merged, or no train verified main's SHA, verify
-freezes as before (`QUEUE_TRAIN_FROZEN`).
+record. When some slot is not merged, no train verified main's SHA, or verify
+ran with `--no-fetch`, verify freezes as before (`QUEUE_TRAIN_FROZEN`). A queue
+another machine already froze stays frozen; the refusal prints its freeze
+lines.
 
 <a id="queue-train-frozen"></a>
 ### `QUEUE_TRAIN_FROZEN`

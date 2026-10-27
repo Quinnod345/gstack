@@ -645,15 +645,18 @@ record comes from the one GitHub read that decided to freeze, never a second
 one: a slot that read MERGED stays merged even when GitHub stops answering
 before the record is written, and a slot unreadable beside a merged one is
 left out of `unmerged`, recorded under `unreadable` and printed on an
-`unreadable:` line; the `NEXT:` after the repair names it (`gh pr view
-#<n>@<sha> (unreadable at the freeze); seat each that is OPEN in a train`).
+`unreadable:` line; the `NEXT:` after the repair names it (`gh pr view <n>
+--json state,headRefOid (unreadable at the freeze: #<n>@<sha>); seat each
+that is OPEN in a train`).
 When every slot of the train already merged on GitHub and main's SHA is a
 prefix another train's verify confirmed (read after the notes ref, so a
 machine that never ran that train still sees it), the mismatch says nothing
 about this train: verify refuses with `QUEUE_TRAIN_STALE` and `NEXT:
 gstack-ship-queue train prune --stale --train <nonce>`, freezing nothing and
 dispatching no backstop (train 24's record froze the queue that way on a main
-train 28 had verified, #3519). When
+train 28 had verified, #3519). Only a verify that fetched main takes this
+exit: under `--no-fetch` the local main may be older than GitHub's, so the
+mismatch freezes as before. When
 whether a slot merged on GitHub cannot be read, verify refuses
 (`QUEUE_PROOF_MISSING`, "whether #<n> merged on GitHub could not be read")
 and asks to be rerun once `gh pr view` answers; an unreadable state is never
