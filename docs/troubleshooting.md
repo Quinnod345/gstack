@@ -4873,3 +4873,33 @@ final summary. Rename or move yours, or switch modes (`./setup --prefix` /
 a generated gstack SKILL.md and then edited it, that file is moved to
 `~/.gstack/backups/skills/<timestamp>/<skill>/SKILL.md` before gstack's is
 linked in, never deleted.
+
+## gstack-decision-trail and gstack-worktree-audit
+
+<a id="decision-trail-start-required"></a>
+### `gstack-decision-trail: DECISION_TRAIL_START_REQUIRED: <file> has <n> rows and run <id> has no start row after the newest one`
+
+You appended with `--run <id>` to a trail that other runs already wrote, and
+the newest `start` row in it is not this run's. A run (one agent
+conversation, with its later turns) that joins a trail opens with its own
+`start` row so a reviewer can tell whose rows are whose. Run
+`gstack-decision-trail start <file> <id>` once and append again; the start
+command is a no-op while this run's start row is still the newest, so a rerun
+of the same script is safe. Nothing was written. See
+[docs/unattended.md](unattended.md#the-decision-trail).
+
+### `gstack-worktree-audit` prints `warn: no -b given; MERGED checks against origin/HEAD` or every row says `MERGED no`
+
+Without `-b` the audit compares each worktree's head against the remote's
+default branch (then `origin/main`, then `origin/master`), which is not
+always the branch PRs merge into; pass `-b origin/<branch>`. A squash-merged
+branch is never an ancestor of the base, so `MERGED no` beside `PR #n/merged`
+is normal and the bucket is still `safe` while the tree is clean and every
+commit is pushed; an unpushed commit or an untracked file on that branch makes
+it `review`, because deleting the worktree would lose it. The audit only reads
+(its one write is the base fetch, which `--no-fetch` skips);
+a worktree it calls `safe` is still yours to remove, and a `prunable` row names
+a registered, unlocked worktree whose directory is already gone (`git worktree
+prune`); a locked one, or a `broken` row whose `.git` link is missing, reads
+`review` instead. `clean,ignored:<n>` means the tree is clean but holds
+gitignored entries (`.env`, build output) that go with the worktree.

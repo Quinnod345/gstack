@@ -82,3 +82,5 @@ is the completion check. Copy the whole directory, never single files.
 {{AUTOPLAN_DRIVER_CODES}}
 
 {{COORDINATOR_CONTRACT}}
+
+Decision trail. A lane keeps `<run dir>/decisions.tsv` through `gstack-decision-trail <file> <phase> <decision> <why> <evidence> <result>` (one row per fork, unit, revert or blocker; evidence a pointer that resolves) and opens it with `gstack-decision-trail start <file> <run id>` when another run wrote it first. Before done it audits the trail against the transcript, superseding a wrong row with a new one rather than editing it, has a reviewer on another model family read the trail, and ends its report with an `Attention` section (`reviewed by <model>`, then the flags, or `No flags`). The full rule is [docs/unattended.md](../docs/unattended.md#the-decision-trail).
