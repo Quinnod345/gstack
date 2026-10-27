@@ -12,6 +12,11 @@
 #      from revision 2, origin's VERSION read in this run
 #      (GSTACK_CAPY_REMOTE_VERSION, the trailer's `latest:` note) and the repo
 #      it just cloned (GSTACK_CAPY_CLONED, the installer's `cloned` line).
+#   From revision 3, `--for none` (this session runs no gstack workflow on this
+#   machine: a coordinator thread) is check-only and installs nothing: with no
+#   checkout it prints `gstack: ok not-needed for=none (...)` and exits 0; with
+#   one it prints the same trailer with the checkout's version, running nothing
+#   from the checkout. That ok admits no workflow (no verdict is written).
 # Everything else (Bun, setup, the doctor, the verdict, the launch line) is
 # the checkout's. The last line is the `gstack:` trailer; exit 0 only on
 # `gstack: ok`. Contract: docs/capy-install.md; tests:
@@ -19,11 +24,12 @@
 #
 # Usage:
 #   bash install.sh --check [--for <skill> | --require <id,id>] [--project <path>]
+#   bash install.sh --check --for none        this machine runs no workflow: ok not-needed, nothing installed
 #   bash install.sh [--for <skill> | --require <id,id>] [--with-browser] [--revision <ref>] [--project <path>]
 # Environment: GSTACK_CAPY_ROOT (default ~/.local/share/gstack), GSTACK_CAPY_REPO,
 # GSTACK_CAPY_AUTO_UPGRADE=0 (never fast-forward), GSTACK_CAPY_FETCH_TIMEOUT (s).
 set -u
-GSTACK_CAPY_WRAPPER=2
+GSTACK_CAPY_WRAPPER=3
 
 self="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
 root="${GSTACK_CAPY_ROOT:-$HOME/.local/share/gstack}"
@@ -46,6 +52,13 @@ fix_cmd="bash $self${skill:+ --for $skill}"
 # The same install for a machine without this skill (gstack_capy_bootstrap_cmd).
 no_drive="test -f \"$root/setup\" || git clone --quiet --single-branch --depth 1 https://github.com/garrytan/gstack.git \"$root\" && GSTACK_CAPY_ROOT=\"$root\" bash \"$root/capy/skill/gstack/scripts/install.sh\"${skill:+ --for $skill}"
 export GIT_TERMINAL_PROMPT=0
+if [ "$skill" = none ]; then
+  check=1
+  if [ ! -f "$root/setup" ]; then
+    echo "gstack: ok not-needed for=none (no checkout at $root; before the first workflow run: bash $self --for <skill>)"
+    exit 0
+  fi
+fi
 
 bounded() { if command -v timeout >/dev/null 2>&1; then timeout "${GSTACK_CAPY_FETCH_TIMEOUT:-60}" "$@"; else "$@"; fi; }
 # below A B — dotted numeric A sorts below B.
@@ -102,6 +115,13 @@ else
     echo "gstack-capy-skill: $min_note; checking the local install only"
   fi
   installed=$(head -1 "$root/VERSION" 2>/dev/null)
+  if [ "$skill" = none ]; then
+    # Nothing from the checkout runs: the trailer is honest for any revision.
+    note="checkout ${installed:-unknown} at $root, not certified"
+    [ -n "$remote_version" ] && [ "$remote_version" != "$installed" ] && note="$note; latest: $remote_version"
+    echo "gstack: ok not-needed for=none ($note; before the first workflow run: bash $self --for <skill>)"
+    exit 0
+  fi
   if [ -n "$remote_min" ] && below "${installed:-0}" "$remote_min"; then
     branch=$(git -C "$root" symbolic-ref -q --short HEAD || true)
     dirty=$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null | cut -c4- | tr '\n' ' ' | sed 's/ $//')

@@ -21,21 +21,39 @@ commit on main's first-parent history, moved only by this workflow, only
 forward.
 
 **Green** means, on that exact commit: the `free-tests` check run succeeded
-(the status main requires), the `main-backstop` check run succeeded, every
-check run on it has completed and none failed, and `refs/notes/gstack-trains`
-holds no active freeze. The Main backstop gate workflow publishes
-`main-backstop` on each push to main from a job of its own: success when a
-green train record covers the tree or the backstop gated it green, neutral
-when main moved past the push before it was gated (superseded) or a freeze's
-own backstop run owns it (deferred), failure when it froze the queue or could
-not finish. Neutral is never green: a commit whose own tree was never gated is
-not released. A push that gets no backstop run at all (a dependabot push, a
-policy without a train block) has no `main-backstop` check run and is not
-green either; a cancelled check run counts as red. A commit with a check run still going is skipped and the next
-older one is considered, back through 7 days or 200 first-parent commits. The
-workflow runs no tests and no paid evals of its own; it only reads what the
-trains and the backstop already recorded. With nothing green in the window it
-fails and lists why each commit was skipped.
+(the status main requires), the commit was gated (below), every check run on
+it has completed and none failed, and `refs/notes/gstack-trains` holds no
+active freeze. A cancelled check run counts as red. A commit with a check run
+still going is skipped and the next older one is considered, back through 7
+days or 200 first-parent commits. The workflow runs no tests and no paid evals
+of its own; it only reads what the trains and the backstop already recorded.
+With nothing green in the window it fails and lists why each commit was
+skipped.
+
+**Gated** means one of two pieces of evidence. The first is the
+`main-backstop` check run: the Main backstop gate workflow publishes it on
+each push to main from a job of its own, success when a green train record
+covers the tree or the backstop gated it green, neutral when main moved past
+the push before it was gated (superseded) or a freeze's own backstop run owns
+it (deferred), failure when it froze the queue or could not finish. The second
+is a train record in `refs/notes/gstack-trains` (kind `train`, state
+`green`, `merging` or `merged`) whose `merged[]` lists the commit's sha or
+its tree: those entries are the main commits `gstack-ship-queue verify
+--train` confirmed, so a commit a green train merged is gated even when trains
+merged faster than the backstop could settle and its own backstop run ended
+neutral or never ran. The `CANDIDATE` line says which: `gated by
+main-backstop` or `gated by train <nonce>`. Train evidence relaxes nothing
+else: a red backstop run, a failed or missing `free-tests` run, any other red
+check run or a run still going keeps the commit out, and a record in any other
+state (`red`, `superseded`, `free-green`, …) is not evidence. A commit with
+neither a successful backstop run nor a train record is not released: a
+dependabot push, a policy without a train block, or a tree that was never
+gated.
+
+Another repository runs the same script with its own names:
+`--required-check <name>` (default `free-tests`), `--backstop-check <name>`
+(default `main-backstop`) and `--notes-ref <ref>` (default
+`refs/notes/gstack-trains`). `weekly-release.yml` passes none of them.
 
 A cut that stopped half-way (tag and `stable` pushed, release not created) is
 finished by the next run, by cron or by hand: `stable` itself stays a
@@ -135,7 +153,7 @@ is exercised against real check runs before it merges.
 
 | Line | Meaning |
 |---|---|
-| `CANDIDATE: <sha> (<date>)` | the commit that will be (or was) released |
+| `CANDIDATE: <sha> (<date>) gated by main-backstop|train <nonce>` | the commit that will be (or was) released, and which evidence gated it (`[hotfix: --ref]` before `gated by` on a `--ref` cut) |
 | `NOTHING_NEW: origin/main <sha> is already released as v<X>` | nothing merged since the last release; exit 0 |
 | `NO_GREEN_COMMIT: ...` with `SKIPPED:` lines | nothing in the window passed the gate; exit 1 (a dry run exits 0: the skips are its answer) |
 | `REFUSED: non-fast-forward: ...` | the candidate is behind stable; stable only moves forward |

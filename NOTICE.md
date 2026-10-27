@@ -49,6 +49,25 @@ signature components are not carried over):
 - `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
   ship-floor tells, turned into a free check.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
+- `design-review/sections/craft-audit.md.tmpl` (and the generated
+  `sections/craft-audit.md`): the redesign-skill audit of an existing site,
+  its fix-priority order and Tailwind version check; `scripts/resolvers/design-craft.ts`:
+  the Persuade conversion checks, also rendered into
+  `plan-design-review/sections/review-sections.md`; and the craft-tell entries
+  in `lib/design-catalog.ts`.
+- `design-motion/SKILL.md.tmpl` and `design-motion/sections/fidelity.md.tmpl`,
+  `motion.md.tmpl` and `figma.md.tmpl` (and the generated `design-motion/SKILL.md`
+  and `sections/*.md`): design-to-motion's fidelity rules, Figma layer-export
+  table (now an optional source path), loading choreography, story loops,
+  loop cycle, easing, checks and export formats, reconciled with gstack's one
+  authored motion moment, content visible without script, and the slop
+  catalog's motion tells.
+- `lib/motion-capture.ts` and `bin/gstack-motion-capture.ts`: design-to-motion's
+  deterministic capture (fake clock, whole-millisecond steps averaging 1000/60,
+  the `__start`/`__tick`/`__lt` page contract, PRE frames).
+- `lib/motion-encode.ts` and `bin/gstack-motion-encode`: design-to-motion's
+  ffmpeg recipes for the MP4, loop GIF and 800x500 GIF, and its seam,
+  empty-beat, rest and overflow checks as ffmpeg PSNR comparisons.
 
 ## hallmark — Copyright (c) 2026 Hallmark contributors — MIT License
 
@@ -86,6 +105,15 @@ grew the diff cuts first; the end of the budget is not approval) in
 are written in gstack's words and mapped onto gstack's blocking floor. No sentence is copied,
 so no license text is carried; this entry is a courtesy.
 
+Design port (`skills/babysit-pr/scripts/pr-wait`, at 7de017b3; license text:
+`licenses/MIT-tstack.txt`): `bin/gstack-pr-wait`, `lib/pr-wait.ts` and
+`lib/pr-wait-github.ts` follow pr-wait's design (one stdout line per real event,
+`--until green|ready|any-change`, exit 0/1/2, required checks from rulesets and
+classic protection, two identical polls before green, the base-moved-and-touches-
+this-PR event, BEHIND and DIRTY, a per-PR lock, a 6-hour baseline), rewritten in
+TypeScript on gstack's bun shebang, state root, result codes and config keys;
+no Python line is carried. Each file names the source in its header.
+
 ## pstack — Copyright Lauren Tan — MIT License
 
 https://github.com/cursor/plugins (`pstack/skills/interrogate`, `lead-judgment.md`). Ideas,
@@ -105,3 +133,5 @@ the shared-premise red flag in `investigate/sections/blast-radius.md.tmpl` and
 design red flags in Section 1 of `plan-eng-review/sections/review-sections.md.tmpl`; and the generated
 `SKILL.md` / `sections/*.md` files. Each section names its source in a first-line comment.
 Written in gstack's words; no sentence is copied, so no license text is carried.
+
+Also ideas, not text, from `pstack/skills/principle-*`, `poteto-mode` and its eval playbook: ETHOS.md principles 5 to 8, the observable-questions rule in `plan-tune/SKILL.md.tmpl` and `docs/proactive.md`, the blinding rules in `eval-plan/SKILL.md.tmpl` and `docs/TESTING_INTERNALS.md`, and the limiter sentence in AGENTS.md step 4 (GSTA-124).

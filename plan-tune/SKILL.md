@@ -978,6 +978,19 @@ For background mode (e.g., the user wants to keep working):
 - **The profile never changes defaults.** This skill inspects and configures.
   Per-question preferences can auto-decide questions; the declared/inferred
   profile is advisory only.
+- **Observable questions are not the user's to answer.** A question whose
+  answer a command, a render or a measurement can produce is a question for the
+  machine: "is this faster" is two timed runs, "which layout reads better" is two
+  renders side by side, "does the API accept this shape" is one call against a
+  local or test endpoint. The skill that would have asked does the observation
+  and reports what it saw, as long as the observation is local, read-only and
+  free; one that changes state, reaches a live or third-party system or spends
+  money is a one-way door and stays a question (see the rule above). Only a
+  product or preference call reaches the user (what the product should do, what
+  they want, what they will spend or risk), and it arrives with the observation
+  already made. When the question log shows a prompt whose answer was observable,
+  the fix belongs in the asking skill, not in a never-ask preference: flag it in
+  the audit as an observable question and name the check that replaces it.
 - **Completion status:**
   - DONE — did what the user asked (enable/inspect/set/update/disable)
   - DONE_WITH_CONCERNS — action taken but flagging something (e.g., "your

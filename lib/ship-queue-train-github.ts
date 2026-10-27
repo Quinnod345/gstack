@@ -57,14 +57,21 @@ export function asRun(summary: RunSummary): { id: number; url: string } {
   return { id: summary.databaseId, url: summary.url };
 }
 
-/** One JSON artifact of a run (the named file, else the first .json file it holds); null when it is missing or unreadable. */
+/**
+ * One JSON artifact of a run: the named file wherever the artifact keeps it
+ * (a multi-path upload keeps its directories, so report-verdict-a1 holds
+ * paid-report/collector-outcomes.json), else the first .json file at its
+ * root; null when it is missing or unreadable.
+ */
 export function downloadJson(ctx: QueueContext, slug: string, run: number, name: string, scratch: string, file?: string): unknown {
   const dir = path.join(scratch, `${run}-${name}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   try {
     if (!ctx.gh(['run', 'download', String(run), '--repo', slug, '-n', name, '-D', dir]).ok) return null;
-    const pick = file ?? fs.readdirSync(dir).find(f => f.endsWith('.json'));
+    const pick = file
+      ? (fs.readdirSync(dir, { recursive: true }) as string[]).filter(f => path.basename(f) === file).sort((a, b) => a.length - b.length)[0]
+      : fs.readdirSync(dir).find(f => f.endsWith('.json'));
     return pick && fs.existsSync(path.join(dir, pick)) ? JSON.parse(fs.readFileSync(path.join(dir, pick), 'utf8')) : null;
   } catch { return null; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

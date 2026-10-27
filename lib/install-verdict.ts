@@ -159,7 +159,7 @@ export function verdictProblem(skill: string, gstackRoot: string, env: Env, bunP
   const missing = (SKILL_REQUIREMENTS[skill]?.requires ?? []).find(id => !v.required.includes(id));
   if (missing && INSTALL_PROFILES.includes(v.for)) {
     return { ...problem(`the install verdict certified for=${v.for}, which does not cover ${missing} that ${skill} needs (${v.for} certifies only the read-only helpers)`),
-      fix: `run GSTACK_CAPY_ROOT=${src} bash ${src}/capy/skill/gstack/scripts/install.sh --for ${skill} (the full install: ./setup and host profiles), then launch with the GSTACK_LAUNCH line it prints` };
+      fix: `run GSTACK_CAPY_ROOT=${src} bash ${src}/capy/skill/gstack/scripts/install.sh --for ${skill} (upgrades this checkout in place: ./setup and host profiles, no second clone), then launch with the GSTACK_LAUNCH line it prints` };
   }
   if (missing) return problem(`the install verdict certified for=${v.for}, which does not cover ${missing} that ${skill} needs`);
   if (v.bun_path && bunPath && bunPath !== v.bun_path) {

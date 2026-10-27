@@ -99,6 +99,36 @@ newest first; `docs/eval-models.md` in gstack), `arms`, `dry-run`, `pilot start`
 the default is `full`. A refused arm (`EVAL_MODEL_DENIED`, `EVAL_MODEL_OLD_GENERATION`,
 `EVAL_MODEL_GENERATION_UNRESOLVED`) is replaced, never argued past.
 
+### Step 1c: Candidate-side blinding
+
+A candidate that can tell it is being graded behaves differently from one that
+thinks it is at work, and a judge that knows which arm it is reading grades the
+label. Three rules hold for every arm, written into the preregistration (a
+`## Blinding` section naming the fixture root and the judge's labels) and checked
+by reading the fixture tree before the freeze commit; `prereg --check` does not
+read fixture trees, so this check is yours:
+
+1. **Nothing the candidate sees carries an eval word.** No `eval`, `test`,
+   `judge`, `experiment`, `rubric`, `score`, `compare`, `benchmark`,
+   `candidate` or `arena` in any directory name, file name, prompt, commit
+   message or environment variable the preregistration controls and the candidate
+   can read. Two things are outside the rule: a project's own test directory, when
+   the task is about those tests, and the skill text an arm loads as its own
+   instructions (a gstack SKILL.md uses these words freely); the rule is about the
+   fixture and the task, which the eval builds.
+2. **The directory looks like a project.** Name the fixture root the way the
+   project it imitates would (`billing-service/`, `docs-site/`), with the files
+   that project would plausibly hold, never `fixture-a/`, `case-7/` or the
+   model's name. A candidate working in `arm-b/` knows there is an `arm-a/`.
+3. **The judge sees sanitized labels and the candidate's real reads.** The judge
+   gets `A` and `B`, never a model id, arm name, price or run number, and it
+   grades whether the candidate followed the chain (read the file the task
+   pointed at, then the file that one named) from the files the transcript shows
+   it actually opened, never from the candidate's own account of what it read.
+
+A rule broken after a priced call is a new eval with a new preregistration, the
+same as a changed bar.
+
 ## Step 2: zero-cost stub-model dry run
 
 Run the pipeline over the real development rows with a stub model that costs nothing:
