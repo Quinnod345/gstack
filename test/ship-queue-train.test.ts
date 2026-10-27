@@ -1069,6 +1069,22 @@ describe('verify, freeze, repair and clear', () => {
     expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [{ pr: '2', head: h2 }] });
   }, 300_000);
 
+  // Value: protects=a slot unreadable on GitHub beside a merged one is left out of unmerged and named in the reason, so the rebuild after the repair never seats a PR that may already be in; fails_when=freezeQueue files an unreadable slot under unmerged, or drops it without naming it; why_new=the test above keeps slot 2 readable; seam=the fixture's gh pr view vanishing for slot 2; no_claim=the backstop's outcome
+  test("a slot unreadable on GitHub beside a merged one is left out of unmerged and named in the freeze reason", () => {
+    const fx = make();
+    const { nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    const coord = coordinatorClone(fx.repo);
+    const smuggled = fx.repo.git('show', `${t.prefixes[0].commit}:CHANGELOG.md`).replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-18\n\n- #1 change\n- added after the gate\n') + '\n';
+    publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: smuggled });
+    fx.write(d => { (d.prs['1'] as any).state = 'MERGED'; d.vanish = { '2': 0 }; });
+    const frozen = queue(fx, ['verify', '--pr', '1', '--train', nonce], {}, coord);
+    expect(frozen.status).toBe(EXIT.fail);
+    expect(line(frozen.out, 'freeze:')).toMatch(/; #1 merged on GitHub without a verified tree; #2 unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers; unmerged \(none\); repair none admitted$/);
+    expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [] });
+  }, 300_000);
+
   // Value: protects=a post-merge CHANGELOG difference is excused only when main's parent is T<i-1> modulo stamps, so a foreign commit between the verified head and the squash freezes; fails_when=published() skips or inverts the parent check; why_new=the two tests above reach the CHANGELOG rule only with a parent that is T1 modulo stamps; seam=none; no_claim=a parent differing from T1 in the CHANGELOG alone
   test("a post-merge CHANGELOG difference is not excused when main's parent is not the verified prefix modulo stamps: the queue freezes naming the parent", () => {
     const fx = make();

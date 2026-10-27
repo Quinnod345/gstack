@@ -624,7 +624,9 @@ freezes the same way, since main already holds the unverified squash. The
 record comes from the one GitHub read that decided to freeze, never a second
 one: a slot that read MERGED stays merged even when GitHub stops answering
 before the record is written, and a slot unreadable beside a merged one is
-kept out of `unmerged` and named in the reason until it can be read. When
+left out of `unmerged` and named in the reason; nothing reads it again, so
+the `NEXT:` after the repair omits it and the operator seats it in a train by
+hand once `gh pr view` answers. When
 whether a slot merged on GitHub cannot be read, verify refuses
 (`QUEUE_PROOF_MISSING`, "whether #<n> merged on GitHub could not be read")
 and asks to be rerun once `gh pr view` answers; an unreadable state is never

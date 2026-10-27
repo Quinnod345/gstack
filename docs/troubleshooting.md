@@ -4352,9 +4352,11 @@ the repair's rebuild never seats it again), main's tree and the backstop run
 dispatched on main's SHA. The record is built from the one GitHub read that
 decided to freeze: a slot that read MERGED stays merged even when `gh pr view`
 stops answering a moment later, and a slot whose state could not be read when
-another slot had merged is kept out of `unmerged` and named in the reason
-(`#<n> unreadable on GitHub, kept out of unmerged until read`), so the
-rebuild after the repair never seats a PR that may already be in. The
+another slot had merged is left out of `unmerged` and named in the reason
+(`#<n> unreadable on GitHub, left out of unmerged; seat it in a train by hand
+once gh pr view answers`), so the rebuild after the repair never seats a PR
+that may already be in; nothing reads that slot again, so the `NEXT:` after
+the repair omits it and the operator seats it by hand. The
 freeze lives in local state and on `refs/notes/gstack-trains`. Ordinary
 trains and other trains' merges are refused until a repair lands.
 

@@ -114,8 +114,9 @@ function published(env: TrainEnv, t: TrainRecord, i: number, main: string): { sa
  * anything remote, then the backstop gate is dispatched on main's sha.
  * `states` is the one GitHub read of every unverified slot, made by the
  * caller: a slot that read MERGED is merged, verified tree or not, and a slot
- * that could not be read is left out of `unmerged` and named in the reason,
- * so the rebuild after the repair never seats a PR that may already be in.
+ * that could not be read is left out of `unmerged` and named in the reason
+ * (nothing reads it again; the operator seats it by hand once gh answers), so
+ * the rebuild after the repair never seats a PR that may already be in.
  */
 async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string, states: ReadonlyMap<string, string>): Promise<FreezeRecord> {
   const now = nowIso();
@@ -127,7 +128,7 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
     schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: [...t.merged.map(m => m.pr), ...landed],
     unmerged: unverified.filter(s => !landed.includes(s.pr) && !unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
     main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out },
-    reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, kept out of unmerged until read` : ''].filter(Boolean).join('; '),
+    reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers` : ''].filter(Boolean).join('; '),
     backstop: null, repair: null,
     created_at: now, cleared_at: null, cleared_by: null, updated_at: now,
   };
