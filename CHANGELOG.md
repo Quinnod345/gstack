@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Policy key versions are stamped, not hand-moved** (`lib/ship-policy.ts`, `.gstack/ship-policy.json`): `DOCS_CAPS_KEY_VERSION` is 1.91.270.0, the release that shipped `docs.caps` (#3487 was written naming 1.91.258.0, which main stamped for another PR; a slot call never permits an edit beyond the four stamp files, so the constant could not move at the slot). gstack's own policy now lists `lib/ship-policy.ts` under `stamp_paths` with the `_KEY_VERSION = '{version}'` template in `stamp_patterns`: a new key's constant is written as a tentative future version (the next patch above the fork point) and `gstack-restamp`'s stamp_paths stage moves it to the allocated version at the slot stamp, reading the base branch's policy, so the stage is live for the PRs after this one. `test/gstack-ship-policy.test.ts` adds the check the incident lacked: a released key's version must be a CHANGELOG heading whose entry names the key, so a tentative value no stamp moved fails (keys from before `review_scope` are exempt).
+
 ## [1.91.270.0] - 2026-10-27
 
 ### Added

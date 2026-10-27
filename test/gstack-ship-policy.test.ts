@@ -91,6 +91,29 @@ describe('policy key versions against the CHANGELOG', () => {
       expect(cmp(parse(version), newest), `${key} is introduced in ${version}, which has no CHANGELOG heading and is not newer than the newest heading ${newest.join('.')}; an unreleased key names the release that will stamp it`).toBeGreaterThan(0);
     }
   });
+
+  test('a released key names the heading whose entry introduces it, so a tentative version no stamp moved fails', () => {
+    // #3487 was written naming the next version and main stamped that number for another PR first, so the constant
+    // pointed at a release that never read `docs` while the heading existed and the test above skipped it. A key version that is
+    // a heading must be the one whose entry names the key (`\`<key>` at a word boundary in the section body, so `\`docs/` paths do not count); lib/ship-policy.ts sits in
+    // stamp_paths so the slot stamp moves a tentative value there itself. Keys from before the convention are exempt.
+    const root = path.join(import.meta.dir, '..');
+    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+    const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.status === 0 ? base.stdout : '');
+    const sections = new Map<string, string>();
+    for (const part of text.split(/^(?=## \[)/m)) {
+      const heading = /^## \[(\d+\.\d+\.\d+\.\d+)\]/.exec(part);
+      if (heading && !sections.has(heading[1]!)) sections.set(heading[1]!, part);
+    }
+    const parse = (v: string) => v.split('.').map(Number);
+    const cmp = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!;
+    for (const [key, version] of Object.entries(POLICY_KEY_INTRODUCED)) {
+      if (cmp(parse(version), parse(REVIEW_SCOPE_KEY_VERSION)) < 0) continue;
+      const section = sections.get(version);
+      if (section === undefined) continue;
+      expect(new RegExp('`' + key + '(?![A-Za-z0-9_/-])').test(section), `${key} is introduced in ${version}, but that release's CHANGELOG entry never names \`${key}: the constant still holds the tentative version the branch was written with; the slot stamp moves it through stamp_paths, or move it to the release that shipped the key`).toBe(true);
+    }
+  });
 });
 
 describe("gstack's own .gstack/ship-policy.json", () => {
