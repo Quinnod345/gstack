@@ -46,6 +46,18 @@ describe('gstack-review-plan', () => {
     expect(r.stdout).toContain('next=fix-check dispatches=1');
     expect(r.stdout).toContain('DISPATCH: fix-check fix-check effort=full');
   });
+  test('--fix-check-prompt renders the fix-check reviewer prompt from the parent\'s files and refuses a missing one', () => {
+    const r = repo({ 'docs/howto.md': '# x\n' });
+    const w = (n: string, t: string) => { const f = path.join(r.state, n); fs.writeFileSync(f, t); return f; };
+    const files = ['--fix-list', w('fix.txt', 'lib/a.ts:3 guard now refuses unknown'), '--hunks', w('hunks.diff', '+if (s !== "MERGED") return false;'), '--tests', w('tests.txt', '12 pass 0 fail')];
+    const ok = spawnSync(BIN, ['--fix-check-prompt', ...files], { cwd: r.dir, encoding: 'utf8', timeout: 60_000 });
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('You are the fix-check reviewer');
+    expect(ok.stdout).toContain('lib/a.ts:3 guard now refuses unknown');
+    expect(ok.stdout).toContain('(none found)');
+    const missing = spawnSync(BIN, ['--fix-check-prompt', '--fix-list', path.join(r.state, 'nope.txt'), '--hunks', files[3]!, '--tests', files[5]!], { cwd: r.dir, encoding: 'utf8', timeout: 60_000 });
+    expect(missing.status).toBe(2);
+  });
   test('usage errors exit 2', () => {
     expect(spawnSync(BIN, [], { encoding: 'utf8', timeout: 10_000 }).status).toBe(2);
     expect(run(repo({ 'a.md': 'x' }), ['--last', 'later']).status).toBe(2);

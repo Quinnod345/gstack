@@ -1,5 +1,9 @@
 <!-- AUTO-GENERATED from adversarial.md.tmpl — do not edit directly -->
 <!-- Regenerate: bun run gen:skill-docs -->
+**Step 9's plan governs this step:** run the native pass only on
+`DISPATCH: adversarial-native` and the outside voice only on
+`DISPATCH: outside-voice`; otherwise print `ADVERSARIAL: skipped (review plan)`.
+
 ## Step 11: Adversarial review (always-on)
 
 Every diff gets the Claude adversarial pass. Add Codex when its preflight is ready; unavailable or disabled outside coverage stays explicit.

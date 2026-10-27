@@ -165,7 +165,7 @@ unpushed head is `QUEUE_RECEIPT_STALE` to the queue.
 
 The receipt's `review_loop` object, written from `gstack-review-scope summary
 --since <REVIEW_SINCE>`, is the loop's machine-readable outcome: `passes`
-(Step 9 passes this ship ran, 1 to 3), `blocking_found` (distinct blocking
+(Step 9 full passes this ship ran, 1 or 2), `blocking_found` (distinct blocking
 findings across them), `deferred` (blocking findings in unchanged code filed
 as issues, Step 11's late defers included), `noted`, `fixed` and `scope`. The
 summary line a parent reads prints it as `passes=<n> blocking_found=<k>
@@ -173,6 +173,18 @@ deferred=<m>`; the PR body lists the deferred issues under `## Deferred
 findings` and the below-floor items under `## Review notes`. A pass that finds
 nothing is `NO FINDINGS` from every reviewer and a pass with no edits, which
 is the loop's exit, never a failed review ([review-policy.md](review-policy.md)).
+Three counters appear only when the run recorded them: `fix_checks` (fix-check
+rows, never passes), `dispatches` (reviewer dispatches by role) and
+`est_input_tokens` (prompt plus diff bytes the dispatches read, / 4, a relative
+estimate and never a bill).
+
+### Report length
+
+A parent reads many lanes, so length is a cost it pays per lane. A READY block
+holds its required lines plus at most 150 words; a completion report holds at
+most 300 words; a subagent brief names the files to read instead of pasting
+them. Evidence goes in files the report points to. Waits go on operations,
+never on polling wakes.
 
 ### The outside voice on Capy
 

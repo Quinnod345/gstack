@@ -11,6 +11,14 @@ Steps 10–11 queue findings without editing; include those findings in this pas
 Every repeat starts before the checklist read and captures a fresh REVIEW_START.
 Finish the complete review and QA before applying any fix in Step 9.4.
 
+**Review plan.** Pass 1 runs `~/.claude/skills/gstack/bin/gstack-review-plan
+--base <base>`; a repeat uses decision 2's run. Save its `REVIEW_PLAN:` line and
+fingerprint. Dispatch exactly its `DISPATCH:` lines (specialists, Red Team, Step
+11's voices), each at its `effort=` on the same model family; a `SKIP:` reviewer
+logs `{"dispatched":false,"reason":"scope"}`. Audits run at `AUDIT_EFFORT:`. The
+core checklist, gate scan and QA always run. Item 6's row adds
+`"dispatches":[{"role":R,"prompt_bytes":N,"diff_bytes":N}]`.
+
 **Pass 2+ reads the range, not the tree** (`review_scope frozen`): the core read
 in item 2 becomes `git diff $RANGE_BASE`, and every dispatched prompt (specialists,
 Red Team, the Step 11 reviewers) carries a literal sha you write in:
@@ -211,18 +219,27 @@ Apply these decisions in order:
    resume at the next decision; otherwise run a fresh complete Step 9. A successful
    peer or a QA exception cannot replace missing dispatched coverage.
 2. **Third fixing cycle reached (`CYCLES >= 3`):** STOP and report recurring findings with
-   `converged:false`; do not run a fourth fixing cycle. Under `frozen` the cap comes
-   sooner: a blocking finding still in `fix` scope on pass 3 (`PASS >= 3`) stops
-   here too, unfixed. Name each blocking finding (path, severity, problem) for the
-   owner. Deferred and noted items are never recurring findings, so a capped pass
+   `converged:false`; do not run a fourth fixing cycle. Under `frozen` the plan
+   decides sooner: `gstack-review-plan --base <base> --pass $PASS --last full` with
+   each flag that holds (`--fixed-blocking`, `--fixed-below`, `--blocking-open`,
+   `--touched-gate` for a fix to an item 2.5 path, `--reviewed-numbers <fp>`).
+   `NEXT: stop` stops here, unfixed; `full` is decision 3, `fix-check` 3.5, `done` 4.
+   Name each blocking finding (path, severity, problem) for the owner. Deferred and noted items are never recurring findings, so a capped pass
    whose remaining findings are all below the floor applies no edits and continues
    at decision 4: the loop ships below the floor. The cap is a stop, not an
    approval: a blocker it leaves standing is reported, never waved through.
 3. **Fixes applied below the cap:** Insert Step 5, affected Steps 6–8 and all of
-   Step 9 before the pending Step 10 in the work list. If the fixes grew the diff
+   Step 9 before the pending Step 10 in the work list (`NEXT: full`). If the fixes grew the diff
    past what the request needs (a helper, a guard, a case nothing takes), cut that
    growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
+3.5. **One fix-check.** Take a `gstack-review-log --start review` token; write the
+   fix list, touched hunks (`git diff $PASS_HEAD`), callers of changed symbols and
+   test results to `.gstack/tmp/fix-check-*.txt`; dispatch one full-effort reviewer
+   on `gstack-review-plan --fix-check-prompt --fix-list <f> --hunks <f> --tests <f>
+   --callers <f>`, plus the outside voice only if the plan lists it. Log item 6's
+   row as `"skill":"review-fix-check"` with `--finish <token>`; not a pass. A
+   CRITICAL stops as decision 2; else decision 4.
 4. **No edits in this pass:** Resolve the required-probe gate below. Only after it
    clears may you continue to Step 10. A pass whose only findings were deferred or
    noted applied no edits and continues here: the loop converges below the floor.

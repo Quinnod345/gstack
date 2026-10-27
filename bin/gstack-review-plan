@@ -5,6 +5,7 @@
  *   gstack-review-plan --base <ref> [--pass <full passes run>] [--last none|full|fix-check] [--fixed-blocking] [--fixed-below]
  *                      [--blocking-open] [--touched-gate] [--critical-found] [--gate-tagged <n>] [--gated a,b] [--force a,b|all]
  *                      [--reviewed-numbers <fingerprint>] [--no-tiers] [--json]
+ *   gstack-review-plan --fix-check-prompt --fix-list <file> --hunks <file> --tests <file> [--callers <file>]
  *
  * Reads the diff against the merge base with <ref> (committed, working tree and
  * untracked), runs gstack-diff-scope and, unless --gate-tagged is given,
@@ -17,6 +18,7 @@ import * as path from 'node:path';
 import { EXIT, exitTableHelp } from '../lib/headless-artifacts';
 import { runScriptSync } from '../lib/script-invocation';
 import { planReview, reviewPlanLine, scanNumbers, type History } from '../lib/review-depth';
+import { renderFixCheckPrompt } from '../scripts/resolvers/fix-check';
 
 const HELP = `gstack-review-plan — the review depth of the next /ship step (docs/review-policy.md#review-depth)
 
@@ -34,6 +36,7 @@ const HELP = `gstack-review-plan — the review depth of the next /ship step (do
   --reviewed-numbers <fp>   the numeric-claim fingerprint the outside voice already reviewed
   --no-tiers                audits and watchers at the host's default effort too (as gstack-config review_effort_tiers off does)
   --json                    the plan as JSON
+  --fix-check-prompt        print the fix-check reviewer's prompt from --fix-list, --hunks, --tests and --callers files
 ${exitTableHelp()}`;
 
 const args = process.argv.slice(2);
@@ -44,6 +47,17 @@ const git = (a: string[]) => { const r = spawnSync('git', ['-c', 'core.quotePath
 
 function main(): number {
   if (has('--help') || has('-h')) { process.stdout.write(HELP + '\n'); return EXIT.ok; }
+  if (has('--fix-check-prompt')) {
+    const read = (n: string, required: boolean) => {
+      const f = flag(n);
+      if (!f) return required ? null : '';
+      try { return fs.readFileSync(f, 'utf8'); } catch { return null; }
+    };
+    const [fixList, touchedHunks, testResults, callers] = [read('--fix-list', true), read('--hunks', true), read('--tests', true), read('--callers', false)];
+    if (fixList === null || touchedHunks === null || testResults === null || callers === null) { process.stderr.write('gstack-review-plan: --fix-check-prompt needs readable --fix-list, --hunks and --tests files (--callers optional)\n'); return EXIT.usage; }
+    process.stdout.write(renderFixCheckPrompt({ fixList, touchedHunks, testResults, callers }));
+    return EXIT.ok;
+  }
   const base = flag('--base');
   if (!base) { process.stderr.write(`gstack-review-plan: --base <ref> is required\n${HELP}\n`); return EXIT.usage; }
   const last = (flag('--last') ?? 'none') as History['last'];
