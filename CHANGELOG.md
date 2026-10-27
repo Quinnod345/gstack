@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**Five paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
+
+### Fixed
+- **Ship doc-sync gate** (`ship-docsync-store`, `ship-docsync-completion`): the read grammar accepts an orientation `git branch` listing with no operand (`--show-current`, `-a`, `-r`, `-v`, `--list`), and the declared interface names exactly that set. A /document-release re-audit after a rejected first attempt is judged on the attempt the parent accepted: the accepted contract is the last foreground dispatch, a rejected attempt's retained edit is not its unreported edit, and a re-audit that edits the same document again and says so passes.
+- **Local-hook preservation gate** (`ship-local-hook-preservation`): manual-integration wording is credited with a noun-phrase phrasal object ("wire the guard in by hand") or the owner's own hand ("the repo owner needs to add it to the existing hooks themselves"), while a denial ("the owner doesn't need to add the hook themselves"), a first-person claim or a sentence that names no hook is not. A negated clause before the request ("Since the installer did not run, the repo owner needs to ...") stays a request.
+- **Design-floor focus picker** (`plan-design-finding-floor`): a pending menu that asks to cover all 7 dimensions without the word "focus" is recognised.
+- **/review Scope Check**: emitted once, in Step 3 after the full diff read, on the first pass only; the plan-completion audit's with-plan and no-plan paths, the section's STOP trigger and the Step 1.5 notes all name that point, so `Diff read: full` exists when the check is written. The plan-review and doc-review run headers admit only the `CODEX_MODE` values their preflight prints, and the small-diff rule and the specialists record agree on State Machines.
+
+### Changed
+- Review, ship and plan-eng-review prose tightened to hold their parity caps; the generated-size pins that shrank were lowered, none raised.
+
+### Tests
+- Three free fixtures (the two docsync captures and the design-floor menu) registered in `FREE_FIXTURES`; probe sets for the hook-actor arm, the two-attempt dispatch contract, the branch-listing grammar and the Scope Check owners; the pass-1 and pass-2 review fixes each carry a probe that fails on the previous helper.
+
 ## [1.91.276.0] - 2026-10-27
 
 **Tier 2+ skills load the shared preamble once per session instead of once per invocation.** Every tier 2+ SKILL.md carried the same ~23 KB of preamble (AskUserQuestion format, voice, writing style, completeness, completion protocol and more), so each skill invocation re-read text the conversation already held. That text now renders once per host into `sections/preamble.md` beside each tier 2+ SKILL.md. The SKILL.md keeps a short "Shared preamble (load first)" pointer naming the file and its id (a hash of the shared text before host rewrites), and asks for the Read unless the skill's own earlier Read of that file, headed by that id, is still in context, so other text that merely carries the id cannot stand in for the shared rules. Measured with Anthropic token counting: review's SKILL.md drops from 21,884 to 16,103 tokens, ship from 22,688 to 16,907, office-hours from 27,100 to 23,085 and design-review from 39,040 to 33,261. The shared file is 5,953 tokens, so a skill's first invocation in a session costs about 170 tokens more than before (about 1,900 for office-hours, about 3,800 for plan-eng-review) and every later invocation of that skill saves about 5,800 (4,000 for office-hours, 2,200 for plan-eng-review). The skip is tied to the skill's own copy of the file, so the first invocation of each different skill pays the Read again. A /autoplan run's four review-skill loads carry 17,941 fewer SKILL.md tokens (191,871 → 173,930), and /autoplan and the inline /office-hours loader skip each loaded skill's "Shared preamble (load first)" section, because the parent already holds the shared preamble.
