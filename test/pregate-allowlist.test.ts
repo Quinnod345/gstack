@@ -84,17 +84,17 @@ describe('allowlist: the secrets check', () => {
     expect(secrets(shape).status).toBe(EXIT.fail);
   });
 
-  // Value: protects=a category entry covers an advisory pii hit (a run id read as a phone number) and the WARN count drops;
+  // Value: protects=a category entry covers an advisory pii hit (a run id after a generic word, which the engine's run-word exemption does not cover, read as a phone number) and the WARN count drops;
   //   fails_when=category matching is id-only; why_new=new; seam=none; no_claim=none
   test('a category entry silences the advisory pii finding for a run id', () => {
     const repo = fixture({ ...BASE_PREGATE, allowlist: [{ finding: 'pii', pattern: '\\d{11}', reason: 'GitHub Actions run ids in reports' }] });
-    commit(repo, { 'docs/runs.md': 'run 40302077688 passed\n' });
+    commit(repo, { 'docs/runs.md': 'job 40302077688 passed\n' });
     expect(secrets(repo).status).toBe(EXIT.ok);
     const r = row(repo);
     expect([r.status, r.code]).toEqual(['pass', undefined]);
     expect(r.detail).toContain('1 allowlisted (pii.phone.e164)');
     const control = fixture(BASE_PREGATE);
-    commit(control, { 'docs/runs.md': 'run 40302077688 passed\n' });
+    commit(control, { 'docs/runs.md': 'job 40302077688 passed\n' });
     secrets(control);
     expect([row(control).status, row(control).code]).toEqual(['warn', 'PREGATE_SECRETS']);
     expect(row(control).detail).toContain('pii.phone.e164');

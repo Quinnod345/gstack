@@ -30,6 +30,24 @@ describe('import graph: route-group / dynamic-segment paths and tsconfig path al
     expect(testsFor(g, 'app/[[...slug]]/page.tsx').tests).toEqual(['test/pages.test.ts']);
   });
 
+  test('a relative literal a test reads through new URL or readFileSync maps from the file that names it', () => {
+    const repo = fixture();
+    commit(repo, {
+      'ship/sections/pr-body.md.tmpl': '## Summary\n',
+      'ship/sections/other.md.tmpl': '## Other\n',
+      'docs/guide.md': '# guide\n',
+      'test/publication.test.ts': "import { readFileSync } from 'node:fs';\nreadFileSync(new URL('../ship/sections/pr-body.md.tmpl', import.meta.url), 'utf8');\nreadFileSync('./../docs/guide.md', 'utf8');\n",
+      'test/nested/deep.test.ts': "import { readFileSync } from 'node:fs';\nreadFileSync('../../ship/sections/other.md.tmpl', 'utf8');\n",
+    });
+    const g = buildGraph(repo.work);
+    expect(testsFor(g, 'ship/sections/pr-body.md.tmpl').tests).toEqual(['test/publication.test.ts']);
+    expect(testsFor(g, 'docs/guide.md').tests).toEqual(['test/publication.test.ts']);
+    expect(testsFor(g, 'ship/sections/other.md.tmpl').tests).toEqual(['test/nested/deep.test.ts']);
+    // A relative literal that climbs out of the repository names nothing.
+    commit(repo, { 'test/escape.test.ts': "import { readFileSync } from 'node:fs';\nreadFileSync('../../../ship/sections/pr-body.md.tmpl', 'utf8');\n" });
+    expect(testsFor(buildGraph(repo.work), 'ship/sections/pr-body.md.tmpl').tests).toEqual(['test/publication.test.ts']);
+  });
+
   test('a relative import of a bracketed path already maps (control: the import scanner is not the bug)', () => {
     const repo = fixture();
     commit(repo, {

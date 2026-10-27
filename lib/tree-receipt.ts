@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { normalizeChangelog } from './changelog-check';
 import { compareIdentity, executionIdentity, normalizeLockfile, readBundle, type EvidenceBundle, type ExecutionIdentity } from './evidence-bundle';
-import { parseUnifiedDiff, rewriteStamps, versionAtRef, type FileDiff, type GateAheadRecord } from './restamp';
+import { parseUnifiedDiff, stampOnlyLine, versionAtRef, type FileDiff, type GateAheadRecord } from './restamp';
 import type { ResultCodeName } from './result-codes';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 
@@ -49,15 +49,18 @@ function blob(cwd: string, treeish: string, rel: string): string | null {
   return r.status === 0 ? r.stdout : null;
 }
 
-/** Every removed/added pair differs only by the exact stamp rewrites (old -> new). */
+/**
+ * Every removed/added pair differs only by stamp rewrites to the new version:
+ * the old version, or a tentative one (newer than it) the stamp_paths stage
+ * moved (#3512), each in a stamp form (`stampOnlyLine`).
+ */
 function stampOnlyHunks(hunks: FileDiff['hunks'], oldV: string, newV: string, templates: readonly string[]): { why: string; line: number } | null {
   for (const h of hunks) {
     if (h.removed.length !== h.added.length) return { why: `${h.removed.length} line(s) removed, ${h.added.length} added`, line: h.at };
     for (let i = 0; i < h.removed.length; i++) {
       const r = h.removed[i]!;
       const a = h.added[i]!;
-      const rewritten = rewriteStamps(r, oldV, newV, templates);
-      if (rewritten.count === 0 || rewritten.text !== a) return { why: `${JSON.stringify(r.trim().slice(0, 60))} -> ${JSON.stringify(a.trim().slice(0, 60))}`, line: h.at + i };
+      if (!stampOnlyLine(r, a, oldV, newV, templates)) return { why: `${JSON.stringify(r.trim().slice(0, 60))} -> ${JSON.stringify(a.trim().slice(0, 60))}`, line: h.at + i };
     }
   }
   return null;

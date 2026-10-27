@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
+import { baseOverlap } from '../lib/ship-queue-train';
 import { TRAIN_HELP } from '../lib/ship-queue-train-cli';
 import { BASE_POLICY, cleanup, runBin } from './helpers/restamp-fixture';
 import { coordinatorClone } from './helpers/ship-queue-fixture';
@@ -352,6 +353,44 @@ describe('train build', () => {
     expect(dispatches(fx)).toEqual([]);
   }, 120_000);
 
+  // Handoff GSTA-119 / #3485: a pooled pin the base moved onto is named with the files, and the conflict is found while the
+  // train is still filling instead of at dispatch time; a base move onto files the PR leaves alone is silent.
+  test('a pin whose files main moved onto gets the base-overlap line; a conflict with main is QUEUE_TRAIN_CONFLICT at slot 1 even while the train fills', () => {
+    const fx = make();
+    const h1 = openPr(fx, '1', { file: 'same.txt', text: 'one\n' });
+    const h2 = openPr(fx, '2');
+    readyReceipt(fx, '1', h1, { at: '2026-10-18T11:00:00.000Z' });
+    readyReceipt(fx, '2', h2, { at: '2026-10-18T11:00:00.000Z' });
+    const { repo } = fx;
+    repo.git('checkout', '-q', '-B', 'mainsim', 'origin/main');
+    fs.writeFileSync(path.join(repo.work, 'same.txt'), 'main\n');
+    fs.writeFileSync(path.join(repo.work, 'unrelated.txt'), 'main\n');
+    repo.git('add', '-A');
+    repo.git('commit', '-qm', 'main moves onto same.txt');
+    repo.git('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    repo.git('checkout', '-q', 'pr-1');
+    const main = repo.git('rev-parse', 'origin/main');
+    const r = queue(fx, ['train', 'build', '--prs', `2@${h2},1@${h1}`]);
+    expect(r.status).toBe(EXIT.fail);
+    // At build the line is the files alone: the chain merges each pin onto its prefix, and that merge is the verdict.
+    expect(line(r.out, '#1 BASE_OVERLAP:')).toBe(`#1 BASE_OVERLAP: main moved to ${main.slice(0, 7)} and touches files in this PR: same.txt`);
+    expect(r.out).not.toContain('#2 BASE');
+    expect(line(r.out, 'QUEUE_TRAIN_CONFLICT:')).toMatch(new RegExp(`stopped at #1 \\(conflicts: same\\.txt\\) after merging (\\(none\\)|#2); nothing dispatched, no branch pushed; fix: gstack-ship-queue train build --prs 2@${h2}$`));
+    expect(r.out).not.toContain('MERGE_CHECK:');
+    expect(remoteRefs(fx)).not.toContain('refs/heads/train/');
+    expect(dispatches(fx)).toEqual([]);
+    const without = queue(fx, ['train', 'build', '--prs', `2@${h2}`]);
+    expect(without.status).toBe(EXIT.refused);
+    expect(without.err).toContain('(QUEUE_TRAIN_WAITING)');
+    expect(line(without.out, 'MERGE_CHECK:')).toBe(`MERGE_CHECK: T1..T1 merge clean onto main@${main.slice(0, 12)} (dry run in object storage; nothing pushed)`);
+    // A git read that fails is never "no overlap" (pre-landing review, pass 1): the comparison is reported as unknown.
+    const unknown = baseOverlap(repo.work, 'main', main, 'f'.repeat(40), TRAIN_POLICY as any);
+    expect(unknown).toMatchObject({ unknown: true, touched: [], conflicts: null });
+    expect(unknown.line).toMatch(new RegExp(`^BASE_OVERLAP: could not compare main@${main.slice(0, 12)} with ffffffffffff \\(.+\\); conflicts unknown$`));
+    // At build the overlap line carries the files alone; the verdict is the chain's.
+    expect(baseOverlap(repo.work, 'main', main, h1, TRAIN_POLICY as any, false).line).toBe(`BASE_OVERLAP: main moved to ${main.slice(0, 7)} and touches files in this PR: same.txt`);
+  }, 120_000);
+
   test("GSTA-67: a PR whose CHANGELOG drops a released heading (#3345's pin 1eb7092) is a CHANGELOG conflict, never merged with the damage", () => {
     const fx = make();
     const h1 = openPr(fx, '1');
@@ -423,6 +462,8 @@ describe('train build', () => {
     expect(filling.status).toBe(EXIT.refused);
     expect(filling.err).toMatch(/1 of 5 PRs; the oldest READY dispatches at 2026-10-18T14:00:00\.000Z.*\(QUEUE_TRAIN_WAITING\)/);
     expect(result(filling.out)).toBe('GSTACK_RESULT: skill=ship-queue status=incomplete run=none');
+    // #3485: the scratch merges run before the fill rule, so a WAITING result also proves the seated pins merge clean.
+    expect(line(filling.out, 'MERGE_CHECK:')).toBe(`MERGE_CHECK: T1..T1 merge clean onto main@${fx.repo.git('rev-parse', 'origin/main').slice(0, 12)} (dry run in object storage; nothing pushed)`);
     fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
     const urgent = queue(fx, ['train', 'build', '--prs', `3@${h3}`, '--urgent']);
     expect(urgent.status).toBe(EXIT.ok);

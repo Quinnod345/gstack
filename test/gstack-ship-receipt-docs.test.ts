@@ -201,6 +201,23 @@ describe('carry follow-ups: git floor, named refusal, branch-touched walk, digit
     expect(change('1.2.34\n', '1.2.44\n')).toBe(false);
   });
 
+  // #3512: the carry classifies a stamp path as metadata only while its change is a stamp; a tentative key version the slot
+  // stamp moved (next minor -> released) was product, so `carry` refused RECEIPT_CARRY_PRODUCT_CHANGED on a stamp commit.
+  test('stampOnlyText accepts a tentative key version moved to the new version, and refuses a released one moved by hand or any other edit', () => {
+    const templates = ["_KEY_VERSION = '{version}'"];
+    const change = (before: string, after: string) => stampOnlyText({ before, after, oldVersion: '1.2.3.0', newVersion: '1.2.4.0', templates });
+    const keys = (docs: string, old: string, extra = '') => `export const DOCS_KEY_VERSION = '${docs}';\nexport const OLD_KEY_VERSION = '${old}';\n${extra}`;
+    expect(change(keys('1.3.0.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0'))).toBe(true);
+    expect(change(keys('1.2.3.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0'))).toBe(true);
+    expect(change(keys('1.3.0.0', '1.2.2.0'), keys('1.2.4.0', '1.2.4.0'))).toBe(false);
+    expect(change(keys('1.3.0.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0', 'export const EXTRA = 1;\n'))).toBe(false);
+    // Without the template the constant is not a stamp form, so the move is a product change.
+    expect(stampOnlyText({ before: keys('1.3.0.0', '1.2.2.0'), after: keys('1.2.4.0', '1.2.2.0'), oldVersion: '1.2.3.0', newVersion: '1.2.4.0' })).toBe(false);
+    // A mention of another width is never a stamp candidate (tentativeMentions), so moving it by hand is a product change.
+    expect(change(keys('1.3.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0'))).toBe(false);
+    expect(stampOnlyText({ before: 'left-pad since: 1.2.3\n', after: 'left-pad since: 1.2.4.0\n', oldVersion: '1.2.3.0', newVersion: '1.2.4.0' })).toBe(false);
+  });
+
   test('planCarry names at most CARRY_NAMED_PATHS paths', () => {
     const many = Array.from({ length: CARRY_NAMED_PATHS + 3 }, (_, i) => `src/f${i}.ts`);
     const plan = planCarry({ from: 'a'.repeat(40), head: 'b'.repeat(40), changed: many.map(p => ({ path: p, class: 'product' as const })), productPatchId: { from: 'x', head: 'y' }, testPatchId: { from: '', head: '' }, changedProduct: many, mergeCommits: 0, rangeDiff: '' });

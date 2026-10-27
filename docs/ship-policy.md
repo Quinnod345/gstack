@@ -425,7 +425,18 @@ conflicts with the base, CHANGELOG-only conflicts included) is replaced by a
 scratch merge of the head onto the base, pushed as `screen/<pr>-<head12>`
 (the `SCREEN_MERGE:` line says which); a screen dispatched on a stale ref would
 plan no cases and report success. Only a real conflict with the base (or a
-remote whose refs cannot be listed) is `QUEUE_SCREEN_STALE_REF`. A finished screen that planned no cases (no
+remote whose refs cannot be listed) is `QUEUE_SCREEN_STALE_REF`. Under either
+choice `ready` first reads what `gstack-pr-wait`'s base-overlap event reports,
+from git: when the base moved since the head forked and its new commits touch
+files the PR changes, `BASE_OVERLAP: <base> moved to <sha7> and touches files
+in this PR: <files>; the train's merge onto <base> is clean` (or `conflicts
+beyond the CHANGELOG and the stamp files (<files>)`), the train's own merge
+rules run as a dry run in object storage; a git read that fails prints
+`conflicts unknown` and refuses nothing. A conflict under `--no-screen` is
+`QUEUE_TRAIN_CONFLICT` at READY, since the train would stop at this PR: the
+lane reports it to the controller and, on its word (crew template rule 14),
+merges the base into the pin, resolves, pushes and runs /ship before READY,
+instead of learning it when the train is built. A finished screen that planned no cases (no
 `paid-plan` artifact, which a superseded run never uploads, or a plan manifest
 with nothing planned) is never followed as a screen: `ready --screen`
 dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
@@ -453,7 +464,14 @@ and waits (`--free-timeout <s>`, default 2700) for a green
 through eval-bg's nonce. A train fills at `max_size` READY PRs or when its
 oldest READY has waited `fill_hours`, whichever comes first; until then
 `QUEUE_TRAIN_WAITING` names the time, and `--urgent` dispatches a one-PR
-train at once. gstack's own block fills at 3 PRs or one hour (it was 5 PRs or
+train at once. The scratch merges run before the fill rule: every `train
+build` prints `#<pr> BASE_OVERLAP: <base> moved to <sha7> and touches files in
+this PR: <files>` for a seated pin whose files the base moved onto since it
+forked (the chain's merge onto the pin's own prefix is the verdict), refuses
+`QUEUE_TRAIN_CONFLICT` for a pin that does not merge, and otherwise prints
+`MERGE_CHECK: T1..T<k> merge clean onto <base>@<sha>`, so a
+`QUEUE_TRAIN_WAITING` result is also a clean dry-run merge of the pool (the
+crew template's sibling trial merge, done by the tool). gstack's own block fills at 3 PRs or one hour (it was 5 PRs or
 three hours until 2026-10-26, which left READY PRs waiting most of a day). The same pins on the same base return the live train
 instead of a second one; `train build --train <nonce>` resumes a train from
 its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork
@@ -708,7 +726,9 @@ integers under `review_loop`, `gate` and `ci`: `passes=2`, `passes: 2` and
 several counters, `passed` under `gate` and `ci` or `pass` under every gate
 lane, matches when the number equals any of them; an underscore in a key
 matches `_`, a space or `-`; a name inside a longer word, `3 pass-through`, is
-not a claim). A body that quotes a different number is
+not a claim; a number that is the value of a `key=` or `key:` pair is that
+key's claim alone, so `passes=2 blocking_found=1` is two claims, never a
+`2 blocking_found` one, #3513). A body that quotes a different number is
 `RECEIPT_PROSE_MISMATCH` (exit 1) and the `PROSE:` line names each field with
 both values; prose that quotes no counter is not a claim. Data PRs (evals,
 measurements, sweeps) run it before READY so the body's numbers are the run's.
@@ -798,7 +818,11 @@ dependency, a script or a new key makes them product). A path the policy's
 `stamp_files`, `stamp_paths` or `release_outputs` name is metadata only while
 its change is a stamp, the rule the tree receipt applies to the same paths: a
 manifest by its version key, any other file when its new text reads as the old
-once the new release version is replaced by the old one. A logic change in a
+once the new release version is replaced by the old one, or when every changed
+line is a stamp-form rewrite to the new version of the old version or of a
+newer tentative one the stamp moved (a `*_KEY_VERSION` written as the next
+minor, #3512; a version older than the old one or of another width is a hand
+edit). A logic change in a
 stamped source file is product. Lockfiles are product unless the policy names
 them. A base merge contributes no product
 change of its own. A receipt carried twice keeps the reviewed head as
@@ -940,7 +964,10 @@ only, where `gstack-version-bump` writes; a dependency entry is `changed`),
 the CHANGELOG (a heading move or re-heading, compared as an order-independent
 multiset of entries), `stamp_paths` and `release_outputs` (every
 removed/added pair must be an exact `(was X)` / `since: X` / `vX` rewrite (a quote around X in the first two forms included) with
-X the gated version and the replacement the current one, so a dependency pin
+X the gated version, or a newer version of the repo's width that the
+stamp_paths stage moves (a tentative `*_KEY_VERSION` written as the next
+minor, #3512; a version older than the gated one, or of another width, is a
+hand edit), and the replacement the current one, so a dependency pin
 that happens to equal the old version is `changed`; `stamp_patterns`
 templates count as stamp forms too). With `stamp_files` set, a file outside it
 is `changed (stamp_files: not in the repo's stamp_files allowlist)` whatever

@@ -193,24 +193,28 @@ export function fetchChecks(env: GhEnv, repo: string, pr: number): Map<string, C
  * Required check names for the base branch, from rulesets and classic branch
  * protection. Reading them up front means a required check that has not
  * started yet counts as pending instead of green by omission. A 404 means no
- * protection of that kind, which is normal; any other failure is logged and
- * that source contributes nothing.
+ * protection of that kind, which is normal; any other failure is logged, that
+ * source contributes nothing, and `known` is false: the set may be short, so a
+ * caller that would relax the gate on it (`--exclude`) must not.
  */
-export function requiredChecks(env: GhEnv, repo: string, base: string): Set<string> {
+export function requiredChecks(env: GhEnv, repo: string, base: string): { names: Set<string>; known: boolean } {
   const sources: Array<[string, string]> = [
     [`repos/${repo}/rules/branches/${base}`, '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context'],
     [`repos/${repo}/branches/${base}/protection/required_status_checks`, '.contexts[]?, .checks[]?.context'],
   ];
   const names = new Set<string>();
+  let known = true;
   for (const [path, jq] of sources) {
     try {
       for (const name of ghLines(env, ['api', path, '--jq', jq])) names.add(name);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!/HTTP 404/.test(message)) env.log(`could not read required checks from ${path}: ${message}`);
+      if (/HTTP 404/.test(message)) continue;
+      known = false;
+      env.log(`could not read required checks from ${path}: ${message}`);
     }
   }
-  return names;
+  return { names, known };
 }
 
 /** Files the PR changes, from `gh pr diff --name-only`. */

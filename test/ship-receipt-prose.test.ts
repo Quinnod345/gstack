@@ -48,6 +48,28 @@ describe('checkReceiptProse', () => {
     expect(bad.mismatches).toEqual([{ field: 'gate.unit.pass', prose: 40, receipt: 41 }]);
     expect(checkReceiptProse(receipt, 'Gate passed: 41. CI passed=41.').mismatches).toEqual([]);
   });
+
+  // #3513: the canonical REVIEW_LOOP line /ship and `gstack-ship-queue ready` print. Before the fix the `<n> <name>` branch
+  // started on passes' value and read `2 blocking_found` as a blocking_found claim of 2 (PROSE: mismatch ... body=2 receipt=1).
+  test('a key=value pair\'s value is that key\'s claim alone: the REVIEW_LOOP line parses as five claims that all match', () => {
+    const loop = { ...receipt, review_loop: { passes: 2, blocking_found: 1, deferred: 0, noted: 4, fixed: 8, scope: 'frozen' } };
+    const line = 'REVIEW_LOOP: passes=2 blocking_found=1 deferred=0 noted=4 fixed=8 scope=frozen';
+    const ok = checkReceiptProse(loop, line);
+    expect(ok).toEqual({ checked: 5, mismatches: [] });
+    expect(proseLine(ok)).toBe('PROSE: 5 receipt counter claims in the body, all match');
+    const one = { ...receipt, review_loop: { passes: 1, blocking_found: 0, deferred: 0, noted: 0, fixed: 0, scope: 'frozen' } };
+    expect(checkReceiptProse(one, 'REVIEW_LOOP: passes=1 blocking_found=0 deferred=0 noted=0 fixed=0 scope=frozen')).toEqual({ checked: 5, mismatches: [] });
+    // A real disagreement on the same line is still caught, and named for the key that carries it.
+    expect(checkReceiptProse(loop, 'REVIEW_LOOP: passes=2 blocking_found=3 deferred=0 noted=4 fixed=8 scope=frozen').mismatches)
+      .toEqual([{ field: 'review_loop.blocking_found', prose: 3, receipt: 1 }]);
+    // Prose claims in the number-then-name spelling keep working when they do not follow a pair.
+    expect(checkReceiptProse(loop, 'The loop ran 2 passes and found 1 blocking_found item.')).toEqual({ checked: 2, mismatches: [] });
+    // The `key: value` spelling with whitespace is the same pair (pre-landing review, pass 1): the value never starts the
+    // next key's claim, while a non-counter word before the number (`Review: 2 passes`) leaves the claim as it was.
+    expect(checkReceiptProse(loop, 'REVIEW_LOOP: passes: 2 blocking_found: 1 deferred: 0 noted: 4 fixed: 8')).toEqual({ checked: 5, mismatches: [] });
+    expect(checkReceiptProse(loop, 'Gate passed: 41 failed: 0')).toEqual({ checked: 2, mismatches: [] });
+    expect(checkReceiptProse(loop, 'Review: 2 passes; passes = 2 fixed = 8.')).toEqual({ checked: 3, mismatches: [] });
+  });
 });
 
 describe('gstack-ship-receipt read --check-prose', () => {

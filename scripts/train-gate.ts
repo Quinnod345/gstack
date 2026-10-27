@@ -26,7 +26,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { normalizeChangelog } from '../lib/changelog-check';
 import { normalizeLockfile } from '../lib/evidence-bundle';
-import { rewriteStamps, versionAtRef } from '../lib/restamp';
+import { stampMentions, rewriteStamps, versionAtRef } from '../lib/restamp';
 import { loadPolicyFromHead, matchesAny, type ShipPolicy } from '../lib/ship-policy';
 import type { BisectPrefixRecord, TrainGateRecord } from '../lib/ship-queue-train-verdict';
 import type { CasePanel } from '../lib/ship-queue-train-record';
@@ -133,19 +133,37 @@ export function fullGateCases(rootDir = ROOT): Map<string, string> {
 }
 
 /**
+ * A release output or stamp path without its stamps: every version mentioned
+ * in a stamp form (the built-in forms and the policy's `stamp_patterns`
+ * templates) collapses to one placeholder. Normalising only the commit's own
+ * version left a tentative `*_KEY_VERSION = '<next minor>'` as written on the
+ * unstamped prefix and normalised once the slot stamp moved it to the released
+ * version, so the two digests differed and train-backstop found no covering
+ * record for main after that train (#3512), and a base-version mention on a
+ * line the base already carried was normalised on the prefix and kept on the
+ * stamped main. Every stamp-form mention collapsing makes the digest blind to
+ * which version a stamp names; the receipt (`stampOnlyLine`) is what judges a
+ * stamp commit's content.
+ */
+export function stampFreeText(text: string, templates: readonly string[]): string {
+  let out = text;
+  for (const v of [...stampMentions(text, templates)].sort((a, b) => b.length - a.length)) out = rewriteStamps(out, v, '\0VERSION', templates).text;
+  return out;
+}
+
+/**
  * A commit's tree modulo stamps: every path with its mode and blob, except the
  * files a restamp rewrites, which contribute their content without the stamp
  * (the version file nothing, package.json without its version, lockfiles
  * without their root version, the CHANGELOG with its headings normalized,
- * release outputs and stamp paths with their own version replaced). Two
- * commits that differ only by a restamp have the same digest.
+ * release outputs and stamp paths with every stamp-form version mention
+ * replaced). Two commits that differ only by a restamp have the same digest.
  */
 export function stampFreeTree(git: Git, commit: string, repoRoot: string, policy: ShipPolicy): string | { error: string } {
   const listed = git(['ls-tree', '-r', '-z', '--full-tree', commit]);
   if (!listed.ok) return { error: `cannot list ${commit.slice(0, 12)} (${listed.out.split('\n')[0]})` };
   const at = versionAtRef(repoRoot, commit);
   const versionRel = 'rel' in at ? at.rel : 'VERSION';
-  const version = 'version' in at ? at.version : null;
   const lines: string[] = [];
   for (const item of listed.out.split('\0').filter(Boolean)) {
     const [meta, rel] = [item.slice(0, item.indexOf('\t')), item.slice(item.indexOf('\t') + 1)];
@@ -161,7 +179,7 @@ export function stampFreeTree(git: Git, commit: string, repoRoot: string, policy
     if (stamp === 'manifest') { try { const parsed = JSON.parse(text); delete parsed.version; text = JSON.stringify(parsed); } catch { /* not JSON: kept verbatim */ } }
     else if (stamp === 'lockfile') text = normalizeLockfile(base, text);
     else if (stamp === 'changelog') text = normalizeChangelog(text);
-    else if (version) text = rewriteStamps(text, version, '\0VERSION', policy.stamp_patterns).text;
+    else text = stampFreeText(text, policy.stamp_patterns);
     lines.push(`${rel}\0${mode}\0${createHash('sha256').update(text).digest('hex')}`);
   }
   return createHash('sha256').update(lines.sort().join('\n')).digest('hex');

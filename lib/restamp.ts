@@ -128,12 +128,33 @@ function queueOrderCheck(o: RestampOptions, baseSha: string): void {
     actual[pr] = merged ? (inBase ? 'merged' : 'merged-not-in-base') : String(info.state ?? 'unknown').toLowerCase();
   }
   const stale = [...ahead.filter(pr => actual[pr] !== 'merged'), ...behind.filter(pr => actual[pr]?.startsWith('merged'))];
-  if (stale.length) {
-    throw new Refusal('QUEUE_STALE', `queue order moved: ${stale.map(pr => `#${pr}=${actual[pr]}`).join(', ')}`, {
-      expected: { order: o.expectOrder, base: o.expectBase ?? null }, actual: { prs: actual, base: baseSha },
-      recompute: `gstack-restamp --next --base ${o.base} --expect-base ${baseSha}${mine ? ` --pr ${mine}` : ''} --expect-order ${o.expectOrder.join(',')}`,
-    });
-  }
+  if (!stale.length) return;
+  // The recompute command is the corrected order, never the stale list again: this PR first (a list that left it out read
+  // every entry as a predecessor), PRs merged into the local base dropped, an unmerged predecessor kept ahead because it
+  // still has to merge first. A predecessor GitHub calls merged that the local base does not carry stays ahead too: the
+  // recompute pins --expect-base to that local base, and dropping the PR would let it allocate the version the
+  // predecessor already took (pre-landing review, pass 1); the lane fetches the base and the entry reads merged.
+  const corrected = correctedOrder(o.expectOrder, mine, actual);
+  const waitingOn = ahead.filter(pr => actual[pr] !== 'merged' && actual[pr] !== 'merged-not-in-base');
+  const unfetched = ahead.filter(pr => actual[pr] === 'merged-not-in-base');
+  const why = mine && idx < 0 ? `; --pr ${mine} is not in --expect-order, so every listed PR read as a predecessor: list this PR first, then the remaining order`
+    : [waitingOn.length ? `${waitingOn.map(pr => `#${pr}`).join(', ')} must merge before this PR stamps` : '',
+      unfetched.length ? `${unfetched.map(pr => `#${pr}`).join(', ')} merged but the local ${o.base} does not carry the merge yet: git fetch origin ${o.base}, then rerun` : '']
+      .filter(Boolean).map(s => `; ${s}`).join('');
+  throw new Refusal('QUEUE_STALE', `queue order moved: ${stale.map(pr => `#${pr}=${actual[pr]}`).join(', ')}${why}`, {
+    expected: { order: o.expectOrder, base: o.expectBase ?? null }, actual: { prs: actual, base: baseSha },
+    recompute: `gstack-restamp --next --base ${o.base} --expect-base ${baseSha.slice(0, 12)}${mine ? ` --pr ${mine}` : ''} --expect-order ${corrected.join(',')}`,
+    ...(unfetched.length ? { fix: `git fetch origin ${o.base}` } : {}),
+  });
+}
+
+/**
+ * The --expect-order to run next: this PR first when the list left it out, every PR merged into the local base dropped,
+ * the rest (open PRs and merges the local base does not carry yet) in their order.
+ */
+export function correctedOrder(order: readonly string[], mine: string | null, actual: Record<string, string>): string[] {
+  const rest = order.filter(pr => actual[pr] !== 'merged');
+  return mine && !order.includes(mine) ? [mine, ...rest] : rest;
 }
 
 interface Plan {
@@ -148,7 +169,7 @@ function planVersions(o: RestampOptions, loaded: LoadedPolicy, policyLabel: stri
   if (o.expectBase && !baseSha.out.startsWith(o.expectBase)) {
     throw new Refusal('QUEUE_STALE', `base moved: expected ${o.expectBase}, ${baseRef} is ${baseSha.out}`, {
       expected: { base: o.expectBase }, actual: { base: baseSha.out },
-      recompute: `gstack-restamp --next --base ${o.base} --expect-base ${baseSha.out.slice(0, 12)}${o.expectOrder?.length ? ` --expect-order ${o.expectOrder.join(',')}` : ''}`,
+      recompute: `gstack-restamp --next --base ${o.base} --expect-base ${baseSha.out.slice(0, 12)}${o.pr ? ` --pr ${o.pr}` : ''}${o.expectOrder?.length ? ` --expect-order ${correctedOrder(o.expectOrder, o.pr ?? null, {}).join(',')}` : ''}`,
     });
   }
   queueOrderCheck(o, baseSha.out);
@@ -311,6 +332,40 @@ export function tentativeMentions(added: Map<string, Set<string>>, forkVersion: 
     }
   }
   return [...found];
+}
+
+/** The versions one line mentions in a stamp form (the built-in forms and the policy's `stamp_patterns` templates). */
+export function stampMentions(text: string, templates: readonly string[] = []): Set<string> {
+  const found = new Set<string>();
+  for (const re of [...BUILT_IN_MENTIONS, ...templates.map(templateMention)]) for (const m of text.matchAll(re)) found.add(m.groups!.v!);
+  return found;
+}
+
+/**
+ * A removed/added line pair that a restamp alone explains: every version the
+ * removed line mentions in a stamp form and the added line no longer does
+ * moves to `newV`, and the rewritten line is the added line byte for byte.
+ * The moved versions are the ones the stamp_paths stage moves, not only the
+ * old version `oldV` (the gated head's): a tentative `*_KEY_VERSION = '<next
+ * minor>'` never equals the base version at the slot and is a stamp all the
+ * same (#3512). The stage's own bound applies: a tentative mention is newer
+ * than the version the branch was written against, so a moved version older
+ * than `oldV` (a released key moved by hand) is not a stamp, and neither is
+ * one of another width (`tentativeMentions`: a 3-digit dependency pin in a
+ * 4-digit repo is never a candidate, so moving it is a hand edit). A line that
+ * moves nothing, or changes anything beyond those mentions, is not one either.
+ */
+export function stampOnlyLine(removed: string, added: string, oldV: string, newV: string, templates: readonly string[] = []): boolean {
+  if (removed === added) return false;
+  const floor = parseVersion(oldV);
+  const width = versionWidth(oldV);
+  const after = stampMentions(added, templates);
+  const moved = [...stampMentions(removed, templates)].filter(v => v !== newV && !after.has(v));
+  if (!moved.length || !floor) return false;
+  if (moved.some(v => { const p = parseVersion(v); return !p || versionWidth(v) !== width || cmpVersion(p, floor) < 0; })) return false;
+  let text = removed;
+  for (const v of moved) text = rewriteStamps(text, v, newV, templates).text;
+  return text === added;
 }
 
 /** The version at the branch's original fork point: the first parent of its oldest own commit (base when it has none). */

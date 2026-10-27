@@ -311,6 +311,43 @@ test('pack ships a linked worktree with a self-contained .git on the checked-out
     } finally { rmSync(d, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('pack snapshots a plain checkout without reading its live .git: remotes resolve, a detached HEAD gets a branch, and git running beside it cannot fail the tar', () => {
+    const d = mkdtempSync(join(tmpdir(), 'ubi-pack-live-'));
+    try {
+      const sh = (cmd: string, cwd: string) => { const r = Bun.spawnSync(['bash', '-c', cmd], { cwd, timeout: 60_000, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }); expect(r.exitCode, r.stderr.toString()).toBe(0); return r.stdout.toString(); };
+      sh('git init -q --bare origin.git && git clone -q origin.git src 2>/dev/null && cd src && echo a > a && git add a && git commit -qm one && git push -q origin HEAD:main && echo b > b && git add b && git commit -qm two && git push -q origin HEAD:main && git checkout -q --detach && echo c > c && echo s > staged && git add staged && echo i > inta && git add -N inta', d);
+      const src = join(d, 'src');
+      const pack = `bash ${JSON.stringify(join(DIR, 'ubi-runner.sh'))} pack .`;
+      // Twenty seconds of index.lock, worktree and ref churn in the checkout while pack runs three times.
+      const churn = Bun.spawn(['bash', '-c', 'end=$((SECONDS+20)); while [ $SECONDS -lt $end ]; do git update-index -q --refresh; git worktree add -q ../wt HEAD >/dev/null 2>&1; git worktree remove --force ../wt >/dev/null 2>&1; git update-ref refs/heads/churn HEAD; git update-ref -d refs/heads/churn; done'], { cwd: src, stdout: 'ignore', stderr: 'ignore' });
+      try {
+        for (const i of [1, 2, 3]) sh(`${pack} > ../pack-${i}.tgz`, src);
+      } finally { churn.kill(); }
+      sh('mkdir vm && tar -xzf pack-3.tgz -C vm', d);
+      const vm = join(d, 'vm');
+      expect(lstatSync(join(vm, '.git')).isDirectory()).toBe(true);
+      const head = sh('git rev-parse HEAD', src).trim();
+      expect(sh('git rev-parse HEAD && git rev-parse --abbrev-ref HEAD && git rev-parse origin/main && git config --get remote.origin.url && git status --short', vm).split('\n').filter(Boolean))
+        .toEqual([head, `detached-${head.slice(0, 12)}`, head, join(d, 'origin.git'), ' A inta', 'A  staged', '?? c']);
+      // The staged blob and the intent-to-add entry's empty blob are behind no ref; the snapshot carries them, so the VM can read and write-tree them.
+      expect(sh('git fsck --no-progress 2>&1; git diff --cached --name-only', vm).trim()).toBe('staged');
+      const wtree = (cwd: string) => sh(`bash ${JSON.stringify(join(ROOT, 'bin/gstack-wtree'))}`, cwd).trim();
+      expect(wtree(vm)).toBe(wtree(src));
+      // The snapshot carries no hook path or other local config from the source checkout.
+      expect(sh('git config --local --list', vm)).not.toContain('hooksPath');
+      // A failed pack leaves no object copy behind in TMPDIR, and a branch's upstream rides along with its remote.
+      sh('mkdir ../tmpd && git checkout -q -b topic && git branch -q --set-upstream-to=origin/main topic', src);
+      const broken = Bun.spawnSync(['bash', '-c', `rm -f .git/index && TMPDIR=../tmpd ${pack} > ../pack-broken.tgz; echo rc=$?; ls ../tmpd`], { cwd: src, timeout: 60_000 });
+      expect(broken.stderr.toString()).toContain('.git/index');
+      expect(broken.stdout.toString().trim()).toBe('rc=1');
+      // A gitlink in the index (a submodule commit this object store lacks) is not packed, and a valueless
+      // remote key (`[remote "origin"] mirror`) replays as true.
+      sh('git reset -q && git update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,sub && printf \'[remote "origin"]\\n\\tmirror\\n\' >> .git/config', src);
+      sh('mkdir vm2 && ' + pack.replace('pack .', 'pack src') + ' | tar -xzf - -C vm2', d);
+      expect(sh('git rev-parse --abbrev-ref @{u} && git config --bool --get remote.origin.mirror && git ls-files -s sub | cut -c1-6', join(d, 'vm2')).split('\n').filter(Boolean)).toEqual(['origin/main', 'true', '160000']);
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('up records the VM in the scratch file before the create request is sent', () => {
     const runner = read('scripts/ubicloud/ubi-runner.sh');
     const create = runner.indexOf('cli "${args[@]}" >/dev/null 2>"$dir/create.err"');

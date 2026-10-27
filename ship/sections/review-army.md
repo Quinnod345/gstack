@@ -456,20 +456,22 @@ Core findings never earn a specialist confidence boost. Preserve `advisory`,
 
 #### 4. Lead judgment
 
-Reviewers fill the space they are given. Before any merged finding counts, the
-parent reads each one and drops or downgrades it on these grounds, saying so:
-- **Nit gravity.** When a reviewer's whole return is style, naming and preference,
-  the code is probably fine; write that down and count nothing from it as a defect.
+Reviewers fill the space they are given. Before a merged finding counts, the
+parent reads it and drops or downgrades it on these grounds, saying so:
+- **Nit gravity.** A reviewer whose whole return is style, naming and preference
+  found nothing; say so and count no defect.
 - **Hypothetical, not actual.** A defect names the call site or input that reaches
-  it. One that does not is a note until someone traces it.
+  it; one that does not is a note until someone traces it.
 - **Structure for a case that does not exist.** Advice to abstract, generalize or
-  guard a path nothing takes is advisory, never a defect.
+  guard a path nothing takes is advisory.
 - **A different design is not a defect.** "I would have done it differently" with
-  no failing case behind it is dropped.
+  no failing case is dropped.
 - **Missing context.** A finding that assumes a rule the repository documents
   otherwise is dropped with the pointer.
-Agreement between reviewers that did not see each other's output is the strongest
-signal; the `MULTI-SPECIALIST CONFIRMED` boost above records it. A reviewer that
+- **On record.** A class `docs/review-policy.md` rules below the floor is a note,
+  named by its ruling.
+Independent agreement between reviewers is the strongest signal (the
+`MULTI-SPECIALIST CONFIRMED` boost records it). A reviewer that
 returned `NO FINDINGS` was right until a traced defect says otherwise.
 
 #### 5. Apply specialist confidence gates

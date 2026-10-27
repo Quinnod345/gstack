@@ -53,6 +53,25 @@ describe('readiness decision', () => {
     expect(freeTestsState([free(3, 'completed', 'cancelled')], HEAD)).toEqual({ state: 'failed', runId: 3, conclusion: 'cancelled' });
   });
 
+  // #3508: a head whose only conflict with main is the CHANGELOG gets no pull_request CI (GitHub has no merge ref to build);
+  // the dispatch route runs Free Tests through workflow_dispatch on the branch, and readiness must read that run.
+  test('a dispatched-only head: the workflow_dispatch Free Tests run at the exact head decides, green or red, newest first; a pull_request run outranks it', () => {
+    const dispatched = (id: number, status: string, conclusion: string | null, over: Partial<FreeTestsRun> = {}) => free(id, status, conclusion, { event: 'workflow_dispatch', ...over });
+    expect(freeTestsState([dispatched(40448356650, 'completed', 'success')], HEAD)).toEqual({ state: 'success', runId: 40448356650 });
+    expect(freeTestsState([dispatched(5, 'completed', 'failure')], HEAD)).toEqual({ state: 'failed', runId: 5, conclusion: 'failure' });
+    expect(freeTestsState([dispatched(5, 'in_progress', null)], HEAD)).toEqual({ state: 'running', runId: 5 });
+    // A dispatched run on another head, or a push run on this one, is not this head's gate.
+    expect(freeTestsState([dispatched(5, 'completed', 'success', { head_sha: NEWER })], HEAD)).toEqual({ state: 'missing' });
+    expect(freeTestsState([free(5, 'completed', 'success', { event: 'push' })], HEAD)).toEqual({ state: 'missing' });
+    // A pull_request run at the head decides when one exists, whatever its age: it built the merge ref, a dispatch built the
+    // head alone, so a newer green dispatch never overrides a red pull_request run (rerun that run instead) and a red or
+    // running extra dispatch never holds a head its pull_request CI cleared (pre-landing review, pass 1).
+    expect(freeTestsState([free(1, 'completed', 'failure'), dispatched(2, 'completed', 'success')], HEAD)).toEqual({ state: 'failed', runId: 1, conclusion: 'failure' });
+    expect(freeTestsState([dispatched(1, 'completed', 'success'), free(2, 'completed', 'failure')], HEAD)).toEqual({ state: 'failed', runId: 2, conclusion: 'failure' });
+    expect(freeTestsState([free(1, 'completed', 'success'), dispatched(2, 'in_progress', null)], HEAD)).toEqual({ state: 'success', runId: 1 });
+    expect(freeTestsState([free(1, 'completed', 'success'), dispatched(2, 'completed', 'failure')], HEAD)).toEqual({ state: 'success', runId: 1 });
+  });
+
   test('ready needs both a green Free Tests on the head and an elapsed window; a moved head is superseded', () => {
     const green = { state: 'success', runId: 7 } as const;
     expect(readinessDecision({ headSha: HEAD, prHead: HEAD, free: green, quietLeftMs: 0 }).kind).toBe('ready');
@@ -78,6 +97,20 @@ describe('waitForReadiness', () => {
     expect(calls.filter(call => call.endsWith('free-tests.yml/runs'))).toHaveLength(2);
     expect(c.at()).toBe(CREATED + 11 * 60_000);
     expect(lines.join('\n')).toContain('Free Tests run 5 passed');
+  });
+
+  test('a dispatched-only head starts the gate: the runs listing is not narrowed to pull_request (#3508)', () => {
+    const { gh, calls } = fakeGh([{ free: [free(40448356650, 'completed', 'success', { event: 'workflow_dispatch' })] }]);
+    const c = clock(CREATED + 3 * 3600_000);
+    const argsSeen: string[][] = [];
+    const spy: GhRunner = (args, timeout) => { argsSeen.push(args); return gh(args, timeout); };
+    const { decision, lines } = waitForReadiness({ ...base, gh: spy, now: c.now, sleep: c.sleep });
+    expect(decision.kind).toBe('ready');
+    expect(lines.join('\n')).toContain('Free Tests run 40448356650 passed');
+    const listing = argsSeen.find(args => args.some(a => a.endsWith('free-tests.yml/runs')))!;
+    expect(listing).toContain(`head_sha=${HEAD}`);
+    expect(listing.some(a => a.startsWith('event='))).toBe(false);
+    expect(calls.filter(call => call.endsWith('free-tests.yml/runs'))).toHaveLength(1);
   });
 
   test('a re-run keeps the original creation time, so an elapsed window is not waited again', () => {

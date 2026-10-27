@@ -590,35 +590,69 @@ cmd_down() {
 }
 
 # pack SRC: write a gzipped checkout tarball to stdout (tracked + untracked
-# files that are not ignored, plus .git; a non-git directory is taken whole).
-# A linked worktree's .git is a one-line pointer into the main repository,
-# useless on the VM, so it is replaced by a self-contained clone of the
-# checked-out branch carrying the worktree's own index.
+# files that are not ignored, plus a .git snapshot; a non-git directory is
+# taken whole). The live .git is never tarred: another process running git in
+# the checkout (a review subagent's diff, a trial merge's worktree add) writes
+# index.lock, packed-refs and objects while tar reads, and GNU tar exits 1
+# on a file that changed under it (GSTA-121's PREGATE_REMOTE_INFRA). Instead
+# the refs are fetched into a fresh repository through git's own transport,
+# which reads a consistent view, the remote.* config is replayed so
+# origin/<base> still resolves, and the index is copied (git writes it
+# atomically through a rename). A linked worktree's .git is a one-line
+# pointer into the main repository, useless on the VM; the same snapshot
+# replaces it, on the worktree's own branch and index. Not carried: submodule
+# repositories (.git/modules) and a partial clone's promisor (the fetch pulls
+# every missing blob first); gstack has neither.
 cmd_pack() {
-  local src tmp="" gitdir branch
+  local src tmp gitdir branch head entry
   src=$(cd "${1:-.}" && pwd)
   if git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    if [ -f "$src/.git" ]; then
-      branch=$(git -C "$src" rev-parse --abbrev-ref HEAD)
-      [ "$branch" != HEAD ] || die "pack: $src is a linked worktree on a detached HEAD; check out a branch so the VM gets a self-contained .git"
-      tmp=$(mktemp -d)
-      gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
-      git clone -q --bare --no-local --single-branch --branch "$branch" "$gitdir" "$tmp/.git"
-      git -C "$tmp/.git" config core.bare false
-      # The worktree's index rides along so the VM's status matches, except a
-      # split index, whose shared half lives only in the original git dir.
-      [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" = true ] \
-        || cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+    head=$(git -C "$src" rev-parse --verify -q HEAD) || die "pack: $src has no commits; the VM needs a HEAD to fingerprint"
+    branch=$(git -C "$src" symbolic-ref -q --short HEAD || true)
+    tmp=$(mktemp -d)
+    # The path is baked in: a set -e failure unwinds the function before the trap runs, and a local $tmp is unset there.
+    trap "rm -rf $(printf %q "$tmp")" EXIT
+    # No template hooks from a global init.templateDir, and no auto-gc under the tar.
+    git -c gc.auto=0 init -q --bare --template= "$tmp/.git"
+    git -C "$tmp/.git" -c gc.auto=0 fetch -q --no-tags --update-shallow "$src" '+refs/*:refs/*' \
+      || die "pack: could not snapshot the refs of $src"
+    if [ -z "$branch" ]; then
+      branch="detached-${head:0:12}"
+      git -C "$tmp/.git" fetch -q --no-tags --update-shallow "$src" "+HEAD:refs/heads/$branch"
+    fi
+    git -C "$tmp/.git" symbolic-ref HEAD "refs/heads/$branch"
+    git -C "$tmp/.git" config core.bare false
+    gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
+    while IFS= read -r -d '' entry; do
+      # A key with no value (`[remote "x"] mirror`) is boolean true.
+      case $entry in *$'\n'*) ;; *) entry="$entry"$'\n'true ;; esac
+      git -C "$tmp/.git" config --add "${entry%%$'\n'*}" "${entry#*$'\n'}"
+    done < <(git -C "$gitdir" config --local --null --get-regexp '^(remote|branch)\.' 2>/dev/null || true)
+    # The checkout's index rides along so the VM's status matches, except a
+    # split index, whose shared half lives only in the original git dir. The
+    # index's blobs that HEAD's tree lacks (staged, intent-to-add, the stages
+    # of an unmerged entry) are behind no ref, so they travel as a pack of
+    # their own; without them the VM's write-tree (gstack-wtree) cannot read a
+    # staged file.
+    if [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" != true ]; then
+      cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
+      # Read the copy, not the live index, so the pack matches it; a gitlink's
+      # sha (mode 160000) is a submodule commit this object store lacks.
+      GIT_INDEX_FILE="$tmp/.git/index" git -C "$src" ls-files -s | awk '$1 != "160000" {print $2}' | sort -u \
+        | comm -23 - <(git -C "$src" ls-tree -r HEAD | awk '{print $3}' | sort -u) \
+        | git -C "$src" pack-objects -q --stdout \
+        | git -C "$tmp/.git" unpack-objects -q \
+        || die "pack: could not snapshot the staged blobs of $src"
     fi
     (
       cd "$src"
-      { git ls-files -z -co --exclude-standard; [ -n "$tmp" ] || printf '.git\0'; } \
+      git ls-files -z -co --exclude-standard \
         | while IFS= read -r -d '' f; do
             if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\0' "$f"; fi
           done \
-        | if [ -n "$tmp" ]; then tar --null -T - -c -C "$tmp" .git -zf -; else tar --null -T - -czf -; fi
+        | tar --null -T - -c -C "$tmp" .git -zf -
     )
-    [ -z "$tmp" ] || rm -rf "$tmp"
+    rm -rf "$tmp"; trap - EXIT
   else
     tar -C "$src" -czf - .
   fi

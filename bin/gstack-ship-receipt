@@ -446,7 +446,7 @@ function cmdCarry(rest: string[], json: boolean): number {
   const oldVersion = versionAt(from);
   const newVersion = versionAt(head);
   const allMetadataGlobs = [...CARRY_METADATA_GLOBS, ...extra.metadata];
-  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra, matchesAny(allMetadataGlobs, p) ? { before: blobAt(from, p), after: blobAt(head, p), oldVersion, newVersion } : undefined) }));
+  const changed = changedRaw.split('\n').filter(Boolean).map(p => ({ path: p, class: classifyCarryPath(p, extra, matchesAny(allMetadataGlobs, p) ? { before: blobAt(from, p), after: blobAt(head, p), oldVersion, newVersion, templates: policy?.stamp_patterns ?? [] } : undefined) }));
   // Pathspecs by class: tests and metadata are excluded from the product patch; the test patch is the tests alone.
   // A metadata-listed path whose change was not a stamp stays in the product patch: every glob that matches it is dropped from the exclusion.
   const excludeGlobs = (globs: readonly string[]) => globs.map(g => `:(exclude,glob)${g}`);

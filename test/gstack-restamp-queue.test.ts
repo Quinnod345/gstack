@@ -469,7 +469,7 @@ describe('gate-ahead (--after), predecessor movement and queue staleness', () =>
     const j = JSON.parse(r.out);
     expect(j).toMatchObject({ status: 'refused', code: 'QUEUE_STALE', expected: { base: assumed.slice(0, 12) } });
     expect(j.actual.base).toBe(repo.git('rev-parse', 'origin/main'));
-    expect(j.recompute).toMatch(/^gstack-restamp --next --base main --expect-base [0-9a-f]{12}$/);
+    expect(j.recompute).toMatch(/^gstack-restamp --next --base main --expect-base [0-9a-f]{12} --pr 2$/);
     expect(repo.git('status', '--porcelain')).toBe('');
     const text = restamp(repo, ['--next', '--pr', '2', '--expect-base', assumed.slice(0, 12)]);
     expect(text.err).toMatch(/base moved.*\(QUEUE_STALE\)\nrecompute: gstack-restamp --next/);
@@ -495,9 +495,38 @@ describe('gate-ahead (--after), predecessor movement and queue staleness', () =>
     const stale = restamp(repo, ['--next', '--pr', '2', '--expect-order', '1,2,3', '--json'], ghShim(repo, { '1': merged, '3': merged }));
     expect(stale.status).toBe(EXIT.refused);
     expect(JSON.parse(stale.out)).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '1': 'merged', '3': 'merged' } } });
-    expect(JSON.parse(stale.out).recompute).toContain('--expect-order 1,2,3');
+    // The recompute is the corrected order (merged PRs dropped), never the stale list again.
+    expect(JSON.parse(stale.out).recompute).toMatch(/ --pr 2 --expect-order 2$/);
     const unmerged = restamp(repo, ['--next', '--pr', '2', '--expect-order', '1,4,2', '--json'], ghShim(repo, { '1': merged, '4': open }));
     expect(JSON.parse(unmerged.out)).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '4': 'open' } } });
+    expect(JSON.parse(unmerged.out).message).toContain('#4 must merge before this PR stamps');
+    expect(JSON.parse(unmerged.out).recompute).toMatch(/ --expect-order 4,2$/);
+    // A predecessor GitHub calls merged that the local base does not carry yet (the slot call came before the lane fetched)
+    // stays ahead in the recompute: dropping it would let --next allocate from the stale base the version it already took.
+    const unfetched = { state: 'MERGED', mergeCommit: { oid: repo.git('rev-parse', 'pr-b') }, headRefOid: 'y' };
+    const stale2 = restamp(repo, ['--next', '--pr', '2', '--expect-order', '1,4,2', '--json'], ghShim(repo, { '1': merged, '4': unfetched }));
+    expect(JSON.parse(stale2.out)).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '4': 'merged-not-in-base' } }, fix: 'git fetch origin main' });
+    expect(JSON.parse(stale2.out).message).toContain('#4 merged but the local main does not carry the merge yet: git fetch origin main, then rerun');
+    expect(JSON.parse(stale2.out).recompute).toMatch(/ --expect-order 4,2$/);
+  });
+
+  // The slot-call lesson (GSTA-123, 2026-10-27): a lane given "remaining order 3487" ran --expect-order 3487 without its own
+  // PR, so every entry read as an unmerged predecessor and the refusal repeated the same list as its recompute.
+  test('--expect-order without the lane\'s own PR: the refusal says so and the recompute lists this PR first, then the remaining order', () => {
+    const repo = fixture();
+    makePr(repo, 'pr-a');
+    makePr(repo, 'pr-b');
+    repo.git('checkout', '-q', 'pr-a');
+    const open = { state: 'OPEN', mergeCommit: null, headRefOid: 'x' };
+    const r = restamp(repo, ['--next', '--pr', '1', '--expect-order', '2,3', '--json'], ghShim(repo, { '2': open, '3': open }));
+    expect(r.status).toBe(EXIT.refused);
+    const j = JSON.parse(r.out);
+    expect(j).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '2': 'open', '3': 'open' } } });
+    expect(j.message).toContain('--pr 1 is not in --expect-order, so every listed PR read as a predecessor: list this PR first, then the remaining order');
+    expect(j.recompute).toMatch(/^gstack-restamp --next --base main --expect-base [0-9a-f]{12} --pr 1 --expect-order 1,2,3$/);
+    // The corrected command passes against the same gh answers.
+    expect(restamp(repo, ['--next', '--pr', '1', '--expect-order', '1,2,3', '--dry-run'], ghShim(repo, { '2': open, '3': open })).status).toBe(EXIT.ok);
+    expect(repo.git('status', '--porcelain')).toBe('');
   });
 });
 
