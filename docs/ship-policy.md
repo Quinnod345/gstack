@@ -725,7 +725,9 @@ integers under `review_loop`, `gate` and `ci`: `passes=2`, `passes: 2` and
 several counters, `passed` under `gate` and `ci` or `pass` under every gate
 lane, matches when the number equals any of them; an underscore in a key
 matches `_`, a space or `-`; a name inside a longer word, `3 pass-through`, is
-not a claim). A body that quotes a different number is
+not a claim; a number that is the value of a `key=` or `key:` pair is that
+key's claim alone, so `passes=2 blocking_found=1` is two claims, never a
+`2 blocking_found` one, #3513). A body that quotes a different number is
 `RECEIPT_PROSE_MISMATCH` (exit 1) and the `PROSE:` line names each field with
 both values; prose that quotes no counter is not a claim. Data PRs (evals,
 measurements, sweeps) run it before READY so the body's numbers are the run's.
@@ -815,7 +817,11 @@ dependency, a script or a new key makes them product). A path the policy's
 `stamp_files`, `stamp_paths` or `release_outputs` name is metadata only while
 its change is a stamp, the rule the tree receipt applies to the same paths: a
 manifest by its version key, any other file when its new text reads as the old
-once the new release version is replaced by the old one. A logic change in a
+once the new release version is replaced by the old one, or when every changed
+line is a stamp-form rewrite to the new version of the old version or of a
+newer tentative one the stamp moved (a `*_KEY_VERSION` written as the next
+minor, #3512; a version older than the old one or of another width is a hand
+edit). A logic change in a
 stamped source file is product. Lockfiles are product unless the policy names
 them. A base merge contributes no product
 change of its own. A receipt carried twice keeps the reviewed head as
@@ -957,7 +963,10 @@ only, where `gstack-version-bump` writes; a dependency entry is `changed`),
 the CHANGELOG (a heading move or re-heading, compared as an order-independent
 multiset of entries), `stamp_paths` and `release_outputs` (every
 removed/added pair must be an exact `(was X)` / `since: X` / `vX` rewrite (a quote around X in the first two forms included) with
-X the gated version and the replacement the current one, so a dependency pin
+X the gated version, or a newer version of the repo's width that the
+stamp_paths stage moves (a tentative `*_KEY_VERSION` written as the next
+minor, #3512; a version older than the gated one, or of another width, is a
+hand edit), and the replacement the current one, so a dependency pin
 that happens to equal the old version is `changed`; `stamp_patterns`
 templates count as stamp forms too). With `stamp_files` set, a file outside it
 is `changed (stamp_files: not in the repo's stamp_files allowlist)` whatever

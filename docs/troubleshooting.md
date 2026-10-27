@@ -2716,7 +2716,11 @@ and the message says so. The JSON result carries `expected`, `actual` and
 **Fix.** Run the printed `recompute` command: it carries the corrected order
 (this PR first, merged PRs dropped, an unmerged predecessor kept ahead because
 it must merge first) and recomputes the version from the current base; then
-merge with the server-side head condition (`MERGE_CONDITION: sha=<head>`).
+merge with the server-side head condition (`MERGE_CONDITION: sha=<head>`). A
+predecessor GitHub calls merged that the local base does not carry yet
+(`#<pr>=merged-not-in-base`) is kept ahead too, with `fix: git fetch origin
+<base>`: fetch, then rerun, so the recompute, pinned to that local base, never
+allocates the version the predecessor already took.
 
 <a id="restamp-version-source"></a>
 ### `RESTAMP_VERSION_SOURCE`
