@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.281.0] - 2026-10-27
 
 **Four paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
 
