@@ -340,9 +340,11 @@ test('pack ships a linked worktree with a self-contained .git on the checked-out
       const broken = Bun.spawnSync(['bash', '-c', `rm -f .git/index && TMPDIR=../tmpd ${pack} > ../pack-broken.tgz; echo rc=$?; ls ../tmpd`], { cwd: src, timeout: 60_000 });
       expect(broken.stderr.toString()).toContain('.git/index');
       expect(broken.stdout.toString().trim()).toBe('rc=1');
-      sh('git reset -q', src);
+      // A gitlink in the index (a submodule commit this object store lacks) is not packed, and a valueless
+      // remote key (`[remote "origin"] mirror`) replays as true.
+      sh('git reset -q && git update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,sub && printf \'[remote "origin"]\\n\\tmirror\\n\' >> .git/config', src);
       sh('mkdir vm2 && ' + pack.replace('pack .', 'pack src') + ' | tar -xzf - -C vm2', d);
-      expect(sh('git rev-parse --abbrev-ref @{u}', join(d, 'vm2')).trim()).toBe('origin/main');
+      expect(sh('git rev-parse --abbrev-ref @{u} && git config --bool --get remote.origin.mirror && git ls-files -s sub | cut -c1-6', join(d, 'vm2')).split('\n').filter(Boolean)).toEqual(['origin/main', 'true', '160000']);
     } finally { rmSync(d, { recursive: true, force: true }); }
   }, 90_000);
 
