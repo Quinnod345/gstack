@@ -1,6 +1,6 @@
 <!-- AUTO-GENERATED from capy-pr.md.tmpl — do not edit directly -->
 <!-- Regenerate: bun run gen:skill-docs -->
-## Step 19-C: Capy PR body (What changed, Why, Approvals)
+## Step 19-C: Capy PR body (What changed, Why, Blast radius, Approvals)
 
 Read only when Step 19 printed `CAPY_PR: on`. Under Capy a person decides the merge from the PR and
 the READY report, through a Captain, so the body shows what changed in pictures, why, and who

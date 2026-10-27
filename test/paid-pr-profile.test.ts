@@ -95,7 +95,7 @@ describe('PR profile paid-runner integration', () => {
   });
 
   test('unknown dependencies restore full gate while missing prompt coverage fails before execution', () => {
-    const fallback = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['ETHOS.md'] });
+    const fallback = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['SECURITY.md'] });
     expect(fallback.coverage?.mode).toBe('full-fallback');
     expect(fallback.selection.e2e).toContain('qa-only-no-fix');
     expect(fallback.selection.e2e).not.toContain('autoplan-dual-voice');

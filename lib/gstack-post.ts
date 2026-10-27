@@ -21,6 +21,7 @@
  */
 import { createHash } from "crypto";
 import { scan, type Finding, type RepoVisibility } from "./redact-engine";
+import { CI_RUN_WORD_BEFORE } from "./redact-patterns";
 import { RECEIPT_FENCE } from "./ship-receipt";
 import { canonicalRemote } from "./remote-identity";
 import { parseChangelog } from "./changelog-check";
@@ -329,8 +330,6 @@ function repoReleaseVersions(env: PostEnv): string[] {
   return [...versions];
 }
 
-/** A run word with an optional ':' '#' '=' right before an 11-digit token: `run 19368712345`, `gate=40323989742`, `rerun passed 40287239206`. */
-const RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed)\s*[:#=]?\s*$/i;
 /** Between two 11-digit tokens of one list: `, `, ` and `, ` & `, ` or `, ` / `, with an optional `(#1234)` after the first. */
 const RUN_ID_CHAIN = /^(?:\s*\(#\d+\))?\s*(?:,|and|&|or|\/)\s*$/i;
 
@@ -344,7 +343,9 @@ const RUN_ID_CHAIN = /^(?:\s*\(#\d+\))?\s*(?:,|and|&|or|\/)\s*$/i;
  * word on the same line (run, runs, screen, screens, gate, gates, backstop,
  * bisect, rerun, dispatched, dispatch, failed, passed, with an optional ':'
  * '#' '=' between: `failed 40269992077`, `gate 40323989742`,
- * `run #19368712345`; generic words such as id, job, attempt and workflow
+ * `run #19368712345`; the engine's isCiRunIdentifier exempts that position on
+ * its own since the run-id fix for approval records, and the same regex drives
+ * the chain below; generic words such as id, job, attempt and workflow
  * exempt nothing, since `customer id 14155551234` is a number), plus every 11-digit id chained
  * after an allowlisted one through ", ", " and ", " & ", " or " or " / ",
  * optionally with a "(#1234)" between (`screen 40269992077 (#3434) and
@@ -361,7 +362,7 @@ function receiptDigitTokens(texts: string[]): string[] {
       let chainFrom = -1;
       for (const m of line.matchAll(/(?<![\d+])\d{11}(?!\d)/g)) {
         const at = m.index!;
-        const listed = RUN_WORD_BEFORE.test(line.slice(0, at)) || (chainFrom >= 0 && RUN_ID_CHAIN.test(line.slice(chainFrom, at)));
+        const listed = CI_RUN_WORD_BEFORE.test(line.slice(0, at)) || (chainFrom >= 0 && RUN_ID_CHAIN.test(line.slice(chainFrom, at)));
         if (listed) tokens.add(m[0]);
         chainFrom = listed ? at + m[0].length : -1;
       }
