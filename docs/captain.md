@@ -215,7 +215,7 @@ fifth: a file the restamp lists that the call did not name is not a stamp, so th
 leaves it out and says so in its READY. The restamp itself never
 moves a line the base added since the pin's fork point, base merge committed or staged. A
 pin stacked on a PR that squash-merged earlier conflicts beyond the CHANGELOG where the
-parent's squash touched the pin's lines: the lane takes its pin's bytes for those files
+parent's squash touched the pin's lines, so the lane takes its pin's bytes for those files
 (`verify` checks the tree against T<i>, which already carries the parent), and
 `mergeChangelogs` carries the pin's edits to the parent's now-released entry as Gate
 integrity corrections in the pin's own entry. The post-merge `verify` judges the CHANGELOG

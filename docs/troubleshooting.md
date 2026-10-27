@@ -2648,7 +2648,11 @@ from the working directory (a bare `bun gstack-pregate`), since a branch could
 then pick the user policy: run `gstack-pregate` directly or as
 `bun --no-env-file`. `gstack-ship-queue ready` under a train policy fetches
 `origin/<base>` first and refuses with this code, quoting git's error, when
-that fetch fails.
+that fetch fails. `gstack-restamp`'s `stamp_paths` stage refuses with it when
+the diff that tells the base's added lines from the branch's own cannot run
+(`cannot diff <since>..<base> for the stamp_paths stage (<git's first stderr
+line>); nothing written`), since an empty diff would read as "the base added
+nothing" and move the base's lines again.
 
 **Fix.** `git fetch origin <base> --depth=1`, then rerun. To run against the
 branch's own file deliberately, pass `--policy-from head --allow-repo-commands`;
@@ -4084,7 +4088,10 @@ gate-ahead merge could not be recomputed with `git merge-tree`. The train
 commands use it too: `train forget` on a record that does not exist or on a
 train still building, running or merging, `train watch` on an unknown record,
 `verify --pr <n> --screen` on a run with no verdict to read (an INCOMPLETE or
-unreadable run), and `ready --screen` when the scratch merge branch cannot be
+unreadable run), `verify --pr <n> --train <nonce>` when main's tree mismatches
+and whether a slot merged on GitHub cannot be read (so whether the queue must
+freeze is unknown; it never answers "nothing merged" from an unreadable
+state), and `ready --screen` when the scratch merge branch cannot be
 pushed. Nothing was written unless the `QUEUE_STAMP_REFUSED:` line says
 `committed=yes`.
 
@@ -4322,17 +4329,27 @@ the repair merges (a changed train).
 
 **Meaning.** Main's tree is neither the train's prefix before this PR nor the
 one after it, modulo stamps, so the merge would not publish what the gate
-tested.
+tested. After a merge, a main that differs from the prefix after the PR in
+the CHANGELOG alone, while being its own first parent's CHANGELOG plus the
+PR's own entry (the rule the pre-merge verify applied to the head), is not a
+mismatch ([one CHANGELOG rule, before and after](ship-policy.md#run-a-merge-train)).
 
-**Fix.** Stop merging. If earlier PRs of the train merged, the queue is now
-frozen (`QUEUE_TRAIN_FROZEN`); otherwise build a new train on current main.
+**Fix.** Stop merging. If a PR of the train merged (verified, or reported
+MERGED by GitHub without a verified tree, slot 1's own squash included), the
+queue is now frozen (`QUEUE_TRAIN_FROZEN`); otherwise build a new train on
+current main. When whether a slot merged on GitHub cannot be read, verify
+refuses with `QUEUE_PROOF_MISSING` instead of either answer; rerun it once
+`gh pr view` answers.
 
 <a id="queue-train-frozen"></a>
 ### `QUEUE_TRAIN_FROZEN`
 
 **Meaning.** A train stopped partway through publication, so main holds a
 prefix no gate covered on its own. The `QUEUE_TRAIN_FROZEN:` line lists the
-merged PRs, main's tree and the backstop run dispatched on main's SHA. The
+merged PRs (a slot GitHub reports MERGED counts as merged, verified tree or
+not, and the reason then says `merged on GitHub without a verified tree`, so
+the repair's rebuild never seats it again), main's tree and the backstop run
+dispatched on main's SHA. The
 freeze lives in local state and on `refs/notes/gstack-trains`. Ordinary
 trains and other trains' merges are refused until a repair lands.
 
