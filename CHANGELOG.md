@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.282.0] - 2026-10-27
 
 **A merge the pre-merge verify accepted no longer freezes the queue, and a slot stamp touches only the stamp files.** Train 24 (2026-10-27) merged #3434 and #3453, then froze on #3453's post-merge check and paid a $31 backstop: the pre-merge verify judged the lane's CHANGELOG as main's plus the pin's own entry and said MERGE_CONDITION, the post-merge check compared main to T2 section by section, and T2's one `[Unreleased]` (both stacked entries) had become two released sections. In both slots `gstack-restamp` also listed `lib/ship-policy.ts` as a fifth stamp file, because the lane's uncommitted base merge made #3511's `DOCS_CAPS_KEY_VERSION` look like the branch's own tentative key. And `mergeChangelogs` refused the stacked child outright, so the lane's hand resolve dropped #3453's two wording fixes to the released 1.91.276.0 entry.
 
