@@ -13,16 +13,16 @@ import { matchesAny } from './ship-policy';
 import { stampFileKind, versionStampOnly } from './pregate/stamp-only';
 
 export const RECEIPT_FENCE = 'gstack-ship-receipt';
-const KEY_ORDER: Array<keyof ShipReceipt> = [
+const KEY_ORDER: Array<keyof ShipReceipt | 'docs'> = [
   'schema_version', 'pr', 'head', 'version', 'base', 'gated_tree', 'predecessor', 'tree', 'gate_reuse', 'gate', 'ci', 'spend_usd',
   'session_kind', 'artifacts_consumed', 'run', 'thread', 'policy', 'queue_mode', 'preregistration', 'history',
-  'pregate', 'requires_remote', 'issues', 'approval', 'review_loop', 'carry',
+  'pregate', 'requires_remote', 'issues', 'approval', 'docs', 'review_loop', 'carry',
 ];
 
 /** Keys in the fixed order so identifiers lead; undefined values are dropped. */
-export function orderReceipt(input: Partial<ShipReceipt>): ShipReceipt {
+export function orderReceipt(input: Partial<ShipReceipt> & { docs?: unknown }): ShipReceipt {
   const out: Record<string, unknown> = {};
-  for (const key of KEY_ORDER) if (input[key] !== undefined) out[key] = input[key];
+  for (const key of KEY_ORDER) if ((input as Record<string, unknown>)[key] !== undefined) out[key] = (input as Record<string, unknown>)[key];
   for (const key of Object.keys(input)) if (!(key in out) && (input as any)[key] !== undefined) out[key] = (input as any)[key];
   return { schema_version: 1, ...out } as ShipReceipt;
 }
@@ -145,6 +145,8 @@ export const CARRY_TEST_GLOBS: readonly string[] = [
   '**/*_test.go', '**/test_*.py', '**/*_test.py', '**/*_spec.rb', '**/*Test.java', '**/*Tests.swift',
 ];
 export const CARRY_METADATA_GLOBS: readonly string[] = ['VERSION', 'CHANGELOG.md', 'package.json', 'agents-digest/**'];
+/** How many differing product paths a RECEIPT_CARRY_PRODUCT_CHANGED refusal names, and how far the per-path patch-id walk goes. */
+export const CARRY_NAMED_PATHS = 20;
 
 export type CarryClass = 'product' | 'test' | 'metadata';
 export interface CarryPlanInput {
@@ -176,7 +178,9 @@ export interface CarryChange { before: string | null; after: string | null; oldV
 export function stampOnlyText(change: CarryChange): boolean {
   const { before, after, oldVersion, newVersion } = change;
   if (before === null || after === null || !oldVersion || !newVersion || oldVersion === newVersion) return false;
-  return after.split(newVersion).join(oldVersion) === before;
+  // Digit-bounded: replacing 1.2.3 inside 11.2.3 or 1.2.34 would read a different version's stamp as this one's.
+  const escaped = newVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return after.replace(new RegExp(`(?<![0-9])${escaped}(?![0-9])`, 'g'), oldVersion) === before;
 }
 
 /**
@@ -207,7 +211,7 @@ export function classifyCarryPath(rel: string, extra: { metadata?: readonly stri
  */
 export function planCarry(input: CarryPlanInput): CarryPlan {
   if (input.productPatchId.from !== input.productPatchId.head) {
-    const named = input.changedProduct.slice(0, 20);
+    const named = input.changedProduct.slice(0, CARRY_NAMED_PATHS);
     return { ok: false, code: 'RECEIPT_CARRY_PRODUCT_CHANGED', message: `product diff changed between ${input.from.slice(0, 12)} and ${input.head.slice(0, 12)}: ${named.join(', ') || 'patch-id differs'}${input.changedProduct.length > named.length ? ` (+${input.changedProduct.length - named.length} more)` : ''}` };
   }
   const reasons: string[] = [];

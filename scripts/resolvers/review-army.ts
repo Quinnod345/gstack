@@ -88,13 +88,34 @@ Print the selection:
 "Dispatching N specialists: [names]. Skipped: [names] (scope not detected). Gated: [names] (0 findings in N+ reviews)."`;
 }
 
+/**
+ * The diff command every dispatched reviewer runs. In /ship the parent writes the
+ * base sha into the prompt (the merge base on pass 1, RANGE_BASE from pass 2 on):
+ * a reviewer is its own process and never sees the parent's shell variables, so a
+ * `$RANGE_BASE` reference there would silently fall back to the whole branch.
+ */
+function diffBase(ctx: TemplateContext): string {
+  return ctx.skillName === 'ship' ? 'DIFF_BASE=<diff-base>' : 'DIFF_BASE=$(git merge-base origin/<base> HEAD)';
+}
+
 function generateSpecialistDispatch(ctx: TemplateContext): string {
   return `### Dispatch specialists in parallel
 
 For each selected specialist, launch an independent subagent via the Agent tool.
 **Launch ALL selected specialists in a single message** (multiple Agent tool calls)
 so they run in parallel. Each subagent has fresh context — no prior review bias.
-
+${ctx.skillName === 'ship' ? `
+**Fan-out (\`--review-fanout auto|serial|parallel\` in the prompt; default \`auto\`).**
+Under \`auto\`, when the host reports fewer free subagent slots than selected
+specialists (Capy caps a thread at 8 running subagents, and waiting or idle ones hold
+a slot), dispatch in batches of the free-slot count, at least one per batch, each
+batch in one message, and start the next batch only after every reader of the
+previous one has finished or is confirmed stopped; print \`Fan-out: N specialists in
+M batches of K\`. A host that reports no slot count runs one parallel batch.
+\`serial\` is batches of one; \`parallel\` is one batch regardless of slots (a refused
+launch is a failed reader, never silently dropped coverage). Batching changes the
+order, never the set: every selected specialist still runs before Step 9.2 merges.
+` : ''}
 **Each specialist subagent prompt:**
 
 Each specialist prompt includes:
@@ -118,7 +139,7 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 5. Instructions:
 
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
-\`DIFF_BASE=$(git merge-base origin/<base> HEAD) && git diff "$DIFF_BASE"\` to get the full diff. Apply the checklist against the diff.
+\`${diffBase(ctx)} && git diff "$DIFF_BASE"\` to get the ${ctx.skillName === 'ship' ? 'diff (`<diff-base>`: write the sha in before dispatch, the merge base on pass 1 and `RANGE_BASE` from pass 2 on; never a shell variable)' : 'full diff'}. Apply the checklist against the diff.
 
 \`NO FINDINGS\` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line:
 {\\"severity\\":\\"CRITICAL|INFORMATIONAL\\",\\"confidence\\":N,\\"path\\":\\"file\\",\\"line\\":N,\\"category\\":\\"category\\",\\"summary\\":\\"description\\",\\"fix\\":\\"recommended fix\\",\\"fingerprint\\":\\"path:line:category\\",\\"specialist\\":\\"name\\"}
@@ -297,7 +318,7 @@ The Red Team subagent receives:
 
 Prompt, after the defensive framing and fixture handling from item 4 of the specialist dispatch: "You are a red team reviewer. The code has already been reviewed by N specialists
 who found the following issues: {merged findings summary}. Your job is to find what they
-MISSED. Read the checklist at {red-team checklist path}, list changed files with \`DIFF_BASE=$(git merge-base origin/<base> HEAD) && git diff --name-status "$DIFF_BASE"\`, read them as that fixture handling says, and look for gaps.
+MISSED. Read the checklist at {red-team checklist path}, list changed files with \`${diffBase(ctx)} && git diff --name-status "$DIFF_BASE"\`, read them as that fixture handling says, and look for gaps.
 Output findings as JSON objects (same schema as the specialists), or \`NO FINDINGS\` alone, the expected result when they missed nothing. Focus on cross-cutting
 concerns, integration boundary issues, and failure modes that specialist checklists
 don't cover."

@@ -1741,8 +1741,11 @@ from "the record was lost with the old machine". `render` still prints the secti
 "Record unavailable on this machine" instead of "No approvals recorded". Exit 1.
 
 **Fix.** Run where the record lives, copy the rows back from the thread's report, or make
-the private Drive mirror resolvable (one `~/.capy/drive/project-user-*` folder, or
-`GSTACK_APPROVALS_DIR`).
+a Drive mirror resolvable: `GSTACK_APPROVALS_DIR`, an `approvals/` directory in the one
+mounted Captain drive (`~/.capy/drive/captain-*/approvals`, readable by the whole crew), or one
+`~/.capy/drive/project-user-*` folder. `gstack-approvals path` prints which rule chose the mirror
+and, as `READ_ALSO:`, the other roots it still reads (a row mirrored before the Captain created
+`approvals/` stays visible).
 
 <a id="approval-record-write-failed"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_WRITE_FAILED)`
@@ -4640,6 +4643,47 @@ conflict-only base merge, a test-only change or release metadata, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
+<a id="receipt-prose-mismatch"></a>
+### `RECEIPT_PROSE_MISMATCH`
+
+**Meaning.** `gstack-ship-receipt read --check-prose` found a number in the PR
+body that names a counter the receipt records (`passes=3` against
+`review_loop.passes: 2`, `1 deferred` against `deferred: 2`, `passed: 40`
+against `gate.passed: 41`) with a different value. The receipt is written from
+the run; the prose was typed, so a reader of the body would learn a number the
+run did not produce. The `PROSE:` line names each field with both values.
+
+**Fix.** Correct the body to the receipt's number. When the receipt is the
+stale one (the run was repeated), rerun `/ship` so the receipt is rewritten
+([ship-policy.md](ship-policy.md#ship-receipt)).
+
+<a id="receipt-git-too-old"></a>
+### `RECEIPT_GIT_TOO_OLD`
+
+**Meaning.** `gstack-ship-receipt carry` compares the product diff at the two
+heads with `git patch-id --verbatim`, which git added in 2.39. The installed git
+is older (the refusal names its version), so the comparison could not run and
+nothing was rewritten.
+
+**Fix.** Upgrade git to 2.39 or later and rerun `carry`; without an upgrade, run
+`/ship` on the new head ([ship-policy.md](ship-policy.md#receipt-carry)).
+
+<a id="docs-audit-blocked"></a>
+### `DOCS_AUDIT_BLOCKED`
+
+**Meaning.** `gstack-ship-receipt write --docs` was given a documentation audit
+whose `status` is `blocked` with no `exception`, or `--body` lacks the exception
+line the record implies, or `gstack-ship-receipt docs-caps` found a declared
+documentation file over its `docs.caps` byte cap (or absent). /ship Step 14.5
+ends blocked only when nobody has accepted the named risk, so a receipt written
+then would publish an unaudited release as audited; nothing was written.
+
+**Fix.** Repair the audit and rerun Step 14.5, or trim the file the `DOCS_CAP: …
+over` line names (or raise its cap on the base branch). When the owner accepts
+the named risk instead, record it as `docs.exception: { accepted_by, date, via,
+reason }` and carry the `Documentation exception: accepted by <owner> <date> via
+<ref>: <reason>` line in the PR body's `## Documentation` section, word for word
+([ship-policy.md](ship-policy.md#ship-receipt)).
 <a id="gstack-pr-wait"></a>
 ## gstack-pr-wait
 
@@ -4873,3 +4917,33 @@ final summary. Rename or move yours, or switch modes (`./setup --prefix` /
 a generated gstack SKILL.md and then edited it, that file is moved to
 `~/.gstack/backups/skills/<timestamp>/<skill>/SKILL.md` before gstack's is
 linked in, never deleted.
+
+## gstack-decision-trail and gstack-worktree-audit
+
+<a id="decision-trail-start-required"></a>
+### `gstack-decision-trail: DECISION_TRAIL_START_REQUIRED: <file> has <n> rows and run <id> has no start row after the newest one`
+
+You appended with `--run <id>` to a trail that other runs already wrote, and
+the newest `start` row in it is not this run's. A run (one agent
+conversation, with its later turns) that joins a trail opens with its own
+`start` row so a reviewer can tell whose rows are whose. Run
+`gstack-decision-trail start <file> <id>` once and append again; the start
+command is a no-op while this run's start row is still the newest, so a rerun
+of the same script is safe. Nothing was written. See
+[docs/unattended.md](unattended.md#the-decision-trail).
+
+### `gstack-worktree-audit` prints `warn: no -b given; MERGED checks against origin/HEAD` or every row says `MERGED no`
+
+Without `-b` the audit compares each worktree's head against the remote's
+default branch (then `origin/main`, then `origin/master`), which is not
+always the branch PRs merge into; pass `-b origin/<branch>`. A squash-merged
+branch is never an ancestor of the base, so `MERGED no` beside `PR #n/merged`
+is normal and the bucket is still `safe` while the tree is clean and every
+commit is pushed; an unpushed commit or an untracked file on that branch makes
+it `review`, because deleting the worktree would lose it. The audit only reads
+(its one write is the base fetch, which `--no-fetch` skips);
+a worktree it calls `safe` is still yours to remove, and a `prunable` row names
+a registered, unlocked worktree whose directory is already gone (`git worktree
+prune`); a locked one, or a `broken` row whose `.git` link is missing, reads
+`review` instead. `clean,ignored:<n>` means the tree is clean but holds
+gitignored entries (`.env`, build output) that go with the worktree.
