@@ -43,7 +43,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `queue_mode` | `claim-at-open` \| `stamp-at-merge` | `claim-at-open` | See [stamp-at-merge](#stamp-at-merge). `claim-at-open` is today's queue (`gstack-next-version` claims a slot when the PR opens). |
 | `release_tool` | command or `null` | `null` | The repo's own release command (`bun run release:restamp`). Runs in an isolated staging worktree under the [release-tool contract](#release-tool-contract). |
 | `release_outputs` | globs | `[]` | Paths the release tool may write beyond the version files, lockfiles, CHANGELOG and `stamp_paths`. Anything else is `RESTAMP_OUTPUT_OUTSIDE_ALLOWED`. |
-| `stamp_paths` | globs | `[]` | Where exact `(was X)`, `since: X` and `vX` mentions of the branch's tentative version are rewritten on a restamp. |
+| `stamp_paths` | globs | `[]` | Where exact `(was X)`, `since: X` and `vX` mentions of the branch's tentative version (quoted or bare: `since: 'X'` counts) are rewritten on a restamp. |
 | `changelog` | path or `null` | `CHANGELOG.md` | Re-headed on a restamp: the PR's `## [Unreleased]` (or old-version) section moves to the top as `## [<version>] - <date>`. |
 | `mirror` | relative path or `null` | `null` | A paired checkout to restamp identically (tier 2: validated and confined today, not yet run). |
 | `history` | `merge-only` \| `squash-ok` | `squash-ok` | `merge-only` makes `/ship` refuse a squash or rebase plan; `gstack-ship-policy check-history` reports a rewritten branch (`HISTORY_POLICY_VIOLATION`). |
@@ -52,7 +52,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `pr_count` | `{ default_pr_count, split_requires_owner }` | `{1, true}` | The PR-count row in plan reviews. |
 | `maintainers` | GitHub logins | `[]` | Maintainer set for `/review` contributor mode; empty means repository push permission. |
 | `stamp_files` | globs | `[]` | The repo's stamp rule: when set, only these files may differ by a stamp (list the version file, manifests, plugin trees and the files holding the PR's own `since:` rows). It applies before every other stamp rule, so a doc `vX` mention outside it is a difference. |
-| `stamp_patterns` | literal templates | `[]` | At most 16 templates of at most 128 characters, each with exactly one `{version}` slot (`"version": "{version}"`, `since: '{version}'`, `<!-- x-stamp: {version} -->`); matched literally at a version boundary, never as a regex. The restamp writer and the tree receipt use them beside the built-in forms. |
+| `stamp_patterns` | literal templates | `[]` | At most 16 templates of at most 128 characters, each with exactly one `{version}` slot (`"version": "{version}"`, `since: '{version}'`, `<!-- x-stamp: {version} -->`); matched literally at a version boundary, never as a regex. The restamp writer, its mention scanner and the tree receipt use them beside the built-in forms. |
 | `restamp_command` | command or `null` | `null` | The repo's own restamp, run first in the staging worktree; see [restamp_command](#restamp-command). |
 | `migrations` | `{ dir, id }` or `null` | `null` | The migration directory and a regex with exactly one capture group for the number in a file name (`"^v(\\d+)-"`); `gstack-pregate regate` reports `MIGRATION_COLLISION`. |
 | `gate_command` | command or `null` | `null` | The repo's full pre-merge gate. `gstack-ship-queue gate-ahead` and `ready` print it for the caller to run (in the background or in CI); gstack never executes it. Needs `min_gstack_version`. |
@@ -188,18 +188,25 @@ READY PR as conflicting each time main stamps; the train merges the CHANGELOG
 by section, so the lane never merges main for it. The conflict does mean GitHub
 has no merge ref for the PR, so no `pull_request` CI runs on the head and
 `ready` prints `ci: none at <head12>` with a `ci-hint:` line. The lane then
-dispatches the free workflows on the branch (`gh workflow run free-tests.yml
---ref <branch> && gh workflow run windows-free-tests.yml --ref <branch>`),
-clears the requires-remote pregate lanes with those runs
-(`gstack-pregate clear --remote <lane> --run-url <run>`) and reruns `ready`,
-which passes because the dispatched check runs attach to the commit; the
-`ci-hint:` line then says those non-pull_request runs count. The `ci-hint:` line is
-advisory text for the lane; nothing parses it, and a PR whose head is on a fork
-gets a hint that leaves the dispatch to the coordinator. `ready --screen` on such a
-PR refuses, because there is no merge ref to screen (`QUEUE_SCREEN_STALE_REF`,
-`<remote> has no refs/pull/<n>/merge`); that refusal's "merge <base> into the
-branch" advice does not apply to a CHANGELOG-only conflict, so the lane READYs
-with `--no-screen` after the skill's own paid cases ran focused.
+runs `ready … --dispatch-ci free-tests.yml,windows-free-tests.yml [--timeout
+<s>]` (under a train policy): it dispatches each named workflow on the branch
+(`gh workflow run <wf> --ref <branch>`, skipped when a run at this head already
+concluded), waits for the runs (`CI_DISPATCH: <wf> --ref <branch> run <id> <url>
+<conclusion>`), clears every requires-remote pregate lane whose workflow is one
+of them with the run URL (`PREGATE_CLEARED: <lane> <url>`; a lane of another
+workflow stays uncleared and is named in the refusal), and then reads the head
+as usual, which passes because the dispatched check runs attach to the commit;
+the `ci-hint:` line then says those non-pull_request runs count. A red run
+clears no lane and refuses (`QUEUE_NOT_READY`); a run still going at `--timeout`
+(default 2700 s) is `QUEUE_TRAIN_PENDING`, and rerunning the command keeps
+waiting; a fork head is never dispatched here (`QUEUE_TRAIN_UNTRUSTED`). By hand the same four steps are `gh workflow
+run <wf> --ref <branch>`, wait, `gstack-pregate clear --remote <lane> --run-url
+<run>`, rerun `ready`. The `ci-hint:` line is advisory text for the lane;
+nothing parses it. `ready --screen` on such a PR has no merge ref to screen,
+so it builds the scratch merge described below (`SCREEN_MERGE:`, pushed as
+`screen/<pr>-<head12>`) and screens that; only a real conflict with the base
+(or a remote whose refs cannot be listed) is `QUEUE_SCREEN_STALE_REF`. A CHANGELOG-only conflict is screenable, and a
+lane whose skill's own paid cases ran focused may still READY with `--no-screen`.
 
 `ci:` counts the latest run per check (one app's check name), as GitHub's
 rollup does: a check that was re-run or superseded on the same commit (a
@@ -394,7 +401,7 @@ explicit choice:
 ```bash
 gstack-ship-queue ready --pr 42                    # prints SCREEN: lines and the recommendation, refuses
 gstack-ship-queue ready --pr 42 --no-screen        # READY receipt; the PR rides unscreened
-gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (QUEUE_SCREEN_STALE_REF when GitHub's merge ref lags the head)
+gstack-ship-queue ready --pr 42 --screen [--broad] # dispatches one paid screen on the PR's merge SHA (a scratch merge when GitHub's merge ref lags the head; QUEUE_SCREEN_STALE_REF only on a real conflict)
 ```
 
 Without a choice it prints the `SCREEN:` selection (with
@@ -411,10 +418,13 @@ the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
 it. Before dispatching, `ready` fetches the merge ref and requires its second
-parent to be the PR head: a missing or lagging merge ref (GitHub stops
-recomputing it while the PR conflicts with the base, CHANGELOG-only conflicts
-included) is `QUEUE_SCREEN_STALE_REF`, because a screen dispatched there plans
-no cases and reports success. A finished screen that planned no cases (no
+parent to be the PR head and its first parent the current base: a missing,
+lagging or unfetchable merge ref (GitHub stops recomputing it while the PR
+conflicts with the base, CHANGELOG-only conflicts included) is replaced by a
+scratch merge of the head onto the base, pushed as `screen/<pr>-<head12>`
+(the `SCREEN_MERGE:` line says which); a screen dispatched on a stale ref would
+plan no cases and report success. Only a real conflict with the base (or a
+remote whose refs cannot be listed) is `QUEUE_SCREEN_STALE_REF`. A finished screen that planned no cases (no
 `paid-plan` artifact, which a superseded run never uploads, or a plan manifest
 with nothing planned) is never followed as a screen: `ready --screen`
 dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
@@ -548,9 +558,81 @@ It runs the normal free tests, full gate and verification on main plus the
 repair. When verify confirms the repair merged, it prints `FREEZE: cleared`
 and `NEXT:` builds a train of the PRs still unmerged.
 
+**5b. Coordinator: after the merge.** `gstack-ship-queue verify --post-merge
+<sha> [--timeout <s>]` (the merged commit's full 40-character SHA) watches
+every check run attached to it (the push workflows: free tests, the Windows
+subset, the main backstop) and every commit status until none is still
+running, prints one `CHECK: <name> <conclusion>` per check and
+`POST_MERGE: <sha12> green|red|pending|none (passed= failed= pending= skipped=)`.
+Green needs at least one completed check and no failure; `neutral` and
+`skipped` (the backstop superseding itself) count as skipped; a pending
+commit status keeps the commit pending and a failed one makes it red. A
+failure is `QUEUE_POST_MERGE_RED` naming the checks; a timeout (default 2700 s) is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`. It keeps no process
+state, so rerunning it after a machine restart continues the watch.
+
 **6. Clean up.** `gstack-ship-queue train prune [--train <nonce>] [--dry-run]`
 deletes the `train/<nonce>` branches of merged, superseded and dropped trains
-(`WOULD-DELETE:`, `DELETED:`, `GONE:`).
+(`WOULD-DELETE:`, `DELETED:`, `GONE:`). `train prune --stale` also settles a
+`merging` or `green` train whose every PR is MERGED or CLOSED on GitHub (its
+PRs landed through another train or by hand): it logs each PR's state on a
+`STALE:` line, marks the record `stale` and deletes its branch; a train with an
+OPEN PR is kept (`KEEP: … still needs the train`). The same run deletes every
+`screen/<pr>-*` scratch branch whose PR is MERGED or CLOSED and keeps one whose
+PR is still OPEN. `train forget --train <nonce> | --receipt
+<pr>@<sha> [--dry-run]` removes one record (a settled train with its attempts,
+or one READY receipt) from local state and from `refs/notes/gstack-trains`
+with an exact lease on the notes ref, printing `FORGET:` then `FORGOTTEN:`; a
+train that is still building, running or merging (`built`, `pushed`,
+`free-pending`, `free-green`, `dispatch-unknown`, `dispatch-absent`,
+`gate-pending`, `merging`) is refused; a rejected lease removes nothing and
+restores the local notes ref.
+
+**Following a train without a daemon.** `gstack-ship-queue train watch --train
+<nonce> [--timeout <s>]` is the one resumable follow command: it reads the
+record, runs the step its state asks for (`train build --train` to push, run
+the free tests and dispatch the gate; `train status` to settle an unconfirmed
+dispatch), waits for the pending run by polling gh, reads the verdict and
+prints the last step's `NEXT:`. It never dispatches anything the record would
+not dispatch on its own, so rerunning it after an interruption continues from
+the record (`WATCH:` lines say what it did; a timeout, default 7200 s, is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`; `--free-timeout <s>`,
+default 2700, bounds the wait for the free tests).
+
+**Screens are read from the run.** `ready --screen` and `verify --pr <n>
+--screen` read a dispatched screen's verdict from the run's own artifacts
+(`gate-binding-a<attempt>`, `report-verdict-a<attempt>`), never from a lane's
+prose, and record it in the READY receipt (`screen.verdict`): `SCREEN_VERDICT:
+#<n> run <id> GREEN|RED|NOT-RUN|INCOMPLETE [red=…] [flaky=…]` plus one
+`FLAKY:` line per rule-16 flaky case. `PENDING` is a run still going,
+`UNKNOWN` one the queue cannot read, and `INCOMPLETE` a finished run that bound
+no verdict (its report job did not finish): `ready --screen` dispatches afresh
+instead of following it, `verify --screen` refuses it (`QUEUE_PROOF_MISSING`)
+and `train build` seats the pin unscreened, as for `NOT-RUN`. A RED screen refuses `ready` under
+either choice, is never re-dispatched at the same merge SHA and is not seated
+by `train build`, whose `NEXT:` names the build without that PR
+(`QUEUE_SCREEN_RED`); a run that concluded success with no slice (its route
+job found the head superseded or the plan selected nothing) is `NOT-RUN`:
+`verify --screen` refuses with `QUEUE_SCREEN_NOT_RUN`, `ready --screen`
+dispatches afresh instead of following it, and `train build` seats the pin
+unscreened with a `SCREEN: … counted as not-run` line. When GitHub's
+`refs/pull/<n>/merge` lags the PR head or is missing, `ready --screen` plans
+the screen on a scratch merge of the head onto the base, pushed as
+`screen/<pr>-<head12>` (`SCREEN_MERGE:` names it; `prune --stale` deletes it
+once the PR merged or closed); only a real conflict with the base (or a remote
+whose refs cannot be listed) is `QUEUE_SCREEN_STALE_REF`.
+
+**Stacked tests before the gate.** `train build --prs … --dry-run --stack-tests
+[--stack-tests-command "<cmd>"]` runs each PR's new test files (added relative
+to the base, with a name ending in `.test`, `_test`, `.spec` or `_spec` and a
+JS or TS extension, bun's own rule, so a helper or fixture under `test/` is not
+one) on the integrated prefix that includes it, T<k>, in a scratch worktree, and prints
+`STACK_TESTS: #<pr> T<k> <n> new test file(s) pass|FAIL (<files>)` or `no new
+test files`. A failure is `QUEUE_TRAIN_STACK_RED` (nothing written, pushed or
+dispatched): the tests pass on the PR head alone only because nothing before
+it in the train had changed what they read, so fix them against that prefix or
+reorder with `--order`. The default command is `bun --no-env-file
+--config=/dev/null test` with the files appended.
 
 **Escape hatches.** Remove the `train` block on the base branch to return
 every lane to the per-PR queue at once. `--urgent` ships one PR alone,
@@ -777,7 +859,7 @@ Stages, each journaled in `.gstack/tmp/restamp-journal.json`:
 1. **version**: `gstack-version-bump write --version <X>` in the staging worktree (VERSION, the manifest, npm lockfiles); skipped when `restamp_command` owns the version.
 2. **release_tool**: the policy command, under the contract below.
 3. **changelog**: the PR's `[Unreleased]` or old-version section moves to the top under `<X>`, above its predecessor's entry. A duplicate heading the PR introduces (`CHANGELOG_DUPLICATE_HEADING`: the headings are counted against the base's CHANGELOG at `origin/<base>` and at the fork point, so a version the base already heads twice passes as long as the PR adds no further copy) and a top entry that is not `<X>` (`CHANGELOG_TOP_MISMATCH`) are errors; the section being re-headed itself may exist only once.
-4. **stamp_paths**: exact `(was X)`, `since: X` and `vX` rewrites, plus every `stamp_patterns` template, within `stamp_paths` and `stamp_files`. `X` is the branch's own tentative stamp (its VERSION when it moved past base), else `--was <X>`, else the version an unstamped branch would have taken next (`base + bump`); mentions of a version the base never released (not a CHANGELOG heading at base, not a tag) are rewritten too, so a queue reorder that moves the base under a branch still finds its `since:` fields. Only the repo's own version width counts, so a 3-digit dependency pin in a 4-digit repo is never a candidate.
+4. **stamp_paths**: exact `(was X)`, `since: X` and `vX` rewrites, plus every `stamp_patterns` template, within `stamp_paths` and `stamp_files`. A quote around X in the first two forms is part of the form and is kept as written: `since: 'X'`, `since: "X"`, `(was 'X')` and `(was "X")` move like the bare ones (the shape of a quoted source row such as gbrain's `{ since: '0.60.468.0', … }`), an opened quote must close right after X (`since: '1.2.3-beta'` and `since: '1.2.3"` are not the form, in the writer and in the tree receipt alike), and `vX` already accepts a quote before the `v`. Which X moves is decided by provenance. The branch's own tentative stamp (its VERSION when it moved past base) and `--was <X>`, when given, are each rewritten on every line of every stamp file. Beyond that, only lines the branch itself added are read, by their position in the file (`git diff --unified=0` from the fork point), so a base line with the same text, or a CRLF checkout whose diff is LF-normalized, is told apart: a stamp-form mention there of a version newer than the version at the branch's fork point is a tentative stamp and moves (this is what finds a quoted row after a lost slot and a merge of the base, since the base's release is newer than the fork point), and when the branch has no stamp of its own because its VERSION equals the base's and its fork point is the base itself (a branch rebased onto the base after it reached X, or one never stamped) a mention of the base version on a line it added is its stale stamp and moves too, while the same version on a line the base already carries is the base's release and stays. The stage detail names both counts per file (`VERSION equals base X, so X moved only on lines this branch added and stayed on the base's own lines (<file>: N moved, M kept)`), so the stamp commit shows which lines moved and why. The rule reads line ownership, not meaning: a branch-added line inside `stamp_paths` that means the base's own release in a stamp form (`Requires vX or later` written on a branch forked at X) moves with it, which the `--dry-run` diff and the per-file counts show before anything is written; write such a reference outside a stamp form, or keep that file out of `stamp_paths`. `--was X` is the opposite tool: it rewrites X everywhere, the base's own lines included, and re-heads the CHANGELOG section `## [X]`. Only the repo's own version width counts, so a 3-digit dependency pin in a 4-digit repo is never a candidate.
 5. **mirror**: tier 2; declared and validated, reported as not run.
 6. **apply**: every changed file is written to the branch only after all stages validated, each against the fingerprinted preimage; a file edited meanwhile is `RESTAMP_CONFLICT` and the applied writes roll back (rollback refuses to overwrite a file whose bytes differ from the recorded postimage).
 
@@ -856,7 +938,7 @@ manifest (`version` key only), npm and bun lockfiles (root `version` keys
 only, where `gstack-version-bump` writes; a dependency entry is `changed`),
 the CHANGELOG (a heading move or re-heading, compared as an order-independent
 multiset of entries), `stamp_paths` and `release_outputs` (every
-removed/added pair must be an exact `(was X)` / `since: X` / `vX` rewrite with
+removed/added pair must be an exact `(was X)` / `since: X` / `vX` rewrite (a quote around X in the first two forms included) with
 X the gated version and the replacement the current one, so a dependency pin
 that happens to equal the old version is `changed`; `stamp_patterns`
 templates count as stamp forms too). With `stamp_files` set, a file outside it

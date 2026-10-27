@@ -449,7 +449,7 @@ do not launch the downstream skill or open a browser.`,
     // The full-audit E2E asserts actual section loading alongside report/proof behavior.
     behavioral: 'external',
     externalTest: 'test/skill-e2e-cso.test.ts',
-    maxSkeletonBytes: 18_100, // + Oct 10 multi-agent wave PR D2 (sideways review): Phase 12's root-cause-variants sentence becomes the sibling sweep (severity follows the worst sibling), two neighbouring phrases tightened to offset most of it; measured skeleton 18,044 (2026-10-10).
+    maxSkeletonBytes: 18_900, // + Oct 10 multi-agent wave PR D2 (sideways review): Phase 12's root-cause-variants sentence becomes the sibling sweep (severity follows the worst sibling), two neighbouring phrases tightened to offset most of it; measured skeleton 18,044 (2026-10-10). + Oct 26 harness lane F (TRUT 5/6, FOUN 13): the environment-hygiene paragraph (set/unset checks only; no env, printenv, set -x, bare set/export, export $(...) in a fence) and the tooling-error paragraph (bounded retries, then not assessed with the command, exit code and stderr tail; never a quiet partial), both in the always-loaded startup block because they govern every helper call; measured skeleton 18,843 (2026-10-26).
     minUnionBytes: 30_000, // v3 deliberately removes the shared export/startup preamble.
     mustContain: ['OWASP', 'STRIDE', 'daily', 'comprehensive', 'verif'],
     // Existing baseline comparison remains an upper bound; absolute limits above
@@ -732,6 +732,31 @@ do not launch the downstream skill or open a browser.`,
     mustContain: ['retrospective', '45-minute gap', 'Ship of the week', 'Praise'],
   },
 
+  // ── GSTA-92 Phase 2 (2026-10-25): design-review carved on every host ──
+  // One lazy section, the craft audit, read for a Persuade page or a redesign;
+  // CARVED_ON_EVERY_HOST in scripts/resolvers/sections.ts keeps it out of the
+  // external skeletons too (Garry 2026-10-25 'Do it' (GSTA-92), Big decision 2a).
+  'design-review': {
+    skill: 'design-review',
+    expectedSections: ['craft-audit.md'],
+    requiredReads: ['craft-audit.md'],
+    scenario:
+      'Walk /design-review in SIMULATION — do not run bash, launch a browser, or edit files. The target is the landing page of a developer-tools SaaS (a Persuade page): treat Setup and Phase 1 as done. Read each pointed section before doing its step, then list the Phases 1-6 checks you would run on that page, including any section-specific check, and stop before Phase 7.',
+    staticInvariants: {
+      mustStayInSkeleton: ['## Phases 1-6: Design Audit Baseline', '**9. AI Slop Detection**', '## Phase 7: Triage', '## Phase 8: Fix Loop'],
+      mustPrecedeStop: ['### Design Hard Rules'],
+      mustMoveToSection: ['### 4. Fix order and stack (Phase 8)'],
+      gateAfterStop: undefined,
+    },
+    // No section-loading paid case yet: a new periodic case would push the
+    // periodic census past its 38-slice cap (test/paid-retry-supervision.test.ts).
+    behavioral: 'none',
+    maxSkeletonBytes: 137_767, // measured 137767 (2026-10-26; 137773 on 2026-10-25 before the shorter craft-audit trigger): the Section index the external-host carve test requires, its craft-audit row, and the STOP pointer (GSTA-92; Garry 2026-10-25 'Do it' (GSTA-92)).
+    minUnionBytes: 143_300, // measured union 145037 (2026-10-26)
+    mustContain: ['AI Slop Detection', 'Fix Loop', 'gstack-design-craft', 'Proof beside each claim', 'holds session data'],
+    maxSizeRatio: 1.3704, // first parity guard for design-review: measured 145082 / 105,842 = 1.3708 (2026-10-25; 145077 after the /ship review fixes, 145068 = 1.3707 after the line-13 reword, 145049 = 1.3705 after the post-merge /ship review, 145037 = 1.3704 after its second pass, 2026-10-26), the skeleton's growth since v1.64.1.0 plus the craft audit (Garry 2026-10-25 'Do it' (GSTA-92)).
+  },
+
   // ── Token-reduction Phase 4 wave 4 (v1.69.x branch): design doctrine carve ──
   // (D3A: read-on-demand doctrine, requiredReads-guarded + loading eval)
   'design-html': {
@@ -789,6 +814,42 @@ do not launch the downstream skill or open a browser.`,
     maxSkeletonBytes: 57_800, // + v2.0 preamble growth (merged); measured 52_962 + v1.91.19.0 wave: design --version probe (B4) and taste profile (F3) on top of v1.91.17.0's claim-based staging and round accounting (#3022); measured 55,168 (2026-10-03). + Oct 6 fix wave A3/CEO-12: free text reaches commands only through agent-written mktemp files (mktemp block, write rule, path rebuild and refusal at each posting, prompt and brief site); skeleton measured 56,880 (2026-10-06). + Honest Work wave merged (W2/W3 gate integrity in review/ship, W4 kernel + DONE line in every tier-2+ skill, W5/W7 in spec/ship): re-measured on the integrated tree (2026-10-10).
     minUnionBytes: 53_200, // Phase 4 wave 4; measured union 54,290
     mustContain: ["Don't make me think", "Users scan, they don't read", 'trunk test', '44px minimum'],
+  },
+
+  // ── GSTA-92 plan item 15 (Garry 2026-10-25 "Do it"): /design-motion ──
+  // Fidelity, motion and the optional Figma path are lazy; the doctrine, the
+  // capture/check/export steps and their bins stay always loaded. The paid
+  // design-motion-showcase case drives a fixture page through the whole flow
+  // and asserts the fidelity and motion reads.
+  'design-motion': {
+    skill: 'design-motion',
+    expectedSections: ['fidelity.md', 'motion.md', 'figma.md'],
+    requiredReads: ['fidelity.md', 'motion.md'],
+    scenario:
+      'Covered by the design-motion-showcase case in test/skill-e2e-design.test.ts: a finalized.html fixture is rebuilt into a page with the capture contract, captured, checked and exported.',
+    staticInvariants: {
+      mustStayInSkeleton: [
+        '## Motion doctrine',
+        'one authored motion moment per page',
+        '## Step 5: Capture',
+        '## Step 6: Motion checks (before any export)',
+        'gstack-motion-encode check',
+        '## Step 7: Export and report',
+        '## Important Rules',
+      ],
+      mustMoveToSection: [
+        '### Loading choreography',
+        '### Stories: one per visual',
+        '### Page architecture and the capture contract',
+        '### Layer export',
+      ],
+      gateAfterStop: undefined,
+    },
+    behavioral: 'external',
+    externalTest: 'test/skill-e2e-design.test.ts',
+    maxSkeletonBytes: 39_900, // new skill (GSTA-92 plan item 15, Garry 2026-10-25 "Do it"); measured skeleton 39,836 (2026-10-25)
+    minUnionBytes: 57_500, // measured union 58,666 (2026-10-25)
+    mustContain: ['window.__start()', 'window.__tick(dt)', 'whole milliseconds averaging 1000/60', 'Content never hides behind animation timing'],
   },
 
   // ── Multi-agent wave PR D3 (2026-10-10): investigate recipes carve ──

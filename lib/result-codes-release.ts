@@ -148,6 +148,26 @@ export const RELEASE_RESULT_CODES = {
     summary: 'GitHub’s refs/pull/<n>/merge is missing or still merges an older head than the PR’s: the PR conflicts with the base (a CHANGELOG-only conflict counts), so a screen dispatched on it would plan no cases and report success',
     fix: 'resolve the conflict with the base branch (or wait for GitHub to recompute the merge ref), push, then gstack-ship-queue ready --pr <n> --screen again; a lane never READYs on a screen that planned nothing',
   },
+  QUEUE_SCREEN_NOT_RUN: {
+    anchor: 'queue-screen-not-run',
+    summary: 'the PR’s dispatched screen run concluded success but ran no slice (the run planned no cases: its route job found the PR head superseded by a push, or the plan selected nothing), so the head is not screened and the run is counted as not-run, never as green',
+    fix: 'gstack-ship-queue ready --pr <n> --screen dispatches a fresh screen at the current head (a not-run screen is never followed); train build seats the pin unscreened and says so on its SCREEN: line',
+  },
+  QUEUE_TRAIN_STACK_RED: {
+    anchor: 'queue-train-stack-red',
+    summary: 'train build --dry-run --stack-tests ran a PR’s new test files on the integrated prefix that includes it (T<k>: main plus every slot up to that PR) and they failed; the tests pass on the PR head alone only because nothing before it in the train had changed what they read',
+    fix: 'fix the PR’s tests against that prefix (read the STACK_TESTS: line for the files and the failing assertion), or reorder the train with --order so the PR they depend on comes first, then rerun the dry run; nothing was written, pushed or dispatched',
+  },
+  QUEUE_POST_MERGE_RED: {
+    anchor: 'queue-post-merge-red',
+    summary: 'a push workflow on the merged commit (free tests, the Windows subset, the main backstop) concluded failure, timed out or was cancelled after the train merged it; a neutral or skipped check is not red',
+    fix: 'read the red run (gstack-ship-queue verify --post-merge <sha> prints one CHECK: line per workflow), repair on a new PR or roll back the merge; gstack-ship-queue train status names the freeze if the backstop filed one',
+  },
+  QUEUE_SCREEN_RED: {
+    anchor: 'queue-screen-red',
+    summary: 'the PR head’s dispatched screen run finished RED (its gate binding says so; a case that failed twice is real), so the head is not READY and a train will not seat it',
+    fix: 'read the SCREEN_VERDICT line (gstack-ship-queue verify --pr <n> --screen prints the red and flaky cases), repair, push a new head, run /ship and ready again; a red screen is never re-dispatched at the same merge SHA',
+  },
   READY_SCREEN_CHOICE_REQUIRED: {
     anchor: 'ready-screen-choice-required',
     summary: 'the base policy turns trains on, so READY needs an explicit screen choice: --screen (pay for a diff-relevant screen now) or --no-screen',
@@ -243,5 +263,16 @@ export const RELEASE_RESULT_CODES = {
     anchor: 'receipt-git-too-old',
     summary: 'gstack-ship-receipt carry needs git 2.39 or later for `git patch-id --verbatim`; the installed git is older, so the product diff could not be compared',
     fix: 'upgrade git to 2.39 or later (the refusal names the installed version), then rerun carry; otherwise run /ship on the new head',
+  },
+  // gstack-pr-wait (lib/pr-wait.ts): the landing-path PR watcher's two terminal codes.
+  PR_WAIT_BLOCKED: {
+    anchor: 'pr-wait-blocked',
+    summary: 'the --until condition cannot be met without action: a check failed, the branch conflicts with its base, the PR closed, ready is blocked by unresolved threads or a BEHIND branch, GitHub stayed unreachable, or --timeout passed',
+    fix: 'act on the event lines above it (fix the check, update or rebase the branch, resolve the threads), push, and start gstack-pr-wait again; after a timeout, start again with a larger --timeout or --timeout 0',
+  },
+  PR_WAIT_REFUSED: {
+    anchor: 'pr-wait-refused',
+    summary: 'the watcher did not start, or a local error stopped it before a verdict',
+    fix: 'pass a PR number or URL the current gh login can read (--repo owner/name when the checkout is not that repository), stop the watcher the line names before starting another for the same PR, or fix the named local error',
   },
 } as const satisfies Record<string, ResultCode>;

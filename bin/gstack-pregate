@@ -33,6 +33,7 @@ import { buildContext, defaultUserConfigPath, describeRefusal, loadedDotenvFiles
 import { CHECKS, CHECK_IDS, PREGATE_OUT_REL, PREGATE_TIER2, clearDecision, clearObligation, readPregateFile, renderTable, runPregate, verifyPregate, writePregateFile } from '../lib/pregate/index';
 import { describeLane, discoverLanes } from '../lib/pregate/workflows';
 import { REMOTE_GATE_LANE } from '../lib/pregate/checks/lanes';
+import { describeSubstitution } from '../lib/pregate/remote-receipt';
 import { ensureTmpExcluded } from '../lib/restamp';
 import { RESULT_CODES, resultCodeSuffix, resultLine } from '../lib/result-codes';
 import { DEFAULT_STALL_TIMEOUT_S } from '../lib/pregate/context';
@@ -48,7 +49,9 @@ const HELP = `gstack-pregate — cheap checks before anything paid or remote (do
   run (default)   stage 1 mechanical preflight (${CHECKS.filter(c => c.stage === 'preflight').map(c => c.id).join(', ')}), then stage 2 test execution (${CHECKS.filter(c => c.stage === 'tests').map(c => c.id).join(', ')})
   verify          publication check against ${PREGATE_OUT_REL}: current tree, no fail or incomplete, every requires-remote obligation cleared
   clear           record the receipt that clears one requires-remote obligation: pregate.json/remote_gate needs
-                  --receipt <file> (the gate's PREGATE_REMOTE: line, checked against the tested tree); a
+                  --receipt <file> (the gate's PREGATE_REMOTE: line, checked against the tested tree; a tree that
+                  differs from pregate.json's only in the base branch's stamp rule is accepted and recorded as a
+                  substitution, docs/pregate.md#remote-gate-stamp-only); a
                   test_backend/<backend> run URL is recorded as attested, not validated
   lanes           print every CI lane with its platform tier (from .github/workflows/*.yml)
   validate | init the working-tree ${PREGATE_CONFIG_PATH}
@@ -211,14 +214,15 @@ function cmdClear(root: string, rest: string[]): number {
   const out = outPath(root, rest);
   const read = fs.existsSync(out) ? readPregateFile(out) : { file: null, errors: [] };
   if (!read.file) { process.stderr.write(resultLine('gstack-pregate clear', 'PREGATE_STALE', `${out} is missing or invalid; run gstack-pregate first`) + '\n'); return EXIT.fail; }
-  const decision = clearDecision(read.file, lane, { runUrl: flag(rest, '--run-url'), bundleLane: flag(rest, '--bundle-lane'), receiptPath: flag(rest, '--receipt') });
+  const decision = clearDecision(read.file, lane, { runUrl: flag(rest, '--run-url'), bundleLane: flag(rest, '--bundle-lane'), receiptPath: flag(rest, '--receipt') }, root);
   if ('refused' in decision) {
     if (decision.refused === 'usage') { process.stderr.write(`gstack-pregate clear: ${decision.message}\n`); return EXIT.usage; }
-    process.stderr.write(`gstack-pregate clear: receipt refused — ${decision.message}; fix: ${RESULT_CODES.PREGATE_RECEIPT_INVALID.fix} ${resultCodeSuffix('PREGATE_RECEIPT_INVALID')}\n`);
+    process.stderr.write(`gstack-pregate clear: receipt refused — ${decision.message}; fix: ${decision.fix ?? RESULT_CODES.PREGATE_RECEIPT_INVALID.fix} ${resultCodeSuffix('PREGATE_RECEIPT_INVALID')}\n`);
     return EXIT.fail;
   }
-  const file = clearObligation(read.file, lane, decision.receipt, `gstack-pregate clear ${new Date().toISOString()}`);
+  const file = clearObligation(read.file, lane, decision.receipt, `gstack-pregate clear ${new Date().toISOString()}`, decision.substitution);
   writePregateFile(root, out, file);
+  if (decision.substitution) process.stdout.write(`PREGATE_RECEIPT_SUBSTITUTED: ${describeSubstitution(decision.substitution)}\n`);
   process.stdout.write(`PREGATE_CLEARED: ${lane} receipt=${decision.receipt} verdict=${file.verdict}${decision.attested ? ` (attested, not validated: ${lane} has no machine-checkable receipt)` : ''}\n`);
   return EXIT.ok;
 }

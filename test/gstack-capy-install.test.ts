@@ -58,7 +58,7 @@ function fixture(opts: { bun?: string; jq?: boolean } = {}) {
   script(path.join(root, 'setup'), ['echo "setup $*" >> "$CAPY_LOG"', 'echo "gstack ready ($2)"', 'echo "env GSTACK_SKIP_PLAYWRIGHT=${GSTACK_SKIP_PLAYWRIGHT:-} GSTACK_SKIP_FONTS=${GSTACK_SKIP_FONTS:-} bun=$(bun --version)" >> "$CAPY_LOG"', 'exit "${STUB_SETUP_EXIT:-0}"']);
   script(path.join(root, 'bin/gstack-doctor'), [
     'echo "doctor $* GSTACK_EPHEMERAL=${GSTACK_EPHEMERAL:-}" >> "$CAPY_LOG"', 'echo "doctor-cwd $(pwd -P)" >> "$CAPY_LOG"', 'echo "doctor-node $(node --version 2>/dev/null)" >> "$CAPY_LOG"',
-    'echo "required: claude codex patch"', 'echo "PASS claude ok"', 'echo "SKIP browser (lazy)"', '[ -n "${STUB_PINS_SKIP:-}" ] && echo "SKIP pins ($STUB_PINS_SKIP)"',
+    'echo "required: claude codex patch"', 'echo "PASS claude ok"', 'echo "SKIP browser (lazy)"', '[ -n "${STUB_PINS_SKIP:-}" ] && echo "SKIP pins ($STUB_PINS_SKIP)"', '[ -n "${STUB_DOCTOR_EXTRA:-}" ] && echo "$STUB_DOCTOR_EXTRA"',
     '[ "${STUB_DOCTOR_FAIL:-}" = 1 ] && { echo "FAIL codex — missing; fix: x (COMPONENT_MISSING; d)"; echo "gstack: fail codex"; exit 1; }',
     '[ -n "${GSTACK_DOCTOR_RUNTIME_DRIFT:-}" ] && { echo "FAIL runtime — bun resolution drifted: $GSTACK_DOCTOR_RUNTIME_DRIFT; fix: $GSTACK_DOCTOR_RUNTIME_DRIFT_FIX (BUN_RESOLUTION_DRIFT; d)"; echo "gstack: fail runtime"; exit 1; }',
     'echo "gstack: ok $(cat "$(dirname "$0")/../VERSION") for=autoplan"',
@@ -282,15 +282,73 @@ describe('gstack-capy-install', () => {
     expect(lastLine(run(f, [], { ...behind, STUB_DOCTOR_FAIL: '1' }).stdout)).toBe('gstack: fail codex');
   });
 
-  test('a skipped session-start upgrade is never ok: the trailer is `fail behind` with the reason, the fix and the code, exit 1, and the verdict records the failure', () => {
+  test('a skipped session-start upgrade above the minimum is a WARN, never a fail: the trailer stays ok with behind=, the skip reason and the fix, exit 0, and a WARN behind row names the code', () => {
     const f = fixture();
     const busy = { GSTACK_CAPY_BEHIND: '3', GSTACK_CAPY_BEHIND_TO: '1.2.6', GSTACK_CAPY_BEHIND_FIX: `${f.root}/bin/gstack-upgrade`, GSTACK_CAPY_BEHIND_BLOCKED: 'live gstack sessions hold this installation: pid 379 (124m dbus-daemon); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle (UPGRADE_BUSY)' };
     const r = run(f, [], busy);
-    expect(r.status, r.stdout + r.stderr).toBe(1);
-    expect(lastLine(r.stdout)).toBe('gstack: fail behind — installed 1.2.3 is 3 commits behind origin (latest 1.2.6) and the session-start upgrade was skipped: live gstack sessions hold this installation: pid 379 (124m dbus-daemon); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle (UPGRADE_BUSY)');
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    // The trailer's fix is the session's one runnable command; the refusal's own prose (and its GSTACK_UPGRADE_FORCE=1 escape hatch) stays on the WARN row.
+    expect(lastLine(r.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: live gstack sessions hold this installation: pid 379 (124m dbus-daemon) (UPGRADE_BUSY); fix: ${f.root}/bin/gstack-upgrade)`);
+    expect(r.stdout).toMatch(/^WARN behind — installed 1\.2\.3 is 3 commits behind origin \(latest 1\.2\.6\) and the session-start upgrade was skipped: live gstack sessions hold this installation: pid 379 \(124m dbus-daemon\); fix: wait for those sessions to finish, or re-run with GSTACK_UPGRADE_FORCE=1 when you know they are idle \(UPGRADE_BUSY; .*#upgrade-busy\)$/m);
+    expect(r.stdout).toMatch(/^GSTACK_LAUNCH_FILE: /m);
     const bare = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'gstack-upgrade exit 9' });
-    expect(lastLine(bare.stdout)).toBe(`gstack: fail behind — installed 1.2.3 is 3 commits behind origin (latest 1.2.6) and the session-start upgrade was skipped: gstack-upgrade exit 9; fix: ${f.root}/bin/gstack-upgrade (UPGRADE_REFUSED)`);
+    expect(bare.status).toBe(0);
+    expect(lastLine(bare.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: gstack-upgrade exit 9 (UPGRADE_REFUSED); fix: ${f.root}/bin/gstack-upgrade)`);
+    // A code the installer does not know collapses to UPGRADE_SKIPPED, whose anchor exists; the reason and fix are kept.
+    const other = run(f, [], { ...busy, GSTACK_CAPY_BEHIND_BLOCKED: 'origin unreachable; fix: retry when online (UPGRADE_FETCH_FAILED)' });
+    expect(other.status).toBe(0);
+    expect(lastLine(other.stdout)).toBe(`gstack: ok 1.2.3 for=autoplan (behind=3 (latest: 1.2.6); upgrade skipped: origin unreachable (UPGRADE_SKIPPED); fix: ${f.root}/bin/gstack-upgrade)`);
+    expect(other.stdout).toMatch(/^WARN behind — .*; fix: retry when online \(UPGRADE_SKIPPED; .*#upgrade-skipped\)$/m);
     expect(lastLine(run(f, [], { ...busy, STUB_DOCTOR_FAIL: '1' }).stdout)).toBe('gstack: fail codex');
+  });
+
+  test('a WARN floor row from the doctor adds floor=<v> (<file>) and the fast-forwarding fix to an ok trailer; behind keeps one fix note', () => {
+    const f = fixture();
+    const row = 'WARN floor — installed 1.2.3 is below the floor 1.2.9 that /p/.gstack/ship-policy.json declares (min_gstack_version); fix: bash /s/install.sh --for autoplan (fast-forwards a clean checkout to origin and reinstalls), or /r/bin/gstack-upgrade (PROJECT_FLOOR_UNMET; d)';
+    const alone = run(f, ['--for', 'autoplan'], { STUB_DOCTOR_EXTRA: row, GSTACK_CAPY_WRAPPER_PATH: '/s/install.sh' });
+    expect(alone.status, alone.stdout + alone.stderr).toBe(0);
+    expect(lastLine(alone.stdout)).toBe('gstack: ok 1.2.3 for=autoplan (floor=1.2.9 (/p/.gstack/ship-policy.json); fix: bash /s/install.sh --for autoplan (fast-forwards))');
+    const behind = run(f, [], { STUB_DOCTOR_EXTRA: row, GSTACK_CAPY_BEHIND: '5', GSTACK_CAPY_BEHIND_TO: '1.2.9', GSTACK_CAPY_BEHIND_FIX: 'bash /s/install.sh --for autoplan' });
+    expect(lastLine(behind.stdout)).toBe('gstack: ok 1.2.3 for=autoplan (behind=5 (latest: 1.2.9); floor=1.2.9 (/p/.gstack/ship-policy.json); fix: bash /s/install.sh --for autoplan)');
+    expect(lastLine(run(f, [], { STUB_DOCTOR_EXTRA: row, STUB_DOCTOR_FAIL: '1' }).stdout)).toBe('gstack: fail codex');
+  });
+
+  test('--for none certifies nothing and installs nothing: ok not-needed, exit 0, no setup, no verdict, with or without a checkout', () => {
+    const f = fixture();
+    const r = run(f, ['--for', 'none']);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(lastLine(r.stdout)).toBe(`gstack: ok not-needed for=none (checkout 1.2.3 at ${f.root}, not certified; before the first workflow run: test -f "${f.root}/setup" || git clone --quiet --single-branch --depth 1 https://github.com/garrytan/gstack.git "${f.root}" && GSTACK_CAPY_ROOT="${f.root}" bash "${f.root}/capy/skill/gstack/scripts/install.sh" --for <skill>)`);
+    expect(f.calls()).toEqual([]);
+    expect(fs.existsSync(path.join(f.home, '.gstack-state'))).toBe(false);
+    const missing = path.join(f.base, 'absent');
+    const none = run(f, ['--check', '--for', 'none', '--root', missing], { GSTACK_CAPY_WRAPPER_PATH: '/s/install.sh', GSTACK_CAPY_BEHIND: '2', GSTACK_CAPY_BEHIND_TO: '1.2.5' });
+    expect(none.status).toBe(0);
+    expect(lastLine(none.stdout)).toBe(`gstack: ok not-needed for=none (no checkout at ${missing}; behind=2 (latest: 1.2.5); before the first workflow run: bash /s/install.sh --for <skill>)`);
+    expect(fs.existsSync(missing)).toBe(false);
+  });
+
+  test('a review-voice verdict for this HEAD and project is upgraded in place by --for <skill>: the installer says so, runs setup, and the verdict becomes the workflow\'s', () => {
+    const f = fixture();
+    const project = path.join(f.base, 'proj');
+    fs.mkdirSync(project, { recursive: true });
+    sh('git init -q', project);
+    const voice = run(f, ['--for', 'review-voice', '--project', project]);
+    expect(voice.status, voice.stdout + voice.stderr).toBe(0);
+    expect(voice.stdout).toContain('review-voice: no ./setup and no host profiles');
+    expect(f.calls().some(l => l.startsWith('setup '))).toBe(false);
+    const full = run(f, ['--for', 'autoplan', '--project', project]);
+    expect(full.status, full.stdout + full.stderr).toBe(0);
+    expect(full.stdout).toContain(`gstack-capy-install: upgrading the review-voice install in place to --for autoplan (same checkout at ${f.root}; the project's pins apply, ./setup and both host profiles run now; no second clone)`);
+    expect(full.stdout).toContain(`gstack-capy-install: reusing ${f.root} (1.2.3); never reset or pulled`);
+    expect(f.calls().filter(l => l.startsWith('setup ')).length).toBe(2);
+    const verdict = full.stdout.match(/GSTACK_INSTALL_VERDICT=(\S+)/)![1]!;
+    expect(JSON.parse(fs.readFileSync(verdict, 'utf8'))).toMatchObject({ for: 'autoplan', ok: true });
+    expect(lastLine(full.stdout)).toBe('gstack: ok 1.2.3 for=autoplan');
+    // The message is for the review-voice -> workflow step only: a rerun of the same profile, a --check and a second review-voice install stay silent.
+    const upgrading = /upgrading the review-voice install in place/;
+    expect(run(f, ['--for', 'autoplan', '--project', project]).stdout).not.toMatch(upgrading);
+    expect(run(f, ['--check', '--for', 'autoplan', '--project', project]).stdout).not.toMatch(upgrading);
+    expect(run(f, ['--for', 'review-voice', '--project', project]).stdout).not.toMatch(upgrading);
   });
 
   test('--root clones when the directory is absent and refuses a non-gstack directory', () => {

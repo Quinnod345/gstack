@@ -70,7 +70,9 @@ export interface PregateCheck {
   // Lane D (GSTA-112): a non-pass names its cause; an environment cause carries its kind and evidence.
   cause?: 'diff' | 'environment'; environment?: { kind: string; evidence: string; proof?: 'launch' | 'output' };
 }
-export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string; command?: string }
+/** A remote_gate receipt accepted from a stamp-only predecessor tree (lib/pregate/remote-receipt.ts): the gated tree, the tree it was accepted for, the policy, and every differing path with its stamp rule. */
+export interface PregateReceiptSubstitution { gated_tree: string; accepted_for: string; policy: string; files: Array<{ path: string; rule: string }> }
+export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string; command?: string; substitution?: PregateReceiptSubstitution }
 export interface PregateFile {
   schema_version: 1; tree: string; checks: PregateCheck[]; run?: string; stage1_ms?: number; stage2_ms?: number;
   // C-pregate (C8): head/base identity, the policy sources, persisted requires-remote obligations and the one-line verdict.
@@ -201,7 +203,8 @@ export const ARTIFACT_SCHEMAS = {
       schema_version: { const: 1 }, run: str, tree: str, stage1_ms: num, stage2_ms: num,
       checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str, stage: { enum: ['preflight', 'tests'] }, inputs: { type: 'object' }, fix: str, code: str, lines: strList, cause: { enum: ['diff', 'environment'] }, environment: { type: 'object', required: ['kind', 'evidence'], properties: { kind: str, evidence: str } } } } },
       head: str, base: str, generated_at: str, policy: str, policy_digest: str, policy_user_path: str, registry: str, verdict: str, scratch: str,
-      requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str, command: str } } },
+      requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str, command: str,
+        substitution: { type: 'object', required: ['gated_tree', 'accepted_for', 'policy', 'files'], properties: { gated_tree: str, accepted_for: str, policy: str, files: { type: 'array', items: { type: 'object', required: ['path', 'rule'], properties: { path: str, rule: str } } } } } } } },
     },
   },
   'ship-receipt': {
