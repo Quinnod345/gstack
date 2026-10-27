@@ -461,8 +461,8 @@ describe('gstack-doctor --check', () => {
   const row = (f: Fixture, args: string[], extra: Record<string, string> = {}) => {
     const r = doctor(f, ['--check', ...args], extra);
     const lines = r.out.split('\n');
-    const rows = Object.fromEntries(lines.filter(l => /^(PASS|FAIL|SKIP) /.test(l)).map(l => {
-      const m = l.match(/^(PASS|FAIL|SKIP) ([a-z-]+)(?:\s(.*))?$/)!;
+    const rows = Object.fromEntries(lines.filter(l => /^(PASS|FAIL|SKIP|WARN) /.test(l)).map(l => {
+      const m = l.match(/^(PASS|FAIL|SKIP|WARN) ([a-z-]+)(?:\s(.*))?$/)!;
       return [m[2], { status: m[1], rest: m[3] ?? '' }];
     }));
     const trailer = lines.filter(l => l.startsWith('gstack: ')).at(-1) ?? '';
@@ -488,10 +488,11 @@ describe('gstack-doctor --check', () => {
     installCodex(f);
     const r = row(f, []);
     expect(r.status, r.out).toBe(0);
-    expect(r.required).toEqual(['claude', 'codex', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'wrapper']);
-    for (const id of r.required.filter(x => x !== 'pins' && x !== 'wrapper')) expect(r.rows[id]?.status, `${id}\n${r.out}`).toBe('PASS');
-    // The work dir is not a git repository, so there is no project to read pins from: SKIP with the reason, never silent.
+    expect(r.required).toEqual(['claude', 'codex', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'floor', 'wrapper']);
+    for (const id of r.required.filter(x => x !== 'pins' && x !== 'floor' && x !== 'wrapper')) expect(r.rows[id]?.status, `${id}\n${r.out}`).toBe('PASS');
+    // The work dir is not a git repository, so there is no project to read pins or a floor from: SKIP with the reason, never silent.
     expect(r.rows.pins).toEqual({ status: 'SKIP', rest: expect.stringContaining('no project') });
+    expect(r.rows.floor).toEqual({ status: 'SKIP', rest: expect.stringContaining('no project to read .gstack/ship-policy.json from') });
     // No ~/.capy/drive skill copy and no active wrapper: not a Capy machine.
     expect(r.rows.wrapper).toEqual({ status: 'SKIP', rest: expect.stringContaining('not a Capy machine') });
     expect(r.rows.patch.status).toBe('PASS');
@@ -512,7 +513,7 @@ describe('gstack-doctor --check', () => {
     fs.rmSync(path.join(f.stub, 'codex'));
     const r = row(f, ['--for', 'autoplan']);
     expect(r.status, r.out).toBe(0);
-    expect(r.required).toEqual(['claude', 'codex', 'patch', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'wrapper']);
+    expect(r.required).toEqual(['claude', 'codex', 'patch', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'floor', 'wrapper']);
     expect(r.rows.patch).toEqual({ status: 'PASS', rest: 'gpt-6-astra (gstack-review/SKILL.md)' });
     expect(r.rows['codex-cli'].status).toBe('SKIP');
     expect(r.rows['codex-cli'].rest).toContain('optional');
@@ -639,21 +640,64 @@ describe('gstack-doctor --check', () => {
     expect(plain.rows.pins.rest).not.toContain(wrapper);
   });
 
-  test('project pins: a Node pin mismatch names the node it read and a fix that installs the pinned Node', () => {
+  test('project pins: a Node-only pin mismatch is a WARN (the trailer stays ok) that names the node it read and a fix that installs the pinned Node', () => {
     const f = makeFixture();
     const project = path.join(f.base, 'project');
     write(path.join(project, '.github/workflows/native-locks.yml'), 'jobs:\n  locks:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 24.18.0\n');
     script(path.join(f.stub, 'node'), ['echo v24.21.0']);
     const wrapper = '/drive/skills/gstack/scripts/install.sh';
-    const capy = row(f, ['--project', project, '--for', 'review'], { GSTACK_CAPY_WRAPPER_PATH: wrapper });
-    expect(capy.rows.pins.status).toBe('FAIL');
-    expect(capy.rows.pins.rest).toContain(`node 24.21.0 outside CI 24.18.0 (.github/workflows/native-locks.yml:6); node read from ${bashPath(f.stub)}/node`);
-    expect(capy.rows.pins.rest).toContain(`fix: bash ${wrapper} --for review (installs the project's pinned Node 24.18.0 into gstack's runtime store and launches it through the GSTACK_LAUNCH PATH), or change the pin in ${project}`);
-    expect(capy.rows.pins.rest).toContain('(PROJECT_PIN_MISMATCH; ');
-    const plain = row(f, ['--project', project, '--for', 'review']);
+    const capy = row(f, ['--project', project, '--for', 'health'], { GSTACK_CAPY_WRAPPER_PATH: wrapper });
+    expect(capy.rows.pins.status).toBe('WARN');
+    expect(capy.rows.pins.rest).toContain(`node 24.21.0 outside CI 24.18.0 (.github/workflows/native-locks.yml:6); node read from ${bashPath(f.stub)}/node (node pin only; bun pins pass)`);
+    expect(capy.rows.pins.rest).toContain(`fix: bash ${wrapper} --for health (installs the project's pinned Node 24.18.0 into gstack's runtime store and launches it through the GSTACK_LAUNCH PATH), or change the pin in ${project}`);
+    expect(capy.rows.pins.rest).toContain('(PROJECT_NODE_PIN_UNMET; ');
+    expect(capy.trailer).toBe(`gstack: ok ${VERSION} for=health`);
+    const plain = row(f, ['--project', project, '--for', 'health']);
     expect(plain.rows.pins.rest).toContain(`fix: nvm install 24.18.0 and put its bin directory first on PATH`);
+    // A Bun pin that also fails keeps the FAIL and its code: only a Node-only gap is advisory.
+    write(path.join(project, 'package.json'), '{\n  "engines": {\n    "bun": ">=1.4.2"\n  }\n}\n');
+    const both = row(f, ['--project', project, '--for', 'health'], { STUB_BUN_VERSION: '1.3.14' });
+    expect(both.rows.pins.status).toBe('FAIL');
+    expect(both.rows.pins.rest).toContain('(PROJECT_PIN_MISMATCH; ');
+    fs.rmSync(path.join(project, 'package.json'));
     script(path.join(f.stub, 'node'), ['echo v24.18.0']);
-    expect(row(f, ['--project', project, '--for', 'review']).rows.pins.status).toBe('PASS');
+    expect(row(f, ['--project', project, '--for', 'health']).rows.pins.status).toBe('PASS');
+  });
+
+  test('floor: min_gstack_version in the project\'s .gstack/ship-policy.json PASSes at or below the installed version, WARNs above it with the upgrade as the fix, and SKIPs when absent or null', () => {
+    const f = makeFixture();
+    const project = path.join(f.base, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    const none = row(f, ['--project', project]);
+    expect(none.rows.floor).toEqual({ status: 'SKIP', rest: `(${project} declares none (.gstack/ship-policy.json absent; set min_gstack_version there to require a gstack version))` });
+    write(path.join(project, '.gstack/ship-policy.json'), '{\n  "bump": "patch",\n  "min_gstack_version": null\n}\n');
+    expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets no min_gstack_version (null or absent))` });
+    // A present value that is not a dotted version is named as such, never read as "absent"; the shell never evaluates it.
+    const marker = path.join(project, 'evaluated-marker');
+    write(path.join(project, '.gstack/ship-policy.json'), `{\n  "min_gstack_version": "1.2.3-rc1; $(touch ${marker})"\n}\n`);
+    expect(row(f, ['--project', project]).rows.floor).toEqual({ status: 'SKIP', rest: `(${project}/.gstack/ship-policy.json sets min_gstack_version to something other than a plain dotted version)` });
+    expect(fs.existsSync(marker)).toBe(false);
+    write(path.join(project, '.gstack/ship-policy.json'), `{\n  "min_gstack_version": "${VERSION}"\n}\n`);
+    const met = row(f, ['--project', project]);
+    expect(met.rows.floor).toEqual({ status: 'PASS', rest: `${VERSION} declared by ${project}/.gstack/ship-policy.json (installed ${VERSION})` });
+    // Valid JSON may put the value on the line after its field (found by Codex in /ship's adversarial review).
+    write(path.join(project, '.gstack/ship-policy.json'), `{\n  "bump": "patch",\n  "min_gstack_version":\n    "${VERSION}"\n}\n`);
+    expect(row(f, ['--project', project]).rows.floor.status).toBe('PASS');
+    // The first occurrence is the top-level field: a later nested one never lowers the floor (found by Codex).
+    write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "999.0.0.0",\n  "$schema": {"min_gstack_version": "0.0.0"}\n}\n');
+    expect(row(f, ['--project', project]).rows.floor.status).toBe('WARN');
+    write(path.join(project, '.gstack/ship-policy.json'), '{\n  "min_gstack_version": "999.0.0.0"\n}\n');
+    const wrapper = '/drive/skills/gstack/scripts/install.sh';
+    const unmet = row(f, ['--project', project, '--for', 'health'], { GSTACK_CAPY_WRAPPER_PATH: wrapper });
+    expect(unmet.status, unmet.out).toBe(0);
+    expect(unmet.rows.floor.status).toBe('WARN');
+    expect(unmet.rows.floor.rest).toContain(`installed ${VERSION} is below the floor 999.0.0.0 that ${project}/.gstack/ship-policy.json declares (min_gstack_version); fix: bash ${wrapper} --for health (fast-forwards a clean checkout to origin and reinstalls), or `);
+    expect(unmet.rows.floor.rest).toContain('(PROJECT_FLOOR_UNMET; ');
+    expect(unmet.trailer).toBe(`gstack: ok ${VERSION} for=health`);
+    const plain = row(f, ['--project', project]);
+    expect(plain.rows.floor.rest).toContain('fix: ');
+    expect(plain.rows.floor.rest).toContain('bin/gstack-upgrade (fast-forwards to the remote default branch');
+    expect(plain.rows.floor.rest).not.toContain(wrapper);
   });
 
   test('--revision: a matching VERSION passes, an unmet revision is never ok', () => {
@@ -728,8 +772,8 @@ describe('gstack-doctor --check', () => {
     expect(json.for).toBe('autoplan');
     expect(json.ok).toBe(false);
     expect(json.failed).toEqual(['runtime']);
-    expect(json.required).toEqual(['claude', 'codex', 'patch', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'wrapper']);
-    expect(json.rows.map((x: { id: string }) => x.id)).toEqual(['claude', 'codex', 'patch', 'codex-cli', 'browse-bundle', 'browser', 'cso', 'helpers', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'wrapper']);
+    expect(json.required).toEqual(['claude', 'codex', 'patch', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'floor', 'wrapper']);
+    expect(json.rows.map((x: { id: string }) => x.id)).toEqual(['claude', 'codex', 'patch', 'codex-cli', 'browse-bundle', 'browser', 'cso', 'helpers', 'runtime', 'pins', 'state-root', 'privacy', 'cores', 'revision', 'floor', 'wrapper']);
     const runtime = json.rows.find((x: { id: string }) => x.id === 'runtime');
     expect(runtime.status).toBe('FAIL');
     expect(runtime.code).toBe('RUNTIME_BELOW_MINIMUM');
@@ -760,8 +804,8 @@ describe('gstack-doctor --check: launch Bun, supported minimum, planning-only pi
   const check = (f: Fixture, args: string[], extra: Record<string, string> = {}) => {
     const r = doctor(f, ['--check', ...args], extra);
     const lines = r.out.split('\n');
-    const rows = Object.fromEntries(lines.filter(l => /^(PASS|FAIL|SKIP) /.test(l)).map(l => {
-      const m = l.match(/^(PASS|FAIL|SKIP) ([a-z-]+)(?:\s(.*))?$/)!;
+    const rows = Object.fromEntries(lines.filter(l => /^(PASS|FAIL|SKIP|WARN) /.test(l)).map(l => {
+      const m = l.match(/^(PASS|FAIL|SKIP|WARN) ([a-z-]+)(?:\s(.*))?$/)!;
       return [m[2], { status: m[1], rest: m[3] ?? '' }];
     }));
     return { status: r.status, out: r.out, rows, trailer: lines.filter(l => l.startsWith('gstack: ')).at(-1) ?? '' };
@@ -850,6 +894,22 @@ describe('gstack-doctor --check: wrapper and runtime drift', () => {
     const fresh = parse(f, []);
     expect(fresh.line('wrapper')).toBe(`PASS wrapper Drive copy ${stale} (wrapper ${currentRev}) (minimum 1)`);
     expect(fresh.status, fresh.out).toBe(0);
+  });
+
+  posixPathTest('direct doctor run: a bootstrapper Drive copy below the minimum still works, so it is an owner-action WARN with an ok trailer (only a pre-bootstrapper copy fails)', () => {
+    const f = makeFixture();
+    withSupport(f, Number(currentRev) + 1);
+    const old = drive(f, 'user-garry-tan', current);
+    const r = parse(f, []);
+    expect(r.status, r.out).toBe(0);
+    expect(r.trailer).toMatch(/^gstack: ok /);
+    expect(r.line('wrapper')).toBe(`WARN wrapper — every Capy skill copy is below the minimum wrapper ${Number(currentRev) + 1} (it still works): ${old} (wrapper ${currentRev}); owner action: copy ${f.root}/capy/skill/gstack/ over the Drive skill folder, or have Capy re-sync it; this recurs every session until the Drive copy changes (CAPY_WRAPPER_STALE; https://github.com/garrytan/gstack/blob/main/docs/troubleshooting.md#capy-wrapper-stale)`);
+    const json = JSON.parse(doctor(f, ['--check', '--json']).out);
+    expect(json.ok).toBe(true);
+    expect(json.rows.find((x: { id: string }) => x.id === 'wrapper')).toMatchObject({ status: 'WARN', code: 'CAPY_WRAPPER_STALE' });
+    // A pre-bootstrapper copy beside it keeps the FAIL: that copy cannot hand over at all.
+    drive(f, 'org', PRE_BOOTSTRAPPER);
+    expect(parse(f, []).trailer).toBe('gstack: fail wrapper');
   });
 
   posixPathTest('two Drive copies, one current: PASS naming the stale one; GSTACK_CAPY_WRAPPER_PATH alone decides when set without a revision', () => {

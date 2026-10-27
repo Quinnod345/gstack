@@ -159,7 +159,7 @@ gstack_install_admission() {
         done
         if [ -n "$detail" ] && gstack_doctor_install_profile "$(gstack_install_verdict_field "$file" for)"; then
           detail="$detail ($(gstack_install_verdict_field "$file" for) certifies only the read-only helpers)"
-          fix="run GSTACK_CAPY_ROOT=$src bash $src/capy/skill/gstack/scripts/install.sh --for $skill (the full install: ./setup and host profiles), then launch with the GSTACK_LAUNCH line it prints"
+          fix="run GSTACK_CAPY_ROOT=$src bash $src/capy/skill/gstack/scripts/install.sh --for $skill (upgrades this checkout in place: ./setup and host profiles, no second clone), then launch with the GSTACK_LAUNCH line it prints"
         fi
       fi
       v_bun=$(gstack_install_verdict_field "$file" bun_path)

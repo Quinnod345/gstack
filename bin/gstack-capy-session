@@ -35,8 +35,10 @@
 # "; " (the note separator): after a refused self-upgrade it is bin/gstack-upgrade,
 # which prints its own refusal and fix. A skipped self-upgrade (refused, busy,
 # or gstack-upgrade missing) also exports GSTACK_CAPY_BEHIND_BLOCKED=<reason; fix: …
-# (CODE)>, and the installer turns an ok trailer into `gstack: fail behind`: a
-# session that meant to upgrade and could not is never certified ok.
+# (CODE)>, and the installer adds a `WARN behind` row with that reason and code:
+# the trailer stays ok (the installed revision is above the supported minimum),
+# and the note names the fix. A `--for none` session certifies nothing and moves
+# nothing, so it never self-upgrades (it behaves like --check).
 #
 # Usage: gstack-capy-session [--check] --root <checkout> [gstack-capy-install arguments]
 #   --check  certify only (bin/gstack-capy-install --check: the doctor with the
@@ -53,6 +55,7 @@ for a in "$@"; do
   [ "$a" = --check ] && CHECK=1
   prev="$a"
 done
+[ "$SKILL" = none ] && CHECK=1
 INSTALLER="$ROOT/bin/gstack-capy-install"
 if [ ! -x "$INSTALLER" ]; then
   echo "gstack: fail installer — $INSTALLER is missing; fix: bash ${GSTACK_CAPY_WRAPPER_PATH:-<skill>/scripts/install.sh} (re-clones or fast-forwards)"
