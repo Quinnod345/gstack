@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.262.0] - 2026-10-27
 
 **The weekly release accepts a commit a green train merged, and five lane frictions seen in operation are gone.** Trains merge faster than the main backstop settles, so most main commits ended with a neutral (`superseded`) `main-backstop` check run and the weekly cut returned `NO_GREEN_COMMIT` for a week of commits every one of which merged through a green train. The evidence already existed in `refs/notes/gstack-trains`; the gate now reads it. Alongside: `gstack-issue-links` no longer turns another repository's `(name #N, #M)` into this repository's Refs lines, `gstack-post` no longer asks for a confirmation on run ids written next to run words, `gstack-post pr-body` no longer wipes a PR body when a lane posts one section, and `gstack-ship-queue ready` finds the pregate verdict a lane recorded from a separate clone.
 
