@@ -57,6 +57,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `migrations` | `{ dir, id }` or `null` | `null` | The migration directory and a regex with exactly one capture group for the number in a file name (`"^v(\\d+)-"`); `gstack-pregate regate` reports `MIGRATION_COLLISION`. |
 | `gate_command` | command or `null` | `null` | The repo's full pre-merge gate. `gstack-ship-queue gate-ahead` and `ready` print it for the caller to run (in the background or in CI); gstack never executes it. Needs `min_gstack_version`. |
 | `full_e2e` | `true` \| `false` | `false` | `true`: every merge needs a passing full-gate result bound to a tree equal to the merging one modulo stamps; `gstack-ship-queue ready`, `stamp` and `verify` refuse without one (`QUEUE_GATE_MISSING`): a gate-ahead record, or the lane's `--gate-exit 0 --gate-log <file>` from its run on the gated head. Needs `min_gstack_version`. |
+| `review_scope` | `frozen` \| `diff-plus-blocking` \| `all` | `frozen` | The finding scope of `/ship`'s review loop; see [review_scope](#review-scope). `frozen` fixes the diff on pass 1, files blocking findings in unchanged code as issues, and later passes read only the range since the previous pass. `diff-plus-blocking` is the same but fixes a blocking finding in unchanged code in this PR instead of filing it. `all` is the earlier loop: every finding is fixed on every pass. Needs `min_gstack_version` when not `frozen`. |
 | `min_gstack_version` | version or `null` | `null` | The oldest gstack that may read the file; see the compatibility rule above. |
 | `train` | `{ gate_workflow, free_workflow, full_gate_check, record_artifact, max_size, fill_hours, screen_selection, trial_reservation_usd }` or `null` | `null` | Turns on [merge trains](#run-a-merge-train), read from the base revision only. Every field is required and an unknown field is `POLICY_INVALID`: `max_size` 1 to 6, `fill_hours` above 0 and at most 24, `screen_selection` `gstack-paid` \| `none`, `trial_reservation_usd` above 0 and at most 100. `null` keeps the per-PR queue exactly as it is. Needs `min_gstack_version`. |
 
@@ -570,9 +571,109 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 | `ship: bump patch: …` | Step 12 never asks for MINOR or MAJOR; PATCH or MICRO by size |
 | `ship: preregistration: …` | `gstack-evidence ancestor --from-policy --base <base>` must print only `ANCESTOR: ok` before push |
 | `ship: release_tool: …` | the command runs only inside `gstack-restamp` (staging worktree, outputs confined to `release_outputs`) |
+| `ship: review_scope …` | Step 9.4 item 0 runs `gstack-review-scope classify` on each pass's findings; see [review_scope](#review-scope) |
 
 The PR body's first section is the ship receipt (`gstack-ship-receipt write … --body`),
 written by the pr-body section of `/ship` after the body is composed.
+
+<a id="review-scope"></a>
+## `review_scope`: how the review loop converges
+
+Since the release that added `review_scope` (`REVIEW_SCOPE_KEY_VERSION` in
+`lib/ship-policy.ts`). `/ship` Step 9 runs the pre-landing review in passes and fixes
+what it finds between them ([review-policy.md](review-policy.md) is the canonical
+statement). Under `review_scope: frozen` (the default) the loop converges by
+construction:
+
+1. **Pass 1 reviews the whole diff.** Every finding goes through
+   `gstack-review-scope classify --base <base> --pass 1 --findings <file>`, which
+   gives each one a `locus` (`diff`: a hunk the PR changed, with three lines of
+   context; `outside`: anything else), a `kind`, `blocking` and a `scope`.
+   `blocking` is a CRITICAL defect: a test that would fail, a production break, a
+   security or data-loss defect. Everything else (an advisory, an informational
+   item, a test gap, a wording note) is below the floor. Pass 1 fixes findings in
+   the diff (`scope: fix`). A blocking finding in code the PR did not change is
+   `scope: defer`: `gstack-review-scope defer` files it as a GitHub issue (reusing
+   an open issue that carries the same `<!-- gstack-deferred-finding: <fingerprint> -->`
+   marker; the title and body go through the same publication scan as the PR
+   body, so a finding that quotes a credential stays `unfiled (publication scan
+   refused: …)`; `unfiled (<reason>)` without `gh`) and `render` writes it under
+   `## Deferred findings` in the PR body. Below-floor findings outside the diff,
+   and every below-floor finding from pass 2 on, are `scope: note` and go under
+   `## Review notes` in the PR body.
+2. **Pass 2 and later review the range since the previous pass.** Each pass saves
+   `PASS_HEAD`; the next pass sets `RANGE_BASE` to it, diffs `RANGE_BASE..HEAD`
+   for every reviewer (the core checklist, specialists, Red Team, the outside
+   voice; the gate scan and QA probes keep the whole candidate) and classifies
+   with `--range-base <sha>`. Only a blocking finding in that range (`locus:
+   fix-range`) or in the diff is `scope: fix`; nothing below the floor earns a
+   pass. `NO FINDINGS` is the expected reviewer result for a clean range, never a
+   failed review.
+3. **Three passes is the cap.** A pass that applied no edits continues to Step 10:
+   the loop ships with its deferred and noted items named in the PR body. A
+   blocking finding still in `fix` scope on pass 3 stops the run and names the
+   finding (path, severity, problem) for the owner instead of a fourth pass.
+
+`gstack-review-scope summary --since <REVIEW_SINCE>` reads the branch's review-log
+rows for this invocation and writes the counters the ship receipt carries
+(`gstack-ship-receipt write … --review-loop @<file>`): `review_loop: { passes,
+blocking_found, deferred, noted, fixed, scope }`, printed on the receipt summary
+line as `passes=<n> blocking_found=<k> deferred=<m>`, so a scorecard can track
+passes per PR.
+
+The floor and the pass structure are stated once, in
+[review-policy.md](review-policy.md); this section documents the knob.
+
+`review_scope: diff-plus-blocking` is the documented fallback for a repository
+where deferred issues pile up: the same passes, range and cap as `frozen`, but a
+blocking finding in code the PR did not change is `scope: fix` in this PR
+instead of `defer`. `review_scope: all` is the opt-back to the earlier loop:
+every finding is `scope: fix` on every pass, reviewers read the whole diff each
+time, and only the three-cycle fix cap stops the loop. `show-effective` prints the choice as a `ship: review_scope …`
+line, and the codes a refusal ends with are
+[`REVIEW_SCOPE_INPUT`](troubleshooting.md#review-scope-input) and
+[`REVIEW_SCOPE_RANGE`](troubleshooting.md#review-scope-range).
+
+<a id="receipt-carry"></a>
+## Carrying a receipt across a base merge or a test-only fix
+
+Since the release that added `review_scope`. A `/ship` receipt names the head it
+reviewed, so a conflict-only merge of the base or a test-only fix used to
+invalidate it and cost a full re-run on identical product code.
+`gstack-ship-receipt carry --pr <n> --base <base>` (or `--body <file>`) moves
+the receipt to HEAD when the working tree is clean, the receipt's head is an
+ancestor of HEAD and `git patch-id --verbatim` of the product diff against the
+base is the same at both heads (verbatim: whitespace counts, hunk line numbers
+do not). Product means every changed path that is not test code (`test/**`,
+`spec/**`, `e2e/**`, `**/*.test.<code ext>`, `**/*.spec.<code ext>` and the
+other `CARRY_TEST_GLOBS` in `lib/ship-receipt.ts`; an `openapi.spec.yaml` is
+product) or release metadata (`CHANGELOG.md`, `agents-digest/**`, and `VERSION`
+or `package.json` only while the change is a version stamp and nothing else: a
+dependency, a script or a new key makes them product). A path the policy's
+`stamp_files`, `stamp_paths` or `release_outputs` name is metadata only while
+its change is a stamp, the rule the tree receipt applies to the same paths: a
+manifest by its version key, any other file when its new text reads as the old
+once the new release version is replaced by the old one. A logic change in a
+stamped source file is product. Lockfiles are product unless the policy names
+them. A base merge contributes no product
+change of its own. A receipt carried twice keeps the reviewed head as
+`carry.from` and adds up the merges and paths. The carried receipt records
+`carry: { from, reason, product_patch_id, changed_paths, merge_commits,
+range_diff, covers, reruns }` with the `git range-diff` evidence, prints
+`CARRY: carried from <old> to <new> (<reason>)` and the `GSTACK_RESULT:
+skill=ship status=complete` line, and its summary line ends with
+`carried_from=<old12>`. `CARRY: current` means the receipt already names HEAD;
+`--dry-run` prints `CARRY: would carry …` and writes nothing.
+
+A changed product path, or a product patch-id that differs, is
+[`RECEIPT_CARRY_PRODUCT_CHANGED`](troubleshooting.md#receipt-carry-product-changed)
+(exit 3; the refusal names the paths), and a receipt whose head is not in HEAD's
+history (a rebase or force-push) or a working tree with uncommitted changes is
+[`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused): run `/ship`
+on the new head. `/ship` Step 1 runs the carry check itself when the branch has
+an open PR, and a `CARRY: carried` result ends that run with the receipt bound
+to HEAD; the queue's `ready`, `train build` and `verify --train` read the
+carried receipt like any other.
 
 ## What `/land-and-deploy` reads from it
 

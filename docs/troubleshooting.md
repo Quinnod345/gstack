@@ -1484,6 +1484,59 @@ moved into place.
 **Fix.** Make the verdict directory writable, or set `GSTACK_STATE_ROOT` to a
 writable directory, then re-run `bin/gstack-capy-install`.
 
+<a id="project-floor-unmet"></a>
+### `WARN floor — installed <v> is below the floor <f> that <project>/.gstack/ship-policy.json declares (min_gstack_version); fix: ... (PROJECT_FLOOR_UNMET)` / trailer note `floor=<f> (<file>)`
+
+**Meaning.** The project you work in declares the oldest gstack it wants its
+crew on, as `min_gstack_version` in its `.gstack/ship-policy.json` (the same
+key `gstack-ship-queue` validates; a file holding only that key is valid), and
+this machine's checkout is older. One commit in the project replaces a
+crew-wide "upgrade to <v>" broadcast: every machine's next session check says
+so and names the command. It is a project rule, not a security minimum, so
+the row is a WARN and the trailer stays `gstack: ok` with a `floor=<f>
+(<file>)` note and a `fix:` note; only the supported minimum
+(`REVISION_BELOW_MINIMUM`) fails a session for being old.
+
+**Fix.** Run the fix before the first workflow: on Capy, `bash
+<skill>/scripts/install.sh --for <skill>` fast-forwards a clean checkout to
+origin and reinstalls in one step (`SELF_UPGRADE: done`); elsewhere
+`bin/gstack-upgrade`. If the floor is above gstack's latest release, lower it
+in the project.
+
+<a id="project-node-pin-unmet"></a>
+### `WARN pins — node <v> outside <pin> (<file>); node read from <path> (node pin only; bun pins pass); fix: ... (PROJECT_NODE_PIN_UNMET)`
+
+**Meaning.** The project's Node pin is not met by the Node first on PATH (a
+Capy image's Node behind the pin, say), while every Bun pin is met. gstack's
+own commands run on Bun, and the project's tests usually select their Node
+themselves (nvm, the CI matrix), so this is advisory: the trailer stays ok. A
+Bun pin that is unmet, with or without a Node gap, is still `FAIL pins`
+(`PROJECT_PIN_MISMATCH`).
+
+**Fix.** When this machine will run the project's tests, run the row's fix: the
+Capy skill installer installs an exact pin into gstack's runtime store and
+launches it through the `GSTACK_LAUNCH` PATH; otherwise `nvm install <pin>`
+and put it first on PATH. A range pin (`>=24.22.1`) needs a Node you install
+yourself; or change the pin in the project.
+
+<a id="upgrade-skipped"></a>
+### `WARN behind — installed <v> is <n> commits behind origin (latest <ver>) and the session-start upgrade was skipped: <reason>; fix: <command> (UPGRADE_SKIPPED|UPGRADE_BUSY|UPGRADE_REFUSED)` / trailer note `behind=<n> (latest: <ver>); upgrade skipped: <reason> (<CODE>); fix: <command>`
+
+**Meaning.** An install-mode session start above the supported minimum found
+the checkout behind origin and could not fast-forward it: the checkout is
+dirty, diverged or pinned (`UPGRADE_REFUSED`), another live session holds a
+lease (`UPGRADE_BUSY`), or `bin/gstack-upgrade` is missing
+(`UPGRADE_SKIPPED`). Nothing was changed, the doctor certified the installed
+revision, and the trailer stays `gstack: ok` with the notes above: a gap
+above the minimum is never a hard fail. The verdict records the installed
+revision, so a lane that is behind reports it (`behind=` rides every report).
+
+**Fix.** When the lane needs the newer gstack (a `floor=` note, or a fix that
+landed upstream), clear the named cause and run the fix: `bin/gstack-upgrade`
+after the refusal is resolved, or the Capy skill installer again once the
+lease holder finishes. Below the supported minimum the bootstrapper fails
+`revision` instead (`REVISION_BELOW_MINIMUM`).
+
 <a id="upgrade-refused"></a>
 ### `gstack-upgrade: <cause>; nothing was changed; fix: <command> (UPGRADE_REFUSED)`
 
@@ -1521,8 +1574,10 @@ every lease with its age and `alive|dead|stale`; a holder is named as
 When you know they are idle, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
 proceeds. At a Capy session start the same refusal appears as
 `SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`,
-and the trailer is `gstack: fail behind — … (UPGRADE_BUSY)`: a session that
-could not upgrade is never certified ok.
+the doctor adds `WARN behind — … (UPGRADE_BUSY)` and the trailer stays
+`gstack: ok … (behind=<n> (latest: <v>); upgrade skipped: … (UPGRADE_BUSY); fix: …)`:
+the installed revision is above the supported minimum, so the session is
+certified and the note names the fix.
 
 <a id="upgrade-fetch-failed"></a>
 ### `gstack-upgrade: could not reach origin (...) (UPGRADE_FETCH_FAILED)`
@@ -1565,9 +1620,12 @@ action that never fails the run. Without provenance (a direct
 `gstack-doctor --check`, or a pre-bootstrapper copy with no
 `GSTACK_CAPY_WRAPPER=` line, which reads as wrapper 0) it reads the Drive
 copies (`~/.capy/drive/*/skills/gstack/scripts/install.sh`, or only
-`GSTACK_CAPY_WRAPPER_PATH` when set) and fails only when every copy is stale,
-listing each with its revision. A stale active wrapper is a `WARN` too: an
-older copy still works (`capy/support.env`). `bin/gstack-upgrade` runs the
+`GSTACK_CAPY_WRAPPER_PATH` when set), listing each with its revision: every
+copy a bootstrapper below the minimum is `WARN wrapper — every Capy skill copy
+is below the minimum wrapper <m> (it still works): ...` with the owner action,
+and it fails only when a copy is pre-bootstrapper (wrapper 0), which cannot
+hand over at all. A stale active wrapper is a `WARN` too: an older copy still
+works (`capy/support.env`). `bin/gstack-upgrade` runs the
 installer with the checkout's own copy as the active wrapper and never leaves
 a pending reinstall when the wrapper row is the only failure.
 
@@ -3122,9 +3180,32 @@ reports failures. The obligation stays uncleared. A run URL alone never clears
 this obligation; a `test_backend/<backend>` obligation takes a run URL, recorded
 as attested rather than validated.
 
+Another tree is accepted in exactly one case: it differs from `pregate.json`'s
+tree only in the repo's stamp rule (`.gstack/ship-policy.json` on the base
+branch: `stamp_files`, `stamp_patterns`, the built-in version, manifest,
+lockfile and CHANGELOG forms), judged by the tree receipt's own classifier on a
+`git diff` of the two trees ([the gate ran ahead of the
+stamp](pregate.md#remote-gate-stamp-only)). The refusal line then says `and the
+trees differ beyond the stamp rule of <policy>: <path> (<rule>: <why>, line
+<n>)`, and the path it names is the one that is not a stamp: a file outside
+`stamp_files`, or a stamp file with a hunk that is not the old → new rewrite.
+`the gated tree <t> is not an object in this repository` means the gated
+commit is not fetched here, so the two trees cannot be compared. Three more
+refusals close the substitution without classifying anything: `lists the test
+lane as stamp-sensitive (stamp_sensitive_gates: tests)` (the base policy says
+the test tier reads the stamps, as gstack's own does, so no run on another tree
+covers this one; rerun the gate on the head), `pregate.json was recorded against
+origin/<a>, not this repository's base origin/<b>` (rerun `gstack-pregate --base
+<b>`, or `git remote set-head origin <a>` when `origin/HEAD` was unset), and
+`.gstack/ship-policy.json on origin/<base>@<sha> is invalid` or `could not be
+read` (fix the policy on the base, or fetch it).
+
 **Fix.** Run the remote gate on the tree pregate tested and pass its output
 file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
-<usd> --allow-repo-commands` run and validate it.
+<usd> --allow-repo-commands` run and validate it. For a gate-ahead receipt:
+fetch the gated commit (`git fetch origin <sha>`) and clear again, or make the
+named path a stamp under the repo's rule; a receipt is never accepted while any
+differing path is a change.
 
 <a id="pregate-no-policy"></a>
 ### `PREGATE_NO_POLICY`
@@ -3190,12 +3271,20 @@ refuses to write the ship receipt otherwise.
 ### `PREGATE_REMOTE_UNCLEARED`
 
 **Meaning.** A `requires-remote` obligation (a platform lane this machine cannot
-run, named by `workflow.yml/job`) has no receipt.
+run, named by `workflow.yml/job`, or the small-machine `pregate.json/remote_gate`
+tier) has no receipt; or a `remote_gate` receipt accepted from a stamp-only
+predecessor tree records `accepted_for` as a tree other than `pregate.json`'s,
+or a `gated_tree` other than its receipt string's `tree=` (the file was edited
+after `clear`), so it clears nothing here.
 
 **Fix.** Dispatch that job, then
 `gstack-pregate clear --remote <workflow.yml/job> --run-url <url>` (or
-`--bundle-lane <label>` from an evidence bundle). The ship receipt carries each
-obligation with its receipt.
+`--bundle-lane <label>` from an evidence bundle). For `pregate.json/remote_gate`,
+`clear --remote pregate.json/remote_gate --receipt <gate output>`: the gate's
+own run on this tree, or a run on a predecessor tree that differs only by the
+repo's stamp rule ([gate ahead of the stamp](pregate.md#remote-gate-stamp-only));
+`verify` then prints the accepted substitution on its ok line. The ship receipt
+carries each obligation with its receipt.
 
 <a id="issue-unreadable"></a>
 ### `ISSUE_UNREADABLE`
@@ -4297,6 +4386,67 @@ has incomplete coverage, never a clean result.
 
 **Fix.** Rerun the state-machines specialist on the same diff and check its
 output again.
+
+<a id="review-scope-input"></a>
+### `REVIEW_SCOPE_INPUT`
+
+**Meaning.** `gstack-review-scope` (the finding scope of /ship's review loop,
+[ship-policy.md#review-scope](ship-policy.md#review-scope)) was given input it
+cannot classify: the findings were not a JSON array of objects, `--pass` or
+`--policy` was outside its values, a pass 2+ call came without
+`--range-base`, `--range-base` was not a commit id (7 to 64 hex digits), or
+`summary --since` matched no review-log row of this branch written via /ship
+(so no `REVIEW_LOOP:` line could be derived, and the ship receipt's
+`--review-loop` input was not written). Nothing was classified, deferred or
+summarized.
+
+**Fix.** Pass the Step 9.3 findings as a JSON array (`--findings <file>` or
+stdin), `--pass <n>` from the invocation record, and from pass 2 on
+`--range-base <sha>`, the HEAD the previous pass saved when it started, as a
+hex commit id. For `summary`, check `REVIEW_SINCE` against the invocation
+record's start time and that each pass was finished with `via:"ship"`.
+
+<a id="review-scope-range"></a>
+### `REVIEW_SCOPE_RANGE`
+
+**Meaning.** `gstack-review-scope classify` could not read the diff it scopes
+findings against: `origin/<base>` or `--range-base` does not resolve, or the
+range base is not an ancestor of HEAD (history was rewritten since the previous
+pass).
+
+**Fix.** Fetch `origin/<base>`, check `--range-base` against the pass heads in
+the invocation record, and start a full pass (`--pass 1`) when the branch was
+rebased; /ship's own rule is to merge the base in, never rebase a reviewed head.
+
+<a id="receipt-carry-refused"></a>
+### `RECEIPT_CARRY_REFUSED`
+
+**Meaning.** `gstack-ship-receipt carry` could not carry the PR's /ship receipt
+to HEAD: the PR body has no valid receipt, the receipt's head is not an ancestor
+of HEAD (a rebase or force-push dropped it), the working tree has uncommitted
+or untracked changes (a carry certifies a commit, never a tree that differs from
+it), or git could not compare the two product diffs or read the working tree's
+status. The receipt in the body is unchanged and still names the old head, so
+`gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
+
+**Fix.** Keep the reviewed head in HEAD's history (merge the base in instead of
+rebasing), commit or stash every working-tree change, then rerun
+`gstack-ship-receipt carry --pr <n>` at the new head. When the history is
+already rewritten, run /ship on the new head.
+
+<a id="receipt-carry-product-changed"></a>
+### `RECEIPT_CARRY_PRODUCT_CHANGED`
+
+**Meaning.** Between the receipt's head and HEAD the product diff against the
+base changed: at least one path that is neither a test, release metadata nor
+part of the base merge has a different patch than the reviewed head had. The
+reviewed verdict does not cover HEAD, so the receipt is not carried. The
+refusal names the changed product paths.
+
+**Fix.** Run /ship on the new head. The receipt carries only across a
+conflict-only base merge, a test-only change or release metadata, which the
+`carry` object in the carried receipt records with the product patch-id and
+the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
 ## gstack-error-capture
 

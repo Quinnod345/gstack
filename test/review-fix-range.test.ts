@@ -205,13 +205,17 @@ describe('gstack-specialist-stats', () => {
 });
 
 describe('ship Step 9 instructions', () => {
+  // Harness lane E (issue row 1): the fix-range token's mandatory final full pass re-read the
+  // whole tree and found new neighbours every time. /ship now reads only the range since the
+  // previous pass (RANGE_BASE) under a full token, so the final record still binds the tree.
   const army = fs.readFileSync(path.join(ROOT, 'ship/sections/review-army.md'), 'utf8').replace(/\s+/g, ' ');
-  test('the fix-range start, its base substitution and the mandatory full pass are stated', () => {
-    expect(army).toContain('start with `--start review --fix-range`');
-    expect(army).toContain('`FIX_BASE=<sha>`, which stands in for `origin/<base>` and `<base>` in this pass');
-    expect(army).toContain('If it refuses, start a full pass.');
-    expect(army).toContain('it may be a fix-range repeat');
-    expect(army).toContain('continue to Step 10, and only from a full pass: after a fix-range pass, run one full Step 9 first.');
+  test('pass 2+ reads the range since the previous pass under a full token; the fix-range token is /review\'s alone', () => {
+    expect(army).toContain('Every entry saves `PASS_HEAD=$(git rev-parse HEAD)`; from pass 2 on, `RANGE_BASE` is the previous pass\'s PASS_HEAD.');
+    expect(army).toContain('use `DIFF_BASE=$RANGE_BASE` instead, so every reviewer reads what changed since the previous pass.');
+    expect(army).toContain('Every pass captures a full token (no `--fix-range`), so the record binds the whole tree even when reviewers read only the range.');
+    expect(army).not.toContain('--start review --fix-range');
+    expect(army).toContain('gstack-review-scope classify --base <base> --pass $PASS --range-base $RANGE_BASE');
+    expect(army).toContain('A pass whose only findings were deferred or noted applied no edits and continues here: the loop converges below the floor.');
   });
 });
 
