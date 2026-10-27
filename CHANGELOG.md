@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**The merge-train bisect can run in CI.** Every `train-bisect` job of `evals.yml` had died at its first step: a container job's `run` steps default to `sh -e {0}` (dash in the CI image), and "Verify the prefix checkout" used the bash-only `${PREFIX_SHA:0:12}`, so run 40456150409 (the first bisect ever dispatched, gate.bisect-b3d085bb87ee-d9b0d60082cc) failed all three prefixes with `Bad substitution` (exit 2) before a case ran; the second bisect run was cancelled. The job shipped in 1.91.162.0 (GSTA-49 T1b) and had never passed. Found while GSTA-96's auq-format-gate red put a train on the bisect path.
+
+### Fixed
+- **`.github/workflows/evals.yml` `train-bisect`**: the job declares `defaults.run.shell: bash`, so every one of its run steps runs under `bash -e -o pipefail` like the steps on bare runners do. No other run step whose effective shell is sh uses a bash construct (the new lint below checked all 23 of them across `evals.yml`, `evals-periodic.yml`, `evals-marathon.yml` and `eval-sweep.yml`).
+
+### Tests
+- `test/workflow-shell-lint.test.ts` (new, free, offline): parses every workflow under `.github/workflows/` and every composite action under `.github/actions/`, computes each run step's effective shell (step `shell` → job `defaults.run.shell` → workflow `defaults.run.shell` → GitHub's default: sh in a container job, pwsh on Windows, bash otherwise), and fails on a bash-only construct in a step whose effective shell is sh (`${x:0:n}`, `${x//…}`, `${!x}`, `[[`, arrays, `declare -a`/`mapfile`, `set -o pipefail`, `PIPESTATUS`, `<<<`, `<(…)`, `$'…'`, `source`, `function`). The detector has positive controls for each construct and negative controls for the POSIX forms (`${x:-d}`, `${x#p}`, `$(…)`, `$((…))`, comments). A fourth test pins the `train-bisect` job to bash by name; it was red at d9b0d60 and is green with the fix.
+
+### Gate integrity
+- No threshold, trial count, case kind, budget or reservation changed; the bisect's cases, prefixes and spend path are untouched. The job's steps gain `pipefail` from bash's explicit-shell default; none of them pipes.
+
 ## [1.91.267.0] - 2026-10-27
 
 **The Captain guide says which questions never need to reach a person.** Follow-up to #3493 (pstack absorb item 4, GSTA-124).
