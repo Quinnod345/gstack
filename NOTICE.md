@@ -46,8 +46,8 @@ signature components are not carried over):
   line-break and motion rules from landing-page-design Part B, the website
   context of design-to-motion and the redesign-skill audit; and the generated
   `design-html/SKILL.md` / `sections/craft.md`.
-- `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
-  ship-floor tells, turned into a free check.
+- `lib/design-lint/rules/copy.ts`: the content-realism and ship-floor tells,
+  the design lint's copy tier.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
 - `design-review/sections/craft-audit.md.tmpl` (and the generated
   `sections/craft-audit.md`): the redesign-skill audit of an existing site,
@@ -128,6 +128,17 @@ design is not a defect, missing context; independent agreement as the strongest 
 `NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
 `docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
 text is carried; this entry is a courtesy.
+Also ideas, not text, from `pstack/skills/blast-radius`, `recall`, `benchmark-checklist`,
+`architect` (`references/design-red-flags.md`) and `principle-attack-the-premise`
+(Garry, 2026-10-26: "Do it, send"): the one safety fact, the five-rung evidence ladder and
+the shared-premise red flag in `investigate/sections/blast-radius.md.tmpl` and
+`investigate/SKILL.md.tmpl`; the transcript-mining fallback and its status-tagged brief in
+`context-restore/sections/transcripts.md.tmpl`; the seven questions in
+`benchmark/sections/vet-the-number.md.tmpl`; the second-shape comparison and the eight
+design red flags in Section 1 of `plan-eng-review/sections/review-sections.md.tmpl`; and the generated
+`SKILL.md` / `sections/*.md` files. Each section names its source in a first-line comment.
+Written in gstack's words; no sentence is copied, so no license text is carried.
+
 Also ideas, not text, from `pstack/skills/principle-*`, `poteto-mode` and its eval playbook: ETHOS.md principles 5 to 8, the observable-questions rule in `plan-tune/SKILL.md.tmpl` and `docs/proactive.md`, the blinding rules in `eval-plan/SKILL.md.tmpl` and `docs/TESTING_INTERNALS.md`, and the limiter sentence in AGENTS.md step 4 (GSTA-124).
 
 ## pstack, ported scripts — Copyright (c) 2026 Lauren Tan — MIT License
@@ -146,3 +157,13 @@ Derived, modified:
 - `bin/gstack-worktree-audit`: `pstack/skills/poteto-mode/scripts/worktree-audit.sh`,
   with the PR column read through `gh --jq` alone, the chat column read from
   Claude Code's per-worktree transcript directory, and a `--no-fetch` flag.
+
+## pstack (unslop) — Copyright Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/skills/unslop/SKILL.md`, at 99b609a7). The
+word lists in `lib/prose-lint.ts` (the autopilot vocabulary and the metaphor nouns with
+their plain replacements) are facts taken from unslop's rules 7 and 26; the rules a
+regular expression decides (the "not just X, but Y" shape, the mid-sentence colon, the
+bold label that restates its line, arrows and dropped articles) are written in gstack's
+words, scoped to the CHANGELOG entry and PR body /ship writes, and report-only elsewhere.
+No sentence is copied, so no license text is carried; this entry is a courtesy.

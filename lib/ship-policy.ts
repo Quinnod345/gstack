@@ -161,11 +161,21 @@ export const SHIP_QUEUE_KEYS_VERSION = '1.91.108.0';
 export const TRAIN_KEYS_VERSION = '1.91.146.0';
 // Each constant is the release that first reads its key: a policy declaring the key must name at least
 // that version as min_gstack_version, so an older gstack refuses the policy by name instead of failing on
-// an unknown key. review_scope shipped in 1.91.256.0 (#3481). docs.caps is unreleased: its constant names the
-// release expected to stamp it (test/gstack-ship-policy.test.ts holds it newer than every CHANGELOG heading the
-// checkout sees); whoever stamps that release under another number moves the constant to the stamped version.
+// an unknown key. review_scope shipped in 1.91.256.0 (#3481), docs.caps in 1.91.270.0 (#3487). A new key's
+// constant is written as a tentative future version clear of main's pace (the next minor, never the next patch,
+// which main takes first and the released-key test below then reds at the pin), in this exact
+// `_KEY_VERSION = '<version>'` form: this file is in .gstack/ship-policy.json stamp_paths with that form as a
+// stamp_patterns template, so the slot stamp's gstack-restamp stamp_paths stage moves the tentative value to the
+// allocated version. The stage reads lines the branch added: a tentative value newer than the fork version moves,
+// an untouched released constant stays, and a branch-added line naming the base's own version is re-read as a
+// stale stamp and moves too, so never rewrite a released constant's line. Until the tree receipt accepts a
+// stamp-form move whose old value is not the base version (#3512), the train's stamp-only check passes such a
+// move only when the tentative value equals the base version at the slot, which a next-minor value never does:
+// a PR that adds a key cannot clear the train until #3512 lands. test/gstack-ship-policy.test.ts holds
+// an unreleased constant newer than every CHANGELOG heading and a released one on a heading whose entry names
+// its key, so a value a stamp did not move fails there.
 export const REVIEW_SCOPE_KEY_VERSION = '1.91.256.0';
-export const DOCS_CAPS_KEY_VERSION = '1.91.258.0';
+export const DOCS_CAPS_KEY_VERSION = '1.91.270.0';
 export const POLICY_KEY_INTRODUCED: Record<PolicyKey, string> = {
   bump: '1.91.73.0', queue_mode: '1.91.73.0', release_tool: '1.91.73.0', release_outputs: '1.91.73.0', stamp_paths: '1.91.73.0',
   changelog: '1.91.73.0', mirror: '1.91.73.0', history: '1.91.73.0', preregistration_shas: '1.91.73.0', stamp_sensitive_gates: '1.91.73.0',

@@ -1236,7 +1236,12 @@ GitHub-hosted restore never sees (until GSTA-48 every restore missed).
 **Readiness (R1).** Paid slices for a PR head start only when the PR has been
 quiet for the window (repository variable `EVALS_QUIET_MINUTES`, default 10,
 measured from the run's creation) and Free Tests has concluded success on the
-same head SHA. The `readiness` job (`scripts/eval-readiness.ts`) sleeps out the
+same head SHA, as GitHub's `pull_request` run or, for a head with none, as a
+`workflow_dispatch` run on the branch (the dispatch route of docs/ship-policy.md
+for a head whose only conflict with the base is the CHANGELOG, which gets no
+`pull_request` CI; the `pull_request` run built the merge ref, so it decides
+whenever it exists, a dispatched run decides only without one, and a red
+dispatched run blocks like any other, #3508). The `readiness` job (`scripts/eval-readiness.ts`) sleeps out the
 window with no API calls, since a newer push cancels the run anyway, then polls
 Free Tests every minute for up to 80 minutes. Free Tests red on the head fails
 the run without paid work; re-run Free Tests, then re-run this workflow (a

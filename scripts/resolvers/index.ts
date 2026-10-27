@@ -19,7 +19,7 @@ import { getHostConfig } from '../../hosts/index';
 import { outsideVoiceFor, outsideVoiceGuard, outsideVoiceInvocation, outsideVoicePreflight, outsideVoiceProvenance, generateOutsideVoiceRouting } from './outside-voice';
 
 // Domain modules
-import { generatePreamble } from './preamble';
+import { generateSkillPreamble } from './preamble-hoist';
 import { generateTestFailureTriage } from './preamble';
 import { generateDesignMethodology, generateDesignHardRules, generateDesignOutsideVoices, generateDesignReviewLite, generateDesignSketch, generateDesignSetup, generateDesignMockup, generateDesignShotgunGeneration, generateDesignShotgunLoop, generateTasteProfile, generateUXPrinciples, generateOverusedFonts, generateDesignSlopBullets, generateDesignDetector, generateDesignMdCheck } from './design';
 import { generateTestBootstrap, generateTestCoverageAuditPlan, generateTestCoverageAuditShip, generateTestCoverageGateShip } from './testing';
@@ -56,6 +56,7 @@ import { generateCoordinatorContract } from './coordinator-contract';
 import { generateAutoplanDriverCodes, generateAutoplanDriverCommands, generateAutoplanDriverFiles, generateAutoplanDriverGate, generateAutoplanDriverPhases, generateAutoplanDriverResultFormat } from './autoplan-driver';
 import { generateQAScope, generateQAExploratory, generateQAFunctional, generateQAResource, generateQAReview, generateQAReviewPreflight, generateQAMethodReads } from './qa';
 import { generateVoiceTriggerRouting } from './voice-triggers';
+import { generateTranscriptDiscovery, generateTranscriptSources } from './transcripts';
 
 export const RESOLVERS: Record<string, ResolverFn> = {
   AUTOPLAN_PUBLICATION_HOOK: generateAutoplanPublicationHook,
@@ -89,7 +90,7 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   SNAPSHOT_FLAGS: generateSnapshotFlags,
   BROWSE_SETUP: generateBrowseSetup,
   BROWSE_FALLBACK: generateBrowseFallback,
-  PREAMBLE: generatePreamble,
+  PREAMBLE: generateSkillPreamble,
   ASIDE_SETUP: generateAsideSetup,
   ASIDE_COOKBOOK: generateAsideCookbook,
   ASIDE_RESEARCH: generateAsideResearch,
@@ -192,4 +193,6 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   AUTOPLAN_DRIVER_CODES: generateAutoplanDriverCodes,
   SECTION,
   SECTION_INDEX,
+  TRANSCRIPT_SOURCES: generateTranscriptSources,
+  TRANSCRIPT_DISCOVERY: generateTranscriptDiscovery,
 };

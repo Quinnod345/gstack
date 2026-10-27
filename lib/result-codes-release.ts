@@ -244,6 +244,11 @@ export const RELEASE_RESULT_CODES = {
     summary: 'gstack-ship-receipt carry could not carry the /ship receipt to HEAD: the PR body has no receipt, the receipt head is not an ancestor of HEAD (rebase or force-push), or the product diff could not be compared',
     fix: 'merge the base in instead of rebasing, keep the reviewed head in HEAD\'s history, then rerun carry; otherwise run /ship on the new head',
   },
+  PROSE_LINT_FOUND: {
+    anchor: 'prose-lint-found',
+    summary: 'the prose /ship is about to publish (a CHANGELOG entry or a PR body) carries an AI tell a regular expression can decide',
+    fix: 'rewrite each PROSE: line in the draft the way its hint says, then rerun gstack-prose-lint on the same file',
+  },
   RECEIPT_CARRY_PRODUCT_CHANGED: {
     anchor: 'receipt-carry-product-changed',
     summary: 'the product diff against the base changed between the receipt\'s head and HEAD (a product file differs beyond a base merge, a test-only fix or release metadata), so the reviewed verdict does not cover HEAD',

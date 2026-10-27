@@ -9,6 +9,7 @@ import { usePrivateStateRoot } from './helpers/private-state-root';
 import { expectMentions } from './helpers/prompt-structure';
 import { generateFailureRouting } from '../scripts/resolvers/preamble/generate-test-failure-triage';
 import { readShippedSkillRouting } from './helpers/shipped-skill-routing';
+import { readSkillStartup } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 
@@ -718,7 +719,7 @@ describe('v0.4.1 preamble features', () => {
 
   for (const skill of tier2PlusSkills) {
     test(`${skill} contains AskUserQuestion Pros/Cons format`, () => {
-      const content = fs.readFileSync(path.join(ROOT, skill), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill));
       // v1.7.0.0 Pros/Cons format tokens. The preamble resolver
       // (generate-ask-user-format.ts) injects all of these into every
       // tier-2+ skill. Drop any of them and the test catches it on the
@@ -742,7 +743,7 @@ describe('v0.4.1 preamble features', () => {
       // pid that names the sessions-dir entry) is derived by the script itself,
       // so the render passes no "$PPID" (#2763); it still carries the
       // SESSION_KIND STATUS-line interpretation prose.
-      const content = fs.readFileSync(path.join(ROOT, skill), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill));
       expect(content).not.toContain('$PPID');
       expect(content).toContain('SESSION_KIND');
     });
@@ -759,7 +760,7 @@ describe('v0.4.1 preamble features', () => {
 
   for (const skill of skillsWithPreamble) {
     test(`${skill} contains escalation protocol`, () => {
-      const content = fs.readFileSync(path.join(ROOT, skill), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill));
       expect(content).toContain('DONE_WITH_CONCERNS');
       expect(content).toContain('BLOCKED');
       expect(content).toContain('NEEDS_CONTEXT');
@@ -994,7 +995,7 @@ describe('Completeness Principle in generated SKILL.md files', () => {
 
   for (const skill of skillsWithPreamble) {
     test(`${skill} contains Completeness Principle section`, () => {
-      const content = fs.readFileSync(path.join(ROOT, skill), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill));
       expect(content).toContain('Completeness Principle');
       expect(content).toContain('Boil the Ocean');
     });
@@ -1002,7 +1003,7 @@ describe('Completeness Principle in generated SKILL.md files', () => {
 
   test('Completeness Principle keeps compact scoring guidance in tier 2+ skills', () => {
     // CSO is intentionally exempt; use a regular tier 2+ PREAMBLE consumer.
-    const content = fs.readFileSync(path.join(ROOT, 'review', 'SKILL.md'), 'utf-8');
+    const content = readSkillStartup(path.join(ROOT, 'review', 'SKILL.md'));
     expect(content).toContain('Completeness: X/10');
     expect(content).toContain('10 = all edge cases');
     expect(content).toContain('Note: options differ in kind, not coverage');
@@ -2245,7 +2246,7 @@ describe('ios tier demotion (Phase 5)', () => {
   const iosSkills = ['ios-fix', 'ios-clean', 'ios-sync', 'ios-design-review'];
   for (const skill of iosSkills) {
     test(`${skill} render drops tier-3 sections, keeps AUQ format`, () => {
-      const content = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
+      const content = readSkillStartup(path.join(ROOT, skill, 'SKILL.md'));
       expect(content).not.toContain('## Repo Ownership');
       expect(content).not.toContain('## Search Before Building');
       expect(content).toContain('## AskUserQuestion Format');

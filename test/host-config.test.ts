@@ -29,6 +29,7 @@ import { HOST_PATHS } from '../scripts/resolvers/types';
 import { RESOLVERS } from '../scripts/resolvers';
 import { expectTokens } from './helpers/prompt-structure';
 import { runGeneration } from '../scripts/gen-skill-docs';
+import { readSkillStartup } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const RESOLVER_NAMES = new Set(Object.keys(RESOLVERS));
@@ -746,7 +747,7 @@ describe('Copilot host render (#393)', () => {
 
   test('paths name the Copilot install, never Claude or Codex', () => {
     for (const skill of ['gstack-review', 'gstack-ship', 'gstack-careful', 'gstack-upgrade']) {
-      const md = read(skill);
+      const md = readSkillStartup(path.join(OUT, '.copilot', 'skills', skill, 'SKILL.md'));
       expect(md).not.toContain('~/.claude/skills/gstack');
       expect(md).not.toContain('$HOME/.claude/skills/gstack');
       expect(md).not.toContain('.codex/skills');
@@ -779,7 +780,7 @@ describe('Antigravity CLI host render', () => {
 
   test('paths name the Antigravity CLI install, never Claude, Codex or Gemini CLI skill dirs', () => {
     for (const skill of ['gstack-review', 'gstack-ship', 'gstack-careful', 'gstack-upgrade']) {
-      const md = read(skill);
+      const md = readSkillStartup(path.join(dir, skill, 'SKILL.md'));
       expect(md).not.toContain('~/.claude/skills/gstack');
       expect(md).not.toContain('$HOME/.claude/skills/gstack');
       expect(md).not.toContain('.codex/skills');

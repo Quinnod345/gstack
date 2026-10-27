@@ -35,6 +35,11 @@ const claude = defineHost({
 
   coAuthorTrailer: 'Co-Authored-By: Claude <noreply@anthropic.com>',
   learningsMode: 'full',
+
+  transcripts: {
+    root: '~/.claude/projects/<slug>/*.jsonl',
+    layout: 'one folder per workspace; <slug> is the workspace path with every character that is not a letter or digit turned into "-"',
+  },
 });
 
 export default claude;

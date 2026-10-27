@@ -21,6 +21,7 @@ import {
 import { paidTestClosure, isCovered } from './helpers/touchfile-closure';
 import { ASK_QUESTIONS_HEADING, readWorkflowExcerpt } from './helpers/workflow-excerpt';
 import { sharedLibsPlanExcerpt } from './helpers/shared-libs-plan-excerpt';
+import { readSkillEffective } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const SHIP_GUARD_ONLY = ['ship-managed-hook-refresh', 'ship-unmanaged-hook-consent', 'ship-local-hook-preservation'];
@@ -182,7 +183,7 @@ describe('selectTests', () => {
   });
 
   test('bounded shared-code planning selects its consumed resolvers, excluding other Eng sections', () => {
-    const entrypoint = fs.readFileSync(path.join(ROOT, 'plan-eng-review/SKILL.md'), 'utf8');
+    const entrypoint = readSkillEffective(path.join(ROOT, 'plan-eng-review/SKILL.md'));
     const review = fs.readFileSync(path.join(ROOT, 'plan-eng-review/sections/review-sections.md'), 'utf8');
     const excerpt = sharedLibsPlanExcerpt(entrypoint, review);
     for (const [start, end] of [

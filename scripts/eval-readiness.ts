@@ -5,7 +5,8 @@
  * head's paid slices start only after (1) the PR has been quiet for the
  * window (no newer push since this run was created; `vars.EVALS_QUIET_MINUTES`,
  * default 10; the `evals-no-debounce` label sets it to 0) and (2) Free Tests
- * (free-tests.yml) has concluded success on the same head SHA. Selection,
+ * (free-tests.yml) has concluded success on the same head SHA, as GitHub's
+ * pull_request run or as a workflow_dispatch run on the branch. Selection,
  * trials and verdict rules are unchanged: only the start time moves.
  *
  * A newer push cancels the run through the workflow's cancel-in-progress
@@ -40,9 +41,25 @@ export type ReadinessDecision =
   | { kind: 'superseded'; by: string }
   | { kind: 'blocked'; reason: string };
 
-/** The newest Free Tests pull_request run on this exact head decides; a rerun updates that run in place. */
+/**
+ * The Free Tests run events that count as this head's CI, in order of
+ * precedence: GitHub's own pull_request run (it builds the merge ref, the tree
+ * a merge would test), then a workflow_dispatch run on the branch (the
+ * dispatch route in docs/ship-policy.md for a head whose only conflict with
+ * the base is the CHANGELOG, which GitHub builds no merge ref for and so never
+ * runs pull_request CI on; #3508). A dispatched run builds the head alone, so
+ * it decides only for a head with no pull_request run: it never overrides a red
+ * pull_request run (rerun that run), and a lane's extra dispatch never holds a
+ * head its pull_request CI cleared. A push run is a branch build, not this
+ * head's gate.
+ */
+export const FREE_TESTS_EVENTS: readonly string[] = ['pull_request', 'workflow_dispatch'];
+
+/** The newest Free Tests run on this exact head under the first event present decides; a rerun updates that run in place. */
 export function freeTestsState(runs: FreeTestsRun[], headSha: string): FreeTestsState {
-  const newest = runs.filter(run => run.head_sha === headSha && run.event === 'pull_request').sort((a, b) => b.id - a.id)[0];
+  const atHead = runs.filter(run => run.head_sha === headSha);
+  const event = FREE_TESTS_EVENTS.find(e => atHead.some(run => run.event === e));
+  const newest = atHead.filter(run => run.event === event).sort((a, b) => b.id - a.id)[0];
   if (!newest) return { state: 'missing' };
   if (newest.status !== 'completed') return { state: 'running', runId: newest.id };
   if (newest.conclusion === 'success') return { state: 'success', runId: newest.id };
@@ -111,8 +128,9 @@ export function waitForReadiness(o: WaitOptions): { decision: ReadinessDecision;
   if (quietUntil > now()) sleep(quietUntil - now());
   let lastError = '';
   for (;;) {
+    // Every event at the head; freeTestsState keeps the pull_request and workflow_dispatch runs.
     const listed = ghJson<{ workflow_runs?: FreeTestsRun[] }>(gh, ['api', '-X', 'GET', `repos/${o.repo}/actions/workflows/free-tests.yml/runs`,
-      '-f', `head_sha=${o.headSha}`, '-f', 'event=pull_request', '-f', 'per_page=20']);
+      '-f', `head_sha=${o.headSha}`, '-f', 'per_page=20']);
     const pr = ghJson<{ head?: { sha?: string } }>(gh, ['api', `repos/${o.repo}/pulls/${o.pr}`]);
     lastError = !listed.ok ? listed.error : !pr.ok ? pr.error : '';
     if (!lastError && listed.ok && pr.ok) {

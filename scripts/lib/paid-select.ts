@@ -260,7 +260,7 @@ export function existingPromptSourceAliases(files: readonly string[], rootDir = 
   const aliases: Record<string, string> = {};
   for (const file of files) {
     if (!file.endsWith('.md')) continue;
-    const template = `${file}.tmpl`;
+    const template = /^[^/]+\/sections\/preamble\.md$/.test(file) ? file.replace(/sections\/preamble\.md$/, 'SKILL.md.tmpl') : `${file}.tmpl`;
     try { if (fs.statSync(path.join(rootDir, template)).isFile()) aliases[file] = template; }
     catch { /* Unknown/generated-only content must keep its own dependency identity. */ }
   }

@@ -62,7 +62,8 @@ function exercise(spec: Spec) {
         allowedTools: ['Read', 'Write', 'AskUserQuestion'], permissionMode: 'default', settingSources: [],
         systemPrompt: { type: 'preset', preset: 'claude_code' } });
       expect(input.skill).toBe(fs.readFileSync(path.join(ROOT, input.id === 'verbose'
-        ? 'test/fixtures/auq-pre-cut-plan-ceo-review-SKILL.md' : 'plan-ceo-review/SKILL.md'), 'utf8'));
+        ? 'test/fixtures/auq-pre-cut-plan-ceo-review-SKILL.md' : 'plan-ceo-review/SKILL.md'), 'utf8')
+        .replaceAll('~/.claude/skills/gstack/plan-ceo-review/sections/', path.join(input.cwd, 'plan-ceo-review', 'sections') + '/'));
       expect(input.sections.length > 0).toBe(input.id !== 'verbose');
       expect(input.prompt).toContain(path.join(input.cwd, 'plan-ceo-review/SKILL.md'));
       expect(input.prompt).toContain(path.join(input.cwd, 'plan.md'));

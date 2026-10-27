@@ -84,8 +84,8 @@ done
 # file (Codex skips a symlinked SKILL.md), and does every section pointer in an
 # installed SKILL.md resolve? A pointer is "Read `<path>/sections/<f>.md`",
 # optionally "relative to the installed `<skill>` SKILL.md directory". A bare
-# `sections/...` pointer counts in a carved skill (sections/ installed, or a
-# **STOP.** line); prefixed ones ($GSTACK_ROOT, ~, absolute, ../) everywhere.
+# `sections/...` pointer counts in a carved skill (a sections/*.md other than the
+# shared preamble.md installed, or a **STOP.** line); prefixed ones ($GSTACK_ROOT, ~, absolute, ../) everywhere.
 _status_install_checks() {
   local reg="$GSTACK_STATE_ROOT/installs.tsv" host scope project dest root src rest router md dir stop tok names n path checked broken first fix _move any_broken=0
   [ -f "$reg" ] || return 0
@@ -109,7 +109,7 @@ _status_install_checks() {
           sections/*)
             if [ -n "$names" ]; then
               for n in $names; do path="$dest/$n/$tok"; [ -r "$path" ] && break; done
-            elif [ -d "$dir/sections" ] || [ "$stop" = 1 ]; then path="$dir/$tok"
+            elif [ -n "$(find "$dir/sections/" -maxdepth 1 -name '*.md' ! -name preamble.md -print -quit 2>/dev/null)" ] || [ "$stop" = 1 ]; then path="$dir/$tok"
             else continue; fi ;;
           '$GSTACK_ROOT/'*) path="$root/${tok#\$GSTACK_ROOT/}" ;;
           '~/'*) path="$HOME/${tok#\~/}" ;;

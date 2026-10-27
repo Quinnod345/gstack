@@ -2708,11 +2708,19 @@ code (you already do when you run its tests), or drop the release tool.
 **Meaning.** `gstack-restamp` was told the base SHA (`--expect-base`) or the
 merge order (`--expect-order`) the allocation assumed, and one of them moved:
 the base advanced, a predecessor is not merged, or a successor merged first.
-The JSON result carries `expected`, `actual` and `recompute`.
+`--expect-order` lists the lane's own PR (`--pr`) first, then the remaining
+order; a list that leaves it out reads every entry as an unmerged predecessor,
+and the message says so. The JSON result carries `expected`, `actual` and
+`recompute`.
 
-**Fix.** Run the printed `recompute` command, which recomputes the version
-from the current base, then merge with the server-side head condition
-(`MERGE_CONDITION: sha=<head>`).
+**Fix.** Run the printed `recompute` command: it carries the corrected order
+(this PR first, merged PRs dropped, an unmerged predecessor kept ahead because
+it must merge first) and recomputes the version from the current base; then
+merge with the server-side head condition (`MERGE_CONDITION: sha=<head>`). A
+predecessor GitHub calls merged that the local base does not carry yet
+(`#<pr>=merged-not-in-base`) is kept ahead too, with `fix: git fetch origin
+<base>`: fetch, then rerun, so the recompute, pinned to that local base, never
+allocates the version the predecessor already took.
 
 <a id="restamp-version-source"></a>
 ### `RESTAMP_VERSION_SOURCE`
@@ -4174,13 +4182,19 @@ with the new pin (`train build --prs <n>@<new sha>,…`).
 ### `QUEUE_TRAIN_CONFLICT`
 
 **Meaning.** Merging a PR onto the prefix before it conflicts outside the
-version files and the CHANGELOG. The `QUEUE_TRAIN_CONFLICT:` line names the
-PR, the conflicting files and the PRs merged before it. Nothing was
-dispatched and no branch was pushed.
+version files and the CHANGELOG. From `train build`, the
+`QUEUE_TRAIN_CONFLICT:` line names the PR, the conflicting files and the PRs
+merged before it, and the check runs before the fill rule, so a filling train
+finds it too. From `ready --no-screen`, the prefix is the base itself: the
+`BASE_OVERLAP:` line names the files the base moved onto since the head
+forked, and the train would stop at this PR (under `--screen` the same
+conflict is `QUEUE_SCREEN_STALE_REF`). Nothing was dispatched and no branch
+was pushed.
 
-**Fix.** Run the printed `train build --prs <list without that PR>`. The PR's
-lane merges main (with the earlier PRs once they land) and reports READY
-again.
+**Fix.** From `train build`, run the printed `train build --prs <list without
+that PR>`. The PR's lane reports the conflict to the controller and, on its
+word (crew template rule 14), merges main into the pin (with the earlier PRs
+once they land), resolves, pushes, runs /ship and reports READY again.
 
 <a id="queue-train-free-red"></a>
 ### `QUEUE_TRAIN_FREE_RED`
@@ -4209,7 +4223,11 @@ run carrying the nonce, or marks the dispatch absent; only then does
 
 **Meaning.** The train has fewer PRs than `train.max_size` and its oldest
 READY PR has waited less than `train.fill_hours`, so it does not dispatch
-yet. The message prints when it will.
+yet. The message prints when it will. The scratch merges already ran: the
+`MERGE_CHECK: T1..T<k> merge clean onto <base>@<sha>` line above it says every
+seated pin merges in slot order (a pin that does not is `QUEUE_TRAIN_CONFLICT`
+instead), and a `#<pr> BASE_OVERLAP:` line names a pin whose files the base
+moved onto since it forked.
 
 **Fix.** Add READY PRs, rerun after the printed time, or pass `--urgent` for a
 one-PR train.
@@ -4688,14 +4706,21 @@ reason }` and carry the `Documentation exception: accepted by <owner> <date> via
 ## gstack-pr-wait
 
 `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change]
-[--interval SECONDS] [--timeout MINUTES]` watches one pull request and prints
+[--interval SECONDS] [--timeout MINUTES] [--exclude CHECK,...]` watches one pull request and prints
 one stdout line per real event, prefixed `#<pr>`; progress and recoverable
 errors go to stderr. `/land-and-deploy` Step 3 runs it with `--until green`.
 Exit 0 means the `--until` condition is met or the PR merged; exit 1 and 2
 end with one of the two codes below. `green` gates on every check on the
 head, as `gstack-ci-gate` does, so the two never disagree; a check the base
 branch requires (rulesets and classic branch protection) counts as pending
-until it appears. A 403 on the classic
+until it appears. `--exclude <check,...>` leaves a named non-required check
+out of the verdict, as `gstack-ci-gate --exclude` does: it neither holds
+`green` while pending nor blocks when it fails, and the first poll logs
+`excluded from the verdict: <names>`; a required check cannot be excluded
+(`exclude refused for required check <name>`) and gates, and while a
+required-check source cannot be read nothing is excluded (`exclude refused for
+<names>: the required checks could not be read`), as `gstack-ci-gate` refuses
+its overrides. A 403 on the classic
 protection read (a token without admin scope) is logged and skipped, and the
 rulesets read still names the required checks. The review-bot lists are
 configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`
@@ -4851,6 +4876,40 @@ every flag and code.
 **Meaning.** Unexpected helper failure; the line names the error class and its first stack frame. Exit 1.
 
 **Fix.** Rerun once; if it repeats, report the printed frame to the gstack maintainers.
+
+## Prose lint (gstack-prose-lint)
+
+`bin/gstack-prose-lint` reads the prose /ship is about to publish, a CHANGELOG
+entry (Step 13) and the sections the author writes in the PR body (Step 19:
+`## Why`, `## Summary` and `## Blast radius`, through `--sections`; the
+`## What changed` captions and image text stay a report), and the quality-gate
+workflow runs it over `CHANGELOG.md`'s `[Unreleased]` block. It decides only
+what a regular expression can: autopilot vocabulary, "not just X, but Y",
+metaphor nouns, a colon used as a conjunction, a bold label that restates its
+line, an arrow or a dropped article standing in for a sentence, and a fence or
+HTML comment left open (`unclosed-block`), because nothing after it was read.
+Fenced code, inline code, URLs, HTML comments and quoted words are never read,
+so the problem quoted in `## Why` is the person's to phrase. Everywhere else (a
+template, a doc, this file) it is a report: run it, read it, keep your em dashes.
+
+<a id="prose-lint-found"></a>
+### `PROSE_LINT_FOUND`
+
+**Meaning.** A gated run (`--gate`) found at least one tell in the text it was
+given. Each `PROSE: <file>:<line> <rule> "<match>" (<hint>)` line above the
+trailer names the rule and what to write instead; `PROSE_LINT: found=<n>` counts
+them. With `--unreleased` only the `## [Unreleased]` block was read; with
+`--base <ref>` only the lines the working tree added since the merge base; with
+`--sections <a,b>` only the text under those `## ` headings (under `--gate`, a
+file with none of them is exit 2, not a pass: the draft lost a heading).
+
+**Fix.** Rewrite each named line in the draft the way its hint says (a measurement
+such as `1.6740 → 1.7010` and the `before → after` heading are not findings), then
+rerun the same command. The PR body's verbatim tool sections (the approvals
+table, issue links, review findings, the coverage diagram) are outside
+`--sections` and are never read, so a finding there means the compose block was
+edited: restore its `--sections` list. A rule that keeps flagging correct prose
+is a bug in `lib/prose-lint.ts`: file it with the sentence.
 
 ## Quick answers
 

@@ -338,7 +338,7 @@ Templates contain the workflows, tips, and examples that require human judgment.
 | `{{ASIDE_RESEARCH}}` | `resolvers/aside.ts` | Web research through `aside exec` in the user's browser, WebSearch as the fallback, then the no-search degrade |
 | `{{ASIDE_EXEC_PRELUDE}}` | `resolvers/aside.ts` | One-line `_aside_exec` definition: an `aside exec` call writes an egress receipt before the prompt leaves the machine (fail-open, user-facing sink: it runs unreceipted only when the egress library is missing); skills never call `aside exec` bare |
 | `{{UNTRUSTED_CONTENT_WARNING}}` | `resolvers/aside.ts` | The one untrusted-content rule for everything either browser hands back |
-| `{{PREAMBLE}}` | `gen-skill-docs.ts` | Startup block: update check, session tracking, contributor mode, AskUserQuestion format |
+| `{{PREAMBLE}}` | `resolvers/preamble.ts`, `resolvers/preamble-hoist.ts` | Startup block: update check, session tracking, contributor mode, AskUserQuestion format; tier 2+ skills get a pointer to their shared `sections/preamble.md` plus the sections that are their own |
 | `{{BROWSE_SETUP}}` | `gen-skill-docs.ts` | Binary discovery + setup instructions |
 | `{{BROWSE_FALLBACK}}` | `resolvers/browse.ts` | Aside→`$B` hand-off: binary discovery + the step-by-step equivalence table, rendered right after `{{ASIDE_SETUP}}` in every browsing skill |
 | `{{BASE_BRANCH_DETECT}}` | `gen-skill-docs.ts` | Dynamic base branch detection for PR-targeting skills (ship, review, qa, plan-ceo-review) |
@@ -373,7 +373,8 @@ The generator also owns two files that are not skill docs: `review/design-checkl
 The internal async `runGeneration()` driver inventories skills, Claude sections
 and, on every supported host, the sections of the skills carved on every host
 (`CARVED_ON_EVERY_HOST` in `scripts/resolvers/sections.ts`: qa, qa-only, ship,
-plan-ceo-review, office-hours and design-review), host metadata, OpenClaw snippets,
+plan-ceo-review, office-hours and design-review), each tier 2+ skill's shared
+`sections/preamble.md` on every host, host metadata, OpenClaw snippets,
 the index, the agent digest, and auxiliary assets. Other skills remain inline on
 non-Claude hosts; QA assets resolve relative to the installed host skill.
 Every artifact goes through one compare-or-write function. Dry runs
@@ -397,6 +398,8 @@ Most workflow skills start with a `{{PREAMBLE}}` block that runs before the skil
 3. **Operational self-improvement** — at the end of every skill session, the agent reflects on failures (CLI errors, wrong approaches, project quirks) and logs operational learnings to the project's JSONL file for future sessions.
 4. **AskUserQuestion format** — universal format: context, question, `RECOMMENDATION: Choose X because ___`, lettered options. Consistent across all skills.
 5. **Search Before Building** — before building infrastructure or unfamiliar patterns, search first. Three layers of knowledge: tried-and-true (Layer 1), new-and-popular (Layer 2), first-principles (Layer 3). When first-principles reasoning reveals conventional wisdom is wrong, the agent names the "eureka moment" and logs it. See `ETHOS.md` for the full builder philosophy.
+
+Tier 2+ skills share most of this text, so it is not repeated in each SKILL.md. `scripts/resolvers/preamble-hoist.ts` renders the skill-independent preamble sections once per host into `sections/preamble.md` beside the SKILL.md, and the SKILL.md opens with a short "Shared preamble (load first)" pointer that names the file's id (a hash of the install root and the shared text before host rewrites, so it changes when that text changes but can repeat across hosts); the agent reads the file unless its own earlier Read of that file, headed by that id, is still in context, so a session loads it once and text that merely carries the id never stands in for it. A section moves only when the skill's render of it is byte-identical to the shared render. The start command, sections that name the skill (Question Tuning, Repo Ownership, Search Before Building, Telemetry) and skill-specific variants stay inline. Tier 1 skills keep their short preamble inline.
 
 ### Why committed, not generated at runtime?
 

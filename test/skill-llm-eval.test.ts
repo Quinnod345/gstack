@@ -24,6 +24,7 @@ import { getCookieWorkflowManualReview, type ManualJudgeReview } from './helpers
 import { resolveEvalModel } from '../lib/eval-model';
 import type { EvalCacheValue } from '../scripts/eval-input-cache';
 import { LLM_JUDGE_TOUCHFILES } from './helpers/touchfiles';
+import { readSkillEffective } from './helpers/skill-startup';
 // Runs when EVALS=1 is set (requires ANTHROPIC_API_KEY in env) — the EVALS
 // gate lives in the shared describeIfSelected. Selection machinery is shared
 // with the E2E suite; only the touchfiles table (LLM_JUDGE_TOUCHFILES, passed
@@ -735,11 +736,11 @@ describeIfSelected('Other skill evals', [
 describeIfSelected('Voice directive eval', ['voice directive tone'], () => {
   testIfSelected('voice directive tone', async () => {
     const t0 = Date.now();
-    // Read a tier 2+ skill to get the full voice directive in context
-    const content = fs.readFileSync(path.join(ROOT, 'review', 'SKILL.md'), 'utf-8');
+    // Read a tier 2+ skill as loaded (SKILL.md plus its shared preamble) to get the full voice directive in context
+    const content = readSkillEffective(path.join(ROOT, 'review', 'SKILL.md'));
     const voiceStart = content.indexOf('## Voice');
     if (voiceStart === -1) {
-      throw new Error('Voice section not found in review/SKILL.md. Was preamble.ts regenerated?');
+      throw new Error('Voice section not found in review/SKILL.md or its shared preamble. Was preamble.ts regenerated?');
     }
     const voiceEnd = content.indexOf('\n## ', voiceStart + 1);
     const voiceSection = content.slice(voiceStart, voiceEnd > 0 ? voiceEnd : voiceStart + 3000);

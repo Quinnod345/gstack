@@ -95,12 +95,17 @@ describe('PR profile paid-runner integration', () => {
   });
 
   test('unknown dependencies restore full gate while missing prompt coverage fails before execution', () => {
-    const fallback = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['ETHOS.md'] });
+    const fallback = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['SECURITY.md'] });
     expect(fallback.coverage?.mode).toBe('full-fallback');
     expect(fallback.selection.e2e).toContain('qa-only-no-fix');
     expect(fallback.selection.e2e).not.toContain('autoplan-dual-voice');
     expect(fallback.coverage?.deferred.some(item => item.id === 'autoplan-dual-voice')).toBe(true);
     expect(() => computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['unregistered/nested/SKILL.md'] })).toThrow('requires full validation');
+    const ethos = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['ETHOS.md'] });
+    expect(ethos.coverage?.mode).toBe('pr');
+    expect(ethos.coverage?.unknownFiles).toEqual([]);
+    expect(ethos.selection.e2e).toContain('plan-ceo-review-plan-mode');
+    expect(ethos.selection.e2e).toContain('office-hours-auto-mode');
   });
 
   test('source aliasing requires an actual template and preserves broad-only generated coverage', () => {
@@ -110,6 +115,15 @@ describe('PR profile paid-runner integration', () => {
     const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['benchmark-models/SKILL.md'] });
     expect(result.coverage?.mode).toBe('pr');
     expect(result.coverage?.deferredPromptFiles).toContain('benchmark-models/SKILL.md');
+    expect(result.coverage?.needsFullValidation).toBe(false);
+  });
+
+  test('a generated shared preamble inherits its skill template identity', () => {
+    const aliases = existingPromptSourceAliases(['ios-clean/sections/preamble.md', 'no-such-skill/sections/preamble.md']);
+    expect(aliases['ios-clean/sections/preamble.md']).toBe('ios-clean/SKILL.md.tmpl');
+    expect(aliases['no-such-skill/sections/preamble.md']).toBeUndefined();
+    const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: ['ios-clean/SKILL.md', 'ios-clean/sections/preamble.md'] });
+    expect(result.coverage?.deferredPromptFiles).toContain('ios-clean/sections/preamble.md');
     expect(result.coverage?.needsFullValidation).toBe(false);
   });
 
