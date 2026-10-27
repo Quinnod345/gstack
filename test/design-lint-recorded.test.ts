@@ -44,7 +44,7 @@ describe('design-lint over the recorded review slop page', () => {
       expect(at('icon-coin')).toEqual([['polish', 'styles.css', 51]]);
       // Issue 6: generic hero copy, the two lines the design catalog names for it and the buzzword behind them
       expect(at('generic-hero-copy')).toEqual([['blocks', 'index.html', 12], ['blocks', 'index.html', 13]]);
-      expect(at('marketing-buzzword')).toEqual([['ask', 'index.html', 1]]);
+      expect(at('marketing-buzzword')).toEqual([['ask', 'index.html', 32], ['ask', 'index.html', 37]]);
       // Tells the page does not annotate but hallmark's sloplint reports on the same files
       expect(at('pure-black-white').map((f) => f[2])).toEqual([17, 63, 85]);
       expect(at('overflow-x-unclipped')).toEqual([['ask', 'styles.css', 1]]);
