@@ -1,6 +1,6 @@
 {
   "_comment": "Context-budget ratchet ceilings (~tokens). Regenerate: bun test/helpers/capture-context-budget.ts. Headroom: alwaysOnTotal x1.05, eagerPerInvocation x1.1. Graded by test/context-budget-ratchet.test.ts via lib/context-bill.ts checkBudget.",
-  "alwaysOnTotal": 7769,
+  "alwaysOnTotal": 7880,
   "eagerPerInvocation": {
     "autoplan": 11289,
     "benchmark": 8043,
@@ -41,6 +41,7 @@
     "landing-report": 3269,
     "learn": 2931,
     "make-pdf": 5204,
+    "modernize": 3772,
     "office-hours": 19139,
     "open-gstack-browser": 4872,
     "openclaw/skills/gstack-openclaw-ceo-review": 2764,

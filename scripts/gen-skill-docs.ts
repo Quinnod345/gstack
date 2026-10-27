@@ -433,11 +433,28 @@ function condenseOpenAIShortDescription(description: string): string {
   return `${safe}...`;
 }
 
-function generateOpenAIYaml(displayName: string, shortDescription: string): string {
+/**
+ * The sentence Codex's skill picker inserts when a user chooses the skill.
+ * A template sets it with a `codex_default_prompt:` frontmatter key (one line,
+ * optionally quoted; `$<display name>` is Codex's own skill reference). Without
+ * the key the prompt is the generic fallback, so every skill keeps a valid entry.
+ */
+export function extractCodexDefaultPrompt(tmplContent: string): string | undefined {
+  const fmEnd = tmplContent.startsWith('---\n') ? tmplContent.indexOf('\n---', 4) : -1;
+  if (fmEnd === -1) return undefined;
+  const match = tmplContent.slice(4, fmEnd).match(/^codex_default_prompt:[ \t]*(.+?)[ \t]*$/m);
+  if (!match) return undefined;
+  const raw = match[1];
+  const quoted = raw.match(/^"(.*)"$/) || raw.match(/^'(.*)'$/);
+  const value = quoted ? quoted[1] : raw;
+  return value.length > 0 ? value : undefined;
+}
+
+export function generateOpenAIYaml(displayName: string, shortDescription: string, defaultPrompt?: string): string {
   return `interface:
   display_name: ${JSON.stringify(displayName)}
   short_description: ${JSON.stringify(shortDescription)}
-  default_prompt: ${JSON.stringify(`Use ${displayName} for this task.`)}
+  default_prompt: ${JSON.stringify(defaultPrompt ?? `Use ${displayName} for this task.`)}
 policy:
   allow_implicit_invocation: true
 `;
@@ -749,10 +766,11 @@ function processExternalHost(
   // section cross-references get the same per-host treatment as SKILL.md).
   result = applyHostRewrites(result, hostConfig);
 
-  // Config-driven: generate metadata (e.g., openai.yaml for Codex)
+  // Config-driven: generate metadata (e.g., openai.yaml for Codex). The
+  // default_prompt comes from the template's codex_default_prompt: key when set.
   const metadata = hostConfig.generation.generateMetadata && !symlinkLoop ? {
     outputPath: path.join(outputDir, 'agents', 'openai.yaml'),
-    content: generateOpenAIYaml(name, condenseOpenAIShortDescription(extractedDescription)),
+    content: generateOpenAIYaml(name, condenseOpenAIShortDescription(extractedDescription), extractCodexDefaultPrompt(tmplContent)),
   } : undefined;
 
   return { content: result, outputPath, symlinkLoop, metadata };

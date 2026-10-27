@@ -7,6 +7,7 @@ description: |
   boundary violations, conditional side effects, and other structural issues. Use when
   asked to "review this PR", "code review", "pre-landing review", or "check my diff".
   Proactively suggest when the user is about to merge or land code changes. (gstack)
+codex_default_prompt: "Use $gstack-review to review this diff against its base before it lands: find the bugs that pass CI and break in production, fix the clear ones, and list what remains."
 allowed-tools:
   - Bash
   - Read

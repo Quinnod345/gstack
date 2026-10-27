@@ -1,5 +1,5 @@
 import { describe, test, expect, afterAll } from 'bun:test';
-import { assertSinglePreamble } from '../scripts/gen-skill-docs';
+import { assertSinglePreamble, extractCodexDefaultPrompt, generateOpenAIYaml } from '../scripts/gen-skill-docs';
 import { validateSkillFrontmatter } from '../scripts/skill-check';
 import { externalHostPathLeaks } from './helpers/skill-parser';
 import { COMMAND_DESCRIPTIONS } from '../browse/src/commands';
@@ -2952,6 +2952,57 @@ describe('Codex generation (--host codex)', () => {
     }
   });
 
+  // A template's codex_default_prompt: key is the sentence Codex's picker
+  // inserts for the skill; without the key the generic fallback keeps every
+  // entry valid. The key is generator input only: no host render carries it.
+  // Value: protects=the new /modernize skill's picker prompt reaches its Codex render; fails_when=modernize's key is dropped, misquoted or unrendered; why_new=modernize-skill.test reads the template only; seam=none; no_claim=prompt wording quality
+  const CODEX_PROMPT_SKILLS = ['ship', 'review', 'qa', 'autoplan', 'office-hours', 'land-and-deploy', 'modernize'];
+  test('codex_default_prompt: in a template becomes that skill\'s default_prompt', () => {
+    for (const dir of CODEX_PROMPT_SKILLS) {
+      const tmpl = fs.readFileSync(path.join(ROOT, dir, 'SKILL.md.tmpl'), 'utf-8');
+      const prompt = extractCodexDefaultPrompt(tmpl);
+      expect(prompt, `${dir} declares codex_default_prompt`).toBeDefined();
+      expect(prompt!, dir).toContain(`$gstack-${dir}`);
+      expect(prompt!, `${dir}: a prompt tells the picker what the skill is for`).not.toBe(`Use gstack-${dir} for this task.`);
+      const yaml = Bun.YAML.parse(fs.readFileSync(path.join(AGENTS_DIR, `gstack-${dir}`, 'agents', 'openai.yaml'), 'utf-8')) as { interface: { default_prompt: string } };
+      expect(yaml.interface.default_prompt, dir).toBe(prompt!);
+    }
+  });
+
+  test('a template without codex_default_prompt: keeps the generic default_prompt', () => {
+    const tmpl = fs.readFileSync(path.join(ROOT, 'careful', 'SKILL.md.tmpl'), 'utf-8');
+    expect(extractCodexDefaultPrompt(tmpl)).toBeUndefined();
+    const yaml = Bun.YAML.parse(fs.readFileSync(path.join(AGENTS_DIR, 'gstack-careful', 'agents', 'openai.yaml'), 'utf-8')) as { interface: { default_prompt: string } };
+    expect(yaml.interface.default_prompt).toBe('Use gstack-careful for this task.');
+  });
+
+  test('extractCodexDefaultPrompt reads one quoted or plain line and nothing outside the frontmatter', () => {
+    const fm = (line: string) => `---\nname: x\n${line}\ndescription: d\n---\n\ncodex_default_prompt: "body text is not frontmatter"\n`;
+    expect(extractCodexDefaultPrompt(fm('codex_default_prompt: "Use $gstack-x to do \\"it\\"."'))).toBe('Use $gstack-x to do \\"it\\".');
+    expect(extractCodexDefaultPrompt(fm("codex_default_prompt: 'Use $gstack-x: quoted'"))).toBe('Use $gstack-x: quoted');
+    expect(extractCodexDefaultPrompt(fm('codex_default_prompt: Use $gstack-x plain  '))).toBe('Use $gstack-x plain');
+    expect(extractCodexDefaultPrompt(fm('codex_default_prompt:'))).toBeUndefined();
+    expect(extractCodexDefaultPrompt(fm('version: 1.0.0'))).toBeUndefined();
+    expect(extractCodexDefaultPrompt('no frontmatter\ncodex_default_prompt: "x"\n')).toBeUndefined();
+    const yaml = Bun.YAML.parse(generateOpenAIYaml('gstack-x', 'short', 'Use $gstack-x: "quoted" prompt')) as { interface: Record<string, string> };
+    expect(yaml.interface.default_prompt).toBe('Use $gstack-x: "quoted" prompt');
+    expect((Bun.YAML.parse(generateOpenAIYaml('gstack-x', 'short')) as { interface: Record<string, string> }).interface.default_prompt).toBe('Use gstack-x for this task.');
+  });
+
+  test('no host render carries codex_default_prompt: (generator input only)', () => {
+    for (const dir of CODEX_PROMPT_SKILLS) {
+      expect(fs.readFileSync(path.join(ROOT, dir, 'SKILL.md'), 'utf-8'), `claude ${dir}`).not.toContain('codex_default_prompt');
+      for (const host of fs.readdirSync(EXTERNAL_OUT)) {
+        const skillsDir = path.join(EXTERNAL_OUT, host, 'skills');
+        if (!fs.existsSync(skillsDir)) continue;
+        for (const name of fs.readdirSync(skillsDir)) {
+          const file = path.join(skillsDir, name, 'SKILL.md');
+          if (fs.existsSync(file)) expect(fs.readFileSync(file, 'utf-8'), `${host}/${name}`).not.toContain('codex_default_prompt');
+        }
+      }
+    }
+  });
+
   test('no .claude/skills/ in Codex output', () => {
     for (const skill of CODEX_SKILLS) {
       const content = readSkillStartup(path.join(AGENTS_DIR, skill.codexName, 'SKILL.md'));
@@ -4535,6 +4586,10 @@ describe('voice-triggers processing', () => {
     const genFm = generated.slice(0, generated.indexOf('\n---', 4));
     expect(genFm).not.toContain('interactive:');
     expect(genFm).not.toContain('benefits-from:');
+    const shipTmpl = fs.readFileSync(path.join(ROOT, 'ship', 'SKILL.md.tmpl'), 'utf-8');
+    expect(shipTmpl.slice(0, shipTmpl.indexOf('\n---', 4))).toContain('codex_default_prompt:');
+    const ship = fs.readFileSync(path.join(ROOT, 'ship', 'SKILL.md'), 'utf-8');
+    expect(ship.slice(0, ship.indexOf('\n---', 4))).not.toContain('codex_default_prompt:');
 
     // The runtime-read and host-read keys survive the strip.
     const investigate = fs.readFileSync(path.join(ROOT, 'investigate', 'SKILL.md'), 'utf-8');

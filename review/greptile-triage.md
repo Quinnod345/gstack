@@ -129,6 +129,8 @@ REPLY_FILE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.gstack/tmp/<rep
 credential: rewrite it without the value. Exit 2 (MEDIUM) prints `RULE:` lines and a
 `TOKEN:`: rewrite the reply, or ask the user and rerun the block with
 `--confirm <confirm-token>` added to the `gstack-post` command.
+When the owner wants agent-written replies labelled, add `--attribute "<model> on behalf of <login>"`
+to the same command: the reply then opens with a `> [!NOTE]` callout naming its author. Off unless asked.
 
 **If a reply POST fails** (e.g., PR was closed, no write permission): warn and continue. Do not stop the workflow for a failed reply.
 

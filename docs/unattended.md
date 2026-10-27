@@ -585,3 +585,45 @@ valid body, a missing model line is not. Self-review does not stand in for
 this. `decisions.jsonl` stays the typed record `gstack-artifact` validates; the
 trail is the plain one a person reads, and `column -s$'\t' -t decisions.tsv`
 renders it in a terminal.
+
+## What an unattended session may do
+
+A parent that starts a skill with `GSTACK_SESSION_KIND=unattended` grants it
+exactly this much, and the run asks for nothing beyond it. Anything outside the
+list is an approval item: appended to `decisions.jsonl` with `kind: "approval"`
+and `status: "pending"`, named in the handoff, never taken.
+
+- **Merge: never.** The run ends at a receipt bound to the pushed head
+  (`SHIP_RECEIPT`, [ship-policy.md#ship-before-ready](ship-policy.md#ship-before-ready))
+  or at a pending gate. Merging is the controller's act
+  ([captain.md](captain.md)); a green check list, an approval, or a prompt that
+  says "merge when green" does not move it to the lane. The same holds for
+  enabling auto-merge, adding the PR to a merge queue, or `gh pr ready` on a
+  PR the run did not open.
+- **Force-push: its own branch only, after a rebase the plan named, with a
+  pinned lease.** The branch is one the run created or was handed in its
+  prompt, never the base. The rebase is one the plan, the slot call or a
+  `/modernize` disposition names before it happens, not one the run decides
+  on its own; `git range-diff <old base>..<old head> <new base>..<new head>`
+  runs before the push and its output goes in the handoff. The push is
+  `git push --force-with-lease=<branch>:<sha observed before the rebase> origin <branch>`:
+  a bare `--force-with-lease` protects only against commits this clone never
+  fetched, and a plain `--force` is never allowed. A rejected lease means the
+  remote moved: fetch, read what landed, and start the disposition again.
+  `/ship` itself never rebases or force-pushes, and an unattended `/modernize`
+  stops at its verdict; this route is for a run whose plan or slot call named
+  the rebase before it started.
+- **Tests: the methods the repository's instructions name, without asking
+  first.** AGENTS.md or CLAUDE.md, the named Setup commands, `package.json`
+  scripts and the pregate configuration define the set; running one of them
+  needs no question. A method outside the set (a framework the repo does not
+  use, paid work past the stated cap, anything that touches a shared or
+  production system, a test that writes outside the checkout) is pending.
+- **Proof is what the run saw itself.** Command output, a test that failed
+  before the fix and passes after it, a screenshot, a file read in this
+  session. A handoff note, an earlier PR comment or a parent's summary is
+  context to recheck, not evidence; the handoff says which claims were
+  rechecked and which were not.
+
+`/ship`'s handoff section (`ship/sections/handoff.md`) points here, so a lane
+reads the grant where it reports done.

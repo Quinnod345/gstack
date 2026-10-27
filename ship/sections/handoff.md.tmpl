@@ -1,7 +1,8 @@
 ## Step 18-H: Handoff without a PR (automation lanes)
 
 Replaces the pr-body section when the run must not open a PR (`--no-pr`, an
-automation lane, an unattended parent said so). Nothing here publishes.
+automation lane, an unattended parent said so). Nothing here publishes. What an
+unattended run may do is docs/unattended.md#what-an-unattended-session-may-do.
 
 1. Verify-only checks: write Step 16's per-lane pass/fail/skip counts, naming
    `requires-remote` lanes, to `.gstack/tmp/ship-gate.json` as the pr-body
