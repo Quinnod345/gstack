@@ -5488,3 +5488,21 @@ Garry for each; revisit 2026-10-29 unless a date says otherwise.
   `test/setup-codex-scope-namespaces.test.ts` are next. Split
   each by describe block, rerun `bun run test:ubicloud --record-durations` and
   delete the entries. **Effort:** S each. **Priority:** P2.
+
+## /write-skill follow-ups (filed via /autoplan on GSTA-133, 2026-10-27)
+
+- **P2 — learnings.jsonl has no writer lock.** `gstack-learnings-log` appends with a plain `>>` and
+  `browse/src/domain-skills.ts` appends to the same file, while /learn's Prune deletes lines by rewriting it; a line
+  appended between the read and the write is lost (`bin/gstack-brain-sync` documents the same race). Fix: one
+  mkdir-style lock (as in `bin/gstack-brain-lock.sh`; macOS has no flock) taken by every writer, a removal command in
+  `gstack-learnings-log` that re-stats before its rename and copies non-matching lines byte for byte
+  (`lib/fs-atomic.ts`), and a test that appends during a removal.
+- **P2 — brain-sync resurrects removed learnings.** The `gstack-jsonl-merge` driver registered for `*.jsonl`
+  concatenates base, ours and theirs, so a row removed on one machine returns on the next merge. Needs a removal
+  marker that the merge driver and every raw reader (qa-only resolver, investigate and retro context,
+  `gstack-memory-ingest`, `gstack-brain-cache`, `gstack-skill-start`) honour. Relayed to GBrain Minder.
+- **P3 — next diet target.** Rank skills by invocations × eager tokens (context-budget.json), not by size alone; take
+  GSTA-134's pilot reports into account. /retro (41 KB template) is the largest outside GSTA-134's three.
+- **P3 — move the /learn eval onto the shared skill eval** (`docs/designs/SKILL_EVAL_CONTRACT.md`) once GSTA-2 ships it,
+  and drop the interim upstream `eval.mjs` path from `write-skill/references/diet.md`.
+

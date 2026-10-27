@@ -683,6 +683,7 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
   'cso-infra-scope':  ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'cso/**', 'lib/cso/**', 'lib/redact-engine.ts', 'lib/redact-patterns.ts',   'test/skill-e2e-cso.test.ts'],
 
   // Learnings
+  'write-skill-add-lesson': ['write-skill/**', 'bin/gstack-skill-bill', 'lib/skill-bill.ts', 'lib/context-bill.ts', 'test/skill-e2e-write-skill.test.ts'],
   'learnings-show': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'learn/**', 'bin/gstack-learnings-search', 'bin/gstack-learnings-log', 'scripts/resolvers/learnings.ts', 'test/skill-e2e-learnings.test.ts'],
   // W1 safety-rule evals (test/helpers/safety-rules.ts registry; E3).
   'safety-design-risk-stop': ['design-review/**', 'scripts/resolvers/browse.ts', 'scripts/resolvers/testing.ts', 'lib/aside-render.ts', 'test/skill-e2e-safety-design-risk.test.ts', 'test/helpers/browser-available.ts', 'test/helpers/aside-available.ts', 'test/helpers/safety-rules.ts', 'test/helpers/skill-fixture.ts', 'test/helpers/llm-judge.ts'],
@@ -1434,6 +1435,7 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
 
   // Learnings — gate (functional guardrail: seeded learnings must appear)
   'learnings-show': 'gate',
+  'write-skill-add-lesson': 'periodic',
   // W1 safety-rule evals.
   'safety-design-risk-stop': 'periodic',
   'safety-codex-boundary': 'periodic',
@@ -1855,6 +1857,7 @@ export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
   'cso-diff-mode': 'rule',
   'cso-infra-scope': 'rule',
   'learnings-show': 'rule',
+  'write-skill-add-lesson': 'rule',
   // W1 safety-rule evals.
   'safety-design-risk-stop': 'rule',
   'safety-codex-boundary': 'rule',
