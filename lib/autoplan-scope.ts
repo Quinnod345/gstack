@@ -7,8 +7,12 @@
  * file, or a UI term next to a visual noun. Bare UI words are weak evidence:
  * they keep the runner's conservative section fallback but do not add the
  * Design phase. The scope marker is the author's way to pin flags in the plan
- * itself; it is read, never written.
+ * itself; it is read, never written. `detectDocsOnly` classifies the paths
+ * the Implementation plan names: a plan that touches only markdown no agent
+ * or gate consumes is docs-only (CEO + Eng, outside voice on Eng only).
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export const UI_TERMS = ['component', 'screen', 'form', 'button', 'modal', 'layout', 'dashboard', 'sidebar', 'nav', 'dialog'] as const;
 export const VISUAL_NOUNS = ['page', 'layout', 'style', 'pixel', 'view', 'browser', 'css'] as const;
@@ -44,13 +48,35 @@ export function detectUiScope(implementationPlan: string): UiScope {
   return { uiRequired: files.length > 0 || visual.length > 0, uiMatches: terms.reduce((s, t) => s + t.count, 0), uiEvidence: { terms, visual: [...new Set(visual)], files } };
 }
 
-export interface ScopeFlags { ui?: boolean; developerTool?: boolean; agentPrimary?: boolean; dx?: boolean }
-export const SCOPE_FLAG_TOKENS = ['--ui', '--no-ui', '--no-dx', '--developer-tool', '--agent-primary'] as const;
+/** Markdown an agent or a gate reads is code: skill prose and its sections, resolvers, DRIVER and template prose, policy docs, agent instructions. */
+const CODE_MARKDOWN = [/(?:^|\/)SKILL\.md/i, /(?:^|\/)sections\//, /(?:^|\/)scripts\/resolvers\//, /(?:^|\/)DRIVER[^/]*$/, /\.tmpl$/, /(?:^|\/)templates?\//, /^docs\/[^/]*-policy\.md$/, /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i];
+
+/** Docs-class: README*, CHANGELOG*, TODOS*, docs/** and *.md outside a skill directory (one holding SKILL.md or SKILL.md.tmpl under `root`). */
+export function docsClassPath(file: string, root: string): boolean {
+  const p = file.replace(/^\.\//, '');
+  if (CODE_MARKDOWN.some(re => re.test(p))) return false;
+  if (/^(?:README|CHANGELOG|TODOS)/i.test(path.basename(p)) || p.startsWith('docs/')) return true;
+  if (!/\.md$/i.test(p)) return false;
+  const top = p.includes('/') ? p.split('/')[0]! : '';
+  return !top || !['SKILL.md', 'SKILL.md.tmpl'].some(f => fs.existsSync(path.join(root, top, f)));
+}
+
+export interface DocsOnlyScope { docsOnly: boolean; paths: string[]; code: string[] }
+/** Docs-only when the Implementation plan names at least one path and every one is docs-class; unsure means not docs-only. */
+export function detectDocsOnly(implementationPlan: string, root: string): DocsOnlyScope {
+  const paths = [...new Set([...implementationPlan.matchAll(/[\w@~$.\/*-]+/g)].map(m => m[0].replace(/[.\-]+$/, ''))
+    .filter(t => !/^[a-z]+:\/\//i.test(t) && t.length > 1 && (t.includes('/') || /\.[a-z][a-z0-9]*$/i.test(t))))];
+  const code = paths.filter(p => !docsClassPath(p, root));
+  return { docsOnly: paths.length > 0 && code.length === 0, paths, code };
+}
+
+export interface ScopeFlags { ui?: boolean; developerTool?: boolean; agentPrimary?: boolean; dx?: boolean; docsOnly?: boolean }
+export const SCOPE_FLAG_TOKENS = ['--ui', '--no-ui', '--no-dx', '--developer-tool', '--agent-primary', '--docs-only'] as const;
 const MARKER_RE = /^<!--\s*gstack-autoplan-scope:(.*?)-->\s*$/;
 
 export function scopeTokens(f: ScopeFlags): string[] {
   return [...(f.ui === true ? ['--ui'] : f.ui === false ? ['--no-ui'] : []), ...(f.dx === false ? ['--no-dx'] : []),
-    ...(f.developerTool ? ['--developer-tool'] : []), ...(f.agentPrimary ? ['--agent-primary'] : [])];
+    ...(f.developerTool ? ['--developer-tool'] : []), ...(f.agentPrimary ? ['--agent-primary'] : []), ...(f.docsOnly ? ['--docs-only'] : [])];
 }
 
 export function parseScopeTokens(tokens: readonly string[], where: string): ScopeFlags {
@@ -62,6 +88,7 @@ export function parseScopeTokens(tokens: readonly string[], where: string): Scop
     ...(tokens.includes('--no-dx') ? { dx: false } : {}),
     ...(tokens.includes('--developer-tool') ? { developerTool: true } : {}),
     ...(tokens.includes('--agent-primary') ? { agentPrimary: true } : {}),
+    ...(tokens.includes('--docs-only') ? { docsOnly: true } : {}),
   };
 }
 

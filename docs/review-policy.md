@@ -87,21 +87,76 @@ incomplete coverage, which blocks until the reviewer is rerun.
    (the changed line behind a defect reported elsewhere, a deleted file included)
    places it in the diff.
    Below-floor findings outside the diff are `note`, listed under `## Review notes`.
-2. **Pass 2 and later review only the range since the previous pass.** Each pass
-   saves its head; the next pass diffs `RANGE_BASE..HEAD` for every reviewer (the
-   gate scan and QA probes keep the whole candidate) and classifies with
-   `--range-base`. Only a blocking finding in that range or in the diff is `fix`;
-   every below-floor finding is a `note`. A finding the diff causes in code it did
-   not change names the changed line in `cause`, and the locus follows it.
-3. **Three passes is the cap.** A pass that applies no edits is the exit: the
-   PR ships with its deferred and noted items named in the body. A blocking
-   finding still in `fix` scope on pass 3 stops the run and names the finding
-   (path, severity, problem) for the owner; a fourth pass is the owner's call,
-   never the loop's.
+2. **What comes next is the transition table below**, not "any fix earns
+   another pass". A full pass after pass 1 reviews only the range since the
+   previous pass: each pass saves its head, the next diffs `RANGE_BASE..HEAD`
+   for every reviewer (the gate scan and QA probes keep the whole candidate) and
+   classifies with `--range-base`. Only a blocking finding in that range or in
+   the diff is `fix`; every below-floor finding is a `note`.
+3. **Two full passes is the cap**, plus at most one fix-check. A blocking
+   finding still open after the last allowed step stops the run and names the
+   finding (path, severity, problem) for the owner; a third full pass is the
+   owner's call, never the loop's. The cap approves nothing.
 
-The same floor and the same `NO FINDINGS` rule apply to `/review` on its own;
-its re-review loop keeps its three-cycle fix cap (`CYCLES`), and a pass that
-applies no edits is its exit too.
+<a id="transitions"></a>
+### Transitions
+
+`gstack-review-plan` (`lib/review-depth.ts` `nextStep`) owns this table, and
+/ship asks it after every step:
+
+| The step that just finished | Next |
+|---|---|
+| none | full pass 1 on the whole diff |
+| a full pass with no edits | done |
+| a full pass that fixed a blocking finding, below the cap | full pass on the range |
+| a full pass whose fix touched a gate-class path, below the cap | full pass on the range |
+| a full pass that fixed only below-floor findings | one fix-check |
+| a full pass at the cap that fixed a blocking finding | one fix-check (full effort when the fix touched gate code) |
+| a full pass at the cap, or with no fix, leaving a blocking finding open | stop: name it for the owner |
+| a fix-check that found nothing blocking | done |
+| a fix-check that found a blocking finding | stop: name it for the owner |
+
+A **fix-check** is one reviewer reading the touched hunks, the fix list, the
+test results and the callers of every changed symbol, at light effort. It is
+logged as a `review-fix-check` row, so it never counts as a pass. No army, no
+Red Team and no outside voice run on it.
+
+<a id="review-depth"></a>
+## Review depth by diff class
+
+`gstack-review-plan --base <base>` classifies the diff and prints the reviewers
+the next step dispatches (`REVIEW_CLASS:`, `REVIEW_PLAN:`, one `DISPATCH:` per
+reviewer with its effort, one `SKIP:` per reviewer left out, `--json`). A mixed
+diff takes its most restrictive class; a `gstack-diff-scope` error fails closed
+to code, and code with the gate scan unavailable fails closed to gate.
+
+| Class | What it is | Pass 1 dispatches |
+|---|---|---|
+| **docs** | markdown no agent or gate reads: README, CHANGELOG, TODOS, how-to and explanation docs | the parent's core checklist only |
+| **tests** | test files and fixtures only | core plus the testing specialist |
+| **code** | everything else, including every `SKILL.md` and template, `*/sections/**`, `scripts/resolvers/**`, `docs/*-policy.md`, checklists, specialists and bins | specialists by scope (as before), the native adversarial pass, the outside voice; the Red Team past 200 lines or after a CRITICAL |
+| **gate** | code plus auth or migration scope, a hunk the gate scan tags (an RH rule: a relaxed threshold, a skipped test), a deleted code file, CI workflows, credential or state-root paths | code's set, plus the Red Team always, at full effort, and no hit-rate gating |
+
+**Numbers keep the outside voice.** On a docs or tests diff the outside voice is
+skipped unless the diff publishes numeric claims: `gstack-review-plan` scans the
+added lines of every path for percentages, money, multipliers, durations, token
+or credit counts and score, rate or speed claims (`NUMBERS: yes`), and a
+claim always dispatches it. The claims' fingerprint (`fingerprint=`) is passed
+back as `--reviewed-numbers`; when a later fix changes a claim, only the
+outside voice reruns, on the numbers.
+
+**The adversarial and outside voices run once**, on pass 1's diff (Step 11).
+Later full passes rerun the specialists on the range only.
+
+**Effort tiers.** Reviewers that only read and report (specialists, the Step 7
+coverage audit, the Step 8 plan-completion audit, the Step 14.5 docs audit,
+fix-checks, decision-trail reviewers, watchers) run at `effort: light`: the
+same model at a lower reasoning effort, never a cheaper model family. The core
+checklist, the Red Team and the native adversarial pass stay at `full`. The
+outside voice keeps its own provider and effort (`codex_effort`). A host that
+cannot set a subagent's effort runs it at its default.
+`gstack-config set review_effort_tiers off` (or `--no-tiers`) renders every
+role at the host default ([model-policy.md](model-policy.md#reasoning-effort)).
 
 ## What the receipt records
 
@@ -111,15 +166,24 @@ puts in the receipt:
 
 | Field | Meaning |
 |---|---|
-| `review_loop.passes` | review passes this ship ran (1 to 3) |
+| `review_loop.passes` | full review passes this ship ran (1 or 2; up to 3 under `review_scope: all`) |
 | `review_loop.blocking_found` | distinct blocking findings across the passes |
 | `review_loop.deferred` | blocking findings in unchanged code filed as issues (a Step 11 late defer, logged as a `review-late-defer` row so it never displaces the newest `review` pass, counts here and is not a pass) |
 | `review_loop.noted` | below-floor findings listed in the PR body |
 | `review_loop.fixed` | findings fixed in this PR |
 | `review_loop.scope` | the `review_scope` the loop ran under |
+| `review_loop.fix_checks` | fix-checks this ship ran (never passes) |
+| `review_loop.dispatches` | reviewer dispatches by role: `specialist`, `red-team`, `adversarial-native`, `outside-voice`, `fix-check` |
+| `review_loop.est_input_tokens` | prompt plus diff bytes the dispatches read, divided by 4: a relative estimate for comparing runs, not a bill |
+
+Each review row may carry `dispatches: [{role, effort, prompt_bytes,
+diff_bytes, status}]`; `summary` adds them up (older rows fall back to the
+specialist stats they record). The summary line appends `fix_checks=`,
+`dispatches=` and `est_input_tokens=` only when they were recorded, so an old
+loop prints the old line.
 
 The receipt's summary line prints `passes=<n> blocking_found=<k> deferred=<m>`,
-which is what a scorecard tracks (target: a median of 2 passes per PR). A
+which is what a scorecard tracks (target: a median of 1 pass per PR). A
 receipt carried across a base merge or a test-only fix
 ([ship-policy.md#receipt-carry](ship-policy.md#receipt-carry)) keeps these
 counters, because the reviewed product diff is unchanged.
@@ -130,8 +194,8 @@ counters, because the reviewed product diff is unchanged.
 
 | Value | Pass 1 | Blocking finding in unchanged code | Pass 2+ | Cap |
 |---|---|---|---|---|
-| `frozen` (default) | the diff | filed as an issue, listed as deferred | the range since the previous pass, blocking only | 3 passes |
-| `diff-plus-blocking` | the diff | fixed in this PR | the range since the previous pass, blocking only | 3 passes |
+| `frozen` (default) | the diff | filed as an issue, listed as deferred | the range since the previous pass, blocking only | 2 full passes + 1 fix-check |
+| `diff-plus-blocking` | the diff | fixed in this PR | the range since the previous pass, blocking only | 2 full passes + 1 fix-check |
 | `all` | everything | fixed in this PR | the whole diff, every finding | 3 fix cycles |
 
 `diff-plus-blocking` is the fallback for a repository where deferred issues pile
@@ -198,7 +262,8 @@ trailers, appended }`.
 
 - `scripts/resolvers/review-army.ts`: the floor and `NO FINDINGS` in every specialist and Red Team prompt (rendered into `review/sections/review-army.md` and `ship/sections/review-army.md`), and the lead judgment's "On record" line that turns a [ruled class](#rulings-below-the-floor) into a note; in `/ship` every specialist and Red Team prompt it renders carries its diff base as a literal sha the parent writes in (`DIFF_BASE=<diff-base>`: the merge base on pass 1, `RANGE_BASE` from pass 2 on), because a reviewer is its own process and never sees the parent's shell variables; the fan-out batches above.
 - `ship/sections/review-army.md` Step 9: passes, `RANGE_BASE`, classify, defer, render, the cap check before any edit, the Step 11 late-defer row, scratch files under `.gstack/tmp/`, the cap decisions; `ship/sections/adversarial.md` Step 11: the outside voice reads the same range and scopes queued fixes the same way.
-- `lib/review-scope.ts`, `bin/gstack-review-scope`: `classify`, `defer`, `render`, `summary`; refusals are `REVIEW_SCOPE_INPUT` and `REVIEW_SCOPE_RANGE` ([troubleshooting.md](troubleshooting.md#review-scope-input)).
+- `lib/review-depth.ts`, `bin/gstack-review-plan`: the diff class, the transition table, the numeric-claim scan and each role's effort tier (`test/review-depth.test.ts`, `test/review-plan-cli.test.ts`).
+- `lib/review-scope.ts`, `bin/gstack-review-scope`: `classify`, `defer`, `render`, `summary` (with `fix_checks`, `dispatches`, `est_input_tokens`); refusals are `REVIEW_SCOPE_INPUT` and `REVIEW_SCOPE_RANGE` ([troubleshooting.md](troubleshooting.md#review-scope-input)).
 - `lib/ship-policy.ts`: the `review_scope` key and its `ship: review_scope …` consequence line.
 - `review/checklist.md`: `prereg-with-results` under Gate Integrity and `test-keyboard-count-loop` under Pass 2; `bin/gstack-coauthor-trailers` for the contributor-credit trailers of a port.
 - `lib/ship-receipt-prose.ts`, `gstack-ship-receipt read --check-prose`: the body's quoted counters against the receipt (`RECEIPT_PROSE_MISMATCH`, [ship-policy.md](ship-policy.md#ship-receipt)).

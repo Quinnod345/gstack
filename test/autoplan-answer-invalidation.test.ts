@@ -19,8 +19,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'autoplan-answer-'));
 afterAll(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 /** A gated run with a disagreement in ceo (taste item d1) and the fixture's user challenges (uc1 ceo, uc2 eng). */
-function gatedRun(name: string): string {
-  const out = startSmallRun(path.join(TMP, name));
+function gatedRun(name: string, extra: string[] = []): string {
+  const out = startSmallRun(path.join(TMP, name), extra);
   const disagree = JSON.stringify([
     { id: 'O1', severity: 'Low', title: 'The install check lies by omission', file: 'bin/gstack-doctor', line: 12, fix: 'minor' },
     { id: 'O2', severity: 'High', title: 'Gate reuse on tree equality alone is unsound', file: 'lib/tree-receipt.ts', line: 3 },
@@ -166,7 +166,7 @@ describe('answer', () => {
   }, 30_000);
 
   test('an eng-only override reopens nothing at answer; revise reruns every phase that reviewed the old plan; p1d reopens every phase; p1c keeps the gate; p1e ends incomplete', () => {
-    const out = gatedRun('eng-only');
+    const out = gatedRun('eng-only', ['--max-rounds', '3']);
     const engOnly = autoplan(['answer', '--by', 'human', '--out', out, '--gate-rev', '1', '--reply', 'all except uc2b', '--json']);
     const runId = readRun(out).run;
     expect(JSON.parse(engOnly.stdout)).toMatchObject({ outcome: 'amend_pending', reopened: [], amendments: [`${runId}-uc2`] });

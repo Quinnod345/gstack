@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { bunIsolationArgs } from './bun-isolation';
-import { readScopeMarker, scopeMarker, scopeTokens, type ScopeFlags, type UiEvidence } from './autoplan-scope';
+import { detectDocsOnly, readScopeMarker, scopeMarker, scopeTokens, type ScopeFlags, type UiEvidence } from './autoplan-scope';
 import { COORDINATOR_CONTRACT } from './coordinator-contract';
 import { capyBootstrapCommand } from './doctor-components';
 import { DX_ERROR_COMPACT } from './dx-error-contract';
@@ -39,6 +39,8 @@ export interface Scope {
   pin?: { marker: string; file: string } | null;
   /** Runs created before per-axis provenance. */
   source?: 'detected' | 'flags';
+  /** A docs-only plan runs CEO (native voice only) and Eng; `--docs-only`, the marker, or every Implementation-plan path docs-class. */
+  docs_only?: boolean; docs_only_source?: ScopeSource;
 }
 
 export function snapshotTool(args: string[], cwd: string): any {
@@ -61,13 +63,19 @@ export function detectScope(activePlan: string, cwd: string, flags: ScopeFlags, 
   const dxSource: ScopeSource = flags.dx !== undefined ? 'flag' : m.dx !== undefined ? 'marker'
     : flags.developerTool || flags.agentPrimary ? 'flag' : m.developerTool || m.agentPrimary ? 'marker' : 'detected';
   const cli = scopeTokens(flags);
-  const merged = scopeTokens({ ui: flags.ui ?? m.ui, dx: flags.dx ?? m.dx, developerTool, agentPrimary });
+  const merged = scopeTokens({ ui: flags.ui ?? m.ui, dx: flags.dx ?? m.dx, developerTool, agentPrimary, docsOnly: !!(flags.docsOnly || m.docsOnly) });
   const pinned = !cli.length || (marker !== null && [...merged].sort().join(' ') === [...marker.tokens].sort().join(' '));
+  // A flag or marker that turns a phase on outranks docs-only detection; --docs-only itself outranks everything.
+  const enables = flags.ui === true || m.ui === true || developerTool || agentPrimary;
+  const planText = fs.readFileSync(activePlan, 'utf8');
+  const docsOnlySource: ScopeSource = flags.docsOnly ? 'flag' : m.docsOnly ? 'marker' : 'detected';
+  const docsOnly = !!(flags.docsOnly || m.docsOnly) || (!enables && detectDocsOnly(extractHeading(planText, 'Implementation plan') ?? planText, cwd).docsOnly);
   return {
     ui: flags.ui ?? m.ui ?? detected.uiRequired, dx: flags.dx ?? m.dx ?? detected.dxRequired,
     ui_matches: detected.uiMatches, dx_matches: detected.matchCount, developer_tool: developerTool, agent_primary: agentPrimary,
     sources: { ui: flags.ui !== undefined ? 'flag' : m.ui !== undefined ? 'marker' : 'detected', dx: dxSource }, ui_evidence: detected.uiEvidence, dx_terms: detected.matches,
     cli_flags: cli, marker: marker?.tokens ?? null, pin: pinned ? null : { marker: scopeMarker(merged), file: sourcePlan },
+    docs_only: docsOnly, docs_only_source: docsOnlySource,
   };
 }
 
@@ -85,12 +93,12 @@ export function scopeLines(scope: Scope): string[] {
   const ev = scope.ui_evidence;
   const ui = `ui=${scope.ui ? 'yes' : 'no'} (terms: ${list(ev?.terms)}; visual: ${ev?.visual.length ? ev.visual.join(', ') : 'none'}; files: ${ev?.files.length ? ev.files.join(', ') : 'none'})`;
   const dx = `dx=${scope.dx ? 'yes' : 'no'} (detected: ${list(scope.dx_terms)}${scope.developer_tool ? '; developer tool' : ''}${scope.agent_primary ? '; agent primary' : ''})`;
-  const lines = [`SCOPE: ${ui} ${dx} source=${scopeSourceLabel(scope)}`];
+  const lines = [`SCOPE: ${ui} ${dx} docs_only=${scope.docs_only ? 'yes' : 'no'} (${scope.docs_only_source ?? 'detected'}) source=${scopeSourceLabel(scope)}`];
   if (scope.pin) lines.push(`SCOPE_PIN: add ${scope.pin.marker} as the first line of ${scope.pin.file} to keep these flags`);
   return lines;
 }
 export function phaseOrder(scope: Scope): Phase[] {
-  return PHASES.filter(p => (p === 'design' ? scope.ui : p === 'dx' ? scope.dx : true));
+  return PHASES.filter(p => (p === 'design' ? scope.ui && !scope.docs_only : p === 'dx' ? scope.dx && !scope.docs_only : true));
 }
 
 /** Extract `## <heading>` … next same-level heading, for repos whose plans use a custom heading. */

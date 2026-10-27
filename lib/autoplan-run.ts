@@ -109,7 +109,7 @@ export function initRun(o: InitOptions, lines: string[] = []): RunState {
   const consentMissing = consent && !consent.allowed ? consent.lines[0] : undefined;
   const sessionKind = o.sessionKind ?? process.env.GSTACK_SESSION_KIND ?? 'unattended';
   const phases: Record<string, PhaseState> = {};
-  for (const p of PHASES) if (!order.includes(p)) phases[p] = { skipped: p === 'design' ? 'no UI scope detected' : 'no developer-facing scope detected', native: { status: 'skipped' }, outside: { status: 'skipped' } };
+  for (const p of PHASES) if (!order.includes(p)) phases[p] = { skipped: scope.docs_only ? 'docs-only plan' : p === 'design' ? 'no UI scope detected' : 'no developer-facing scope detected', native: { status: 'skipped' }, outside: { status: 'skipped' } };
   const state: RunState = {
     schema_version: 1, run, status: 'running', required_phases: order, phases, artifacts: {}, revision: 0, out,
     plan_source: init.sourcePlan, active_plan: init.activePlan, restore: init.restorePath, scope, phase_order: order,
@@ -169,7 +169,8 @@ function openPhase(state: RunState, phase: Phase, cwd: string): void {
   ps.sections = { loaded: sections.loaded, skipped: sections.skipped, checklist: !!sections.checklist };
   ps.native = { status: 'pending', attempts: [] };
   const notRun = state.outside_not_run as { reason: string; detail: string } | undefined;
-  ps.outside = state.outside_enabled ? { status: 'pending', attempts: [] }
+  ps.outside = phase === 'ceo' && state.scope.docs_only ? { status: 'disabled', outcome: 'not_run', reason: 'docs_only', detail: 'docs-only plan: CEO runs the native voice only; Eng keeps both voices' }
+    : state.outside_enabled ? { status: 'pending', attempts: [] }
     : notRun ? { status: 'disabled', outcome: 'not_run', reason: notRun.reason, detail: notRun.detail } : { status: 'disabled' };
   ps.prompts = prompts;
   journal(state.out, { event: 'phase_opened', phase, snapshot: snap.sha256, prompts: Object.fromEntries(Object.entries(prompts).map(([k, p]) => [k, path.relative(state.out, p)])) });
@@ -202,6 +203,7 @@ export function nextStep(o: NextOptions): NextResult {
   if (drift) lines.push(drift);
   if (first) lines.push(...scopeLines(state.scope), `DRIVER: ${driverFile()}`);
   if (ps.outside?.reason === 'consent_missing') lines.push(`OUTSIDE: ${phase} not_run reason=consent_missing`, String(ps.outside.detail));
+  if (ps.outside?.reason === 'docs_only') lines.push(`OUTSIDE: ${phase} not_run reason=docs_only (native voice only)`);
   if (ps.sections) lines.push(`Skipped sections: ${ps.sections.skipped.length ? ps.sections.skipped.join(',') : 'none'} (scope: ui=${state.scope.ui ? 'yes' : 'no'},dx=${state.scope.dx ? 'yes' : 'no'},source=${scopeSourceLabel(state.scope)}; checklist=${ps.sections.checklist ? 'loaded' : 'none'})`);
   const prompts = ps.prompts!;
   const estimate = attemptEstimate(state, o.estimateUsd, process.env);
@@ -231,7 +233,7 @@ export function nextStep(o: NextOptions): NextResult {
     catch (e: any) { if (e.code === 'SPEND_CAP_EXCEEDED') { state.attempt_counter--; writeState(state); throw new RunError('SPEND_CAP_EXCEEDED', e.message, 3); } throw e; }
     const row: AttemptState = { attempt, state: 'dispatched', prompt: prompts[voice], result: path.join(state.out, attemptFile(phase, voice, attempt.slice(state.run.length + 1), 'md')), estimate_usd: estimate.usd, dispatched_at: now() };
     bindPromptResult(row.prompt, row.result);
-    journal(state.out, { event: 'dispatched', attempt, phase, voice, snapshot: ps.snapshot, prompt: path.relative(state.out, row.prompt), prompt_sha256: sha256File(row.prompt), result: path.relative(state.out, row.result), estimate_usd: estimate.usd });
+    journal(state.out, { event: 'dispatched', attempt, phase, voice, snapshot: ps.snapshot, prompt: path.relative(state.out, row.prompt), prompt_sha256: sha256File(row.prompt), prompt_bytes: fs.statSync(row.prompt).size, result: path.relative(state.out, row.result), estimate_usd: estimate.usd });
     (v.attempts ??= []).push(row);
     v.attempt = attempt; v.status = 'running';
     result.attempts.push({ attempt, voice, prompt: row.prompt, result: row.result, model_family: familyHint(state, voice), new: true });

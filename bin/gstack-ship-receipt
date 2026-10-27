@@ -12,7 +12,7 @@
  *   gstack-ship-receipt read --body <file> [--json]
  *   gstack-ship-receipt result (--pr <n> [--repo <owner/repo>] | --body <file>) [--head <sha>] [--out <dir>] [--json]
  *   gstack-ship-receipt census --repo <owner/repo> --since <tag|YYYY-MM-DD> [--cohort <file>] [--limit <n>] [--json]
- *   gstack-ship-receipt carry (--pr <n> [--repo <owner/repo>] | --body <file>) [--base <ref>] [--head <sha>] [--dry-run] [--out <dir>] [--json]
+ *   gstack-ship-receipt carry (--pr <n> [--repo <owner/repo>] | --body <file>) [--base <ref>] [--head <sha>] [--pregate <pregate.json>] [--dry-run] [--out <dir>] [--json]
  *   gstack-ship-receipt docs-caps [--base <ref>] [--policy <ship-policy.json>] [--json]
  *
  * `write` validates against `gstack-artifact schema ship-receipt`, prints the
@@ -60,11 +60,12 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
                                       GSTACK_RESULT: skill=ship status=complete run=<dir> (refused: status=refused run=-)
   census --repo <r> --since <tag|date> [--cohort <file>]
                                       the P7 adoption number over merged PRs (deduplicated by run and thread)
-  carry --pr <n> [--repo <r>] | --body <file> [--base <ref>] [--head <sha>] [--dry-run] [--out <dir>]
+  carry --pr <n> [--repo <r>] | --body <file> [--base <ref>] [--head <sha>] [--pregate <pregate.json>] [--dry-run] [--out <dir>]
                                       carry the receipt to HEAD when only a base merge, tests or release metadata changed
                                       since its head (product patch-id unchanged): rewrites the receipt with a \`carry\` record,
                                       posts the body (gh pr edit) and prints GSTACK_RESULT: skill=ship status=complete;
                                       RECEIPT_CARRY_PRODUCT_CHANGED / RECEIPT_CARRY_REFUSED leave the body unchanged (exit 3);
+                                      a receipt that records a pregate needs --pregate current for HEAD (RECEIPT_CARRY_PREGATE_STALE);
                                       needs git >= 2.39 (RECEIPT_GIT_TOO_OLD)
   docs-caps [--base <ref>]            /ship Step 14.5: one DOCS_CAP: <path> <bytes>/<max> ok|over line per docs.caps entry of the
                                       reviewed policy (origin/<base>'s .gstack/ship-policy.json; --policy <file> reads that file
@@ -144,18 +145,12 @@ function cmdWrite(rest: string[], json: boolean): number {
     const r = spawnSync(path.join(path.dirname(Bun.fileURLToPath(import.meta.url)), 'gstack-session-kind'), [], { encoding: 'utf8', timeout: 15_000 });
     sessionKind = r.status === 0 ? r.stdout.trim() || undefined : undefined;
   }
-  let pregate: { pregate: string; requires_remote?: string[] } | undefined;
+  let pregate: PregateField | undefined;
   const pregateFile = flag(rest, '--pregate');
   if (pregateFile) {
-    const read = readPregateFile(pregateFile);
-    if (!read.file) {
-      for (const e of read.errors) process.stderr.write(resultLine('gstack-ship-receipt write', e.code, `${e.message} at ${e.path}`) + '\n');
-      return EXIT.fail;
-    }
-    const v = verifyPregate(repoRoot, read.file);
-    if (!v.ok) { process.stderr.write(resultLine('gstack-ship-receipt write', v.code!, `${v.message}; nothing written`) + '\n'); return EXIT.fail; }
-    const remote = read.file.requires_remote ?? [];
-    pregate = { pregate: `${read.file.verdict ?? 'pass'} @${read.file.tree.slice(0, 12)} (${read.file.checks.length} checks, current for ${head.slice(0, 12)})`, requires_remote: remote.length ? remote.map(r => `${r.lane}: ${r.receipt}`) : undefined };
+    const read = pregateFieldFor(repoRoot, pregateFile, head);
+    if (!read.ok) { for (const e of read.errors) process.stderr.write(resultLine('gstack-ship-receipt write', e.code, `${e.message}; nothing written`) + '\n'); return EXIT.fail; }
+    pregate = read.field;
   }
   const base = flag(rest, '--base') ?? resolveBaseBranch(repoRoot);
   const bodyFile = flag(rest, '--body');
@@ -369,6 +364,17 @@ function gitVersionBelow(repoRoot: string, minimum: string): string | null {
  * receipt's head and at HEAD by patch-id, classifies every changed path, and
  * records the range-diff as evidence in the receipt it rewrites.
  */
+type PregateField = { pregate: string; requires_remote?: string[] };
+/** A pregate result file → the receipt's pregate field, verified current for this checkout's tree (shared by write and carry). */
+function pregateFieldFor(repoRoot: string, file: string, head: string): { ok: true; field: PregateField } | { ok: false; errors: Array<{ code: string; message: string }> } {
+  const read = readPregateFile(file);
+  if (!read.file) return { ok: false, errors: read.errors.map(e => ({ code: e.code, message: `${e.message} at ${e.path}` })) };
+  const v = verifyPregate(repoRoot, read.file);
+  if (!v.ok) return { ok: false, errors: [{ code: v.code!, message: v.message ?? 'pregate is not current' }] };
+  const remote = read.file.requires_remote ?? [];
+  return { ok: true, field: { pregate: `${read.file.verdict ?? 'pass'} @${read.file.tree.slice(0, 12)} (${read.file.checks.length} checks, current for ${head.slice(0, 12)})`, requires_remote: remote.length ? remote.map(r => `${r.lane}: ${r.receipt}`) : undefined } };
+}
+
 function cmdCarry(rest: string[], json: boolean): number {
   const bodyFile = flag(rest, '--body');
   const pr = flag(rest, '--pr');
@@ -378,7 +384,7 @@ function cmdCarry(rest: string[], json: boolean): number {
   if (!repoRoot) { process.stderr.write('gstack-ship-receipt carry: run it inside the git checkout whose head carries the receipt\n'); return EXIT.usage; }
   const head = (flag(rest, '--head') ?? git(['rev-parse', 'HEAD'], repoRoot))?.toLowerCase();
   if (!head || !/^[0-9a-f]{40,64}$/.test(head)) { process.stderr.write('gstack-ship-receipt carry: cannot resolve HEAD\n'); return EXIT.usage; }
-  const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'RECEIPT_CARRY_REFUSED' | 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_GIT_TOO_OLD', message: string) => {
+  const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'RECEIPT_CARRY_REFUSED' | 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_GIT_TOO_OLD' | 'RECEIPT_CARRY_PREGATE_STALE', message: string) => {
     process.stderr.write(resultLineWithDocs('gstack-ship-receipt carry', code, message) + '\n');
     process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'refused', run: '-', code, message }) + '\n' : `CARRY: refused (${code})\nGSTACK_RESULT: skill=ship status=refused run=-\n`);
     return EXIT.refused;
@@ -480,7 +486,18 @@ function cmdCarry(rest: string[], json: boolean): number {
   const rangeDiff = rangeRaw.status === 0 ? (rangeRaw.stdout.trim().split('\n').slice(0, 20).join('\n') || '(empty: identical ranges)') : `unavailable: ${(rangeRaw.stderr ?? '').trim().split('\n')[0] || (rangeRaw.signal ? `range-diff killed by ${rangeRaw.signal} after 15 s` : 'range-diff failed')}`;
   const plan = planCarry({ from, head, changed, productPatchId: { from: productFrom, head: productHead }, testPatchId: { from: testFrom, head: testHead }, changedProduct, mergeCommits: Number(mergeCommits) || 0, rangeDiff });
   if (!plan.ok) return refused(plan.code, plan.message);
-  const carried = carryReceipt(receipt, head, plan.carry);
+  // Eligibility is not publication: a receipt that recorded a pregate is rebound only with a pregate current for HEAD,
+  // so a carried receipt never claims the old tree's checks (docs/ship-policy.md#receipt-carry).
+  const pregateFile = flag(rest, '--pregate');
+  let pregateField: PregateField | undefined;
+  if (pregateFile) {
+    const read = pregateFieldFor(repoRoot, pregateFile, head);
+    if (!read.ok) return refused('RECEIPT_CARRY_PREGATE_STALE', `--pregate ${pregateFile}: ${read.errors[0]?.code ?? 'invalid'} ${read.errors[0]?.message ?? ''}`.trim());
+    pregateField = read.field;
+  } else if (receipt.pregate && !rest.includes('--dry-run')) {
+    return refused('RECEIPT_CARRY_PREGATE_STALE', `the receipt records a pregate for ${receipt.head.slice(0, 12)}; run gstack-pregate at HEAD ${head.slice(0, 12)} and pass --pregate <pregate.json>`);
+  }
+  const carried = carryReceipt(pregateField ? { ...receipt, ...pregateField } : receipt, head, plan.carry);
   const errors = validateReceipt(carried);
   if (errors.length) return refused('RECEIPT_CARRY_REFUSED', `the carried receipt does not validate: ${errors[0]!.message} at ${errors[0]!.path}`);
   const newBody = placeReceiptFirst(body, carried);

@@ -234,7 +234,15 @@ export function renderDeferredSection(deferred: readonly DeferredRecord[], noted
 // ---------------------------------------------------------------------------
 // loop summary: what the ship receipt carries for the factory scorecard
 // ---------------------------------------------------------------------------
-export interface ReviewLoopSummary { passes: number; blocking_found: number; deferred: number; noted: number; fixed: number; scope: ReviewScopePolicy | 'unknown' }
+export interface ReviewLoopSummary {
+  passes: number; blocking_found: number; deferred: number; noted: number; fixed: number; scope: ReviewScopePolicy | 'unknown';
+  /** One-reviewer re-checks of a fix (docs/review-policy.md#transitions); never passes. */
+  fix_checks?: number;
+  /** Reviewer dispatches of this invocation by role (specialist, red-team, adversarial-native, outside-voice, fix-check). */
+  dispatches?: Record<string, number>;
+  /** Prompt plus diff bytes the dispatches read, / 4: a relative estimate, never a bill. */
+  est_input_tokens?: number;
+}
 
 /** Review-log rows of one /ship invocation (skill review, via ship, at or after `since`) → the loop summary. */
 /**
@@ -259,11 +267,27 @@ function rowTime(row: Record<string, any>): number {
  * row without a start token would read as UNVERIFIED and displace the pass).
  */
 export const LATE_DEFER_SKILL = 'review-late-defer';
+/** A fix-check (one reviewer reading the touched hunks and the fix list) logs under its own skill, so it is never a pass. */
+export const FIX_CHECK_SKILL = 'review-fix-check';
+const DISPATCH_SKILLS = ['review', LATE_DEFER_SKILL, FIX_CHECK_SKILL, 'adversarial-review'];
+
+/** Dispatch records of one row: its `dispatches` array, else the specialists and Red Team its stats say ran (older rows). */
+function rowDispatches(row: Record<string, any>): Array<{ role: string; bytes: number | null }> {
+  if (Array.isArray(row.dispatches)) {
+    return row.dispatches.filter((d: any) => d && typeof d.role === 'string').map((d: any) => {
+      const b = [d.prompt_bytes, d.diff_bytes].filter((x: unknown) => typeof x === 'number' && Number.isFinite(x) && x >= 0) as number[];
+      return { role: String(d.role).slice(0, 40), bytes: b.length ? b.reduce((a, c) => a + c, 0) : null };
+    });
+  }
+  if (row.skill !== 'review' || !row.specialists || typeof row.specialists !== 'object') return [];
+  return Object.entries(row.specialists as Record<string, any>).filter(([, s]) => s && s.dispatched === true)
+    .map(([name]) => ({ role: name === 'red-team' ? 'red-team' : 'specialist', bytes: null }));
+}
 
 export function summarizeReviewLoop(rows: readonly Record<string, any>[], since: string): ReviewLoopSummary {
   const sinceMs = Date.parse(since);
-  const loopRows = rows.filter(r => r && (r.skill === 'review' || r.skill === LATE_DEFER_SKILL) && r.via === 'ship' && Number.isFinite(rowTime(r))
-    && (!Number.isFinite(sinceMs) || rowTime(r) >= sinceMs));
+  const inRun = (r: Record<string, any>) => r && r.via === 'ship' && Number.isFinite(rowTime(r)) && (!Number.isFinite(sinceMs) || rowTime(r) >= sinceMs);
+  const loopRows = rows.filter(r => inRun(r) && (r.skill === 'review' || r.skill === LATE_DEFER_SKILL || r.skill === FIX_CHECK_SKILL));
   const passes = loopRows.filter(r => r.skill === 'review');
   const blocking = new Set<string>();
   const deferred = new Set<string>();
@@ -281,9 +305,25 @@ export function summarizeReviewLoop(rows: readonly Record<string, any>[], since:
       if (f.action === 'fixed' || f.action === 'auto-fixed') fixed.add(id);
     }
   }
-  return { passes: passes.length, blocking_found: blocking.size, deferred: deferred.size, noted: noted.size, fixed: fixed.size, scope };
+  const out: ReviewLoopSummary = { passes: passes.length, blocking_found: blocking.size, deferred: deferred.size, noted: noted.size, fixed: fixed.size, scope };
+  const fixChecks = loopRows.filter(r => r.skill === FIX_CHECK_SKILL).length;
+  if (fixChecks) out.fix_checks = fixChecks;
+  const byRole: Record<string, number> = {};
+  let bytes = 0; let measured = false;
+  for (const row of rows.filter(r => inRun(r) && DISPATCH_SKILLS.includes(r.skill))) {
+    for (const d of rowDispatches(row)) { byRole[d.role] = (byRole[d.role] ?? 0) + 1; if (d.bytes !== null) { bytes += d.bytes; measured = true; } }
+  }
+  if (Object.keys(byRole).length) out.dispatches = byRole;
+  if (measured) out.est_input_tokens = Math.round(bytes / 4);
+  return out;
+}
+
+export function dispatchTotal(d: Record<string, number> | undefined): number | undefined {
+  return d ? Object.values(d).reduce((a, c) => a + c, 0) : undefined;
 }
 
 export function reviewLoopLine(s: ReviewLoopSummary): string {
-  return `REVIEW_LOOP: passes=${s.passes} blocking_found=${s.blocking_found} deferred=${s.deferred} noted=${s.noted} fixed=${s.fixed} scope=${s.scope}`;
+  const total = dispatchTotal(s.dispatches);
+  return `REVIEW_LOOP: passes=${s.passes} blocking_found=${s.blocking_found} deferred=${s.deferred} noted=${s.noted} fixed=${s.fixed} scope=${s.scope}`
+    + (s.fix_checks ? ` fix_checks=${s.fix_checks}` : '') + (total !== undefined ? ` dispatches=${total}` : '') + (s.est_input_tokens !== undefined ? ` est_input_tokens=${s.est_input_tokens}` : '');
 }

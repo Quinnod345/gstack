@@ -4704,6 +4704,19 @@ run did not produce. The `PROSE:` line names each field with both values.
 stale one (the run was repeated), rerun `/ship` so the receipt is rewritten
 ([ship-policy.md](ship-policy.md#ship-receipt)).
 
+<a id="receipt-carry-pregate-stale"></a>
+### `RECEIPT_CARRY_PREGATE_STALE`
+
+**Meaning.** The receipt in the body records a pregate result for its old head,
+and `gstack-ship-receipt carry` was asked to rebind it to HEAD without a pregate
+result current for HEAD (or the one passed with `--pregate` is not current). A
+carry certifies the new head, so it never keeps the old tree's checks. Nothing
+was rewritten.
+
+**Fix.** Run `gstack-pregate` at HEAD (the remote tests stage when the policy
+requires it), then rerun `carry --pregate <pregate.json>`. `--dry-run` still
+reports eligibility without one ([ship-policy.md](ship-policy.md#receipt-carry)).
+
 <a id="receipt-git-too-old"></a>
 ### `RECEIPT_GIT_TOO_OLD`
 

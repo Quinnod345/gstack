@@ -264,6 +264,11 @@ export const RELEASE_RESULT_CODES = {
     summary: 'the PR body quotes a counter the ship receipt also records (review passes, deferred findings, gate case counts) with a different number, so the prose and the receipt disagree about the same run',
     fix: 'correct the body to the receipt\'s number (the PROSE: line names each field with both values); when the receipt is the stale one, rerun /ship so the receipt is rewritten from the run',
   },
+  RECEIPT_CARRY_PREGATE_STALE: {
+    anchor: 'receipt-carry-pregate-stale',
+    summary: 'gstack-ship-receipt carry would rebind a receipt that records a pregate without a pregate result current for HEAD, so the carried receipt would claim the old tree\'s checks',
+    fix: 'run gstack-pregate at HEAD (the remote tests stage when the policy requires it), then rerun carry with --pregate <pregate.json>',
+  },
   RECEIPT_GIT_TOO_OLD: {
     anchor: 'receipt-git-too-old',
     summary: 'gstack-ship-receipt carry needs git 2.39 or later for `git patch-id --verbatim`; the installed git is older, so the product diff could not be compared',

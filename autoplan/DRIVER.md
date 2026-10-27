@@ -14,9 +14,10 @@ ends with `(<CODE>)`.
 ## Phases and scope
 
 Order: ceo → design → dx → eng. Design runs only with UI scope, DX only with DX scope, Eng always and last.
-Scope flags on the first `next`: `--ui`, `--no-ui`, `--no-dx`, `--developer-tool`, `--agent-primary`. `--developer-tool` and `--agent-primary` only enable DX.
-The first `next` prints `SCOPE: ui=… (terms; visual; files) dx=… (detected) source=ui:<s>,dx:<s>`
-(each axis is `flag`, `marker` or `detected`). UI needs a rendered file path or a UI term next
+Scope flags on the first `next`: `--ui`, `--no-ui`, `--no-dx`, `--developer-tool`, `--agent-primary`, `--docs-only`. `--developer-tool` and `--agent-primary` only enable DX.
+The first `next` prints `SCOPE: ui=… (terms; visual; files) dx=… (detected) docs_only=yes|no (<s>) source=ui:<s>,dx:<s>`
+(each is `flag`, `marker` or `detected`). Docs-only (`--docs-only`, or every Implementation-plan path is README*, CHANGELOG*,
+TODOS*, docs/** but not docs/*-policy.md, or other markdown outside a skill dir) runs CEO on the native voice only, then Eng. UI needs a rendered file path or a UI term next
 to a visual noun in the Implementation plan. To keep flags for later runs on the same plan, add
 the `SCOPE_PIN:` marker it prints (`<!-- gstack-autoplan-scope: … -->`) as the plan's first
 line yourself; gstack never writes the plan.
@@ -34,7 +35,9 @@ line yourself; gstack never writes the plan.
    accepted plan changes (status `amend_pending`): edit the plan, then `revise` (the printed
    `NEXT:` names it), or `revise --settle <id>` when the line says no plan edit is needed. Until
    then `next` refuses with `PLAN_AMEND_PENDING` and `export` will not mark the run complete.
-5. `REOPENED: <phases>` means loop `next` again (Eng last). `APPROVED:` means `export`.
+5. `REOPENED: <phases>` means loop `next` again (Eng last). `APPROVED:` means `export` (`DISPATCHES: <n> est_input_tokens=<k>`, relative).
+6. Rounds: one by default; a second only for High or Critical findings; cap 2 (`--max-rounds`). A `revise` whose decisions all resolve below
+   High prints `APPLIED: <ids> without re-review (below High)`. At the cap with High open, `ESCALATE: evidence sufficient, decision needed`: relay it, never ask for another round.
 
 ### On Capy
 
@@ -55,7 +58,7 @@ line yourself; gstack never writes the plan.
 ### Commands
 
 - `gstack-autoplan next --out <dir> --plan <plan.md> [scope flags] [--light] [--spend-cap <usd>] [--max-rounds <n>] [--scaffold]`
-  first call: init the run, print PHASE:, SCOPE:, DRIVER: and one ATTEMPT: per voice; --max-rounds caps review rounds per phase (default 3 unattended), and an unattended Capy run reserves 5.00 per host attempt unless --estimate-usd <n> says otherwise, so --spend-cap binds.
+  first call: init the run, print PHASE:, SCOPE:, DRIVER: and one ATTEMPT: per voice; --max-rounds caps review rounds per phase (default 2 unattended), and an unattended Capy run reserves 5.00 per host attempt unless --estimate-usd <n> says otherwise, so --spend-cap binds.
 - `gstack-autoplan next --out <dir> [--redispatch <attempt>]`
   later calls: open the next phase or reprint open attempts; never redispatches on its own.
 - `gstack-autoplan submit --out <dir> --phase <p> --voice native|outside --record <file.md> --model <id> [--attempt <id>]`
@@ -91,8 +94,7 @@ line yourself; gstack never writes the plan.
 
 ## Reviewer result format
 
-Every prompt ends with this contract; `submit --result` enforces it, `submit --record` accepts
-the looser record shapes above.
+Every prompt ends with this contract; `submit --result` enforces it, `submit --record` accepts the looser shapes above.
 
 RESULT FORMAT (required by gstack-autoplan; the parent binds your file by this contract):
 1. The first line of your result is exactly: INPUT: <phase> <snapshot sha256>

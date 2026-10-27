@@ -903,10 +903,27 @@ A changed product path, or a product patch-id that differs, is
 (exit 3; the refusal names the paths), and a receipt whose head is not in HEAD's
 history (a rebase or force-push) or a working tree with uncommitted changes is
 [`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused): run `/ship`
-on the new head. `/ship` Step 1 runs the carry check itself when the branch has
-an open PR, and a `CARRY: carried` result ends that run with the receipt bound
-to HEAD; the queue's `ready`, `train build` and `verify --train` read the
+on the new head. The queue's `ready`, `train build` and `verify --train` read the
 carried receipt like any other.
+
+**Delta /ship: eligibility, then checks, then publication.** `/ship` Step 1 runs
+the carry when the branch has an open PR, in this order, and never reruns the
+review loop for a carried receipt:
+
+1. `gstack-ship-receipt carry --pr <n> --base <base> --dry-run`. `CARRY: would
+   carry` is eligibility only; a refusal continues the full ship.
+2. At that pinned HEAD: the CHANGELOG check, the size-cap check the policy
+   declares, and `gstack-pregate` (the remote tests stage when
+   `requires_remote` asks for it). A failing check, or HEAD moving, continues
+   the full ship from Step 2.
+3. `gstack-ship-receipt carry --pr <n> --base <base> --pregate <pregate.json>`
+   rebinds the receipt with a pregate current for HEAD and ends the run.
+
+A receipt that records a pregate never rebinds without a current one:
+`carry` without `--pregate` (or with a stale one) is
+[`RECEIPT_CARRY_PREGATE_STALE`](troubleshooting.md#receipt-carry-pregate-stale)
+and leaves the body unchanged. A crew that reran the whole `/ship` after every
+base merge should run this sequence instead.
 
 ## What `/land-and-deploy` reads from it
 

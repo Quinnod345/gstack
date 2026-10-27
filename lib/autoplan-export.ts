@@ -6,7 +6,8 @@
  * tables, the gate and the GUARD_NOT_INSTALLED line the validator requires),
  * `findings.jsonl`, `tasks.jsonl`, `decisions.jsonl` (already written by the
  * gate), `timing.json`, and `run.json` with every artifact's path and hash
- * and the counts `gstack-artifact validate` checks against the files. The
+ * and the counts `gstack-artifact validate` checks against the files, plus
+ * the reviewer dispatch counts and their relative input-token estimate. The
  * snapshot bin stays unchanged: this is `gstack-autoplan export --out <dir>`.
  */
 import * as fs from 'node:fs';
@@ -14,7 +15,7 @@ import * as path from 'node:path';
 import { PHASES } from './autoplan-prompts';
 import type { ConsensusRecord } from './autoplan-reconcile';
 import { decisionId } from './gate-list';
-import { readDecisions, voiceRows, type RunState } from './autoplan-state';
+import { readDecisions, readJournal, voiceRows, type DispatchCounts, type RunState, type Voice } from './autoplan-state';
 import type { FindingRow, TaskRow } from './headless-artifacts';
 import { readJsonl, renderUrgentBlock, sha256File } from './headless-artifacts';
 
@@ -105,6 +106,22 @@ function runLog(state: RunState, findings: number, tasks: number, decisions: { t
 
 export interface ExportResult { warnings: string[]; files: string[] }
 
+/** Every dispatched attempt in attempts.jsonl, whatever became of it; prompt bytes come from the row (older rows: the prompt file if still on disk). */
+export function dispatchStats(out: string): { dispatches: DispatchCounts; est_input_tokens: number } {
+  const dispatches: DispatchCounts = { total: 0, by_phase: {} };
+  let bytes = 0;
+  for (const r of readJournal(out)) {
+    if (r.event !== 'dispatched') continue;
+    const by = (dispatches.by_phase[r.phase] ??= {});
+    by[r.voice as Voice] = (by[r.voice as Voice] ?? 0) + 1;
+    dispatches.total += 1;
+    const file = typeof r.prompt === 'string' ? path.resolve(out, r.prompt) : '';
+    bytes += typeof r.prompt_bytes === 'number' ? r.prompt_bytes : file && fs.existsSync(file) ? fs.statSync(file).size : 0;
+  }
+  return { dispatches, est_input_tokens: Math.round(bytes / 4) };
+}
+export const dispatchLine = (state: RunState) => `DISPATCHES: ${state.dispatches?.total ?? 0} est_input_tokens=${state.est_input_tokens ?? 0} (relative estimate)`;
+
 /** Write the file set and bind every artifact into run.json (counts and hashes); the caller writes run.json. */
 export function exportRun(state: RunState): ExportResult {
   const warnings: string[] = [];
@@ -134,6 +151,7 @@ export function exportRun(state: RunState): ExportResult {
   for (const phase of state.phase_order) for (const name of [`${phase}-consensus.md`, `${phase}-consensus.json`]) {
     if (fs.existsSync(path.join(state.out, name))) state.artifacts[name] = { path: name, sha256: sha256File(path.join(state.out, name)) };
   }
+  Object.assign(state, dispatchStats(state.out));
   state.counts = { decisions: decisions.length, decisions_pending: decisions.filter(d => d.status === 'pending').length, findings: findings.length, tasks: tasks.length };
   return { warnings, files };
 }

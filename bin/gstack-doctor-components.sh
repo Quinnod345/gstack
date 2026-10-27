@@ -308,6 +308,7 @@ gstack_result_anchor() {
     RECEIPT_CARRY_PRODUCT_CHANGED) printf '%s' 'receipt-carry-product-changed' ;;
     DOCS_AUDIT_BLOCKED) printf '%s' 'docs-audit-blocked' ;;
     RECEIPT_PROSE_MISMATCH) printf '%s' 'receipt-prose-mismatch' ;;
+    RECEIPT_CARRY_PREGATE_STALE) printf '%s' 'receipt-carry-pregate-stale' ;;
     RECEIPT_GIT_TOO_OLD) printf '%s' 'receipt-git-too-old' ;;
     PR_WAIT_BLOCKED) printf '%s' 'pr-wait-blocked' ;;
     PR_WAIT_REFUSED) printf '%s' 'pr-wait-refused' ;;

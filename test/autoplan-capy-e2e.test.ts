@@ -49,7 +49,7 @@ const ok = (res: { status: number | null; stderr: string; stdout: string }) => {
 
 describe('unattended runs on the Capy host', () => {
   test('a three-revision run driven only through the CLI validates with unique ids and records gstack_version', () => {
-    const s = start();
+    const s = start(['--max-rounds', '3']);
     expect(readRunJson(s.out).gstack_version).toBe(VERSION);
     for (const rev of [1, 2]) {
       phaseVia(r, s.out, 'ceo');
@@ -134,7 +134,7 @@ describe('unattended runs on the Capy host', () => {
 describe('conformance: one run through every mechanism', () => {
   test('canonical and attested binds, an unavailable voice, partial then full replies, PLAN_AMEND_PENDING, revise --incorporates, an interruption, three gate revisions', () => {
     const c: CapyRunner = r;
-    const s = start();
+    const s = start(['--max-rounds', '3']);
     const run = readRunJson(s.out).run;
     // ceo: native canonical (fixture), outside attested record
     ok(c.review(path.join(s.out, 'ceo-native-prompt.md')));

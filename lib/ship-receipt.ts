@@ -120,7 +120,8 @@ export function receiptSummaryLine(r: ShipReceipt): string {
   if (r.artifacts_consumed) parts.push(`artifacts_consumed=${r.artifacts_consumed}`);
   if (r.approval) parts.push(`approval=${approvalSummary(r.approval)}`);
   const loop = parseReviewLoop(r.review_loop);
-  if (loop) parts.push(`passes=${loop.passes} blocking_found=${loop.blocking_found} deferred=${loop.deferred}`);
+  if (loop) parts.push(`passes=${loop.passes} blocking_found=${loop.blocking_found} deferred=${loop.deferred}`
+    + (loop.fix_checks ? ` fix_checks=${loop.fix_checks}` : '') + (loop.dispatches ? ` dispatches=${Object.values(loop.dispatches).reduce((a, c) => a + c, 0)}` : ''));
   if (r.carry && typeof r.carry.from === 'string') parts.push(`carried_from=${r.carry.from.slice(0, 12)}`);
   return `SHIP_RECEIPT: ${oneLine(parts.join(' '))}`;
 }
@@ -268,6 +269,13 @@ export function parseReviewLoop(value: unknown): ReviewLoopReceipt | undefined {
   if (n('noted') !== undefined) out.noted = n('noted');
   if (n('fixed') !== undefined) out.fixed = n('fixed');
   if (typeof v.scope === 'string') out.scope = v.scope.slice(0, 20);
+  if (n('fix_checks') !== undefined) out.fix_checks = n('fix_checks');
+  if (n('est_input_tokens') !== undefined) out.est_input_tokens = n('est_input_tokens');
+  if (v.dispatches && typeof v.dispatches === 'object' && !Array.isArray(v.dispatches)) {
+    const d = Object.fromEntries(Object.entries(v.dispatches as Record<string, unknown>)
+      .filter(([k, c]) => /^[a-z][a-z0-9-]{0,39}$/.test(k) && typeof c === 'number' && Number.isInteger(c) && c >= 0).slice(0, 12)) as Record<string, number>;
+    if (Object.keys(d).length) out.dispatches = d;
+  }
   return out;
 }
 

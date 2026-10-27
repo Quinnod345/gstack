@@ -154,6 +154,19 @@ set, because a higher effort would spend the time the gate is sized for.
 `gstack-models list` prints the effective effort and where it came from
 (`--json`: `codexEffort`). The Claude Code runner takes no effort setting.
 
+### Review effort tiers
+
+Subagents that only read and report run at a lighter reasoning effort on the
+same model; gstack never swaps in a cheaper model family for them.
+`gstack-review-plan` names each dispatch's tier: `light` for specialists,
+audits, fix-checks, decision-trail reviewers and watchers, `full` for the core
+checklist, the Red Team and the native adversarial pass, `host` for the outside
+voice (its provider and `codex_effort` above). A host that can set a
+subagent's effort maps `light` to a medium or low setting; one that cannot runs
+it at its default. `gstack-config set review_effort_tiers off` (default `on`)
+renders every role at the host default
+([review-policy.md](review-policy.md#review-depth)).
+
 ## Which workflows use the tiers?
 
 The plan-review role applies to autoplan's CEO, design, DX and engineering

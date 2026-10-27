@@ -1,21 +1,26 @@
 /**
  * autoplan-budget — the run budget of the unattended runner (field list 2,
  * W5). Review rounds are counted per phase from `state.history` reopen events
- * and capped by `run.json.max_rounds` (default 3 for unattended runs) plus the
+ * and capped by `run.json.max_rounds` (default 2 for new unattended runs; a
+ * resumed run keeps the value it persisted) plus the
  * owner's per-phase grants at the gate. Unattended runs on Capy reserve a
  * default per-voice estimate for unestimated host attempts, so `--spend-cap`
  * binds. A dispatch the cap refuses stops the run at the terminal `incomplete`
  * status with a structured `stop` object (`reason: budget_exhausted`) and
  * printed recovery commands; `gstack-autoplan budget` journals the owner's cap
  * change and `resume` lifts the stop only after one. Phase close at the cap
- * lives in lib/autoplan-gate.ts (`closeDeferred`).
+ * lives in lib/autoplan-gate.ts (`closeDeferred`); `escalateLine` names the
+ * capped phases still holding High or Critical findings.
  */
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ANSWERED_BY_RE, type GateItem } from './gate-list';
-import { FILES, RunError, journal, now, readJournal, type RunState, type RunStop } from './autoplan-state';
+import { settledIds } from './autoplan-confirm';
+import type { ConsensusRecord } from './autoplan-reconcile';
+import { FILES, RunError, journal, now, readJournal, voiceRows, type RunState, type RunStop } from './autoplan-state';
 import { readLedger, release, setCap, summarize } from './spend-ledger';
 
-export const DEFAULT_MAX_ROUNDS = 3;
+export const DEFAULT_MAX_ROUNDS = 2;
 /** Reserved per voice for a host-subagent attempt with no `--estimate-usd` in an unattended Capy run. */
 export const DEFAULT_HOST_ESTIMATE_USD = 5;
 
@@ -29,6 +34,23 @@ export function roundCap(state: RunState, phase: string): number | null {
 export const atCap = (state: RunState, phase: string): boolean => { const cap = roundCap(state, phase); return cap !== null && roundOf(state, phase) >= cap; };
 /** The phase is about to open past its cap (a rerun-all reply reopened it). */
 export const overCap = (state: RunState, phase: string): boolean => { const cap = roundCap(state, phase); return cap !== null && roundOf(state, phase) > cap; };
+
+/** Open High or Critical findings of a closed phase: the deferred counts, else bound rows not settled or answered, an outside row paired with a native one counted once. */
+function openHigh(state: RunState, phase: string): number {
+  const ps = state.phases[phase];
+  if (ps?.deferred) return (ps.deferred.counts.High ?? 0) + (ps.deferred.counts.Critical ?? 0);
+  const file = path.join(state.out, `${phase}-consensus.json`);
+  const paired = new Set(fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as ConsensusRecord).rows.filter(r => r.native_id).map(r => r.outside_id) : []);
+  const answered = settledIds(state);
+  return [...voiceRows(state, phase, 'native'), ...voiceRows(state, phase, 'outside')]
+    .filter(r => !paired.has(r.id) && !(r as { settled_by?: string }).settled_by && !answered.has(r.id) && (r.severity === 'High' || r.severity === 'Critical')).length;
+}
+
+/** At the round cap with High or Critical findings still open, more rounds buy nothing: the owner decides. */
+export function escalateLine(state: RunState): string | undefined {
+  const held = state.phase_order.filter(p => state.phases[p]?.closed_at && atCap(state, p)).map(p => [p, openHigh(state, p)] as const).filter(([, n]) => n > 0);
+  return held.length ? `ESCALATE: evidence sufficient, decision needed (${held.map(([p, n]) => `${p}: ${n} High open`).join('; ')})` : undefined;
+}
 
 export function roundsLine(state: RunState): string {
   const cell = (p: string) => `${p}=${roundOf(state, p)}/${roundCap(state, p) ?? 'none'}`;

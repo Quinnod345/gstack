@@ -50,7 +50,11 @@ export interface PhaseState {
   deferred?: DeferredClose;
   /** A confirm round (r > 1): the revision this phase last reviewed. */
   confirm?: { round: number; previous_sha256?: string; added: number; removed: number };
+  /** Revisions bound to this phase without re-review: every incorporated decision was below High (lib/autoplan-revise.ts). */
+  rebound?: Array<{ k: number; from: string; to: string; decisions: string[]; at: string }>;
 }
+/** Reviewer attempts journaled as dispatched (failed, unknown and superseded ones included), per phase and voice. */
+export interface DispatchCounts { total: number; by_phase: Record<string, Partial<Record<Voice, number>>> }
 export interface RunState extends RunManifest {
   revision: number; out: string; plan_source: string; active_plan: string; restore: string; scope: Scope; phase_order: Phase[];
   phases: Record<string, PhaseState>; native_model?: string; outside_model?: string; outside_enabled: boolean; attempt_counter: number;
@@ -64,6 +68,8 @@ export interface RunState extends RunManifest {
   /** Review rounds per phase (null: uncapped); round_grants are the owner's per-phase raises at the gate. */
   max_rounds?: number | null; round_grants?: Record<string, number>;
   stop?: RunStop; stops?: RunStop[]; capped_deltas?: CappedDelta[];
+  /** Written by export from attempts.jsonl; est_input_tokens is dispatched prompt bytes / 4, a relative estimate only. Absent on older runs. */
+  dispatches?: DispatchCounts; est_input_tokens?: number;
 }
 
 export const TERMINAL_VOICE_STATUSES = ['completed', 'disabled', 'unavailable', 'failed', 'skipped'] as const;
