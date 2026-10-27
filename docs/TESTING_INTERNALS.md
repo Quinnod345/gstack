@@ -1527,6 +1527,53 @@ the `recordGraceMs` option of `test/helpers/office-hours-attempt.ts` (default
 5000) and the `timeoutMs` argument of `clearCookieTargetStorage(page, origin,
 timeoutMs)` (default 15000).
 
+## Candidate-side blinding
+
+A paid case has two readers that must not know what the other knows: the
+candidate (the agent under test) must not know it is being graded, and the
+judge must not know which arm it is grading. `/eval-plan` Step 1c states the
+three rules a preregistration carries; this is what they mean for gstack's own
+fixtures.
+
+- **The candidate's view carries no eval word.** Nothing the candidate can read
+  (its working directory, file names, the task prompt, commit messages, the
+  environment) says `eval`, `test`, `judge`, `experiment`, `rubric`, `score`,
+  `compare`, `benchmark`, `candidate` or `arena`. The project's own `test/`
+  directory is exempt when the task is about those tests, and so is the skill
+  text an arm loads as its own instructions (a gstack SKILL.md and the ETHOS.md it
+  points at use these words freely); the rule governs what the case builds. The
+  hermetic home a case builds (`test/helpers/hermetic-env.ts`) is the boundary:
+  what is copied in is visible, what stays in the runner is not.
+- **Fixture roots are project-shaped.** A fixture the candidate works in is
+  named like the project it imitates, with the files that project would hold.
+  Runner-side fixtures (captured transcripts, judge calibration sets, census
+  reports) are never shown to a candidate and may keep descriptive names.
+- **The judge grades labels and reads, not claims.** A judge prompt names arms
+  `A` and `B`, never the model or run, and a chain-following dimension is scored
+  from the files the transcript shows the candidate opened, not from what the
+  candidate says it read.
+
+An audit on 2026-10-26 (GSTA-124) found these fixture directory names on the
+word list: `test/fixtures/arm-benchmark/` and its four children, `browse-judge/`,
+`cso-eval/`, `eval-history/`, `judge-calibration/` and its children, two shard
+names under `paid-report-census/` and the `test/` subdirectories of
+`state-matrix-6792/`. All of these are runner-side: no candidate's working
+directory is one of them. Candidate-visible gaps are in the temporary roots
+the harnesses create: `test/helpers/arm-benchmark-harness.ts` copies each fixture
+into `os.tmpdir()/arm-<fixture>-<arm>-*`, so the candidate's working directory is
+named after the arm rather than after a project; `test/skill-e2e-deploy.test.ts`
+runs the /benchmark case in `skill-e2e-benchmark-*`, a root that carries a listed
+word; `test/skill-e2e-test-value.test.ts` creates `skill-e2e-<id>-*` roots as the
+candidate's working directory, and two of its ids (`review-test-value`,
+`test-audit-report-only`) carry the word `test`; and `test/skill-e2e-health.test.ts`
+creates `gstack-health-eval-*`. That list comes from a scan of the `mkdtemp`
+prefixes in the e2e tests, not from a proof that no other root carries a listed
+word. The audit matched whole
+lower-case words in path components under `test/fixtures/`; a substring match
+(`factory-scorecard/`, `ios-qa/FixtureApp/Tests/`) was not counted. Renaming is a
+separate change with its own touchfile updates; the list is here so that change
+can be scoped.
+
 ## Running evals as an agent: detach
 
 Moved verbatim from CLAUDE.md (#2096 size limit). The short rule stays in

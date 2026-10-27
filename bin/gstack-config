@@ -270,6 +270,14 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 #                           #   so Greptile reviews in parallel (a public repo
 #                           #   asks once). false keeps the old order.
 #                           #   Invalid values are REJECTED (value kept).
+# pr_wait_gating_bots: greptile,macroscope  # review bots gstack-pr-wait
+#                           #   --until ready waits for (comma-separated; a
+#                           #   bot owns logins starting with its name and
+#                           #   checks mentioning it).
+# pr_wait_advisory_bots: coderabbit  # review bots gstack-pr-wait reports but
+#                           #   never waits for. Both lists: lowercase names,
+#                           #   letters, digits, . _ - only; none empties a list.
+#                           #   Invalid values are REJECTED (value kept).
 #
 # ─── Workspace-aware ship ────────────────────────────────────────────
 # workspace_root: $HOME/conductor/workspaces  # Where /ship looks for sibling
@@ -353,6 +361,8 @@ lookup_default() {
     model_frontier_claude|model_frontier_openai|model_smart_claude|model_smart_openai) echo "" ;; # empty = shipped catalog ID (gstack-models list)
     codex_effort) echo "" ;; # empty = each gate's own effort; /codex --effort, then GSTACK_CODEX_EFFORT, win (gstack-codex-probe run-with-timeout --effort)
     ship_greptile_early) echo "true" ;; # true | false — /ship's early Greptile PR
+    pr_wait_gating_bots) echo "greptile,macroscope" ;; # review bots gstack-pr-wait --until ready waits for
+    pr_wait_advisory_bots) echo "coderabbit" ;; # review bots gstack-pr-wait reports but never waits for
     # Unknown key: exit non-zero instead of printing "". The fallback pattern
     # the preambles use,
     #   VAR=$(gstack-config get <key> 2>/dev/null || echo "<default>")
@@ -855,6 +865,14 @@ $_gstack_legacy_root"
       ship_greptile_early)
         if [ "$VALUE" != "true" ] && [ "$VALUE" != "false" ]; then
           echo "Error: ship_greptile_early '$VALUE' not recognized. Valid values: true, false. Existing value left unchanged." >&2
+          exit 1
+        fi ;;
+      pr_wait_gating_bots|pr_wait_advisory_bots)
+        # Comma-separated bot names gstack-pr-wait matches against logins and
+        # check names. Reject anything else so a stray token never widens or
+        # empties the gate by accident; the literal none is the empty list.
+        if ! printf '%s' "$VALUE" | LC_ALL=C grep -qE '^[a-z0-9._-]+(,[a-z0-9._-]+)*$'; then
+          echo "Error: $KEY '$VALUE' is not a comma-separated list of bot names (lowercase letters, digits, . _ -; e.g. greptile,macroscope) or none. Existing value left unchanged." >&2
           exit 1
         fi ;;
       ship_rerun_backend|test_backend)

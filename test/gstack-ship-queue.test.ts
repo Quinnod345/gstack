@@ -292,6 +292,70 @@ describe('ready', () => {
     const stalePregate = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } }));
     expect(stalePregate.status).toBe(EXIT.refused);
     expect(stalePregate.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
+    // A lane that cleared its pregate from a separate clone (gstack-pregate --remote cannot run in a worktree) holds the verdict under
+    // <state root>/pregate/by-tree/<tree>.json; ready reads that mirror for the current tree when its own record is stale or missing, and only a run
+    // that holds the tests stage (what `--stage tests --remote` writes: checks=[lanes]) against origin/main under a reviewed policy stands in: a
+    // --only timing run, another base or a head policy is named on the PREGATE line instead.
+    const stateRoot = path.join(repo.root, 'state-root');
+    const complete = { base: `origin/main@${repo.git('rev-parse', 'origin/main').slice(0, 12)}`, policy: 'origin/main@abc (no .gstack/pregate.json)', checks: [{ id: 'lanes', status: 'pass' }] };
+    const fromSuffix = `(from the state root's pregate/by-tree/${'TREE'}.json, recorded by another checkout)`;
+    const movedShim = ghQueueShim(repo, { prs: { '1': { headRefOid: moved, body: shippedBody('1', moved) } }, checks: { [moved]: green } });
+    const movedTree = runBin(repo, 'gstack-wtree', []).out.trim();
+    const mirror = path.join(stateRoot, 'pregate', 'by-tree', `${movedTree}.json`);
+    fs.mkdirSync(path.dirname(mirror), { recursive: true });
+    fs.writeFileSync(path.join(stateRoot, 'pregate', 'by-tree', `${'0'.repeat(movedTree.length)}.json`), JSON.stringify({ schema_version: 1, tree: '0'.repeat(movedTree.length), head: moved, verdict: 'pass', ...complete }));
+    const otherTree = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(otherTree.status).toBe(EXIT.refused);
+    expect(otherTree.out).toMatch(/^PREGATE: pass .* \(PREGATE_STALE\)$/m);
+    const missing = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(missing.status).toBe(EXIT.refused);
+    expect(missing.out).toMatch(/^PREGATE: missing \(\.gstack\/tmp\/pregate\.json; run gstack-pregate run --allow-repo-commands\)$/m);
+    const suffix = fromSuffix.replace('TREE', movedTree.slice(0, 12));
+    const partial = { ...complete, checks: [{ id: 'timing', status: 'pass' }] };
+    for (const [bad, why] of [[partial, 'a run without the tests stage (lanes)'], [{ ...complete, base: 'origin/develop@0123456789ab' }, 'recorded against origin/develop@0123456789ab, not origin/main'], [{ ...complete, policy: 'head (unreviewed) .gstack/pregate.json' }, 'recorded under the unreviewed head policy']] as const) {
+      fs.writeFileSync(mirror, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'pass', ...bad }));
+      const ignored = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+      expect(ignored.status).toBe(EXIT.refused);
+      expect(line(ignored.out, 'PREGATE:')).toBe(`PREGATE: missing (.gstack/tmp/pregate.json; run gstack-pregate run --allow-repo-commands); the state root's mirror for this tree cannot stand in: ${why}`);
+    }
+    fs.writeFileSync(mirror, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'pass', ...complete }));
+    const fromMirror = queue(repo, ['ready', '--pr', '1', '--pregate', pregate], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([fromMirror.status, fromMirror.err]).toEqual([EXIT.ok, '']);
+    expect(line(fromMirror.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1 ${suffix}`);
+    const missingFromMirror = queue(repo, ['ready', '--pr', '1'], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([missingFromMirror.status, missingFromMirror.err]).toEqual([EXIT.ok, '']);
+    expect(line(missingFromMirror.out, 'PREGATE:')).toContain(suffix);
+    const current = queue(repo, ['ready', '--pr', '1', '--pregate', pregateFor(repo, moved)], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([current.status, current.err]).toEqual([EXIT.ok, '']);
+    expect(line(current.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1`);
+    // Value: protects=a same-tree record that only waits on a remote receipt (the small-machine run) is cleared by the clone's mirror, an
+    // unreadable record falls through to the mirror, and a record whose own checks failed or stayed incomplete is never overridden by a green mirror,
+    // including an incomplete check the environment caused (PREGATE_ENVIRONMENT, #3480: a secrets scanner that never finished is not a scanned diff);
+    // fails_when=ready reads the mirror only for another tree (the documented lane case refuses PREGATE_REMOTE_UNCLEARED) or lets a mirror hide a red
+    // or incomplete local run; why_new=the rows above cover only stale, missing and current records; seam=none; no_claim=the mirror's writer
+    const local = path.join(repo.root, 'pregate-local.json');
+    const obligation = { lane: 'pregate.json/remote_gate', platform: 'remote', workflow: 'pregate.json', job: 'remote_gate', tests: ['test/a.test.ts'], receipt: null };
+    fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'requires-remote', checks: [{ id: 'lanes', status: 'requires-remote' }], requires_remote: [obligation] }));
+    const uncleared = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([uncleared.status, uncleared.err]).toEqual([EXIT.ok, '']);
+    expect(line(uncleared.out, 'PREGATE:')).toBe(`PREGATE: pass tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1 ${suffix}`);
+    fs.writeFileSync(local, '{ not json');
+    const unreadable = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect([unreadable.status, unreadable.err]).toEqual([EXIT.ok, '']);
+    expect(line(unreadable.out, 'PREGATE:')).toContain(suffix);
+    fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'fail', checks: [{ id: 'lanes', status: 'fail' }] }));
+    const redLocal = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(redLocal.status).toBe(EXIT.refused);
+    expect(line(redLocal.out, 'PREGATE:')).toBe(`PREGATE: fail tree=${movedTree.slice(0, 12)} head=${moved.slice(0, 12)} checks=1 — 1 check(s) failed: lanes (PREGATE_LANE_FAILED)`);
+    fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'incomplete', checks: [{ id: 'lanes', status: 'incomplete' }] }));
+    const incompleteLocal = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(incompleteLocal.status).toBe(EXIT.refused);
+    expect(line(incompleteLocal.out, 'PREGATE:')).toMatch(/\(PREGATE_INCOMPLETE\)$/);
+    fs.writeFileSync(local, JSON.stringify({ schema_version: 1, tree: movedTree, head: moved, verdict: 'incomplete', checks: [{ id: 'secrets', status: 'incomplete', cause: 'environment', environment: { kind: 'missing-binary', evidence: 'gstack-redact: not on PATH', proof: 'launch' } }] }));
+    const environmentLocal = queue(repo, ['ready', '--pr', '1', '--pregate', local], { ...movedShim, GSTACK_STATE_ROOT: stateRoot });
+    expect(environmentLocal.status).toBe(EXIT.refused);
+    expect(line(environmentLocal.out, 'PREGATE:')).toMatch(/\(PREGATE_ENVIRONMENT\)$/);
+    expect(environmentLocal.out).not.toContain(suffix);
     fs.appendFileSync(path.join(repo.work, 'pr-a.txt'), 'dirty\n');
     expect(queue(repo, ['ready', '--pr', '1'], shim(moved, green)).err).toMatch(/uncommitted tracked changes: pr-a\.txt.*\(QUEUE_NOT_READY\)/);
   }, 180_000);

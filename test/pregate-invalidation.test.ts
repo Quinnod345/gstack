@@ -90,4 +90,35 @@ describe('pregate invalidation', () => {
     expect(bad.status).toBe(EXIT.fail);
     expect(bad.err).toContain('(ARTIFACT_SCHEMA)');
   }, 30_000);
+
+  // Value: protects=every record gstack-pregate writes (run and clear) is mirrored byte for byte to <state root>/pregate/by-tree/<tree>.json, the path
+  // gstack-ship-queue ready reads for a checkout that did not run the pregate, and a state root that cannot be written still leaves the record and
+  // the exit code untouched; fails_when=the mirror is missing, lands under another path or name, holds different bytes than the record, is not
+  // refreshed by clear, or an unwritable state root fails the run; why_new=the ship-queue test writes the mirror by hand and covers only the reader;
+  // seam=none; no_claim=a second checkout reading it (test/gstack-ship-queue.test.ts covers ready)
+  test('run and clear mirror the record to <state root>/pregate/by-tree/<tree>.json; an unwritable state root never fails the record', () => {
+    const repo = fixture();
+    commit(repo, { 'test/windows-paths.test.js': "const test = require('node:test');\ntest('windows paths', () => { /* touched */ });\n" });
+    expect(run(repo, []).status).toBe(EXIT.ok);
+    const record = fs.readFileSync(outFile(repo), 'utf8');
+    const tree = (JSON.parse(record) as { tree: string }).tree;
+    expect(tree).toMatch(/^[0-9a-f]{12,128}$/);
+    const mirror = path.join(repo.home, 'pregate', 'by-tree', `${tree}.json`);
+    expect(fs.readdirSync(path.join(repo.home, 'pregate', 'by-tree'))).toEqual([`${tree}.json`]);
+    expect(fs.readFileSync(mirror, 'utf8')).toBe(record);
+    expect(runBin(repo, 'gstack-pregate', ['clear', '--remote', 'windows.yml/windows-shard', '--run-url', 'https://github.com/o/r/actions/runs/42']).status).toBe(EXIT.ok);
+    const cleared = fs.readFileSync(outFile(repo), 'utf8');
+    expect(cleared).not.toBe(record);
+    expect(fs.readFileSync(mirror, 'utf8')).toBe(cleared);
+    expect(JSON.parse(fs.readFileSync(mirror, 'utf8')).requires_remote[0].receipt).toBe('https://github.com/o/r/actions/runs/42');
+
+    const blocked = path.join(repo.root, 'not-a-dir');
+    fs.writeFileSync(blocked, 'a file where the state root should be\n');
+    const unwritable = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands'], { GSTACK_STATE_ROOT: path.join(blocked, 'root') });
+    expect(unwritable.status, unwritable.out + unwritable.err).toBe(EXIT.ok);
+    expect(unwritable.err).not.toMatch(/ENOTDIR|EACCES|by-tree/);
+    expect(JSON.parse(fs.readFileSync(outFile(repo), 'utf8')).tree).toBe(tree);
+    expect(fs.existsSync(path.join(blocked, 'root'))).toBe(false);
+    expect(fs.readFileSync(mirror, 'utf8')).toBe(cleared);
+  }, 120_000);
 });
