@@ -143,11 +143,15 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
  * Interrupted publication: freeze when a slot merged, verified or merged on
  * GitHub without a verified tree (slot 1's own squash failing the post-merge
  * check leaves main unverified with nothing in `merged` yet); otherwise a
- * plain refusal (nothing was published).
+ * plain refusal (nothing was published). A GitHub state that cannot be read
+ * is neither: the verify refuses and asks to be rerun, never "nothing merged".
  */
 async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[]): Promise<TrainOut> {
   const run = trainFile(t.nonce);
-  const landed = t.merged.length > 0 || t.slots.some(s => prState(env.ctx, s.pr) === 'MERGED');
+  const states = t.merged.length ? [] : t.slots.map(s => ({ pr: s.pr, state: prState(env.ctx, s.pr) }));
+  const landed = t.merged.length > 0 || states.some(s => s.state === 'MERGED');
+  const unreadable = landed ? [] : states.filter(s => s.state === 'unreadable').map(s => `#${s.pr}`);
+  if (unreadable.length) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `${message}; whether ${unreadable.join(', ')} merged on GitHub could not be read, so whether the queue must freeze is unknown` }, lines, `${Q} verify --pr ${t.slots[0]!.pr} --train ${t.nonce} (once gh pr view answers)`, run);
   if (!landed) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
   const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);

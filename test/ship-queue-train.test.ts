@@ -1022,8 +1022,8 @@ describe('verify, freeze, repair and clear', () => {
     expect(JSON.parse(fs.readFileSync(freezeFile, 'utf8'))).toMatchObject({ merged: ['1', '2'], unmerged: [] });
   }, 300_000);
 
-  // Value: protects=a first slot GitHub reports MERGED whose squash fails the post-merge check freezes the queue; fails_when=stopped() reads an empty merged list as "nothing merged" while main already holds the unverified squash (red-team review of GSTA-129); why_new=the test above freezes on slot 2 with slot 1 verified; seam=the fixture's gh pr view state; no_claim=the backstop's outcome
-  test("slot 1 merged on GitHub but not confirmed: the queue freezes with #1 merged and #2 unmerged instead of saying nothing merged", () => {
+  // Value: protects=a first slot GitHub reports MERGED whose squash fails the post-merge check freezes the queue, and a GitHub state that cannot be read refuses instead of reading as not merged; fails_when=stopped() reads an empty merged list, or an unreadable gh answer, as "nothing merged" while main already holds the unverified squash (review of GSTA-129, passes 1 and 2); why_new=the test above freezes on slot 2 with slot 1 verified; seam=the fixture's gh pr view state; no_claim=the backstop's outcome
+  test("slot 1 merged on GitHub but not confirmed: an unreadable GitHub state refuses, and a MERGED one freezes with #1 merged and #2 unmerged instead of saying nothing merged", () => {
     const fx = make();
     const { h2, nonce } = twoPrTrain(fx);
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
@@ -1032,7 +1032,16 @@ describe('verify, freeze, repair and clear', () => {
     const v = (pr: string) => queue(fx, ['verify', '--pr', pr, '--train', nonce], {}, coord);
     const smuggled = fx.repo.git('show', `${t.prefixes[0].commit}:CHANGELOG.md`).replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-18\n\n- #1 change\n- added after the gate\n') + '\n';
     const broken = publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: smuggled });
-    fx.write(d => { (d.prs['1'] as any).state = 'MERGED'; });
+    // While GitHub's answer for #1 cannot be read, the verify neither freezes nor says "nothing merged": it refuses and asks to be rerun.
+    const row = fx.read().prs['1'];
+    fx.write(d => { delete d.prs['1']; });
+    const unreadable = v('1');
+    expect(unreadable.status).toBe(EXIT.refused);
+    expect(unreadable.err).toContain(`main ${broken.slice(0, 12)} is neither T0 nor T1 modulo stamps`);
+    expect(unreadable.err).toMatch(/; whether #1 merged on GitHub could not be read, so whether the queue must freeze is unknown; .*\(QUEUE_PROOF_MISSING\)/);
+    expect(unreadable.out).toContain(`NEXT: gstack-ship-queue verify --pr 1 --train ${nonce} (once gh pr view answers)`);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`))).toBe(false);
+    fx.write(d => { d.prs['1'] = { ...row, state: 'MERGED' }; });
     const frozen = v('1');
     expect(frozen.status).toBe(EXIT.fail);
     expect(frozen.err).toContain(`main ${broken.slice(0, 12)} is neither T0 nor T1 modulo stamps`);
