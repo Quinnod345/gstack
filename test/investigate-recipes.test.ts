@@ -13,12 +13,12 @@ import { CARVE_GUARDS } from './helpers/carve-guards';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-const RECIPES = ['flake', 'polluter', 'race', 'eval-bisect', 'backlog'] as const;
+const RECIPES = ['flake', 'polluter', 'race', 'eval-bisect', 'backlog', 'blast-radius'] as const;
 
 describe('investigate carve', () => {
   const manifest = JSON.parse(read('investigate/sections/manifest.json')) as { skill: string; sections: Array<{ id: string; file: string; trigger: string }> };
   const skeleton = read('investigate/SKILL.md');
-  test('manifest lists the five recipes and the registry guards them', () => {
+  test('manifest lists the six recipes and the registry guards them', () => {
     expect(manifest.skill).toBe('investigate');
     expect(manifest.sections.map(s => s.id)).toEqual([...RECIPES]);
     expect(CARVE_GUARDS.investigate!.expectedSections).toEqual(manifest.sections.map(s => s.file));
@@ -95,13 +95,28 @@ describe('recipe tokens', () => {
     expect(backlog).toMatch(/no `gh issue close`/);
     expect(backlog).not.toMatch(/gh issue close <n>/);
   });
+  test('blast-radius: the one safety fact, the five-rung ladder, look where grep stops, confirmed and cleared risks apart, the Phase 4 pointer and the shared-premise red flag', () => {
+    const blast = read('investigate/sections/blast-radius.md');
+    expect(blast).toContain('## Blast radius');
+    expect(blast).toContain('**Name the one fact it is safe because of.**');
+    expect(blast).toContain('**Look where grep stops.**');
+    expect(blast).toMatch(/1\. You said so\.[\s\S]*5\. You reproduced it in the running app\./);
+    expect(blast).toContain('**Keep confirmed risks and cleared risks apart.**');
+    expect(blast).toContain('the word "unproven"');
+    const skeleton = read('investigate/SKILL.md');
+    const phase4 = skeleton.slice(skeleton.indexOf('## Phase 4: Implementation'), skeleton.indexOf('## Phase 5: Verification & Report'));
+    expect(phase4).toContain('sections/blast-radius.md');
+    expect(phase4.indexOf('sections/blast-radius.md')).toBeLessThan(phase4.indexOf('**Fix the root cause, not the symptom.**'));
+    const phase3 = skeleton.slice(skeleton.indexOf('## Phase 3: Hypothesis Testing'), skeleton.indexOf('## Phase 4: Implementation'));
+    expect(phase3).toMatch(/Two fixes that shared one premise failed the same gate — write the premise down in one sentence and test it before a third fix/);
+  });
 });
 
 describe('external hosts inline the recipes', () => {
   const codex = path.join(ROOT, '.agents', 'skills', 'gstack-investigate', 'SKILL.md');
   test.skipIf(!fs.existsSync(codex))('the codex render carries every recipe heading and no section pointer', () => {
     const text = fs.readFileSync(codex, 'utf8');
-    for (const heading of ['## Flake recipe', '## Polluter recipe', '## Race recipe', '## Eval bisect recipe', '## Backlog mode']) expect(text).toContain(heading);
+    for (const heading of ['## Flake recipe', '## Polluter recipe', '## Race recipe', '## Eval bisect recipe', '## Backlog mode', '## Blast radius']) expect(text).toContain(heading);
     expect(text).not.toContain('sections/flake.md');
   });
 });

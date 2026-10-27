@@ -342,7 +342,7 @@ kill <PID> 2>/dev/null || true
 
 {{DESIGN_DETECTOR:gate}}
 
-Then, always: the craft section's check, `{{BIN_DIR}}/gstack-design-craft <path-to-finalized.html>` (plus `--accepted` per the section), one fix pass and one rerun, as above.
+Then, always: the craft section's lint, `{{BIN_DIR}}/gstack-design-lint <path-to-finalized.html> --render`, one fix pass and one rerun, as above.
 
 ### Verification Screenshots
 
@@ -443,7 +443,6 @@ Write `finalized.json` alongside the HTML:
   "pretext_tier": "<selected tier>",
   "framework": "<vanilla|react|svelte|vue>",
   "iterations": <number of refinement iterations>,
-  "craft_exceptions": [{"id": "<craft id>", "count": <n>, "reason": "<why accepted>"}],
   "date": "<ISO 8601>",
   "screen": "<screen name>",
   "branch": "<current branch>"

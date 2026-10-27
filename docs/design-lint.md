@@ -13,9 +13,9 @@ picks (Aside when it is running, otherwise the browse daemon `./setup` built).
 The rules are ported from [Nutlope/hallmark](https://github.com/Nutlope/hallmark)'s
 `sloplint` (MIT; see NOTICE.md and licenses/MIT-hallmark.txt), rewritten in
 gstack's voice and mapped onto gstack's severity words. The copy tier is
-`gstack-design-craft`'s content-realism and ship-floor check under the same
-contract. Phase 1 (this document) is the tool alone; /design-html and
-/design-review call it in Phase 2.
+the content-realism and ship-floor check adapted from Elaya's design skills
+(MIT; see NOTICE.md), each tell at its line. /design-html runs the lint on
+every finalized page and /design-review on each audited page.
 
 ## Usage
 
@@ -271,12 +271,12 @@ waiver can answer it.
 | `justified-text` | polish | F22 | justified text without hyphens: auto | hyphens: auto, or left-aligned |
 | `missing-lang` | polish | F23 | a document without lang | lang on <html> |
 | `hairline-under-shadow` | polish | F24 | a hairline border under a wide soft shadow on one surface | the shadow or the border, not both |
-| `placeholder-name` | blocks | craft | a placeholder name (John Doe) | use a supplied name, or one that fits the product in sample data |
-| `placeholder-brand` | blocks | craft | a placeholder brand (Acme, Nexus) | use a supplied customer, or a fitting name in sample data |
-| `lorem` | blocks | craft | lorem ipsum placeholder text | write real copy |
+| `placeholder-name` | ask | craft | a placeholder name (John Doe) | use a supplied name, or one that fits the product in sample data |
+| `placeholder-brand` | ask | craft | a placeholder brand (Acme, Nexus) | use a supplied customer, or a fitting name in sample data |
+| `lorem` | ask | craft | lorem ipsum placeholder text | write real copy |
 | `marketing-buzzword` | ask | craft | a marketing buzzword | say the specific thing |
-| `round-number` | blocks | craft | a round invented number | use the supplied figure, or drop the claim |
-| `needs-proof` | blocks | craft | a [Needs proof] marker left in the page | supply the proof or remove the claim before publishing |
+| `round-number` | ask | craft | a round invented number | use the supplied figure, or drop the claim |
+| `needs-proof` | ask | craft | a [Needs proof] marker left in the page | supply the proof or remove the claim before publishing |
 | `oops` | ask | craft | "oops" as an error message | say what happened and what to do |
 | `scroll-listener` | ask | craft | a scroll event listener | use IntersectionObserver; read scroll inside requestAnimationFrame for a scroll-linked effect |
 | `dead-link` | ask | craft | a dead link (href="#") | link it, or render the control disabled |
@@ -287,9 +287,14 @@ waiver can answer it.
 | `missing-favicon` | polish | craft | a document without a favicon | add a favicon <link rel="icon"> |
 | `missing-skip-link` | ask | craft | no skip link reaching <main> | add a "Skip to content" link first in <body> whose #id exists on <main> |
 | `missing-aria-current` | ask | craft | route navigation without aria-current | mark the current nav link aria-current="page" |
+| `empty-mount-node` | ask | craft | an empty mount node: the body has no text and a script renders it, so the lint read none of its content | lint the rendered page: save document.documentElement.outerHTML to a file and lint that |
 
 Source gates are Nutlope/hallmark `references/gates.md` at 7ec8682; `craft`
-marks a rule carried over from `gstack-design-craft` (Elaya-derived). Four
+marks the copy tier (Elaya-derived). Its content-realism ids (placeholder
+people and brands, lorem, round numbers, `[Needs proof:` markers) sit at
+ask, so a real customer named Nexus or a supplied 50% figure is answered by a
+waiver that names the page; `empty-mount-node` says a client-rendered shell
+was not read, instead of passing it. Four
 ids are the lint's own: `waiver` (a refused waiver, ask), `house-style` (more
 than three waivers, polish), `render` (a page that did not render, blocks:
 an unrendered page is never a pass) and `internal-error` (a page or stylesheet the lint could not read, or a rule family that
@@ -308,7 +313,7 @@ literal on a page with no tokens bypasses nothing; its Tailwind half, an
 arbitrary value like `bg-[#0b0b12]` or `font-['Inter']`, fires on any page,
 since Tailwind's theme is the token block it bypasses). A project that names its
 tokens `--bg` or `--brand` gets none of those checks and no signal that they
-did not run; Phase 2 reads the roles from DESIGN.md.
+did not run; reading the roles from DESIGN.md is left to a later phase.
 
 The token block is `:root`, `html`, a `[data-theme|mode|scheme]` scope, `@theme`,
 `@font-face` and anything in a `tokens.css`. Its values are read in one mode:
@@ -334,17 +339,19 @@ no `max-width` (`line-length` reads a declared `ch` value), an uppercase
 paragraph at body size (`wide-tracking` reads caps at label size or tracked;
 a 16px untracked uppercase `<p>` passes), and a fixed px `width` on a
 container with no responsive handling (`wide-container` reads the opposite
-case). The copy tier
-reports at the document's first line with a count, because
-`gstack-design-craft` counts matches without positions; Phase 2 folds those
-patterns into the lint with lines. It reads the page with every open
-`<script>`, `<style>`, `<template>` or `<nav>` that nothing closes after it
-dropped, so a page of unclosed openers costs its length there too.
+case). The copy tier reads the visible text (comments, scripts, styles and
+`<template>` removed, entities decoded), script bodies and inline handlers
+for `alert()` and scroll listeners, and the parsed tags for links, images and
+the head, so a hydration payload or commented-out markup is not counted; it
+does not fetch external scripts, and its head rules run only on a document
+with a `<head>`. A body with no text (a `<noscript>` notice aside) that loads
+a script is an `empty-mount-node`: lint the rendered DOM instead; `--url`
+measures layout, it does not read the copy.
 `tooltip-focus-delay` reads the delay slot of a tooltip's `transition`
 (the second time in each comma part) or its `transition-delay`, 100ms and
 over; a `0.2s` or `200ms` fade is a duration, not a delay. Where a rule id is shared with
 `lib/design-catalog.ts`, the tier here follows hallmark's gate (several
-catalog `ask` rows are `blocks` here); Phase 2 reconciles the two before a
+catalog `ask` rows are `blocks` here); a later phase reconciles the two before a
 catalog row is marked `detect: lint`. Also outside the lint: `system-ui` or
 `-apple-system` as the body's first face (`system-font-primary`; the
 `overused-font` rule reads display tokens and heading selectors, as hallmark's
@@ -388,4 +395,4 @@ range).
 hallmark's theme stamp (the CSS comment that declares a theme, a posture and a
 hero shape) and every guard that reads it; the genre flag; the judged gates
 (the AI template shape, section rhythm, hover by judgement, toasts, the
-reviews); the `--before` / `--kept` redesign record (Phase 2); the photo index.
+reviews); the `--before` / `--kept` redesign record (left to a later phase); the photo index.

@@ -732,7 +732,7 @@ _DJ=$(mktemp "${TMPDIR:-/tmp}/gstack-detect.XXXXXX"); bun --no-env-file --config
 
 Exit 2 → one surgical fix pass over the non-advisory rules in the `DETECT_TOP` block, then scan once more. Whatever remains, present the page with those findings listed as accepted-with-reason: a pattern the approved mockup contains, a value DESIGN.md's tokens bless or a pattern its Decisions Log or Do's and Don'ts records as intentional, or an inline `<!-- impeccable-disable <rule>: <reason> -->` the user agreed to. One pass, not a loop. Any other first line from the probe: skip, no ceremony.
 
-Then, always: the craft section's check, `~/.claude/skills/gstack/bin/gstack-design-craft <path-to-finalized.html>` (plus `--accepted` per the section), one fix pass and one rerun, as above.
+Then, always: the craft section's lint, `~/.claude/skills/gstack/bin/gstack-design-lint <path-to-finalized.html> --render`, one fix pass and one rerun, as above.
 
 ### Verification Screenshots
 
@@ -833,7 +833,6 @@ Write `finalized.json` alongside the HTML:
   "pretext_tier": "<selected tier>",
   "framework": "<vanilla|react|svelte|vue>",
   "iterations": <number of refinement iterations>,
-  "craft_exceptions": [{"id": "<craft id>", "count": <n>, "reason": "<why accepted>"}],
   "date": "<ISO 8601>",
   "screen": "<screen name>",
   "branch": "<current branch>"
