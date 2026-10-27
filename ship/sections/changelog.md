@@ -42,6 +42,8 @@
 
 **Do NOT ask the user to describe changes.** Infer from the diff and commit history.
 
+7. **Lint the entry:** `~/.claude/skills/gstack/bin/gstack-prose-lint CHANGELOG.md --base origin/<base> --gate` reads only the lines this branch added; rewrite each `PROSE:` line it names and rerun until the trailer is `PROSE_LINT: ok`.
+
 **NO_VERSION (Step 12):** skip this step; write no CHANGELOG entry or version header.
 
 **No CHANGELOG:** when the policy's `changelog` is `null`, or the file it names

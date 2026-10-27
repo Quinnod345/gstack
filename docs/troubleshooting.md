@@ -4852,6 +4852,40 @@ every flag and code.
 
 **Fix.** Rerun once; if it repeats, report the printed frame to the gstack maintainers.
 
+## Prose lint (gstack-prose-lint)
+
+`bin/gstack-prose-lint` reads the prose /ship is about to publish, a CHANGELOG
+entry (Step 13) and the sections the author writes in the PR body (Step 19:
+`## Why`, `## Summary` and `## Blast radius`, through `--sections`; the
+`## What changed` captions and image text stay a report), and the quality-gate
+workflow runs it over `CHANGELOG.md`'s `[Unreleased]` block. It decides only
+what a regular expression can: autopilot vocabulary, "not just X, but Y",
+metaphor nouns, a colon used as a conjunction, a bold label that restates its
+line, an arrow or a dropped article standing in for a sentence, and a fence or
+HTML comment left open (`unclosed-block`), because nothing after it was read.
+Fenced code, inline code, URLs, HTML comments and quoted words are never read,
+so the problem quoted in `## Why` is the person's to phrase. Everywhere else (a
+template, a doc, this file) it is a report: run it, read it, keep your em dashes.
+
+<a id="prose-lint-found"></a>
+### `PROSE_LINT_FOUND`
+
+**Meaning.** A gated run (`--gate`) found at least one tell in the text it was
+given. Each `PROSE: <file>:<line> <rule> "<match>" (<hint>)` line above the
+trailer names the rule and what to write instead; `PROSE_LINT: found=<n>` counts
+them. With `--unreleased` only the `## [Unreleased]` block was read; with
+`--base <ref>` only the lines the working tree added since the merge base; with
+`--sections <a,b>` only the text under those `## ` headings (under `--gate`, a
+file with none of them is exit 2, not a pass: the draft lost a heading).
+
+**Fix.** Rewrite each named line in the draft the way its hint says (a measurement
+such as `1.6740 → 1.7010` and the `before → after` heading are not findings), then
+rerun the same command. The PR body's verbatim tool sections (the approvals
+table, issue links, review findings, the coverage diagram) are outside
+`--sections` and are never read, so a finding there means the compose block was
+edited: restore its `--sections` list. A rule that keeps flagging correct prose
+is a bug in `lib/prose-lint.ts`: file it with the sentence.
+
 ## Quick answers
 
 The short troubleshooting entries that used to live in the README. Each names the symptom and the fix; the sections above cover every gate message in depth.

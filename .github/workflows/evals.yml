@@ -998,6 +998,13 @@ jobs:
     permissions:
       contents: read
       packages: read
+    # A container job's run steps default to `sh -e {0}` (dash in the CI
+    # image), not bash as on a bare runner: run 40456150409 died at
+    # `${PREFIX_SHA:0:12}` with "Bad substitution" on every prefix before a
+    # case ran. test/workflow-shell-lint.test.ts keeps every sh-run step POSIX.
+    defaults:
+      run:
+        shell: bash
     container:
       image: ${{ needs.build-image.outputs.image-tag }}
       credentials:
