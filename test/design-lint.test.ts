@@ -17,6 +17,7 @@ import { collectFiles, contextWaivers, lintStatic, MAX_FILE_BYTES } from '../lib
 import type { LintContext } from '../lib/design-lint/context';
 import { browserAvailable } from './helpers/browser-available';
 import { RULES } from '../lib/design-lint/rules/ids';
+import { CRAFT_IDS } from '../lib/design-craft';
 import { FAMILIES } from '../lib/design-lint/rules';
 import { findWaivers, reasonIsBoilerplate, resolveWaivers, applyWaivers, suspectedRules } from '../lib/design-lint/waivers';
 
@@ -398,11 +399,10 @@ describe('design-lint: third review cycle', () => {
   });
 
   test('every id gstack-design-craft can emit has a lint rule or belongs to the static tier', () => {
-    const src = fs.readFileSync(path.join(ROOT, 'lib', 'design-craft.ts'), 'utf8');
-    const ids = [...new Set([...src.matchAll(/id: '([a-z-]+)'/g)].map((m) => m[1]))];
+    const ids = [...CRAFT_IDS];
     expect(ids.length).toBeGreaterThan(15);
-    expect(ids.filter((id) => !(id in RULES) && id !== 'transition-all')).toEqual([]);
-    expect(ids.filter((id) => id in RULES && RULES[id].gate !== 'craft')).toEqual(['vh-height']);
+    expect(ids.filter((id) => !(id in RULES))).toEqual([]);
+    expect(ids.filter((id) => RULES[id].gate !== 'craft')).toEqual(['layout-transition', 'vh-height']);
   });
 });
 

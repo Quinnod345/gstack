@@ -91,10 +91,11 @@
         "#### 1. Parse outputs",
         "#### 2. Validate severity",
         "#### 3. Identify and merge",
-        "#### 4. Apply specialist confidence gates",
-        "#### 5. Score and present specialists",
-        "#### 6. Save specialist activity",
-        "#### 7. Hand off to Fix-First"
+        "#### 4. Lead judgment",
+        "#### 5. Apply specialist confidence gates",
+        "#### 6. Score and present specialists",
+        "#### 7. Save specialist activity",
+        "#### 8. Hand off to Fix-First"
       ]
     },
     "ship": {
@@ -148,10 +149,11 @@
         "#### 1. Parse outputs",
         "#### 2. Validate severity",
         "#### 3. Identify and merge",
-        "#### 4. Apply specialist confidence gates",
-        "#### 5. Score and present specialists",
-        "#### 6. Save specialist activity",
-        "#### 7. Hand off to Fix-First",
+        "#### 4. Lead judgment",
+        "#### 5. Apply specialist confidence gates",
+        "#### 6. Score and present specialists",
+        "#### 7. Save specialist activity",
+        "#### 8. Hand off to Fix-First",
         "### Step 9.2.1: Exploratory QA (before Fix-First)",
         "### Step 9.3: Cross-review finding dedup",
         "## Step 9.4: Fix-First and persistence"

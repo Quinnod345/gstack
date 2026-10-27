@@ -12,7 +12,7 @@
  *
  * Derived in part from pbakaus/impeccable (Apache-2.0), modified. See NOTICE.md.
  */
-import { DESIGN_SLOP_CATALOG, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
+import { RENDERED, BANNED_FONTS, type DesignSlopEntry } from '../../lib/design-catalog';
 import { SENTINEL, DETECT_EXIT_ECHO } from '../../lib/design-detect-contract';
 
 export const DESIGN_CHECKLIST_HEADER =
@@ -24,17 +24,17 @@ export const DESIGN_CHECKLIST_SLOP_HEADING = 'AI Slop Detection';
 
 const TIER_ORDER: Record<DesignSlopEntry['confidence'], number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
-/** Category 1: slop entries a code reader can grep for, plus the legacy blacklist lines. */
+/** Category 1: rendered (non-checkerOnly) slop entries a code reader can grep for, plus the legacy blacklist lines. */
 export function checklistSlopEntries(): DesignSlopEntry[] {
   // Array.prototype.sort is stable, so catalog order survives within a tier.
-  return DESIGN_SLOP_CATALOG
+  return RENDERED
     .filter(e => e.kind === 'slop' && (e.detect.includes('grep') || e.legacyBlacklist))
     .sort((a, b) => TIER_ORDER[a.confidence] - TIER_ORDER[b.confidence]);
 }
 
 /** Catalog rules a review may fix without asking: mechanical CSS changes with HIGH confidence. */
 export function autoFixEntries(): DesignSlopEntry[] {
-  return DESIGN_SLOP_CATALOG.filter(e => e.tier === 'auto-fix');
+  return RENDERED.filter(e => e.tier === 'auto-fix');
 }
 
 function endsWithPunctuation(s: string): boolean {
