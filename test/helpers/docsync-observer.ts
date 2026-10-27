@@ -5,7 +5,7 @@ import { observeQAWrites, type QAWriteObservation } from './qa-functional-observ
 import { nativeCalls } from './qa-checkpoint-evidence';
 import type { SkillTestResult } from './session-runner';
 import { DOC_PATH, type DocsScenario, type fixtureDocs } from './docsync-fixture';
-import { docsNativeInterface } from './docsync-interface';
+import { docsNativeInterface, DOCS_AUDIT_RECORD, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } from './docsync-interface';
 import { sliceBetween } from './skill-fixture';
 import { readOnlyCommandAllowed } from './read-only-commands';
 
@@ -230,6 +230,7 @@ function unwrapHarmlessRead(text: string, fixture: ReturnType<typeof fixtureDocs
 export function docsCommandAllowed(command: string, fixture: ReturnType<typeof fixtureDocs>, scripts: string[] = []): boolean {
   const text = command.trim();
   if (docsPreambleCommands(fixture).some(block => block.trim() === text)) return true;
+  if (text === DOCS_TMP_EXCLUDE || text === DOCS_AUDIT_RESET || text === docsCapsCommand(fixture.skills.split(path.sep).join('/'))) return true;
   if (readOnlyCommandAllowed(text, docsReadOnlyScope(fixture)) || docsComposedReadAllowed(text, fixture)) return true;
   const insert = /^cat (['"]?)([^\s'"]+)\1 >> (['"]?)([^\s'"]+)\3$/.exec(text);
   if (insert) return [insert[2], insert[4]].every(file => path.isAbsolute(file) && /\.md$/i.test(file) &&
@@ -458,7 +459,8 @@ export function docsToolFailures(result: SkillTestResult, fixture: ReturnType<ty
       const actual = actualWritePath(file);
       const productWrite = within(file, fixture.repo) || (actual !== null && within(actual, repo));
       if (readOnly && productWrite) failures.push('read-only docs write attempt');
-      const allowedDoc = file === path.join(fixture.repo, DOC_PATH) && actual === authoredDoc;
+      const allowedDoc = (file === path.join(fixture.repo, DOC_PATH) && actual === authoredDoc) ||
+        (file === path.join(fixture.repo, DOCS_AUDIT_RECORD) && actual === path.join(repo, DOCS_AUDIT_RECORD));
       if (productWrite && !allowedDoc) {
         failures.push('non-document product write attempt');
       }
