@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**/benchmark's collection, comparison, budget and trend phases now agree with its vet-the-number section.** The 2026-10-27 flaky pass (GSTA-128) read the `benchmark/SKILL.md perf collection` judge's six samples from run 40558235014: every sample named the same contradictions, so the prose was repaired and no threshold moved.
+
+### Fixed
+- **Phase 3 run count**: the script runs 5 times per page and later phases use each metric's median with its range, which is what the mandatory vet section already demanded; the old optional 3-run median contradicted it. `--quick` is the one-run ballpark and produces no comparison verdict.
+- **Phase 5 against a stored baseline**: the baseline ran earlier, so question 5's alternation is unavailable; the comparison uses both sides' `range_ms`, names the limiter from Phase 6, and is inconclusive when either side is one run. A delta smaller than either spread is OK whatever threshold it crosses. The report leads with the verdict and names the run count.
+- **Phase 4 schema** carries `runs` and `range_ms`; **Phase 7**'s grade example counts 3 PASS, 1 WARNING, 2 FAIL (4/6 below budget); **Phase 8** reads the benchmark and baseline JSON files by `timestamp` and says where Bundle and Grade come from; **Phase 9** defines the JSON as the Phase 4 object plus per-page `grade`, `verdict` and metric `status`.
+- Nearby prose tightened so the skeleton stays under its 31,300-byte cap (31,290). Judge after the repair: clarity, completeness and actionability 4/4/4 on all three samples, three runs.
+
 ## [1.91.281.0] - 2026-10-27
 
 **Four paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
