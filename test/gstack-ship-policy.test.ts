@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { DEFAULT_POLICY, POLICY_KEYS, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
+import { fillDue } from '../lib/ship-queue-train';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -29,6 +30,11 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(codes({ history: 'rebase' })).toEqual(['POLICY_INVALID:history']);
     expect(codes({ release_tool: 42 })).toEqual(['POLICY_INVALID:release_tool']);
     expect(codes({ pr_count: { default_pr_count: 0, split_requires_owner: 'yes' } })).toEqual(['POLICY_INVALID:pr_count.default_pr_count', 'POLICY_INVALID:pr_count.split_requires_owner']);
+    expect(codes({ review_scope: 'loose' })).toEqual(['POLICY_INVALID:review_scope', 'POLICY_INVALID:review_scope']);
+    expect(codes({ review_scope: 'all' })).toEqual(['POLICY_INVALID:review_scope']);
+    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'frozen' })).toEqual([]);
     expect(codes([])).toEqual(['POLICY_INVALID:']);
   });
 
@@ -72,6 +78,18 @@ describe("gstack's own .gstack/ship-policy.json", () => {
     expect(raw.train).toMatchObject({ gate_workflow: 'evals.yml', free_workflow: 'free-tests.yml', full_gate_check: 'gstack/full-gate', record_artifact: 'gstack-train-record' });
     for (const wf of [raw.train.gate_workflow, raw.train.free_workflow]) expect(fs.existsSync(path.join(root, '.github/workflows', wf))).toBe(true);
   });
+
+  // Value: protects=the fill rule the coordinator relies on: a train dispatches at 3 READY PRs or one hour after the first READY, whichever comes first
+  // (2026-10-26: 5 PRs / 3 hours left READY PRs waiting most of a day); fails_when=the live block drifts back to a larger or slower fill; why_new=the values were unpinned; seam=the policy file; no_claim=fillDue's arithmetic (ship-queue-train-logic)
+  test('fills a train at 3 READY PRs or one hour after the first READY, whichever comes first', () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(import.meta.dir, '..', '.gstack', 'ship-policy.json'), 'utf8'));
+    expect([raw.train.max_size, raw.train.fill_hours]).toEqual([3, 1]);
+    const first = '2026-10-26T09:00:00.000Z';
+    const slots = (n: number) => Array.from({ length: n }, (_, i) => ({ pr: i + 1, ready_at: new Date(Date.parse(first) + i * 60_000).toISOString() })) as any;
+    expect(fillDue(slots(2), raw.train, '2026-10-26T09:59:00Z', false)).toBe('2026-10-26T10:00:00.000Z');
+    expect(fillDue(slots(2), raw.train, '2026-10-26T10:00:00Z', false)).toBeNull();
+    expect(fillDue(slots(3), raw.train, '2026-10-26T09:05:00Z', false)).toBeNull();
+  });
 });
 
 describe('gstack-ship-policy (bin)', () => {
@@ -97,7 +115,7 @@ describe('gstack-ship-policy (bin)', () => {
     expect(r.out).not.toMatch(/^ship: history/m);
     const strict = fixture({ policy: { ...BASE_POLICY, history: 'merge-only', queue_mode: 'claim-at-open', bump: 'ask', release_tool: null, preregistration_shas: ['0123456789abcdef0123456789abcdef01234567'] } });
     const lines = runBin(strict, 'gstack-ship-policy', ['show-effective', '--base', 'main']).out.split('\n').filter(l => l.startsWith('ship: '));
-    expect(lines.map(l => l.split(':')[1]!.trim())).toEqual(['history merge-only', 'queue_mode claim-at-open', 'bump ask', 'preregistration']);
+    expect(lines.map(l => l.split(':')[1]!.trim())).toEqual(['history merge-only', 'queue_mode claim-at-open', 'bump ask', 'review_scope frozen', 'preregistration']);
     const j = JSON.parse(runBin(repo, 'gstack-ship-policy', ['show-effective', '--base', 'main', '--json']).out);
     expect(j.valid).toBe(true);
     expect(j.source.kind).toBe('base');

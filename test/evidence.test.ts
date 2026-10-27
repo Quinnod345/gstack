@@ -404,6 +404,174 @@ describe('gstack-evidence tests_ran — zero-run green is a third state, never m
     }
   });
 
+  test('a gstack-pregate --remote lane: the remote gate\'s tests= count (ran, skips included) lands in the receipt (captured output)', () => {
+    // test/fixtures/evidence/pregate-remote-failed.out is the stdout of
+    // `gstack-pregate --stage tests --remote` captured under gstack-evidence
+    // on 2026-10-26 (GSTA-102): the Ubicloud gate ran 9658 tests with 1
+    // failure, and the lane came back incomplete. Before, the receipt said
+    // tests_ran=unknown for every remote lane, so the ship receipt and the
+    // Review Readiness Dashboard never carried the real number.
+    const fixture = path.join(ROOT, 'test', 'fixtures', 'evidence', 'pregate-remote-failed.out');
+    expect(fs.readFileSync(fixture, 'utf-8')).toContain('PREGATE_REMOTE: tree=279e658e29bec511739dd00510828dc433fb94fa tests=9658 failed=1 spent=0.04');
+    const r = run(['run', '--label', 'tests', '--', `cat '${fixture}'; exit 1`]);
+    expect(r.status).toBe(1);
+    expect(records().pop()).toMatchObject({ exit: 1, tests_ran: 9658 });
+    expect(r.stderr).toContain('recorded label=tests exit=1 tests_ran=9658');
+    expect(run(['check', '--label', 'tests']).stdout).toContain('EVIDENCE: STALE label=tests exit=1 tests_ran=9658');
+  });
+
+  test('a cleared remote lane (captured output): the gate line and the receipt line carry the same count, and the lane is FRESH', () => {
+    // pregate-remote-cleared.out is the same lane's stdout+stderr on the next
+    // tree, after the fix: 9660 tests, 0 failed, the obligation cleared. It
+    // carries both the gate's PREGATE_REMOTE line and the "cleared by
+    // remote-gate" receipt, plus bun's own "Ran 23 tests" line indented under
+    // "lanes:", which must not be mistaken for a bun summary.
+    const fixture = path.join(ROOT, 'test', 'fixtures', 'evidence', 'pregate-remote-cleared.out');
+    const text = fs.readFileSync(fixture, 'utf-8');
+    expect(text).toContain('PREGATE_REMOTE: tree=46b75c23704fb4ae1f22677258c16b880ecd20c5 tests=9660 failed=0 spent=0.04');
+    expect(text).toContain('cleared by remote-gate tree=46b75c23704f tests=9660');
+    expect(text).toContain('lanes:   Ran 23 tests across 1 file.');
+    expect(run(['run', '--label', 'tests', '--', `cat '${fixture}'`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(9660);
+    expect(run(['check', '--label', 'tests']).stdout).toContain('EVIDENCE: FRESH label=tests exit=0 tests_ran=9660');
+    // A paid-only selection reports tests=0: that is ZERO-RUN, not a pass.
+    expect(run(['run', '--label', 'tests', '--', "printf '    lanes:   PREGATE_REMOTE: tree=279e658e29bec511739dd00510828dc433fb94fa tests=0 failed=0 spent=0\\n'"]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(0);
+    expect(run(['check', '--label', 'tests']).stdout).toContain('EVIDENCE: ZERO-RUN label=tests exit=0 tests_ran=0');
+  });
+
+  test('the cleared receipt line alone is parsed, the later of the two lines wins, and an echoed occurrence does not count', () => {
+    // renderTable prints the obligation's receipt line beside the lane row; it is
+    // parsed on its own (here in the `clear --receipt` form lib/pregate/index.ts
+    // builds, with receipt= and sha256=) so a table that carries the receipt
+    // without the row still records the count.
+    const receipt = 'requires-remote: pregate.json/remote_gate (remote) 362 test(s) — cleared by remote-gate tree=46b75c23704f tests=9660 receipt=/x/gate.out sha256=0123456789ab';
+    const gate = '    lanes:   PREGATE_REMOTE: tree=46b75c23704fb4ae1f22677258c16b880ecd20c5 tests=9658 failed=0 spent=0.04';
+    const print = (...ls: string[]) => `printf '%s\\n' ${ls.map((l) => `'${l}'`).join(' ')}`;
+    expect(run(['run', '--label', 'tests', '--', print(receipt)]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(9660);
+    expect(run(['run', '--label', 'tests', '--', print(gate, receipt)]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(9660);
+    expect(run(['run', '--label', 'tests', '--', print(receipt, gate)]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(9658);
+    // Only a line that is the lane row or the receipt counts: a log line that
+    // prefixes or quotes one is not a run (indentation is accepted: the row
+    // itself is indented under "lanes:").
+    expect(run(['run', '--label', 'tests', '--', print('expected PREGATE_REMOTE: tree=x tests=9999 failed=0', 'note: saw cleared by remote-gate tree=x tests=9999 in a log')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+  });
+
+  test("gstack's shard runner (captured output): the FILES-FROM RESULT total, the per-shard PASS sum without it, and a forwarded bun line on stderr", () => {
+    // test/fixtures/evidence/shard-runner-files-from.out is the stream of the
+    // remote gate's `scripts/test-free-shards.ts --files-from` run on the
+    // Ubicloud VM for GSTA-102's tree d47be9b6 (275 files, 16 shards, 10138
+    // tests): 16 "[test:free] PASS — N tests" epilogues whose sum is the
+    // "FILES-FROM RESULT: … tests=10138" total, nested bun children's own
+    // "Ran N tests" lines among them. Before, every full-suite run through the
+    // shard runner (`bun run test:ubicloud`, GSTA-94 on #3424) recorded
+    // tests_ran=0: the quiet shards forward bun's "Ran N tests" line without
+    // its " N pass" counts, and the bun branch read that as zero.
+    const fixture = path.join(ROOT, 'test', 'fixtures', 'evidence', 'shard-runner-files-from.out');
+    const text = fs.readFileSync(fixture, 'utf-8');
+    expect(text).toContain('[test:free] FILES-FROM RESULT: files=275 tests=10138 failed=0 exit=0');
+    expect(text.match(/\[test:free\] PASS — (\d+) tests/g)).toHaveLength(16);
+    expect(run(['run', '--label', 'tests', '--', `cat '${fixture}'`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(10138);
+    // A full-suite run has no FILES-FROM RESULT line: the per-shard epilogues sum to the same total.
+    expect(run(['run', '--label', 'tests', '--', `grep -v 'FILES-FROM RESULT' '${fixture}'`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(10138);
+    // The live shape: epilogues on stdout, the forwarded "Ran N tests" line on stderr (which the
+    // tail appends after stdout). A bun terminal line with no counts block is not a bun summary.
+    expect(run(['run', '--label', 'tests', '--', "printf '[test:free] full suite: 1 files across 1 shard processes (duration-packed)\\n[test:free] PASS — 37 tests, 1 files, 38s. Full log: /x\\n'; printf 'Ran 37 tests across 1 file. [38.05s]\\n' >&2"]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(37);
+    // A real bun all-skip run still grades ZERO-RUN: its counts block is present.
+    expect(run(['run', '--label', 'tests', '--', "printf ' 0 pass\\n 2 skip\\n 0 fail\\nRan 2 tests across 1 file. [4.00ms]\\n'"]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(0);
+  });
+
+  test('shard runner shapes: a forwarded count-less line never beats the epilogue sum, no bun block does once the runner spoke, a flaky-pass run is unknown, only the last run counts, and a count-less "Ran 0 tests" is ZERO-RUN', () => {
+    const start = '[test:free] full suite: 3 files across 2 shard processes (duration-packed)';
+    const pass = (n: number) => `[test:free] PASS — ${n} tests, 1 files, 1s. Full log: /x`;
+    const out = (...ls: string[]) => `printf '%s\\n' ${ls.map((l) => `'${l}'`).join(' ')}`;
+    const err = (...ls: string[]) => `${out(...ls)} >&2`;
+    // The quiet runner forwards " N fail" (never " N pass") and the terminal line on stderr.
+    expect(run(['run', '--label', 'tests', '--', `${out(start, pass(100), pass(37))}; ${err(' 1 fail', 'Ran 600 tests across 18 files. [1s]')}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    // Once the runner spoke its sum stands over any bun counts block, wherever that block sits: the tail
+    // is stdout then stderr, so a bun block on stderr always sorts after the runner's stdout epilogues
+    // whether it ran before the suite (a focused file first) or after it (a trailing all-skip run).
+    // Value: protects=a 10k-test shard-runner run is never recorded as a focused file's count or ZERO-RUN
+    // because bun's stderr block out-positions it; fails_when=parseTestsRan lets a counted bun block win
+    // on position once the runner spoke; why_new=every earlier row put the counted block after the runner;
+    // seam=none; no_claim=a bun run that genuinely followed the suite is not counted separately.
+    expect(run(['run', '--label', 'tests', '--', `${out(start, pass(100), pass(37))}; ${err(' 0 pass', ' 2 skip', ' 0 fail', 'Ran 2 tests across 1 file. [4.00ms]')}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    expect(run(['run', '--label', 'tests', '--', out(start, pass(100), pass(37), ' 0 pass', ' 2 skip', ' 0 fail', 'Ran 2 tests across 1 file. [4.00ms]')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    expect(run(['run', '--label', 'tests', '--', `${err(' 5 pass', ' 0 fail', 'Ran 5 tests across 1 file. [9.00ms]')}; ${out(start, pass(100), pass(37))}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    expect(run(['run', '--label', 'tests', '--', out(' 5 pass', ' 0 fail', 'Ran 5 tests across 1 file. [9.00ms]', start, pass(100), pass(37))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    // A verdict line whose start line fell out of the tail: the runner spoke but the sum is incomplete, so
+    // unknown, never a forwarded shard block's count and never bun's ZERO-RUN for a run that was not bun's.
+    expect(run(['run', '--label', 'tests', '--', `${out(pass(100), pass(37))}; ${err(' 0 pass', ' 2 skip', ' 0 fail', 'Ran 2 tests across 1 file. [4.00ms]')}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    expect(run(['run', '--label', 'tests', '--', out('[test:free] FILES-FROM RESULT: files=1 tests=9 failed=0 exit=0')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    // A full-suite start line names its shard count: fewer PASS epilogues than that is a killed run, not a total.
+    const planned = '[test:free] full suite: 300 files across 3 shard processes (duration-packed), then 2 exclusive host-state file(s) serially';
+    expect(run(['run', '--label', 'tests', '--', out(planned, pass(100), pass(37), pass(5), pass(2))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(144);
+    expect(run(['run', '--label', 'tests', '--', out(planned, pass(100), pass(37), pass(5))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    expect(run(['run', '--label', 'tests', '--', out('[test:free] full suite: 300 files across 3 shard processes', pass(100), pass(37), pass(5))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(142);
+    // An empty shard prints no PASS epilogue, only its "0 files" line: it counts as a zero shard, not a missing one.
+    expect(run(['run', '--label', 'tests', '--', out('[test:free] full suite: 2 files across 3 shard processes', pass(100), '[test:free] shard 2/3: 0 files, 0s, pass', pass(37))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    // A FAIL epilogue plus a FLAKY-PASS retry exits 0 but has lost the failed shard's count.
+    expect(run(['run', '--label', 'tests', '--', out(start, pass(100), '[test:free] FAIL — 1 failing test(s) in 1 file(s), 0 crashed worker(s). Full log: /y', '[test:free] FLAKY-PASS — 1 file(s) failed once and passed on serial retry: a.test.ts', pass(5))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    // Two runs in one command: the last run's sum, not both.
+    expect(run(['run', '--label', 'tests', '--', out(start, pass(100), start, pass(7), pass(8))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(15);
+    // A forwarded "Ran 0 tests" line with no counts block is still ZERO-RUN.
+    expect(run(['run', '--label', 'tests', '--', err('Ran 0 tests across 0 files. [1ms]')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(0);
+    // A files-from run's total stands even when a shard failed; a shard with no count is unknown.
+    expect(run(['run', '--label', 'tests', '--', out(start, pass(100), '[test:free] FAIL — 1 failing test(s) in 1 file(s), 0 crashed worker(s). Full log: /y', '[test:free] FILES-FROM RESULT: files=3 tests=137 failed=1 exit=1')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    expect(run(['run', '--label', 'tests', '--', out(start, pass(100), '[test:free] PASS — ? tests, ? files, 1s. Full log: /z')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+  });
+
+  test('shard runner degrade paths: no start line, a forwarded empty-file line, a look-alike epilogue, and a run that printed no epilogue', () => {
+    const start = '[test:free] full suite: 3 files across 2 shard processes (duration-packed)';
+    const pass = (n: number) => `[test:free] PASS — ${n} tests, 1 files, 1s. Full log: /x`;
+    const out = (...ls: string[]) => `printf '%s\\n' ${ls.map((l) => `'${l}'`).join(' ')}`;
+    const err = (...ls: string[]) => `${out(...ls)} >&2`;
+    // Without the runner's start line in the tail an epilogue still means the runner spoke, but the sum is
+    // incomplete: unknown, not bun's count (the block may be one forwarded shard's) and not a partial sum.
+    expect(run(['run', '--label', 'tests', '--', out(' 0 pass', ' 0 fail', 'Ran 0 tests across 0 files. [1ms]', pass(5))]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    expect(run(['run', '--label', 'tests', '--', `${out(pass(100), pass(37))}; ${err('Ran 137 tests across 2 files. [1s]')}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+    // A shard's forwarded count-less "Ran 0 tests across 1 file" (an empty file, or a nested child) is not the run.
+    expect(run(['run', '--label', 'tests', '--', `${out(start, pass(100), pass(37))}; ${err('Ran 23 tests across 1 file. [1s]', 'Ran 0 tests across 1 file. [1ms]', 'Ran 37 tests across 1 file. [1s]')}`]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(137);
+    // Only the runner's whole epilogue shape counts (a look-alike without the "Ns. Full log:" tail does not), and a
+    // checkout path with spaces still matches. A forged whole epilogue is the child's own stdout, trusted like any
+    // runner summary (W3's trust model), so it is not a control here.
+    const oneShard = '[test:free] full suite: 1 files across 1 shard processes';
+    expect(run(['run', '--label', 'tests', '--', out(oneShard, pass(100), '[test:free] PASS — 99999 tests, 1 files, 1s. error: spoof')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(100);
+    expect(run(['run', '--label', 'tests', '--', out(oneShard, '[test:free] PASS — 100 tests, 2 files, 9s. Full log: /Users/garry tan/gstack/.context/free-test-logs/x.log')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe(100);
+    // The runner spoke but printed no countable epilogue (killed mid-shards): unknown.
+    expect(run(['run', '--label', 'tests', '--', out(start, '[test:free] shard 1/2 (1 files)')]).status).toBe(0);
+    expect(records().pop().tests_ran).toBe('unknown');
+  });
+
   test('the last summary wins when a command runs a suite twice', () => {
     expect(run(['run', '--label', 'tests', '--', `${bunOutput(9, 0, 0)}; ${bunOutput(0, 3, 0)}`]).status).toBe(0);
     expect(records().pop().tests_ran).toBe(0);

@@ -32,6 +32,17 @@ describe("buildRestartEnv (#1781 headed persistence)", () => {
     expect(env.BROWSE_CONFIG_HASH).toBe("abc");
   });
 
+  test("explicit direct (macOS/Windows, #3440) is re-emitted from this invocation", () => {
+    const env = buildRestartEnv({ explicitDirect: true, configHash: "d" } as any, launchedState as any);
+    expect(env.BROWSE_PROXY_URL).toBe("direct");
+    expect(env.BROWSE_CONFIG_HASH).toBe("d");
+  });
+
+  test("the opt-out comes only from this invocation's flags, never from the persisted state, so the env never contradicts the hash", () => {
+    expect(buildRestartEnv({ explicitDirect: false, configHash: "plain" } as any, { ...launchedState, proxyDirect: true } as any).BROWSE_PROXY_URL).toBeUndefined();
+    expect(buildRestartEnv({ proxyUrl: "socks5://x" } as any, { ...launchedState, proxyDirect: true } as any).BROWSE_PROXY_URL).toBe("socks5://x");
+  });
+
   test("configHash falls back to persisted state", () => {
     const env = buildRestartEnv({} as any, { ...launchedState, configHash: "fromstate" } as any);
     expect(env.BROWSE_CONFIG_HASH).toBe("fromstate");

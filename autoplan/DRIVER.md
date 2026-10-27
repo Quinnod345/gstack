@@ -6,8 +6,8 @@ Read this file instead of `autoplan/SKILL.md` when you (a parent agent on any ho
 unattended /autoplan run through `gstack-autoplan`: the reviewers are subagents you dispatch,
 and the runner keeps the state. The commands live in `<root>/bin/`, where `<root>` is the
 folder that holds this `autoplan/` directory; `gstack-autoplan --help` and the first `next`
-print `DRIVER: <root>/autoplan/DRIVER.md`. Run every command with the `GSTACK_LAUNCH`
-assignments your installer printed. Read printed lines and files, never prose: every workflow
+print `DRIVER: <root>/autoplan/DRIVER.md`. Run every command with the `GSTACK_LAUNCH` assignments your installer printed: `. <the GSTACK_LAUNCH_FILE it printed>` in the shell that runs the command,
+never `export $(...)`, `env`, `printenv` or a bare `set` in a tool fence (a bare `export` prints every variable, credentials included). Read printed lines and files, never prose: every workflow
 command ends with `GSTACK_RESULT: skill=autoplan status=<s> run=<dir>`, and every error line
 ends with `(<CODE>)`.
 
@@ -109,7 +109,7 @@ RESULT FORMAT (required by gstack-autoplan; the parent binds your file by this c
 
 A reply binds to the `gate_rev` you read (`--gate-rev`). Bare `yes`/`no` is unparsed, never guessed.
 
-- `rec`: every item takes its recommendation, plan changes included (each prints APPLY:); `all` is an alias.
+- `rec`: every item takes its recommendation, plan changes included (each prints APPLY:); `all` and `do it` are aliases.
 - `as-is`: keep every direction; no plan change.
 - `d3b uc1a`: one <id><option> token per item you set; unanswered auto items take their default.
 - `rec except d3b`: recommendations, with the listed overrides.

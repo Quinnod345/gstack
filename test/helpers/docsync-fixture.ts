@@ -60,9 +60,13 @@ export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.
   write('personal-note.txt', 'Unrelated user content: KEEP THIS EXACTLY.\n');
   for (const skill of ['document-release', 'ship']) {
     fs.mkdirSync(path.join(skills, skill, 'sections'), { recursive: true });
-    for (const relative of skill === 'ship'
+    const required = skill === 'ship'
       ? ['SKILL.md', 'sections/documentation.md', 'sections/pr-body.md']
-      : ['SKILL.md', 'sections/audit-scope.md', 'sections/release-body.md']) {
+      : ['SKILL.md', 'sections/audit-scope.md', 'sections/release-body.md'];
+    // A generated skill that loads a shared preamble names sections/preamble.md as a
+    // required asset before skill start; a spawned child blocks on its absence.
+    const preamble = fs.existsSync(path.join(generatedRoot, skill, 'sections/preamble.md')) ? ['sections/preamble.md'] : [];
+    for (const relative of [...required, ...preamble]) {
       const source = path.join(generatedRoot, skill, relative);
       if (!fs.existsSync(source)) throw new Error(`Generate the changed skill before live evaluation: ${source}`);
       fs.copyFileSync(source, path.join(skills, skill, relative));

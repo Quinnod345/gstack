@@ -141,7 +141,11 @@ export function verdictProblem(skill: string, gstackRoot: string, env: Env, bunP
   const file = findInstallVerdict(src, project, env);
   const v = readInstallVerdict(file);
   const problem = (detail: string): VerdictProblem => ({ detail, code: 'INSTALL_UNVERIFIED' });
-  if (!v) return problem(`no install verdict at ${file} for ${src}`);
+  if (!v && fs.existsSync(file)) return problem(`the install verdict at ${file} is unreadable or has an unsupported schema_version; rerun the installer`);
+  if (!v) {
+    return { ...problem(`no install verdict at ${file} for ${src}`),
+      fix: `run the Capy skill installer (scripts/install.sh --for ${skill}) from ${project ?? 'this directory'}: the verdict is keyed by the project directory the installer runs in, so a run from the skill's own folder does not cover ${project ?? 'it'}; then launch with the GSTACK_LAUNCH line it prints` };
+  }
   if (!v.ok) return problem(`the install verdict says: ${v.trailer}`);
   if (v.checkout !== src) return problem(`the install verdict is for checkout ${v.checkout}, not ${src}`);
   const head = spawnSync('git', ['-C', src, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).stdout?.trim() ?? '';
@@ -155,7 +159,7 @@ export function verdictProblem(skill: string, gstackRoot: string, env: Env, bunP
   const missing = (SKILL_REQUIREMENTS[skill]?.requires ?? []).find(id => !v.required.includes(id));
   if (missing && INSTALL_PROFILES.includes(v.for)) {
     return { ...problem(`the install verdict certified for=${v.for}, which does not cover ${missing} that ${skill} needs (${v.for} certifies only the read-only helpers)`),
-      fix: `run GSTACK_CAPY_ROOT=${src} bash ${src}/capy/skill/gstack/scripts/install.sh --for ${skill} (the full install: ./setup and host profiles), then launch with the GSTACK_LAUNCH line it prints` };
+      fix: `run GSTACK_CAPY_ROOT=${src} bash ${src}/capy/skill/gstack/scripts/install.sh --for ${skill} (upgrades this checkout in place: ./setup and host profiles, no second clone), then launch with the GSTACK_LAUNCH line it prints` };
   }
   if (missing) return problem(`the install verdict certified for=${v.for}, which does not cover ${missing} that ${skill} needs`);
   if (v.bun_path && bunPath && bunPath !== v.bun_path) {

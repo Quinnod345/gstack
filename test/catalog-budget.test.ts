@@ -46,17 +46,33 @@ import { skillCensus } from './helpers/skill-census';
  * New-skill ratchet: previous ceiling 1,194 + ceil(10 / 4) = 1,197
  * token-equivalents (4,788 bytes), leaving 2 bytes. Existing descriptions
  * are unchanged.
- *   ref     design-motion addition on 975e836 (2026-10-25), Garry 2026-10-25
- *           'Do it' (GSTA-92 plan item 15)
- *   result  pre-addition aggregate 4,786 bytes; design-motion adds 99 bytes
+ *   ref     captain addition on base ab9a854b (2026-10-26)
+ *   result  pre-addition aggregate 4,786 bytes; captain adds 214 bytes (name
+ *           plus the one-sentence catalog lead naming the /crew alias),
+ *           yielding 5,000 bytes = 1,250 token-equivalents including the root
+ *           router alias.
+ * New-skill ratchet: previous ceiling 1,197 + ceil(214 / 4) = 1,251
+ * token-equivalents (5,004 bytes), leaving 4 bytes. Existing descriptions
+ * are unchanged.
+ *   ref     ubicloud addition on base 4d48d39e (2026-10-26)
+ *   result  pre-addition aggregate 5,000 bytes; ubicloud adds 150 bytes
+ *           (name + the generator's catalog-trimmed one-line description),
+ *           yielding 5,150 bytes = 1,288 token-equivalents including the
+ *           root router alias.
+ * New-skill ratchet: previous ceiling 1,251 + ceil(150 / 4) = 1,289
+ * token-equivalents (5,156 bytes), leaving 6 bytes. Existing descriptions
+ * are unchanged.
+ *   ref     design-motion addition on base 6c5b2d46 (2026-10-27), Garry
+ *           2026-10-25 'Do it' (GSTA-92 plan item 15)
+ *   result  pre-addition aggregate 5,150 bytes; design-motion adds 99 bytes
  *           (name + the trimmed lead "animate an approved design into a
- *           seamless MP4 and GIF loop"), yielding 4,885 bytes = 1,222
+ *           seamless MP4 and GIF loop"), yielding 5,249 bytes = 1,313
  *           token-equivalents including the root router alias.
- * New-skill ratchet: previous ceiling 1,197 + ceil(99 / 4) = 1,222
- * token-equivalents (4,888 bytes), the measured size. Existing descriptions
+ * New-skill ratchet: previous ceiling 1,289 + ceil(99 / 4) = 1,314
+ * token-equivalents (5,256 bytes), leaving 7 bytes. Existing descriptions
  * are unchanged.
  */
-const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_222;
+const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_314;
 
 // Largest today: design-consultation at 229 bytes. A description that needs
 // more than 260 bytes is a body paragraph, not a catalog entry.

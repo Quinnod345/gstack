@@ -20,7 +20,7 @@ cuts to the coverage audit, review army, or voice directive have real quality co
 
 A second, harder ceiling guards the DISCOVERY surface: `test/catalog-budget.test.ts`
 caps the aggregate frontmatter `name` + `description` across all skills at
-`CATALOG_BUDGET_TOKEN_EQUIVALENTS` (1,194 today; each new skill ratchets it)
+`CATALOG_BUDGET_TOKEN_EQUIVALENTS` (1,251 today; each new skill ratchets it)
 token-equivalents (260-byte per-skill sub-cap), counted through the shared census
 in `test/helpers/skill-census.ts`. This one is enforced, not a warning — every
 host loads the full catalog every session, so growth here taxes every
@@ -111,7 +111,10 @@ determined leaker (a CHANGELOG line that does would fail a hostile screenshotter
 - **Engine + taxonomy:** `lib/redact-patterns.ts` (the single source of truth —
   3 tiers; HIGH = genuinely-secret credentials that block, MEDIUM = PII/legal/
   internal + high-FP credential shapes that confirm via AskUserQuestion, LOW =
-  FYI) and `lib/redact-engine.ts` (pure `scan()` + `applyRedactions()`).
+  FYI) and `lib/redact-engine.ts` (`scan()` + `applyRedactions()`; no I/O,
+  and `scan()`'s one ambient input is the credential-named variables of
+  `process.env`, read by value for the `env.value` HIGH finding unless
+  `ScanOptions.processEnv` names another environment).
   Calibration matters: a gate that cries wolf gets ignored, so context-variable
   shapes (Stripe `pk_live_`, Google `AIza`, JWT, env `*_KEY=`) sit at MEDIUM.
 - **CLI:** `bin/gstack-redact` (exit 0 clean / 2 MEDIUM / 3 HIGH; `--json`,

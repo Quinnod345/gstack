@@ -49,6 +49,12 @@ signature components are not carried over):
 - `lib/design-craft.ts` and `bin/gstack-design-craft`: the content-realism and
   ship-floor tells, turned into a free check.
 - `design-shotgun/SKILL.md.tmpl`: page archetypes as a variant axis.
+- `design-review/sections/craft-audit.md.tmpl` (and the generated
+  `sections/craft-audit.md`): the redesign-skill audit of an existing site,
+  its fix-priority order and Tailwind version check; `scripts/resolvers/design-craft.ts`:
+  the Persuade conversion checks, also rendered into
+  `plan-design-review/sections/review-sections.md`; and the craft-tell entries
+  in `lib/design-catalog.ts`.
 - `design-motion/SKILL.md.tmpl` and `design-motion/sections/fidelity.md.tmpl`,
   `motion.md.tmpl` and `figma.md.tmpl` (and the generated `design-motion/SKILL.md`
   and `sections/*.md`): design-to-motion's fidelity rules, Figma layer-export
@@ -63,6 +69,24 @@ signature components are not carried over):
   ffmpeg recipes for the MP4, loop GIF and 800x500 GIF, and its seam,
   empty-beat, rest and overflow checks as ffmpeg PSNR comparisons.
 
+## hallmark — Copyright (c) 2026 Hallmark contributors — MIT License
+
+https://github.com/Nutlope/hallmark (`skills/hallmark/scripts/sloplint.mjs`,
+`sloplint-render.mjs`, `references/gates.md`, `scripts/fixtures/`, at 7ec8682).
+License text: `licenses/MIT-hallmark.txt`.
+
+Derived, modified (every gate rewritten in TypeScript and in gstack's voice,
+mapped onto gstack's severity words; hallmark's theme stamp, genres, posture
+guards, photo index and judged gates are not carried over):
+
+- `lib/design-lint/` and `bin/gstack-design-lint`: the static tier's parsers
+  (CSS rules and tokens, HTML and component pseudo-HTML, Tailwind class
+  strings), the colour maths, the waiver record, and the rule families under
+  `lib/design-lint/rules/`; the render tier in `lib/design-lint/render*.ts`,
+  driving gstack's own browser instead of puppeteer.
+- `test/fixtures/design-lint/{slopped.html,eyebrow-pass,eyebrow-fail,tailwind-pass,tailwind-fail,waiver}`:
+  the fixtures, with their waiver comments rewritten to the lint's form.
+
 ## DESIGN.md specification — Copyright Google LLC — Apache License 2.0
 
 https://github.com/google-labs-code/design.md
@@ -71,3 +95,22 @@ https://github.com/google-labs-code/design.md
 `design-consultation/sections/proposal-and-preview.md.tmpl` implement the
 format (YAML token front matter in five groups, eight canonical sections in
 spec order, `{path}` token references). No specification text is reproduced.
+
+## tstack — Copyright Theo Browne — MIT License
+
+https://github.com/t3dotgg/tstack (`skills/sol-loop`, at 7de017b3). Ideas, not text: the
+three-word severity glossary (blocker, should, nit) and the two stop rules (a review that
+grew the diff cuts first; the end of the budget is not approval) in
+`ship/sections/review-army.md.tmpl`, `review/checklist.md` and `docs/review-policy.md`
+are written in gstack's words and mapped onto gstack's blocking floor. No sentence is copied,
+so no license text is carried; this entry is a courtesy.
+
+## pstack — Copyright Lauren Tan — MIT License
+
+https://github.com/cursor/plugins (`pstack/skills/interrogate`, `lead-judgment.md`). Ideas,
+not text: the lead-judgment filters applied before a merged review finding counts (nit
+gravity, hypothetical versus actual, structure for a case that does not exist, a different
+design is not a defect, missing context; independent agreement as the strongest signal;
+`NO FINDINGS` as a correct result) in `scripts/resolvers/review-army.ts` stage 4 and
+`docs/review-policy.md` are written in gstack's words. No sentence is copied, so no license
+text is carried; this entry is a courtesy.

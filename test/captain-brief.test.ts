@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { capyRelayLine, renderCaptainBrief } from '../lib/captain-brief';
-import { recHash, type GateList } from '../lib/gate-list';
+import { parseReply, recHash, type GateList } from '../lib/gate-list';
 import { findSection, headings } from '../lib/markdown-sections';
 import { loadBriefInputs } from '../lib/owner-brief';
 
@@ -87,7 +87,7 @@ describe('renderCaptainBrief', () => {
     expect(b.missing).toEqual([]);
     const t = b.text;
     expect(t.split('\n')[0]).toStartWith('**Decision needed:** approve the plan "Widget export fix". Reply **rec**');
-    const order = ['### Before → after', '### Why it matters', '### What caused this work', '### Big decisions', '### What we need from you', 'Reply: **rec**'].map(s => t.indexOf(s));
+    const order = ['### Before → after', '### Why it matters', '### What caused this work', '### Big decisions', '### What we need from you', '- **do it:** rec at full scope', 'Reply: **rec**, or **do it**'].map(s => t.indexOf(s));
     expect(order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1]!))).toBe(true);
     expect(t).toContain('1. Split the exporter into its own module: keep the plan as written (a reviewer suggested changing it).');
     expect(t).toContain('2. Cap memory at 256 MB: cap at 256 MB (changes the plan).');
@@ -104,7 +104,15 @@ describe('renderCaptainBrief', () => {
     expect(b.missing).toEqual(['Why it matters']);
     expect(b.text).toStartWith('**Not ready for approval:** the plan "Widget export fix" is missing Why it matters.');
     expect(b.text).not.toContain('Reply: **rec**');
+    expect(b.text).not.toContain('**do it:**');
     expect(b.text).toContain('_Not written for this plan yet._');
+  });
+
+  test('"do it", the advertised closing reply, parses as rec', () => {
+    const gate = JSON.parse(fs.readFileSync(path.join(run(FULL_PLAN), 'gate.json'), 'utf8')) as GateList;
+    const parsed = parseReply('do it', gate, gate.gate_rev);
+    expect(parsed.valid).toBe(true);
+    expect(parsed.mode).toBe('rec');
   });
 
   test('an answered gate says nothing is pending; urgent findings come first', () => {

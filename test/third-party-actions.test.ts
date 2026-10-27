@@ -533,14 +533,21 @@ describe('Opus consent renders (gate captures)', () => {
   const consent = opusRenders.renders.filter(render => render.case !== 'tpa-apple-ban');
 
   test('every consent question offers defer as a lettered option, including the paraphrased ones', () => {
-    expect(consent).toHaveLength(28);
+    expect(consent).toHaveLength(29);
     for (const render of consent) expect(offersDefer(render.assistantText), `${render.case} ${render.run}`).toBe(true);
     const paraphrased = consent.filter(render => !letteredOptions(render.assistantText).some(option => /defer/i.test(option)));
     expect(paraphrased.map(render => `${render.case} ${render.run}`).sort()).toEqual([
-      'tpa-absent-darwin 39166935531', 'tpa-absent-linux 39166935531', 'tpa-absent-linux 39199692993', 'tpa-broken 39195396438']);
+      'tpa-absent-darwin 39166935531', 'tpa-absent-linux 39166935531', 'tpa-absent-linux 39199692993', 'tpa-broken 39195396438',
+      'tpa-present 40290033102']);
+    // Gate 40290033102 slice 14: the one red tpa-present render; its D) option waits for now and marks the step blocked.
+    expect(letteredOptions(renders('tpa-present').find(render => render.run === '40290033102')!.assistantText).at(-1))
+      .toBe("Wait for now. I'll mark this step as blocked on you.");
     for (const option of ['- **D)** Put this off for now. The token step stays blocked until you do it.',
       '- **D)** We skip it for now and come back to it later.', '> **D)** Defer: I mark the step blocked on you.',
-      'D) Postpone this step.', 'D) Leave it for later.']) expect(offersDefer(option), option).toBe(true);
+      'D) Postpone this step.', 'D) Leave it for later.', "D) Wait for now. I'll mark this step as blocked on you.",
+      '- **D)** Hold off for now; the step stays blocked on you.', 'D) Not yet: we wait on this step for now.',
+      "D) Let's hold off on it for now.", "D) Wait for now\u2014I'll mark this step as blocked on you.", 'D) Let\u2019s hold off on it for now.'])
+      expect(offersDefer(option), option).toBe(true);
   });
 
   test('defer counts only as a lettered option', () => {
@@ -549,7 +556,14 @@ describe('Opus consent renders (gate captures)', () => {
     expect(withoutD).not.toBe(present);
     for (const text of [withoutD, 'If you would rather defer, tell me.\nA) I drive it in your Aside browser\nB) Manual instructions',
       "- B) I drive it in gstack's own visible browser; I skip the sign-in for now and hand it to you.",
-      'D) I drive it later in Aside.', 'I will defer this step for now.']) expect(offersDefer(text), text).toBe(false);
+      'D) I drive it later in Aside.', 'I will defer this step for now.', 'Wait for now.\nA) I drive it in your Aside browser',
+      'A) I drive it in your Aside browser; at the sign-in wall I wait for now while you sign in, then continue.',
+      "B) I drive it in gstack's own browser and wait for your go-ahead for now.", 'A) You wait for now; I drive it in Aside.',
+      'D) Do not wait for now; I drive it in Aside at once.', 'A) I drive it in Aside; I wait for now while you sign in.',
+      'A) I drive it in your Aside browser. At the sign-in wall I stop. Wait for now while you sign in, then I continue.',
+      'B) Manual instructions: wait for now and do it yourself.', "C) I do it in gstack's own browser. We wait for now only if sign-in is needed.",
+      'A) I drive it in Aside. I wait for now.', 'B) I drive it in your Aside browser; hold off for now.'])
+      expect(offersDefer(text), text).toBe(false);
   });
 
   test('the Aside drive offer is found in every tpa-present render, including first-person and blockquoted options', () => {

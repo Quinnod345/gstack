@@ -90,13 +90,16 @@ details for cards whose file type has no known comment syntax.>
 ZERO-RUN lane never reaches this body unresolved.>
 
 ## Pre-Landing Review
-<findings from Step 9 code review, or "No issues found.">
+<findings from Step 9 code review, or "No issues found."; then Step 9.4's `REVIEW_LOOP:` line.>
 <Gate edits: Step 9's latest `Gate edits:` line verbatim — `none detected (...)`,
 `N listed, M read, K findings — J kept, R restored, O open`, `partial (...)` or
 `UNAVAILABLE — ...`; never `none detected` for partial or UNAVAILABLE. Under it, each
 kept finding's `gate`, path and `reason`, and each open finding's `gate` and path.
 Identity and reason only; no hunk text.>
 <Outside review: its verdict; `unverified` or `unavailable` is listed as missing coverage with its reason, never as passed.>
+
+<Step 9.4's saved `## Deferred findings` and `## Review notes` sections, verbatim, as their own
+sections here; omit each when empty. References only: never a closing keyword.>
 
 ## Exploratory QA
 <Step 9's current surfaces/charters, reproducers, approved regressions and red/green
@@ -201,12 +204,22 @@ per-lane counts (`{"<lane>":{"pass":N,"fail":N,"skip":N}}`) to
 `.gstack/tmp/ship-gate.json` with your file-write tool, then:
 
 ```bash
-~/.claude/skills/gstack/bin/gstack-ship-receipt write --pr <pr-number> --base <base> --gate @.gstack/tmp/ship-gate.json --pregate .gstack/tmp/pregate.json --issues @.gstack/tmp/issues.json --body "$PR_BODY_FILE"
+rm -f .gstack/tmp/review-loop.json
+~/.claude/skills/gstack/bin/gstack-review-scope summary --since "$REVIEW_SINCE" --out .gstack/tmp/review-loop.json &&
+~/.claude/skills/gstack/bin/gstack-ship-receipt write --pr <pr-number> --base <base> --gate @.gstack/tmp/ship-gate.json --pregate .gstack/tmp/pregate.json --issues @.gstack/tmp/issues.json --review-loop @.gstack/tmp/review-loop.json --body "$PR_BODY_FILE"
 ```
+
+The summary reads this branch's review log for the invocation's passes (its
+`REVIEW_LOOP:` line is the one the Pre-Landing Review section carries). The `&&`
+matters: a summary that refuses (no pass matched `REVIEW_SINCE`) must not let `write`
+record a stale or empty loop file.
 
 Add `--receipt .gstack/tmp/tree-receipt.json` only when Step 16 wrote it (gate-ahead).
 New PR/MR: omit `--pr`, then rerun with the number after creation and repost the body.
-Its `SHIP_RECEIPT:` line opens the completion message. `RECEIPT_INVALID` names the bad
+Its `SHIP_RECEIPT:` line opens the completion message. The posted receipt is what
+`gstack-ship-queue ready`, `train build` and `verify --train` require (`QUEUE_RECEIPT_MISSING`,
+`QUEUE_RECEIPT_STALE`, no flag around them), so /ship runs before every READY and after any
+push. `RECEIPT_INVALID` names the bad
 field: fix that input file and rerun; nothing was written. `ISSUE_LINKS_MISSING`: add
 the named line under `## Issues` and rerun. `PREGATE_STALE` means rerun
 `gstack-pregate` on the stamped tree; `PREGATE_REMOTE_UNCLEARED` needs

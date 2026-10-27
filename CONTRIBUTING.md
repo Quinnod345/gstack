@@ -14,6 +14,8 @@ bun install                    # install dependencies
 bin/dev-setup                  # activate dev mode
 ```
 
+`./setup` on its own installs production dependencies only. `bun install` (and `bin/dev-setup`, which runs it) adds the dev toolchain the tests and evals need: the Claude Agent SDK, TypeScript and Prettier. Once they are installed, a later `./setup` runs the full install too, so they stay at `bun.lock`'s versions.
+
 > **Full clone vs shallow.** The README's user-facing install uses `--depth 1` for speed. As a contributor, use a full clone (no `--depth` flag) — you'll need history for `git log`, `git blame`, `git bisect`, and reviewing PRs against earlier versions. If you already have a `--depth 1` clone from following the README, promote it to a full clone with `git fetch --unshallow`.
 
 ### First free check (no API key, no browser)
@@ -425,7 +427,7 @@ eval files, and misses the strict classifier. No API keys needed.
 - **Generator tests** (`test/gen-skill-docs.test.ts`) — Tests the template system: verifies placeholders resolve correctly, output includes value hints for flags (e.g. `-d <N>` not just `-d`), enriched descriptions for key commands (e.g. `is` lists valid states, `press` lists key examples).
 - **Design detector, catalog, and DESIGN.md** (`test/gstack-design-detect.test.ts`, `test/design-detect-contract.test.ts`, `test/design-catalog.test.ts`, `test/design-checklist-sync.test.ts`, `test/design-md.test.ts`, `test/frontend-scope.test.ts`, `test/impeccable-fixtures.test.ts`) — Drive `bin/gstack-design-detect.ts` through the fake engine in `test/fixtures/fake-impeccable.ts` (probe order, the never-execute-a-repository-file rule, the `--changed` target allow-list, `design_detector: off`, analytics lines, output sanitizing), pin the catalog invariants and the generated `review/design-checklist.md`, round-trip the open DESIGN.md reader/writer, and check the real engine captures (`test/fixtures/impeccable-*.json`, engine 0.1.3) against the contract. `test/dom-dump-hygiene.test.ts` runs `lib/dom-dump.js` in a real Chromium page through the built browse binary; it self-skips without the binary and is opt-in outside CI (`GSTACK_DOM_DUMP_HYGIENE=1`).
 - **Tier-alignment invariant** (`test/e2e-tier-alignment.test.ts`) — For every self-gated `test/skill-e2e-*.test.ts` named in a touchfiles dep list, the file's `EVALS_TIER` self-gate must match its declared tier in `E2E_TIERS`. Kills the "inert demotion" class where a test is re-tiered in `touchfiles.ts` but the file still gates on the old tier and keeps running in the wrong lane. Unmapped or mixed-tier files are reported, never silently skipped.
-- **Catalog budget** (`test/catalog-budget.test.ts`) — Caps the aggregate discovery surface: the sum of every skill's frontmatter `name` + `description` (what every host loads at discovery, every session) must stay under 1,171 token-equivalents, with a 260-byte per-skill cap. Counting goes through the shared census in `test/helpers/skill-census.ts` (physical files vs authored skills vs registry entries — three deliberately different counts). Adding a skill? The failure message carries the re-measure + ratchet protocol.
+- **Catalog budget** (`test/catalog-budget.test.ts`) — Caps the aggregate discovery surface: the sum of every skill's frontmatter `name` + `description` (what every host loads at discovery, every session) must stay under 1,251 token-equivalents, with a 260-byte per-skill cap. Counting goes through the shared census in `test/helpers/skill-census.ts` (physical files vs authored skills vs registry entries — three deliberately different counts). Adding a skill? The failure message carries the re-measure + ratchet protocol.
 - **Context-budget ratchet** (`test/context-budget-ratchet.test.ts`) — CI ceilings on the two token ledgers the catalog budget doesn't cover: the always-on full-frontmatter aggregate and each skill's per-invocation eager tokens (SKILL.md + forced-read references), graded against `test/fixtures/context-budget.json` via `lib/context-bill.ts`. New skills fail until they have a ceiling; ceilings for removed skills must be pruned. Legitimate growth or a landed reduction: re-run `bun test/helpers/capture-context-budget.ts` and commit the refreshed fixture in the same commit, so the change is a visible decision in the diff.
 - **Dependency security regressions** (`test/dependency-security.test.ts`) — Run `bun test test/dependency-security.test.ts` to check the resolved `sharp` and `adm-zip` version floors, load Sharp, verify ordinary ZIP extraction, and reject extraction through destination-file and destination-directory symlinks. The symlink cases skip Windows. These checks complement the OSV scan; they do not change its existing exceptions.
 
@@ -906,6 +908,14 @@ bun install && bun run build && ./setup
 ```
 
 This affects all projects. To revert: `git checkout main && git pull && bun run build && ./setup`.
+
+## Issue triage
+
+An issue is open, parked or closed, and closed means fixed, duplicate or won't
+fix, each with its reason in the closing comment. An issue we intend to fix
+later stays open under the `parked` label with one comment saying where it is
+tracked (a TODOS.md theme or a tracking issue) and what fixes it. The full rule,
+including the labels and the close reasons, is in [docs/triage.md](docs/triage.md).
 
 ## Community PR triage (wave process)
 

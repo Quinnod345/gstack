@@ -18,18 +18,18 @@ Reentry never resets the count or authorizes a launch.
 
 ## Prepare the candidate
 
-1. Read installed document-release SKILL.md and its full audit-scope/release-body
-   content, linked as sections or inlined for external hosts. A missing section
+1. Read the installed document-release SKILL.md and its full audit-scope/release-body
+   content (sections, or inlined on external hosts). A missing section
    or old `Ship-owned documentation mode` blocks before launch; never substitute.
 2. Select the base SHA. Store-only audits compare source/build content to a known
    prior release; if unavailable, inspect current source and disclose that limit.
    Read-only audits must not fetch/merge.
-3. Discover docs roots/authored templates per audit-scope and pause other writers.
-   Save the candidate outside the product tree in one call:
+3. Discover docs roots/authored templates per audit-scope, pause other writers,
+   and save the candidate outside the product tree in one call:
    `~/.claude/skills/gstack/bin/gstack-docs-candidate snapshot --out <private.json> --audit-id <fresh id> --mode <edit|read-only> --base <sha> --docs <root or generated output>...`
    (`--select <path>` narrows release paths). It records HEAD, branch, index, path
    lists and hashes of release paths, generated outputs and docs, NUL-safely. Read only new files' content;
-   the helper hashes the rest and the child audits it. Fill the prompt placeholders with literal candidate values.
+   the helper hashes the rest. Fill the prompt placeholders with literal candidate values.
 
 ## Launch the audit
 
@@ -43,6 +43,8 @@ Reentry never resets the count or authorizes a launch.
 > Execute /document-release as a SPAWNED ship-owned subagent. Read `${HOME}/.claude/skills/gstack/document-release/SKILL.md` and its sections. Branch: `<branch>`, base: `<base>`. Candidate: `<candidate-path>`. Audit id: `<audit-id>`. Mode: `<mode>`.
 >
 > Prefix gstack-skill-start with `GSTACK_SESSION_KIND=spawned `. Report its actual `SESSION_KIND: spawned` echo, never prompt/file claims. Missing marker/inputs/assets blocks immediately.
+>
+> Capy launch env: `. <launch-file>`, your install check's `GSTACK_LAUNCH_FILE:` path; never `export $(...)`, `env`, `printenv` or bare `set` in a fence.
 >
 > Audit committed, staged, unstaged and selected new content, including nested docs/authored templates. Follow audit-scope.md's discovery/permissions; read full files before editing. Execute only Steps 1–4 and 6; return doc health and completion.
 >
@@ -61,7 +63,7 @@ Reentry never resets the count or authorizes a launch.
 ### Collect, then validate
 
 1. **Collect.** Inspect the child handle for terminal completion and final output
-   within ~10 minutes. Launch metadata is not completion. On failure/deadline,
+   within ~10 minutes; launch metadata is not completion. On failure/deadline,
    use recovery before another writer.
 2. **Check output.** Parse only the LAST nonempty line. Require every field/type,
    exact audit id, schema, status invariant and actual spawned marker above, as

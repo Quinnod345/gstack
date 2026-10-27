@@ -1470,6 +1470,73 @@ or nvm), then re-run `bin/gstack-capy-install`. A checksum mismatch means the
 upstream installer changed: update `GSTACK_BUN_INSTALL_SHA` only after
 reviewing the new script.
 
+<a id="capy-install-launch-file-unwritable"></a>
+### `gstack: fail launch-file — could not write the launch file <path>; fix: ... (LAUNCH_FILE_UNWRITABLE)`
+
+**Meaning.** The doctor passed, but `bin/gstack-capy-install` could not write
+the launch file (`GSTACK_LAUNCH_FILE`, the sourceable mode-0600 copy of the
+`GSTACK_LAUNCH` assignments beside the install verdict). The file is part of the
+ok verdict: without it a caller would be left with only the line and the
+re-typing path that leaked an environment in GSTA-96, so the run fails instead.
+The directory under the state root is unwritable, or a temp file could not be
+moved into place.
+
+**Fix.** Make the verdict directory writable, or set `GSTACK_STATE_ROOT` to a
+writable directory, then re-run `bin/gstack-capy-install`.
+
+<a id="project-floor-unmet"></a>
+### `WARN floor — installed <v> is below the floor <f> that <project>/.gstack/ship-policy.json declares (min_gstack_version); fix: ... (PROJECT_FLOOR_UNMET)` / trailer note `floor=<f> (<file>)`
+
+**Meaning.** The project you work in declares the oldest gstack it wants its
+crew on, as `min_gstack_version` in its `.gstack/ship-policy.json` (the same
+key `gstack-ship-queue` validates; a file holding only that key is valid), and
+this machine's checkout is older. One commit in the project replaces a
+crew-wide "upgrade to <v>" broadcast: every machine's next session check says
+so and names the command. It is a project rule, not a security minimum, so
+the row is a WARN and the trailer stays `gstack: ok` with a `floor=<f>
+(<file>)` note and a `fix:` note; only the supported minimum
+(`REVISION_BELOW_MINIMUM`) fails a session for being old.
+
+**Fix.** Run the fix before the first workflow: on Capy, `bash
+<skill>/scripts/install.sh --for <skill>` fast-forwards a clean checkout to
+origin and reinstalls in one step (`SELF_UPGRADE: done`); elsewhere
+`bin/gstack-upgrade`. If the floor is above gstack's latest release, lower it
+in the project.
+
+<a id="project-node-pin-unmet"></a>
+### `WARN pins — node <v> outside <pin> (<file>); node read from <path> (node pin only; bun pins pass); fix: ... (PROJECT_NODE_PIN_UNMET)`
+
+**Meaning.** The project's Node pin is not met by the Node first on PATH (a
+Capy image's Node behind the pin, say), while every Bun pin is met. gstack's
+own commands run on Bun, and the project's tests usually select their Node
+themselves (nvm, the CI matrix), so this is advisory: the trailer stays ok. A
+Bun pin that is unmet, with or without a Node gap, is still `FAIL pins`
+(`PROJECT_PIN_MISMATCH`).
+
+**Fix.** When this machine will run the project's tests, run the row's fix: the
+Capy skill installer installs an exact pin into gstack's runtime store and
+launches it through the `GSTACK_LAUNCH` PATH; otherwise `nvm install <pin>`
+and put it first on PATH. A range pin (`>=24.22.1`) needs a Node you install
+yourself; or change the pin in the project.
+
+<a id="upgrade-skipped"></a>
+### `WARN behind — installed <v> is <n> commits behind origin (latest <ver>) and the session-start upgrade was skipped: <reason>; fix: <command> (UPGRADE_SKIPPED|UPGRADE_BUSY|UPGRADE_REFUSED)` / trailer note `behind=<n> (latest: <ver>); upgrade skipped: <reason> (<CODE>); fix: <command>`
+
+**Meaning.** An install-mode session start above the supported minimum found
+the checkout behind origin and could not fast-forward it: the checkout is
+dirty, diverged or pinned (`UPGRADE_REFUSED`), another live session holds a
+lease (`UPGRADE_BUSY`), or `bin/gstack-upgrade` is missing
+(`UPGRADE_SKIPPED`). Nothing was changed, the doctor certified the installed
+revision, and the trailer stays `gstack: ok` with the notes above: a gap
+above the minimum is never a hard fail. The verdict records the installed
+revision, so a lane that is behind reports it (`behind=` rides every report).
+
+**Fix.** When the lane needs the newer gstack (a `floor=` note, or a fix that
+landed upstream), clear the named cause and run the fix: `bin/gstack-upgrade`
+after the refusal is resolved, or the Capy skill installer again once the
+lease holder finishes. Below the supported minimum the bootstrapper fails
+`revision` instead (`REVISION_BELOW_MINIMUM`).
+
 <a id="upgrade-refused"></a>
 ### `gstack-upgrade: <cause>; nothing was changed; fix: <command> (UPGRADE_REFUSED)`
 
@@ -1507,8 +1574,10 @@ every lease with its age and `alive|dead|stale`; a holder is named as
 When you know they are idle, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
 proceeds. At a Capy session start the same refusal appears as
 `SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`,
-and the trailer is `gstack: fail behind — … (UPGRADE_BUSY)`: a session that
-could not upgrade is never certified ok.
+the doctor adds `WARN behind — … (UPGRADE_BUSY)` and the trailer stays
+`gstack: ok … (behind=<n> (latest: <v>); upgrade skipped: … (UPGRADE_BUSY); fix: …)`:
+the installed revision is above the supported minimum, so the session is
+certified and the note names the fix.
 
 <a id="upgrade-fetch-failed"></a>
 ### `gstack-upgrade: could not reach origin (...) (UPGRADE_FETCH_FAILED)`
@@ -1551,9 +1620,12 @@ action that never fails the run. Without provenance (a direct
 `gstack-doctor --check`, or a pre-bootstrapper copy with no
 `GSTACK_CAPY_WRAPPER=` line, which reads as wrapper 0) it reads the Drive
 copies (`~/.capy/drive/*/skills/gstack/scripts/install.sh`, or only
-`GSTACK_CAPY_WRAPPER_PATH` when set) and fails only when every copy is stale,
-listing each with its revision. A stale active wrapper is a `WARN` too: an
-older copy still works (`capy/support.env`). `bin/gstack-upgrade` runs the
+`GSTACK_CAPY_WRAPPER_PATH` when set), listing each with its revision: every
+copy a bootstrapper below the minimum is `WARN wrapper — every Capy skill copy
+is below the minimum wrapper <m> (it still works): ...` with the owner action,
+and it fails only when a copy is pre-bootstrapper (wrapper 0), which cannot
+hand over at all. A stale active wrapper is a `WARN` too: an older copy still
+works (`capy/support.env`). `bin/gstack-upgrade` runs the
 installer with the checkout's own copy as the active wrapper and never leaves
 a pending reinstall when the wrapper row is the only failure.
 
@@ -1604,8 +1676,9 @@ message lists.
 
 **Meaning.** On a Capy machine (`GSTACK_CAPY=1`, set by the `GSTACK_LAUNCH`
 line), an unattended or spawned workflow starts only with a passing install
-verdict (`<state root>/install-verdicts/<sha256 of the checkout path>.json`,
-named as `GSTACK_INSTALL_VERDICT`) for this checkout, its current HEAD and a
+verdict (`<state root>/install-verdicts/<sha256 of the checkout path>/<sha256
+of the project directory, or none>.json`, named as `GSTACK_INSTALL_VERDICT`)
+for this checkout, its current HEAD and a
 workflow at least as wide as the one starting: a verdict for `--for autoplan`
 does not cover `qa`'s browser, and a planning-only pins SKIP does not cover a
 workflow that runs the repo's tests. `gstack-skill-start` printed this row and
@@ -1613,8 +1686,12 @@ workflow that runs the repo's tests. `gstack-skill-start` printed this row and
 an unattended run whose Bun on PATH is below the supported minimum
 (`INSTALL: fail runtime ... (RUNTIME_BELOW_MINIMUM)`) on any host.
 
-**Fix.** Run the Capy skill installer with `--for <workflow>` on this machine
-and launch with the `GSTACK_LAUNCH` line it prints.
+**Fix.** Run the Capy skill installer (`scripts/install.sh --for <workflow>`)
+from the project directory the workflow will run in, since the verdict is
+keyed by that directory (GSTA-85), and launch with the `GSTACK_LAUNCH` line it
+prints. A verdict file that exists but cannot be read (`the install verdict at
+<file> is unreadable or has an unsupported schema_version`) is repaired the
+same way, by rerunning the installer.
 `GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1` admits anyway (printed as
 `INSTALL_VERDICT: overridden`); record it as a deviation.
 
@@ -2160,7 +2237,12 @@ case with `bun run eval:pass-rates --headroom --case <id>`.
 ### `cost unknown (no billing captured for any of <N> trial(s))` / `cost $<x> known + <N> of <M> trial(s) cost unknown`
 
 **Meaning.** PTY and Codex sessions record no billing, so their cost is
-unknown. Only the known sum is shown.
+unknown. So is a trial in a multi-case shard whose result records are named by
+a display label rather than the case id, because no record can be attributed
+to it (a one-case shard's records are its case's). Only the known sum is
+shown. A train verdict's `ATTEMPT:` line reports the same as `cost=$<x> known
++ <n> of <m> case(s) cost unknown`, a bare `cost=$<x>` only when every case
+in the train record is priced, and no cost at all when none is.
 
 **Fix.** None needed; this is informational.
 
@@ -2239,7 +2321,11 @@ entry that no longer applies; rotate a credential that is real.
 <a id="redact-version-as-ip"></a>
 ### `pii.ip_public` MEDIUM on a four-part version number
 
-**Meaning.** The line does not declare the value as a version.
+**Meaning.** The line does not declare the value as a version. When the
+text goes through `gstack-post` from inside the repository, four-part versions
+equal to the root `VERSION` or to a `## [x.y.z.w]` / `## vx.y.z.w` CHANGELOG.md heading are
+exempt wherever they appear, so there the finding means the quad is not a
+release of this repository (or the post ran outside the checkout).
 
 **Fix.** Write it as `version: 1.2.3.4`, `"version": "..."` or `v1.2.3.4`.
 MEDIUM findings do not block pushes.
@@ -2615,8 +2701,22 @@ read the receipt again.
 
 **Meaning.** Two sections share one version heading, usually a stamp that
 re-headed `[Unreleased]` beside an entry that already carried the version.
+In `gstack-restamp` only duplicates the PR introduces count: the headings are
+compared against the base branch's CHANGELOG as read at `origin/<base>` and at
+the commit the branch's own lines are counted from (its fork point, or the
+predecessor's head in a gate-ahead stamp); the larger count per heading wins,
+so a version the base already heads twice (released history the PR inherited
+and must keep) passes as long as the PR adds no further copy of it. When a
+reading is unavailable (the PR adds the CHANGELOG itself, or the file moved),
+the stage detail and the refusal name it: with no reading left every duplicate
+counts, otherwise inherited headings are counted at the readable commit only. Two paths keep the strict rule: the section being re-headed itself
+(`[Unreleased]`, or the branch's earlier stamp) may exist only once, and
+`gstack-version-bump write --changelog` (the claim-at-open bump) compares the
+file with itself.
 
-**Fix.** Merge them into one entry under the new version.
+**Fix.** Merge the duplicate sections the PR introduced into one entry under
+the new version. A duplicate that is on the base branch itself is not this
+PR's to fix in a restamp; leave it and the stamp proceeds.
 
 <a id="changelog-top-mismatch"></a>
 ### `CHANGELOG_TOP_MISMATCH`
@@ -2960,7 +3060,11 @@ names it).
 `secret` category, in the lines this branch adds.
 
 **Fix.** Rotate the credential, remove it from the added lines (history
-included), rerun. Not downgradable.
+included), rerun. Not downgradable. A benign finding (a dummy token, a run id
+read as a phone number, a vendor's public key) is named in the policy's
+`allowlist` by finding id or non-secret category with a path glob or an
+anchored pattern and a reason ([docs/pregate.md](pregate.md#allowlist));
+`env.value`, the whole `secret` category and `engine.*` never.
 
 <a id="pregate-strays"></a>
 ### `PREGATE_STRAYS`
@@ -2994,6 +3098,20 @@ test. An unmapped source or code file still fails. A file under a test
 directory is not this empty lane. Images, fonts and media, and
 allowlisted tool config no test names, are the assets-and-tool-config empty lane,
 not this error.
+A release manifest the branch only re-stamped is not this error either: when a
+touched `*.json`, `*.plist`, `VERSION` or `VERSION.txt` file differs from the
+merge base in nothing but its version values, `lanes` waives it as
+version-stamp-only and prints `version-stamp-only (no lane needed): <files>`.
+The exact per-kind rule (the document's top-level `version` in JSON of the
+same shape and text, the two bundle version keys in a plist, one bare version
+in a VERSION file) is in [docs/pregate.md](pregate.md#gstack-pregate). A
+restamp PR on a base whose policy declares no lane for its manifests (gbrain's
+`release:restamp` and its plugin manifests) therefore passes without a
+policy change. A manifest whose description, keys, key order, nested
+versions, line endings or any non-version byte changed, one under a test,
+fixture, golden, `.gstack/` or workflow tree, or one added, deleted, renamed
+or re-moded, is still this error; `--explain` prints `not version-stamp-only (<reason>)`
+for it.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
 for files with no behaviour) under `dependencies` in `.gstack/pregate.json` (or the user-owned file the message names).
@@ -3001,8 +3119,10 @@ Other non-Markdown documentation goes in `empty_lanes` on the base branch.
 Dart files under `integration_test/` or `test_driver/` need a device, so pregate
 never runs them: declare `"**/integration_test/**": []` (and
 `"**/test_driver/**": []`) under `dependencies` and let CI run them.
-With no policy yet, `gstack-pregate init` drafts the `dependencies` entries
-from the repo and lists the files it could not place. `--explain` prints every mapping and why. For a file with no lane it also prints the import
+With no policy anywhere (no base copy, no user-owned file) an unmapped file is
+the warning [`PREGATE_NO_POLICY`](#pregate-no-policy) with a starter policy
+printed, not this error; `gstack-pregate init` writes that draft and lists the
+files it could not place. `--explain` prints every mapping and why. For a file with no lane it also prints the import
 specifiers in test files that resolved to no repo file (for example a
 `tsconfig.json` `paths` alias such as `@/lib/x` whose target is missing) and any
 `extends` hop that was not followed (only relative `extends`, at most 4 hops). If
@@ -3021,14 +3141,19 @@ should have found it, report the specifier as a resolver gap.
 <a id="pregate-incomplete"></a>
 ### `PREGATE_INCOMPLETE`
 
-**Meaning.** A check timed out, its tool is unavailable, repo commands were not
-allowed, or the working tree changed while the check ran. Incomplete is never
-pass and blocks publication.
+**Meaning.** A check timed out, a runner process was killed by a signal (out of
+memory, an outside kill) and ended without an exit code, repo commands were not
+allowed, no runner is declared or detected, or the working tree changed while
+the check ran. Incomplete is never pass and blocks publication. A tool missing from PATH, a
+network or quota error before any test ran, or a full disk is
+[`PREGATE_ENVIRONMENT`](#pregate-environment) instead, so the machine's failure
+reads apart from the diff's.
 
-**Fix.** Pass `--allow-repo-commands`, install the tool (for a Dart package the
-message names `not on PATH: dart` or `flutter`; fvm also works when the repo pins
-it), commit the `pubspec.yaml` of a Dart package the message says has none (or
-declare `runner`), raise `--timeout`, or keep the tree still, then rerun.
+**Fix.** Pass `--allow-repo-commands`, commit the `pubspec.yaml` of a Dart
+package the message says has none (or declare `runner`), raise `--timeout`, or
+keep the tree still, then rerun. A runner killed by a signal never passes: read
+the lane log, then rerun or split the selection. A tool missing from PATH is
+[`PREGATE_ENVIRONMENT`](#pregate-environment), with its own fix.
 
 <a id="pregate-stalled"></a>
 ### `PREGATE_STALLED`
@@ -3055,9 +3180,80 @@ reports failures. The obligation stays uncleared. A run URL alone never clears
 this obligation; a `test_backend/<backend>` obligation takes a run URL, recorded
 as attested rather than validated.
 
+Another tree is accepted in exactly one case: it differs from `pregate.json`'s
+tree only in the repo's stamp rule (`.gstack/ship-policy.json` on the base
+branch: `stamp_files`, `stamp_patterns`, the built-in version, manifest,
+lockfile and CHANGELOG forms), judged by the tree receipt's own classifier on a
+`git diff` of the two trees ([the gate ran ahead of the
+stamp](pregate.md#remote-gate-stamp-only)). The refusal line then says `and the
+trees differ beyond the stamp rule of <policy>: <path> (<rule>: <why>, line
+<n>)`, and the path it names is the one that is not a stamp: a file outside
+`stamp_files`, or a stamp file with a hunk that is not the old → new rewrite.
+`the gated tree <t> is not an object in this repository` means the gated
+commit is not fetched here, so the two trees cannot be compared. Three more
+refusals close the substitution without classifying anything: `lists the test
+lane as stamp-sensitive (stamp_sensitive_gates: tests)` (the base policy says
+the test tier reads the stamps, as gstack's own does, so no run on another tree
+covers this one; rerun the gate on the head), `pregate.json was recorded against
+origin/<a>, not this repository's base origin/<b>` (rerun `gstack-pregate --base
+<b>`, or `git remote set-head origin <a>` when `origin/HEAD` was unset), and
+`.gstack/ship-policy.json on origin/<base>@<sha> is invalid` or `could not be
+read` (fix the policy on the base, or fetch it).
+
 **Fix.** Run the remote gate on the tree pregate tested and pass its output
 file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
-<usd> --allow-repo-commands` run and validate it.
+<usd> --allow-repo-commands` run and validate it. For a gate-ahead receipt:
+fetch the gated commit (`git fetch origin <sha>`) and clear again, or make the
+named path a stamp under the repo's rule; a receipt is never accepted while any
+differing path is a change.
+
+<a id="pregate-no-policy"></a>
+### `PREGATE_NO_POLICY`
+
+**Meaning.** The repository has no pregate policy yet (no `.gstack/pregate.json`
+on the base branch and no user-owned `<state root>/projects/<slug>/pregate.json`)
+and a touched file maps to no test lane. Under no policy that is a `warn`, not
+`PREGATE_NO_LANE`: the selected tests still ran (a red lane is still `fail`),
+and the table printed a starter policy drafted from the repository
+(`PREGATE_STARTER:` lines: runner, test directories, CI lanes, the JSON between
+`begin` and `end`, a `TODO` per file nothing covers). `run` wrote nothing.
+Details: [docs/pregate.md](pregate.md#no-policy).
+
+**Fix.** Review the starter, write it with `gstack-pregate init` (it refuses to
+overwrite an existing file without `--force`), edit each `TODO` (a test that
+names the file, a `dependencies` entry, or `[]` for a file with no behaviour),
+run `gstack-pregate validate`, then commit `.gstack/pregate.json` on the base
+branch. From then on an unmapped file is `PREGATE_NO_LANE`.
+
+<a id="pregate-environment"></a>
+### `PREGATE_ENVIRONMENT`
+
+**Meaning.** A check could not run its command because of the machine, not the
+diff: a runner or guard binary missing from PATH (exit 127, `command not
+found`, a tool `not on PATH`), a network error or a quota refusal before any
+test was counted, a full disk, an unverified runtime, or gstack's own scanner
+not finishing. The check is `incomplete` (never pass) with `cause:
+"environment"` and `environment: { kind, evidence, proof }` in `pregate.json`,
+and the table prints `environment: <kind> — <evidence>`. A test that failed and
+whose log also names a connection error is **not** this code: the runner's own
+summary counted a failure, so it is `PREGATE_LANE_FAILED` with `cause:
+"diff"`; nor is a runner, guard or gate script whose own binary is present but
+exits 127. `proof: "launch"` is certain (the command could not start, its
+binary is off PATH, the runtime or a gstack tool refused); `proof: "output"`
+means a rule matched the command's text before any test was counted, which the
+diff's own output could have written, so the line says `(inferred from output)`
+and the fix asks for confirmation elsewhere. Kinds and the rule:
+[docs/pregate.md](pregate.md#environment).
+
+**Fix.** Repair what the `environment:` line names on this machine (install the
+tool, restore the network or the quota, free the disk, repair the runtime), or
+run the lane where it can run: `gstack-pregate --stage tests --remote
+--spend-cap <usd> --allow-repo-commands`, or the CI job and `gstack-pregate
+clear --remote <workflow.yml/job> --run-url <url>`. A lane that waives the run
+cites the kind, the evidence and the proof, never a test name; `verify` prints
+`PREGATE_ENVIRONMENT: <n> check(s) blocked by the environment (<kinds>), not by
+the diff`, naming any check inferred from output alone, so a coordinator can
+tell the two apart and knows which to confirm elsewhere first.
 
 <a id="pregate-stale"></a>
 ### `PREGATE_STALE`
@@ -3075,12 +3271,20 @@ refuses to write the ship receipt otherwise.
 ### `PREGATE_REMOTE_UNCLEARED`
 
 **Meaning.** A `requires-remote` obligation (a platform lane this machine cannot
-run, named by `workflow.yml/job`) has no receipt.
+run, named by `workflow.yml/job`, or the small-machine `pregate.json/remote_gate`
+tier) has no receipt; or a `remote_gate` receipt accepted from a stamp-only
+predecessor tree records `accepted_for` as a tree other than `pregate.json`'s,
+or a `gated_tree` other than its receipt string's `tree=` (the file was edited
+after `clear`), so it clears nothing here.
 
 **Fix.** Dispatch that job, then
 `gstack-pregate clear --remote <workflow.yml/job> --run-url <url>` (or
-`--bundle-lane <label>` from an evidence bundle). The ship receipt carries each
-obligation with its receipt.
+`--bundle-lane <label>` from an evidence bundle). For `pregate.json/remote_gate`,
+`clear --remote pregate.json/remote_gate --receipt <gate output>`: the gate's
+own run on this tree, or a run on a predecessor tree that differs only by the
+repo's stamp rule ([gate ahead of the stamp](pregate.md#remote-gate-stamp-only));
+`verify` then prints the accepted substitution on its ok line. The ship receipt
+carries each obligation with its receipt.
 
 <a id="issue-unreadable"></a>
 ### `ISSUE_UNREADABLE`
@@ -3300,7 +3504,10 @@ CLI golden test) from the base branch's `.gstack/pregate.json`, or from the
 user-owned file when the base carries none, matched a
 file the branch touched and exited non-zero. Guards cover what the import graph
 cannot see: manifests, subprocess goldens, registries. They cannot be
-downgraded to warn.
+downgraded to warn. A guard that could not start, or whose own binary is off
+PATH (exit 127), is the machine's: `PREGATE_ENVIRONMENT` (`incomplete`), not
+this code; a guard whose binary is present but whose script exits 127 is this
+code.
 
 **Fix.** Read the guard's lines in the table (exit code, output tail, log path)
 and do what its `fix` line says, commit, then rerun
@@ -4021,6 +4228,74 @@ trains and other trains' merges are refused until a repair lands.
 <n>@<sha>`). The freeze clears when verify finds main's tree after that merge
 in a green record; `NEXT:` then builds a train of the PRs still unmerged.
 
+<a id="queue-receipt-missing"></a>
+### `QUEUE_RECEIPT_MISSING`
+
+**Meaning.** The PR body carries no valid ```gstack-ship-receipt``` block, so
+/ship never ran on this branch (or its receipt was lost when the body was
+rewritten). `gstack-ship-queue ready` refuses to READY it, `train build`
+refuses the pin by PR number before any write, push or dispatch (dry run
+included), and `verify --train` refuses the slot. The block still prints the
+informational `SHIP_RECEIPT: none in the PR body` (or `invalid`) line. There
+is no flag that skips this check (Garry, 2026-10-25: use the gstack ship skill
+before merging PRs; [ship-policy.md](ship-policy.md#ship-before-ready)).
+
+**Fix.** Run /ship on the branch. Unattended, it ends by writing the receipt
+into the PR body (`gstack-ship-receipt write --pr <n> … --body <file>`, then
+`gstack-post pr-body`) when an open PR exists for the branch at HEAD;
+otherwise it leaves the receipt in `.gstack/tmp/ship-receipt.md` and the
+parent posts it ([unattended.md](unattended.md)). Then rerun
+`gstack-ship-queue ready --pr <n> --screen|--no-screen` and send the new READY
+block.
+
+<a id="queue-receipt-stale"></a>
+### `QUEUE_RECEIPT_STALE`
+
+**Meaning.** The PR body's ship receipt is valid but names another head than
+the one being READY'd or merged (a push after /ship, a receipt copied from
+another PR, or a `pr` field for another PR), so the receipt does not cover
+what would merge. The one accepted difference is a train slot's stamp: when
+the current head is the pinned head's stamp commit (same tree modulo stamp
+files, or the pin with main merged in at slot 2 and later), the receipt
+written for the pinned head is the binding one and `verify --train` accepts it.
+
+**Fix.** Rerun /ship on the current head so the receipt names it, then rerun
+`gstack-ship-queue ready --pr <n> --screen|--no-screen`. A lane never stamps
+to fix this: the stamp comes only when the slot is called.
+
+<a id="queue-screen-stale-ref"></a>
+### `QUEUE_SCREEN_STALE_REF`
+
+**Meaning.** `gstack-ship-queue ready --screen` dispatches the screen against
+GitHub's `refs/pull/<n>/merge`, and that ref is missing or still merges an
+older head than the PR's pushed head. GitHub stops recomputing the merge ref
+while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
+counts), so a screen dispatched there checks out the old merge, sees itself
+superseded, plans 0 cases and reports success. GSTA-95 hit this on #3431:
+`ready` printed `SCREEN_DISPATCH:` as if a screen ran. `ready` now compares
+the merge ref's second parent with the PR head before dispatching, and a
+finished screen that planned no cases is never adopted as a screen. A screen
+run uploads no train record, so the evidence is its plan: a superseded run
+skips `plan-slices` and uploads no `paid-plan` artifact, and a manifest with
+nothing planned counts the same. `ready --screen` dispatches a fresh one and
+`train build` prints `SCREEN: #<n> run <id> planned no cases (no paid-plan
+artifact; …)` or `… planned no cases (an empty plan manifest; …)`, each
+ending `; counted as not-run, the slot rides unscreened`. A plan it cannot
+read (`… paid-plan artifact has expired`, `… manifest.json is unreadable`, an
+unreadable run or artifact list, an unreadable repository slug, or a READY
+whose run id is not a number) keeps the slot screened and prints
+`SCREEN: #<n> <reason>; counted as screened, unverified`; `ready --screen`
+follows such a run. When `ready` cannot list the remote's refs or fetch the
+merge ref at all, it refuses with the same code and a `could not list …` or
+`could not fetch …` message whose NEXT line says to check the remote, not to
+resolve a conflict.
+
+**Fix.** Resolve the conflict with the base branch (or wait for GitHub to
+recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
+--screen` again. Under crew rule 14 a CHANGELOG-only conflict is left to the
+train, so a lane that cannot get a fresh merge ref READYs `--no-screen` only
+after its own focused paid cases passed (rule 6).
+
 <a id="ready-screen-choice-required"></a>
 ### `READY_SCREEN_CHOICE_REQUIRED`
 
@@ -4111,6 +4386,67 @@ has incomplete coverage, never a clean result.
 
 **Fix.** Rerun the state-machines specialist on the same diff and check its
 output again.
+
+<a id="review-scope-input"></a>
+### `REVIEW_SCOPE_INPUT`
+
+**Meaning.** `gstack-review-scope` (the finding scope of /ship's review loop,
+[ship-policy.md#review-scope](ship-policy.md#review-scope)) was given input it
+cannot classify: the findings were not a JSON array of objects, `--pass` or
+`--policy` was outside its values, a pass 2+ call came without
+`--range-base`, `--range-base` was not a commit id (7 to 64 hex digits), or
+`summary --since` matched no review-log row of this branch written via /ship
+(so no `REVIEW_LOOP:` line could be derived, and the ship receipt's
+`--review-loop` input was not written). Nothing was classified, deferred or
+summarized.
+
+**Fix.** Pass the Step 9.3 findings as a JSON array (`--findings <file>` or
+stdin), `--pass <n>` from the invocation record, and from pass 2 on
+`--range-base <sha>`, the HEAD the previous pass saved when it started, as a
+hex commit id. For `summary`, check `REVIEW_SINCE` against the invocation
+record's start time and that each pass was finished with `via:"ship"`.
+
+<a id="review-scope-range"></a>
+### `REVIEW_SCOPE_RANGE`
+
+**Meaning.** `gstack-review-scope classify` could not read the diff it scopes
+findings against: `origin/<base>` or `--range-base` does not resolve, or the
+range base is not an ancestor of HEAD (history was rewritten since the previous
+pass).
+
+**Fix.** Fetch `origin/<base>`, check `--range-base` against the pass heads in
+the invocation record, and start a full pass (`--pass 1`) when the branch was
+rebased; /ship's own rule is to merge the base in, never rebase a reviewed head.
+
+<a id="receipt-carry-refused"></a>
+### `RECEIPT_CARRY_REFUSED`
+
+**Meaning.** `gstack-ship-receipt carry` could not carry the PR's /ship receipt
+to HEAD: the PR body has no valid receipt, the receipt's head is not an ancestor
+of HEAD (a rebase or force-push dropped it), the working tree has uncommitted
+or untracked changes (a carry certifies a commit, never a tree that differs from
+it), or git could not compare the two product diffs or read the working tree's
+status. The receipt in the body is unchanged and still names the old head, so
+`gstack-ship-queue ready` refuses `QUEUE_RECEIPT_STALE`.
+
+**Fix.** Keep the reviewed head in HEAD's history (merge the base in instead of
+rebasing), commit or stash every working-tree change, then rerun
+`gstack-ship-receipt carry --pr <n>` at the new head. When the history is
+already rewritten, run /ship on the new head.
+
+<a id="receipt-carry-product-changed"></a>
+### `RECEIPT_CARRY_PRODUCT_CHANGED`
+
+**Meaning.** Between the receipt's head and HEAD the product diff against the
+base changed: at least one path that is neither a test, release metadata nor
+part of the base merge has a different patch than the reviewed head had. The
+reviewed verdict does not cover HEAD, so the receipt is not carried. The
+refusal names the changed product paths.
+
+**Fix.** Run /ship on the new head. The receipt carries only across a
+conflict-only base merge, a test-only change or release metadata, which the
+`carry` object in the carried receipt records with the product patch-id and
+the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
 ## gstack-error-capture
 
@@ -4218,3 +4554,69 @@ every flag and code.
 **Meaning.** Unexpected helper failure; the line names the error class and its first stack frame. Exit 1.
 
 **Fix.** Rerun once; if it repeats, report the printed frame to the gstack maintainers.
+
+## Quick answers
+
+The short troubleshooting entries that used to live in the README. Each names the symptom and the fix; the sections above cover every gate message in depth.
+
+**Skill not showing up?** Run `./setup --status` from your gstack checkout. It
+prints every install (host, scope, version, skills directory, source checkout)
+and, for a `stale`, `missing` or `unregistered` row, the exact command that fixes
+it. The usual fix is to re-run setup from that row's source for that host, e.g.
+`cd ~/.claude/skills/gstack && ./setup` (Claude) or `cd ~/gstack && ./setup --host codex`.
+A project install lives in the project's `.claude/skills/gstack` or
+`.agents/skills/gstack`; run its `setup` from inside the project.
+
+**Cursor freezes on load, or an agent's gstack skills went missing after an upgrade?** Each checkout now renders skills only for the agents installed from it (#1694). `./setup --status` lists them; `./setup --host <name>` adds one back. Pruned copies are in `~/.gstack/backups/host-renders/<time>-<id>/`, with every path in its `prune.log` ([host renders pruned](#host-renders-pruned)).
+
+**`/browse` (or `/qa`, `/design-review`) says `NEEDS_ASIDE` or `ASIDE_NOT_RUNNING`?** That's the probe telling you it's about to use the fallback browser. Want Aside? Open the app and sign in — `aside --version` should print a version and `aside repl 'console.log("ok")'` should print `ok` — then re-run. gstack never installs it for you. Want the fallback on purpose while Aside is open? `GSTACK_SKIP_ASIDE=1` makes every skill, the renderer, and `./setup` treat Aside as absent. When Aside is absent the probe prints `NEEDS_ASIDE: <OS>` and skills trust that line for the macOS-only download pitch; `GSTACK_PLATFORM` overrides the OS it names, for tests and unusual hosts (set it in your shell — gstack never reads it from a project `.env`).
+
+**`/browse` fails on the fallback browser?** `cd ~/.claude/skills/gstack && bun install --production --frozen-lockfile && bun run build`
+
+**`/make-pdf` or `/diagram` can't render?** Same two paths: with Aside open they print through Aside (`bun run ~/.claude/skills/gstack/bin/gstack-render.ts some.html --screenshot /tmp/out.png` tests it directly, and its first line, `ENGINE=aside` or `ENGINE=browse`, names the browser that actually rendered); without it they use the bundled browser, so `bun run build` is the fix.
+
+**Stale install?** Run `/gstack-upgrade` — or set `auto_upgrade: true` in `~/.gstack/config.yaml`.
+On Codex and the other non-Claude hosts, upgrade from a terminal: find the
+checkout in the `source` column of `./setup --status`, then
+`cd <source> && git pull && ./setup --host <host>`, and start a new session.
+
+**Typing into a specific field with the fallback browser?** `browse type --selector '<css>' <text>`
+types into that element; bare `browse type <text>` types into whatever has focus.
+
+**State in the wrong place, or a setting that won't stick?** `~/.claude/skills/gstack/bin/gstack-paths --explain` shows which directory gstack uses for its state and why. See [docs/state-root.md](state-root.md).
+
+**Want shorter commands?** `cd ~/.claude/skills/gstack && ./setup --no-prefix` — switches from `/gstack-qa` to `/qa`. Your choice is remembered for future upgrades.
+
+**Don't use some skills?** `gstack-config set disabled_skills make-pdf,pair-agent` stops registering them on every host, so their descriptions stop loading into each session. Claude Code updates right away; other hosts on their next `./setup --host <name>` or `/gstack-upgrade`. Their files stay installed, so a skill that calls a disabled one still works (you get a warning). Typos are rejected with the closest skill name, `gstack-upgrade` can't be disabled, and `gstack-config set disabled_skills ""` re-enables everything.
+
+**Never use plan mode?** `gstack-config set plan_mode_preamble off` leaves the "Plan Mode Safe Operations" and "Skill Invocation During Plan Mode" sections (about 1.6 KB per skill) out of every installed skill on the next `./setup` run; the command prints the exact `./setup --refresh-registered` line that applies it. Claude Code then serves a render under `~/.gstack/render/claude` instead of the committed files. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" keep their marker. `gstack-config set plan_mode_preamble on` (the default) and another `./setup` bring the sections back. It matters for Claude Code, Copilot and OpenCode: hosts without plan mode (Codex and others) never carry these sections.
+
+**Want namespaced commands?** `cd ~/.claude/skills/gstack && ./setup --prefix` — switches from `/qa` to `/gstack-qa`. Useful if you run other skill packs alongside gstack.
+
+**Codex says "Skipped loading skill(s) due to invalid SKILL.md"?** Your Codex skill descriptions are stale. `${CODEX_HOME:-~/.codex}/skills/gstack` is a runtime directory, not the checkout: `./setup --status` shows the Codex row's source checkout. Fix: `cd <that source> && git pull && ./setup --host codex` — for a repo-local install, run it from inside the project.
+
+**Chromium install failed or hung during `./setup`?** The bundled browser is
+best-effort: setup records the reason, finishes registering every skill, and
+prints which skills are affected (`/qa`, `/qa-only`, `/design-review`,
+`/browse`, make-pdf, `/diagram`, `/pair-agent`). With Aside open, the browser
+skills keep running in Aside and only the fallback engine is missing;
+`/pair-agent` always needs the bundled browser. Fix the cause and re-run
+`./setup`. Knobs:
+`GSTACK_PLAYWRIGHT_INSTALL_TIMEOUT=<seconds>` raises the download bound
+(default 600) on slow links; `GSTACK_SKIP_PLAYWRIGHT=1` skips the Chromium
+install entirely (CI, no-browser boxes); `GSTACK_CHROMIUM_NO_SANDBOX=1` is the
+fix when Chromium installs but cannot launch because the host blocks
+unprivileged user namespaces (Ubuntu 24.04+ AppArmor default, #2157).
+
+**Setup ended with "Not registered (a skill you own already uses the name; left untouched)"?**
+gstack only deletes or links over a skill entry it can prove it created: a
+symlink into gstack, a directory carrying the `.gstack-owned` marker `./setup`
+writes into every directory it creates, or a SKILL.md that is byte-identical to
+gstack's or carries the generated `<!-- AUTO-GENERATED from ... -->` banner. A
+`qa/` or `ship/` you wrote yourself is left untouched by `./setup`,
+`gstack-relink`, and both prefix-mode flips, and the linker names it in the
+final summary. Rename or move yours, or switch modes (`./setup --prefix` /
+`--no-prefix`) so the names stop colliding. If you started your own skill from
+a generated gstack SKILL.md and then edited it, that file is moved to
+`~/.gstack/backups/skills/<timestamp>/<skill>/SKILL.md` before gstack's is
+linked in, never deleted.

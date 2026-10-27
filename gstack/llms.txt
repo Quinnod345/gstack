@@ -15,6 +15,7 @@ Conventions:
 - [/benchmark-models](benchmark-models/SKILL.md): Cross-model benchmark for gstack skills.
 - [/browse](browse/SKILL.md): Drive a real browser through Aside: open a page, read it, click through a flow, take screenshots, check console errors.
 - [/canary](canary/SKILL.md): Post-deploy canary monitoring.
+- [/captain](captain/SKILL.md): Run a crew of coding agents from one controller (also /crew): lanes send READY blocks and never merge; the controller merges through trains, keeps the digest, relays approvals, fixes flakes daily.
 - [/careful](careful/SKILL.md): Safety guardrails for destructive commands.
 - [/codex](codex/SKILL.md): OpenAI Codex CLI wrapper — three modes.
 - [/context-restore](context-restore/SKILL.md): Restore working context saved earlier by /context-save.
@@ -67,6 +68,7 @@ Conventions:
 - [/spec](spec/SKILL.md): Turn vague intent into a precise, executable spec in five phases.
 - [/sync-gbrain](sync-gbrain/SKILL.md): Keep gbrain current with this repo's code and refresh agent search guidance in CLAUDE.md.
 - [/test-audit](test-audit/SKILL.md): Find low-value or duplicate tests and the test-only code they keep alive.
+- [/ubicloud](ubicloud/SKILL.md): Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs, a reaper, quota preflight and a hang watchdog.
 - [/unfreeze](unfreeze/SKILL.md): Clear the freeze boundary set by /freeze, allowing edits to all directories again.
 
 ## Browse Commands

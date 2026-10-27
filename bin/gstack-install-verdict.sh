@@ -31,6 +31,8 @@
 # spawned sessions (ambient OpenClaw) only warn. GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1
 # admits anyway and says so.
 
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
+
 # gstack_source_root BIN_DIR — the source checkout behind an install: an
 # installed runtime root's recorded .source-path (setup _link_runtime_dists),
 # else BIN_DIR/.. resolved. Prints the realpath; returns 1 when unresolvable.
@@ -131,11 +133,15 @@ gstack_install_admission() {
     fix="run the Capy skill installer (scripts/install.sh --for $skill) on this machine, then launch with the GSTACK_LAUNCH line it prints"
     if [ ! -f "$file" ]; then
       detail="no install verdict at $file for $src"
+      fix="run the Capy skill installer (scripts/install.sh --for $skill) from ${project:-this directory}: the verdict is keyed by the project directory the installer runs in, so a run from the skill's own folder does not cover ${project:-it}; then launch with the GSTACK_LAUNCH line it prints"
     else
       trailer=$(gstack_install_verdict_field "$file" trailer)
       v_head=$(gstack_install_verdict_field "$file" head)
       head=$(git -C "$src" rev-parse HEAD 2>/dev/null)
-      if [ "$(gstack_install_verdict_field "$file" ok)" != true ]; then
+      v_schema=$(gstack_install_verdict_field "$file" schema_version)
+      if { [ -z "$(gstack_install_verdict_field "$file" ok)" ] && [ -z "$v_schema" ]; } || { [ "$v_schema" != 1 ] && [ "$v_schema" != 2 ]; }; then
+        detail="the install verdict at $file is unreadable or has an unsupported schema_version; rerun the installer"
+      elif [ "$(gstack_install_verdict_field "$file" ok)" != true ]; then
         detail="the install verdict says: $trailer"
       elif [ "$(gstack_install_verdict_field "$file" checkout)" != "$src" ]; then
         detail="the install verdict is for checkout $(gstack_install_verdict_field "$file" checkout), not $src"
@@ -153,13 +159,13 @@ gstack_install_admission() {
         done
         if [ -n "$detail" ] && gstack_doctor_install_profile "$(gstack_install_verdict_field "$file" for)"; then
           detail="$detail ($(gstack_install_verdict_field "$file" for) certifies only the read-only helpers)"
-          fix="run GSTACK_CAPY_ROOT=$src bash $src/capy/skill/gstack/scripts/install.sh --for $skill (the full install: ./setup and host profiles), then launch with the GSTACK_LAUNCH line it prints"
+          fix="run GSTACK_CAPY_ROOT=$src bash $src/capy/skill/gstack/scripts/install.sh --for $skill (upgrades this checkout in place: ./setup and host profiles, no second clone), then launch with the GSTACK_LAUNCH line it prints"
         fi
       fi
       v_bun=$(gstack_install_verdict_field "$file" bun_path)
       if [ -z "$detail" ] && [ -n "$v_bun" ]; then
         running=$(gstack_realpath "$where" 2>/dev/null)
-        _gstack_bun_is_shim "$where" && running=$(bun --no-env-file --config=/dev/null -p process.execPath </dev/null 2>/dev/null | head -1)
+        _gstack_bun_is_shim "$where" && running=$(bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -p process.execPath </dev/null 2>/dev/null | head -1)
         if [ -n "$running" ] && [ "$running" != "$v_bun" ]; then
           _ia_status=runtime code=BUN_RESOLUTION_DRIFT
           detail="bun $found at $running is running, but the install verdict recorded bun $(gstack_install_verdict_field "$file" bun_version) at $v_bun"

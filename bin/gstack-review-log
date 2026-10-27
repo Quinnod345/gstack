@@ -17,6 +17,7 @@
 # a model read the code. Caller-supplied binding fields are always discarded.
 # Plan-tier rows retain their legacy binding behavior.
 set -euo pipefail
+GSTACK_BUN_CONFIG=/dev/null; case "${OSTYPE:-}" in msys*|cygwin*) if command -v cygpath >/dev/null 2>&1; then GSTACK_BUN_CONFIG=NUL; fi ;; esac
 export GIT_OPTIONAL_LOCKS=0
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'core.fsmonitor=false' 'core.untrackedCache=false'"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -77,7 +78,7 @@ SESSION_KIND=$("$SCRIPT_DIR/gstack-session-kind" 2>/dev/null || echo interactive
 export GSTACK_STAMP_COMMIT_FULL="$COMMIT_FULL" GSTACK_STAMP_TREE="$TREE" GSTACK_STAMP_WTREE="$WTREE" GSTACK_STAMP_DIRTY="$DIRTY" GSTACK_STAMP_SESSION_KIND="$SESSION_KIND"
 if [ "$INPUT" = --start ]; then
   case "${3:-}" in ''|--fix-range) ;; *) echo 'Usage: gstack-review-log --start SKILL [--fix-range]' >&2; exit 2 ;; esac
-  GSTACK_REVIEW_SKILL="${2:-}" GSTACK_REVIEW_FIX_RANGE="${3:-}" bun --no-env-file --config=/dev/null -e '
+  GSTACK_REVIEW_SKILL="${2:-}" GSTACK_REVIEW_FIX_RANGE="${3:-}" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e '
     const { captureReviewStart } = await import(process.env.GSTACK_REVIEW_LIB);
     try { console.log(captureReviewStart(process.env.GSTACK_REVIEW_SKILL, process.env, process.env.GSTACK_REVIEW_FIX_RANGE === "--fix-range")); }
     catch (e) { console.error(e.message); process.exit(1); }
@@ -85,7 +86,7 @@ if [ "$INPUT" = --start ]; then
   exit $?
 fi
 if [ "$INPUT" = --check-shared-libs ] && [ "$#" -eq 2 ]; then
-  GSTACK_REVIEW_TOKEN="$2" bun --no-env-file --config=/dev/null -e '
+  GSTACK_REVIEW_TOKEN="$2" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e '
     const { checkSharedLibsReuse } = await import(process.env.GSTACK_REVIEW_LIB);
     console.log(JSON.stringify(checkSharedLibsReuse(JSON.parse(await Bun.stdin.text()), process.env.GSTACK_REVIEW_TOKEN)));
   '
@@ -113,7 +114,7 @@ case "$INPUT" in --*) usage ;; esac
 # Caller values for the binding keys are dropped before stamping. A binding or
 # validation failure reaches stderr as its own line (never folded into
 # "invalid JSON"), and exits 1 with nothing written.
-STAMPED=$(printf '%s' "$INPUT" | GSTACK_REVIEW_TOKEN="$TOKEN" GSTACK_REVIEW_FINDINGS="$FINDINGS" bun --no-env-file --config=/dev/null -e "
+STAMPED=$(printf '%s' "$INPUT" | GSTACK_REVIEW_TOKEN="$TOKEN" GSTACK_REVIEW_FINDINGS="$FINDINGS" bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" -e "
 const { bindReview } = await import(process.env.GSTACK_REVIEW_LIB);
 let rec;
 try { rec = JSON.parse(await Bun.stdin.text()); } catch (e) { console.error('gstack-review-log: invalid JSON, skipping (' + e.message + ')'); process.exit(1); }

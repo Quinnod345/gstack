@@ -226,8 +226,8 @@ export const RESULT_CODES = {
   },
   CHANGELOG_DUPLICATE_HEADING: {
     anchor: 'changelog-duplicate-heading',
-    summary: 'two CHANGELOG sections carry the same version heading',
-    fix: 'merge the duplicate sections into one entry under the new version',
+    summary: 'two CHANGELOG sections carry the same version heading, beyond any duplicate the base branch already carries',
+    fix: 'merge the duplicate sections the PR introduced into one entry under the new version',
   },
   CHANGELOG_TOP_MISMATCH: {
     anchor: 'changelog-top-mismatch',
@@ -385,7 +385,7 @@ export const RESULT_CODES = {
   PREGATE_NO_LANE: {
     anchor: 'pregate-no-lane',
     summary: 'a touched source file maps to no test lane through imports, repo-path literals, the bin/<name> convention or a declaration',
-    fix: 'add a test that names the file, or declare its lane (or an explicit empty lane) under `dependencies` in .gstack/pregate.json. Markdown no test depends on is already a docs/no-tests empty lane; other documentation goes in `empty_lanes`',
+    fix: 'add a test that names the file, or declare its lane (or an explicit empty lane) under `dependencies` in .gstack/pregate.json. Markdown no test depends on is already a docs/no-tests empty lane; other documentation goes in `empty_lanes`; a release manifest whose only change against the merge base is its version values is waived as version-stamp-only',
   },
   PREGATE_LANE_FAILED: {
     anchor: 'pregate-lane-failed',

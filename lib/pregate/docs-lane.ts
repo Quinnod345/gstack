@@ -76,6 +76,12 @@ export function isDocsEmptyLane(rel: string, extraGlobs: readonly string[] = [])
   return isBuiltinDocsPath(norm);
 }
 
+/** True under a test directory or a protected tree (snapshots, goldens, baselines, fixtures, CI workflows and actions, `.gstack/`): never an empty lane, never a version stamp. */
+export function isProtectedTree(rel: string): boolean {
+  const norm = rel.replace(/\\/g, '/').replace(/^\.\//, '');
+  return isTestTree(norm) || PROTECTED_TREE.test(norm);
+}
+
 /** Tool configuration on the allowlist: a named dotfile at any depth, or a file under an editor or design-tool dot-directory. */
 function isToolConfig(rel: string): boolean {
   return INERT_DOTFILE.test(rel.split('/').pop() ?? rel) || INERT_DOT_DIR.test(rel);

@@ -229,7 +229,8 @@ test('review finalization ownership: initialize invocation state and capture the
   expect(flat).toMatch(/REVIEW_START for this core candidate before reading its diff/i);
   expectMentions(flat, [['never', 'reading', 'before']], 'flat');
   expect(flat).toMatch(/separate PASS_START tokens, not REVIEW_START/);
-  expectMentions(flat, [['only', 'finishes', 'final']], 'flat');
+  expect(flat).toContain('After an edited pass, start the next with `--start review --fix-range`');
+  expect(flat).toContain('On refusal, start a full pass.');
 });
 
 test('review finalization ownership: late findings use Fix-First before the bounded parent transition', () => {
@@ -240,7 +241,7 @@ test('review finalization ownership: late findings use Fix-First before the boun
     'Structured approval does not waive advisory/test_stub ASK gates',
     '## Step 5.8: Persist Eng Review result',
     'Edited: increment CYCLES once',
-    'No edits: fill the record below',
+    'No edits: after a full pass, fill the record below',
     '### 2. Fill the record',
     '--finish REVIEW_START',
   ];
@@ -248,7 +249,7 @@ test('review finalization ownership: late findings use Fix-First before the boun
   expect(positions.every(position => position >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
   expect(flat).toContain('at most 3 fix cycles');
-  expect(flat).toContain('At 3, persist `converged:false`');
+  expect(flat).toContain('Edited: increment CYCLES once, then fill and save the record below with `converged:false`.');
   const limit = flat.slice(flat.indexOf('At 3,'), flat.indexOf('No edits:'));
   expect(limit).toMatch(/then stop this invocation/i);
   expectMentions(limit, [['without', 'summary', 'fourth']], 'limit');
@@ -276,14 +277,14 @@ test('review finalization ownership: required native completion and optional out
   expect(flat).toContain('`CONVERGED`: true only for a completed zero-edit pass');
 });
 
-test('review finalization ownership: finish only the final core token without log-time capture', () => {
+test('review finalization ownership: each logged pass finishes its own core token without log-time capture', () => {
   const step = skill.slice(skill.indexOf('## Step 5.8: Persist Eng Review result'));
   const flat = step.replace(/\s+/g, ' ');
   expect(step.match(/--finish REVIEW_START/g)).toHaveLength(1);
   expect(step).not.toContain('--start review');
   expect(step).not.toContain('--finish PASS_START');
   expect(flat).toMatch(/never invent a binding or replace REVIEW_START at log time/i);
-  expectMentions(flat, [['only', 'finish', 'final']], 'flat');
+  expect(flat).toContain("finish only this pass's own token");
   expect(step).toContain('"completed":COMPLETED,"converged":CONVERGED,"cycles":CYCLES');
 });
 
@@ -433,14 +434,14 @@ for (const skillName of ['review', 'ship']) {
     expectMentions(flat, [['never', 'dispatched', 'incomplete']], 'flat');
     const redTeam = flat.slice(flat.indexOf('### Red Team dispatch'));
     expectMentions(redTeam, [['confirm', 'incomplete', 'stopped']], 'redTeam');
-    expect(redTeam).toContain('stages 1–7');
+    expect(redTeam).toContain('stages 1–8');
   });
 
   test(`${skillName} clarity: ordered specialist merge separates validation from scoring and provenance`, () => {
     const markers = ['#### 1. Parse outputs', '#### 2. Validate severity',
-      '#### 3. Identify and merge', '#### 4. Apply specialist confidence gates',
-      '#### 5. Score and present specialists', '#### 6. Save specialist activity',
-      '#### 7. Hand off to Fix-First'];
+      '#### 3. Identify and merge', '#### 4. Lead judgment', '#### 5. Apply specialist confidence gates',
+      '#### 6. Score and present specialists', '#### 7. Save specialist activity',
+      '#### 8. Hand off to Fix-First'];
     const positions = markers.map(marker => army.indexOf(marker));
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -453,7 +454,10 @@ for (const skillName of ['review', 'ship']) {
     for (const rule of [/never trust a supplied hash/i, /missing\/malformed metadata cannot deduplicate/i,
       /core findings never earn a specialist confidence boost/i]) expect(merge).toMatch(rule);
     for (const gate of ['Confidence 7+', 'Confidence 5-6', 'Confidence 3-4', 'Confidence 1-2']) expect(army).toContain(gate);
-    const scoring = flat.slice(flat.indexOf('#### 5.'), flat.indexOf('#### 6.'));
+    const judgment = flat.slice(flat.indexOf('#### 4.'), flat.indexOf('#### 5.'));
+    for (const filter of [/nit gravity/i, /hypothetical, not actual/i, /case that does not exist/i, /different design is not a defect/i, /missing context/i]) expect(judgment).toMatch(filter);
+    expect(judgment).toContain('returned `NO FINDINGS` was right');
+    const scoring = flat.slice(flat.indexOf('#### 6.'), flat.indexOf('#### 7.'));
     expect(scoring).toMatch(/only specialist findings enter this header and `quality_score`/i);
     expect(scoring).toMatch(/non-advisory/i);
     expect(scoring).toContain('quality_score = max(0, 10 - (critical_count * 2 + informational_count * 0.5))');

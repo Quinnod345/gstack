@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { BASE_POLICY, cleanup, makeFixtureRepo, type FixtureRepo } from './helpers/restamp-fixture';
-import { bumpVersion } from '../lib/version-gate-train';
+import { bumpVersion, regeneratedAtBase } from '../lib/version-gate-train';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'compare-pr-version.ts');
@@ -168,6 +168,136 @@ describe('version gate: unstamped heads under a train policy', () => {
     }
   });
 
+  describe('a release output regenerated at the base VERSION is not a stamp (GSTA-96: an unstamped PR could not reword the agents digest)', () => {
+    const gen = (r: FixtureRepo, body: string) => write(r, 'gen.js', `const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\n${body}\\n');\n`);
+
+    test('a generator change with its regenerated output at the base VERSION passes as unstamped', () => {
+      const r = fixture();
+      branch(r);
+      gen(r, 'reworded body');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'reword the digest'));
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+      expect(r.git('worktree', 'list').trim().split('\n')).toHaveLength(1);
+    });
+
+    test('a regenerated output stays unstamped after main stamps again (the regeneration is at the merge base VERSION, not the base tip)', () => {
+      const r = fixture();
+      branch(r);
+      gen(r, 'reworded body');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'reword the digest');
+      r.git('checkout', '-q', 'main');
+      write(r, 'VERSION', '1.2.4.0\n');
+      write(r, 'generated/digest.md', '# digest v1.2.4.0\nbody\n');
+      write(r, 'CHANGELOG.md', read(r, 'CHANGELOG.md').replace('# Changelog\n\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-02\n\n- another release\n\n'));
+      commit(r, 'release 1.2.4.0');
+      r.git('push', '-q', 'origin', 'main');
+      r.git('fetch', '-q', 'origin');
+      const res = run(r, head, '1.2.3.0');
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('a tool whose background child outlives it does not hold the gate open', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', "const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\nreworded body\\n');require('child_process').spawn('sleep',['20'],{stdio:'inherit'}).unref();\n");
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'tool with a lingering child');
+      const started = Date.now();
+      const res = run(r, head);
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(res.code).toBe(0);
+      expect(res.out).toContain('is unstamped under the base');
+    });
+
+    test('a tool that ignores TERM is killed at the limit and reported, never waited for', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      const head = commit(r, 'output without a working tool');
+      const started = Date.now();
+      const res = regeneratedAtBase({ repoRoot: r.work, head, baseVersion: '1.2.3.0\n', tool: "trap '' TERM; echo stubborn; sleep 30", outputs: ['generated/digest.md'], timeoutMs: 2_000 });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(res.kind).toBe('error');
+      expect((res as { reason: string }).reason).toContain('was killed at the 2s limit');
+      expect((res as { reason: string }).reason).toContain('stubborn');
+      expect(r.git('worktree', 'list').trim().split('\n')).toHaveLength(1);
+    });
+
+    test('the tool runs without the gate\'s tokens, and an output the tool never writes still counts as a stamp', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', "const fs=require('fs');const v=fs.readFileSync('VERSION','utf8').trim();fs.writeFileSync('generated/digest.md','# digest v'+v+'\\nreworded body\\n'+(process.env.GH_TOKEN??''));\n");
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const head = commit(r, 'tool that would echo a token');
+      const next = path.join(r.root, 'next.json');
+      fs.writeFileSync(next, JSON.stringify({ version: '1.2.4.0', base_version: '1.2.3.0', claimed: [] }));
+      const leak = Bun.spawnSync([process.execPath, 'run', SCRIPT, next, '3320'], {
+        cwd: r.work, env: { ...process.env, ...r.env, PR_VERSION: '1.2.3.0', BASE_REF: 'main', HEAD_SHA: head, GH_TOKEN: 'ghs_secret' }, timeout: 30_000, stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(leak.exitCode).toBe(0);
+      expect(leak.stdout.toString()).toContain('is unstamped under the base');
+      write(r, 'generated/extra.md', 'not generated\n');
+      const res = run(r, commit(r, 'second output by hand'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
+    });
+
+    test('an output that is not what the generator produces at the base VERSION still counts as a stamp', () => {
+      for (const edit of [
+        (r: FixtureRepo) => write(r, 'generated/digest.md', '# digest v1.2.3.0\nhand-edited body\n'),
+        (r: FixtureRepo) => { gen(r, 'reworded body'); write(r, 'generated/digest.md', '# digest v1.2.4.0\nreworded body\n'); },
+      ]) {
+        const r = fixture();
+        branch(r);
+        write(r, 'CHANGELOG.md', withUnreleased(r));
+        edit(r);
+        const res = run(r, commit(r, 'not a regeneration'));
+        expect(res.code).toBe(1);
+        expect(res.out).toContain('must carry v1.2.4.0');
+      }
+    });
+
+    test('a VERSION bump without the regenerated output is a stamp, never an unstamped head', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'VERSION', '1.2.4.0\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'bump without digest'), '1.2.3.0');
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
+      expect(res.out).not.toContain('is unstamped under the base');
+    });
+
+    test('a release tool that fails at the head is an error, not a pass', () => {
+      const r = fixture();
+      branch(r);
+      write(r, 'gen.js', 'process.stderr.write("gen broke\\n");process.exit(3);\n');
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'broken generator'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('release_tool `node gen.js` exited 3');
+      expect(res.out).toContain('gen broke');
+    });
+
+    test('without a release_tool a changed output keeps counting as a stamp', () => {
+      const r = fixture({ ...BASE_POLICY, release_tool: null, train: TRAIN });
+      branch(r);
+      write(r, 'generated/digest.md', '# digest v1.2.3.0\nreworded body\n');
+      write(r, 'CHANGELOG.md', withUnreleased(r));
+      const res = run(r, commit(r, 'no tool'));
+      expect(res.code).toBe(1);
+      expect(res.out).toContain('must carry v1.2.4.0');
+    });
+  });
   test('negative controls: CHANGELOG edits outside [Unreleased] fail an unstamped head', () => {
     const cases: Array<(r: FixtureRepo) => string> = [
       r => withUnreleased(r).replace('- older', '- older, rewritten'),

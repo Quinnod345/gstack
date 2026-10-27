@@ -26,6 +26,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+          # The head's release_tool runs inside the gate (lib/version-gate-train.ts);
+          # no token may sit in the checkout it stages. The base fetch below is public.
+          persist-credentials: false
 
       # The gate's own code comes from the PR's merge commit (github.sha): a PR
       # that edits the gate runs its edit, and an open PR picks up a gate fix

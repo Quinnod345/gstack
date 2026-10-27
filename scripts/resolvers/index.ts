@@ -39,6 +39,7 @@ import { generateDxFramework, generateDxErrorCompact, generateDxErrorItems } fro
 import { generateGBrainContextLoad, generateGBrainSaveResults, generateBrainPreflight, generateBrainCacheRefresh, generateBrainWriteBack } from './gbrain';
 import { generateTasksSectionEmit, generateTasksSectionAggregate } from './tasks-section';
 import { SECTION, SECTION_INDEX } from './sections';
+import { DESIGN_CRAFT_RULE, DESIGN_PERSUADE_CHECKS } from './design-craft';
 import { generateRedactInvocationBlock } from './redact-doc';
 import { generateFreeTextFile } from './free-text-file';
 import { FOREGROUND_DISPATCH_NOTE, codexSelect } from './constants';
@@ -109,6 +110,8 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   DESIGN_DETECTOR: generateDesignDetector,
   DESIGN_MD_CHECK: generateDesignMdCheck,
   DESIGN_SLOP_BULLETS: generateDesignSlopBullets,
+  DESIGN_CRAFT_RULE,
+  DESIGN_PERSUADE_CHECKS,
   UX_PRINCIPLES: generateUXPrinciples,
   DESIGN_OUTSIDE_VOICES: generateDesignOutsideVoices,
   DESIGN_REVIEW_LITE: generateDesignReviewLite,

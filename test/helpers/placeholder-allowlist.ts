@@ -97,6 +97,7 @@ export const IDENTIFIER_PLACEHOLDERS: Record<string, IdentifierGrammar> = {
   '<start_date>': { grammar: DATE, what: 'YYYY-MM-DD' },
   '<since>': { grammar: /^[0-9]+[dhwm]$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, what: 'retro window (7d, 24h, 2w) or date' },
   '<window>': { grammar: /^[0-9]+[dhwm]$/, what: 'retro window (7d, 24h, 2w)' },
+  '<window-days>': { grammar: NUM, what: 'retro window in whole days' },
 
   // Git refs. Branch names from remote data travel as data (ENG-8), never through this list.
   '<base>': { grammar: REF, what: 'base branch detected by the skill' },
@@ -146,6 +147,7 @@ export const IDENTIFIER_PLACEHOLDERS: Record<string, IdentifierGrammar> = {
   '<plan-path>': { grammar: PATH, what: 'bound plan file path' },
   '<sketch-dir>': { grammar: PATH, what: 'sketch directory printed by an earlier block' },
   '<path-to-finalized.html>': { grammar: PATH, what: 'finalized HTML path' },
+  '<path-to-page.html>': { grammar: PATH, what: 'saved page HTML path' },
   '<finalized.html>': { grammar: PATH, what: 'finalized HTML path' },
   '<motion-dir>': { grammar: PATH, what: 'run directory printed by the /design-motion Step 0 MOTION_DIR line' },
   '<approved-variant.png>': { grammar: PATH, what: 'approved variant image path' },

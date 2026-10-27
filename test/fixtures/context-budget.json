@@ -8,12 +8,13 @@
     "browse": 8943,
     "browser-skills/hackernews-frontpage": 371,
     "canary": 13441,
-    "capy/skill/gstack": 3498,
+    "captain": 12011,
+    "capy/skill/gstack": 4075,
     "careful": 1239,
     "codex": 15594,
     "context-restore": 10909,
     "context-save": 10517,
-    "cso": 4660,
+    "cso": 4924,
     "design-consultation": 16188,
     "design-html": 14380,
     "design-motion": 10409,
@@ -26,7 +27,7 @@
     "document-release": 10092,
     "eval-plan": 9811,
     "freeze": 1115,
-    "gstack": 4821,
+    "gstack": 5326,
     "gstack-upgrade": 6212,
     "guard": 1000,
     "health": 11440,
@@ -65,6 +66,7 @@
     "spec": 14840,
     "sync-gbrain": 15399,
     "test-audit": 10324,
+    "ubicloud": 9033,
     "unfreeze": 409
   }
 }
