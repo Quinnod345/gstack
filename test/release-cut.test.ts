@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { bunIsolationArgs } from '../lib/bun-isolation';
 import {
   BACKSTOP_CHECK, NOTES_CAP, NOTES_REF, REQUIRED_CHECK, changelogEntries, compareVersions, cutRelease, describePlan, gateVerdict, gitIn,
-  planRelease, releaseNotes, type Gh,
+  planRelease, readTrainNotes, releaseNotes, type Gh, type Git,
 } from '../scripts/release-cut';
 
 const bases: string[] = [];
@@ -154,13 +154,13 @@ describe('release-cut: planning', () => {
     const queued = checks([{ check_runs: [...GREEN, { name: 'slices-report', status: 'queued', conclusion: null }] }]);
     expect(gateVerdict(queued, 'o/r', 'a'.repeat(40))).toEqual({ green: false, why: 'check runs still going: slices-report', pending: true });
     const paged = checks([{ check_runs: [{ name: 'typecheck', status: 'completed', conclusion: 'success' }, { name: BACKSTOP_CHECK, status: 'completed', conclusion: 'success' }] }, { check_runs: [{ name: REQUIRED_CHECK, status: 'completed', conclusion: 'success' }] }]);
-    expect(gateVerdict(paged, 'o/r', 'a'.repeat(40))).toEqual({ green: true });
+    expect(gateVerdict(paged, 'o/r', 'a'.repeat(40))).toEqual({ green: true, via: BACKSTOP_CHECK });
     const pagedRed = checks([{ check_runs: GREEN }, { check_runs: [{ name: 'windows-free-tests', status: 'completed', conclusion: 'timed_out' }] }]);
     expect(gateVerdict(pagedRed, 'o/r', 'a'.repeat(40))).toEqual({ green: false, why: 'red check runs: windows-free-tests', pending: false });
     const cancelled = checks([{ check_runs: [...GREEN, { name: 'quality', status: 'completed', conclusion: 'cancelled' }, { name: 'docs', status: 'completed', conclusion: 'skipped' }] }]);
     expect(gateVerdict(cancelled, 'o/r', 'a'.repeat(40))).toEqual({ green: false, why: 'red check runs: quality', pending: false });
     const skipped = checks([{ check_runs: [...GREEN, { name: 'docs', status: 'completed', conclusion: 'skipped' }] }]);
-    expect(gateVerdict(skipped, 'o/r', 'a'.repeat(40))).toEqual({ green: true });
+    expect(gateVerdict(skipped, 'o/r', 'a'.repeat(40))).toEqual({ green: true, via: BACKSTOP_CHECK });
   });
 
   test('an active freeze in refs/notes/gstack-trains refuses the cut; a cleared one does not', () => {
@@ -174,6 +174,174 @@ describe('release-cut: planning', () => {
     git(f.seed, 'notes', '--ref=' + NOTES_REF, 'add', '-f', '-m', JSON.stringify({ ...freeze, cleared_at: 'y' }), 'HEAD');
     git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
     expect(planRelease({ repo: f.repo, git: f.git, gh: f.gh }).ok).toBe(true);
+  });
+
+  // Value: protects=one read of the trains notes ref feeds both gates: a fetch failure other than a missing ref refuses the plan with its message, a
+  // missing ref is no freeze and no evidence, a blob that is not JSON, is JSON that is not an object (null, an array, a string, a number), carries a
+  // malformed merged[] or a non-string nonce, or is a train without a nonce is skipped while a freeze and a train in the same
+  // ref are both read (the freeze still wins over the evidence); fails_when=a fetch error is read as "no notes" and a frozen or ungated main is
+  // released, an unparsable note aborts the read, or evidence from a later note is lost once a freeze is seen; why_new=the freeze test covers one
+  // readable freeze record only and the evidence tests never mix record kinds or break the fetch; seam=none; no_claim=a real origin outage
+  test('readTrainNotes: a fetch error refuses, a missing ref holds nothing, junk notes are skipped, and a freeze beside train evidence still refuses', () => {
+    const f = fixture();
+    const head = f.shas['1.0.3']!;
+    const failing: Git = (args) => (args[0] === 'fetch' ? { ok: false, out: 'fatal: unable to access the remote: Could not resolve host' } : f.git(args));
+    const broken = planRelease({ repo: f.repo, git: failing, gh: f.gh });
+    expect(broken).toEqual({ ok: false, code: 'REFUSED', message: 'cannot fetch ' + NOTES_REF + ': fatal: unable to access the remote: Could not resolve host' });
+    const absent = readTrainNotes(f.git);
+    expect([absent.error, absent.freeze, absent.evidence.bySha.size, absent.evidence.byTree.size]).toEqual([null, null, 0, 0]);
+
+    const add = (record: string, on: string) => git(f.seed, 'notes', '--ref=' + NOTES_REF, 'add', '-f', '-m', record, on);
+    add('not json {', f.shas['1.0.0']!);
+    for (const junk of ['null', '[]', '"train"', '7', JSON.stringify({ kind: 'train', nonce: 'bad1', state: 'green', merged: 'x' }), JSON.stringify({ kind: 'train', nonce: 'bad2', state: 'green', merged: [null, 'y', { sha: 3, tree: ['t'] }, { sha: '', tree: '' }] }), JSON.stringify({ kind: 'train', nonce: 9, state: 'green', merged: [{ sha: f.shas['1.0.0'] }] })]) {
+      add(junk, f.shas['1.0.0']!);
+      git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+      const read = readTrainNotes(f.git);
+      expect([junk, read.error, read.freeze, read.evidence.bySha.size, read.evidence.byTree.size]).toEqual([junk, null, null, 0, 0]);
+    }
+    add(JSON.stringify({ schema: 1, kind: 'train', state: 'merged', merged: [{ sha: f.shas['1.0.1'], tree: 't1' }] }), f.shas['1.0.1']!);
+    add(JSON.stringify({ schema: 1, kind: 'train', nonce: 'ok1', state: 'green', merged: [{ pr: '2' }, { sha: f.shas['1.0.2'] }, { tree: 'tree-only' }] }), f.shas['1.0.2']!);
+    add(JSON.stringify({ schema: 1, kind: 'freeze', train: 'ok1', reason: 'backstop red', cleared_at: null }), head);
+    git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+    const mixed = readTrainNotes(f.git);
+    expect(mixed.error).toBeNull();
+    expect(mixed.freeze).toBe('queue frozen since train ok1: backstop red');
+    expect([...mixed.evidence.bySha]).toEqual([[f.shas['1.0.2']!, 'ok1']]);
+    expect([...mixed.evidence.byTree]).toEqual([['tree-only', 'ok1']]);
+    f.state.checks[f.shas['1.0.2']!] = backstop('completed', 'neutral');
+    const frozen = planRelease({ repo: f.repo, ref: f.shas['1.0.2'], git: f.git, gh: f.gh });
+    expect(frozen).toEqual({ ok: false, code: 'REFUSED', message: 'queue frozen since train ok1: backstop red' });
+    add(JSON.stringify({ schema: 1, kind: 'freeze', train: 'ok1', reason: 'backstop red', cleared_at: 'y' }), head);
+    git(f.seed, 'push', '-q', '-f', 'origin', NOTES_REF);
+    const thawed = planRelease({ repo: f.repo, ref: f.shas['1.0.2'], git: f.git, gh: f.gh });
+    expect(thawed.ok, JSON.stringify(thawed)).toBe(true);
+    if (thawed.ok) expect(thawed.plan.via).toBe('train ok1');
+  });
+});
+
+describe('release-cut: train evidence gates a commit whose backstop never settled', () => {
+  const train = (nonce: string, state: string, merged: Array<{ sha: string; tree: string }>) =>
+    ({ schema: 1, kind: 'train', nonce, state, merged: merged.map(m => ({ pr: '1', at: 'x', ...m })), updated_at: 'x' });
+  const note = (f: ReturnType<typeof fixture>, record: unknown, on: string, ref = NOTES_REF) => {
+    git(f.seed, 'notes', '--ref=' + ref, 'add', '-f', '-m', JSON.stringify(record), on);
+    git(f.seed, 'push', '-q', '-f', 'origin', ref);
+  };
+  const treeOf = (f: ReturnType<typeof fixture>, sha: string) => git(f.seed, 'rev-parse', sha + '^{tree}');
+
+  // Value: protects=a main commit whose main-backstop check run is neutral (superseded) or absent is released when a green, merging or merged train record's
+  // merged[] names its sha or its tree, and the CANDIDATE line says which train gated it; fails_when=the gate still needs a successful backstop run on
+  // every commit (the weekly cut returns NO_GREEN_COMMIT for a week of train-merged commits), evidence is matched on sha only, or the plan hides what gated
+  // the commit; why_new=the planning tests know only the backstop check run as evidence; seam=none; no_claim=real refs/notes/gstack-trains content (a
+  // fixture record shaped like lib/ship-queue-train-record.ts TrainRecord)
+  test('a neutral backstop plus a train record naming the sha, or only the tree, is a candidate gated by that train', () => {
+    const f = fixture();
+    const head = f.shas['1.0.3']!;
+    f.state.checks[head] = backstop('completed', 'neutral');
+    note(f, train('t1', 'merged', [{ sha: head, tree: treeOf(f, head) }]), head);
+    const bySha = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+    expect(bySha.ok, JSON.stringify(bySha)).toBe(true);
+    if (!bySha.ok) return;
+    expect(bySha.plan.sha).toBe(head);
+    expect(bySha.plan.via).toBe('train t1');
+    expect(describePlan(bySha.plan, true)[0]).toBe('CANDIDATE: ' + head + ' (' + bySha.plan.date + ') gated by train t1');
+
+    const byTree = fixture();
+    const head2 = byTree.shas['1.0.3']!;
+    delete byTree.state.checks[head2];
+    byTree.state.checks[head2] = GREEN.filter(c => c.name !== BACKSTOP_CHECK);
+    note(byTree, train('t2', 'green', [{ sha: 'f'.repeat(40), tree: treeOf(byTree, head2) }]), head2);
+    const r = planRelease({ repo: byTree.repo, git: byTree.git, gh: byTree.gh });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (r.ok) { expect(r.plan.sha).toBe(head2); expect(r.plan.via).toBe('train t2'); }
+
+    const plain = planRelease({ repo: f.repo, ref: f.shas['1.0.2'], git: f.git, gh: f.gh });
+    expect(plain.ok).toBe(true);
+    if (plain.ok) { expect(plain.plan.via).toBe(BACKSTOP_CHECK); expect(describePlan(plain.plan, false)[0]).toBe('CANDIDATE: ' + f.shas['1.0.2'] + ' (' + plain.plan.date + ') [hotfix: --ref] gated by ' + BACKSTOP_CHECK); }
+  });
+
+  // Value: protects=train evidence never relaxes the rest of the gate: a covered commit still needs a successful required check run (also when
+  // --required-check and --backstop-check name the same check, where evidence substitutes for nothing), no red check run (a red backstop included),
+  // nothing still running, and only a green, merging or merged record counts; fails_when=a covered commit with a failed free-tests run, a red windows lane
+  // or a red backstop is released, a running check is not waited for, a red or superseded train record is read as evidence, or equal check names let a
+  // covered commit with zero check runs through; why_new=the first train test covers the accepting path only; seam=none; no_claim=none beyond protects
+  test('a covered commit is still refused by a red check run, a red backstop, a missing or failed required run, a running run, or a red/superseded record', () => {
+    const f = fixture();
+    const head = f.shas['1.0.3']!;
+    const tree = treeOf(f, head);
+    note(f, train('t1', 'merging', [{ sha: head, tree }]), head);
+    const gate = (checks: CheckRun[]) => { f.state.checks[head] = checks; const v = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh }); return v.ok ? 'green' : v.message; };
+    expect(gate([...backstop('completed', 'neutral'), { name: 'windows-free-tests', status: 'completed', conclusion: 'failure' }])).toBe('--ref ' + head.slice(0, 12) + ' is not green: red check runs: windows-free-tests');
+    expect(gate(backstop('completed', 'failure'))).toBe('--ref ' + head.slice(0, 12) + ' is not green: red check runs: ' + BACKSTOP_CHECK);
+    expect(gate([{ name: BACKSTOP_CHECK, status: 'completed', conclusion: 'neutral' }])).toBe('--ref ' + head.slice(0, 12) + ' is not green: no ' + REQUIRED_CHECK + ' check run');
+    expect(gate([{ name: REQUIRED_CHECK, status: 'completed', conclusion: 'failure' }, { name: BACKSTOP_CHECK, status: 'completed', conclusion: 'neutral' }])).toBe('--ref ' + head.slice(0, 12) + ' is not green: ' + REQUIRED_CHECK + ' concluded failure');
+    expect(gate(backstop('in_progress', null))).toBe('--ref ' + head.slice(0, 12) + ' is not green: ' + BACKSTOP_CHECK + ' is still running');
+    expect(gate([...backstop('completed', 'neutral'), { name: 'slices-report', status: 'queued', conclusion: null }])).toBe('--ref ' + head.slice(0, 12) + ' is not green: check runs still going: slices-report');
+    expect(gate(backstop('completed', 'neutral'))).toBe('green');
+    f.state.checks[head] = [];
+    const same = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'ci' });
+    expect(same.ok ? 'green' : same.message).toBe('--ref ' + head.slice(0, 12) + ' is not green: no ci check run');
+    f.state.checks[head] = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    const sameGreen = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'ci' });
+    expect(sameGreen.ok ? sameGreen.plan.via : sameGreen.message).toBe('ci');
+
+    for (const state of ['red', 'superseded', 'incomplete', 'free-green']) {
+      note(f, train('t1', state, [{ sha: head, tree }]), head);
+      expect([state, gate(backstop('completed', 'neutral'))]).toEqual([state, '--ref ' + head.slice(0, 12) + ' is not green: ' + BACKSTOP_CHECK + ' concluded neutral']);
+    }
+
+    for (const sha of Object.values(f.shas)) f.state.checks[sha] = backstop('completed', 'neutral');
+    const none = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+    expect(none.ok).toBe(false);
+    if (none.ok) return;
+    expect(none.code).toBe('NO_GREEN_COMMIT');
+    expect(none.message).toBe('no green commit among 4 on origin/main; see the skipped list');
+    expect(none.skipped).toEqual(Object.values(f.shas).reverse().map(s => s.slice(0, 12) + ': ' + BACKSTOP_CHECK + ' concluded neutral'));
+    note(f, train('other', 'merged', [{ sha: f.shas['1.0.1']!, tree: treeOf(f, f.shas['1.0.1']!) }]), head);
+    const older = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+    expect(older.ok, JSON.stringify(older)).toBe(true);
+    if (!older.ok) return;
+    expect(older.plan.sha).toBe(f.shas['1.0.1']);
+    expect(older.plan.via).toBe('train other');
+    expect(older.plan.skipped).toEqual([head.slice(0, 12) + ': ' + BACKSTOP_CHECK + ' concluded neutral', f.shas['1.0.2']!.slice(0, 12) + ': ' + BACKSTOP_CHECK + ' concluded neutral']);
+  });
+
+  // Value: protects=--required-check, --backstop-check and --notes-ref rename what the gate reads so another repository can run the script, and the
+  // defaults stay free-tests, main-backstop and refs/notes/gstack-trains for weekly-release.yml; fails_when=a renamed check is still looked up under the
+  // default name, the train notes are read from the default ref only, or a flag is misread by the CLI; why_new=every other test runs under the defaults;
+  // seam=none; no_claim=none beyond protects
+  test('--required-check, --backstop-check and --notes-ref rename what the gate reads, through planRelease and the CLI', () => {
+    const f = fixture();
+    const head = f.shas['1.0.3']!;
+    const renamed: CheckRun[] = [{ name: 'ci', status: 'completed', conclusion: 'success' }, { name: 'nightly-backstop', status: 'completed', conclusion: 'success' }];
+    for (const sha of Object.values(f.shas)) f.state.checks[sha] = renamed;
+    const defaults = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+    expect(defaults.ok).toBe(false);
+    if (!defaults.ok) expect(defaults.skipped![0]).toBe(head.slice(0, 12) + ': no ' + REQUIRED_CHECK + ' check run');
+    const flagged = planRelease({ repo: f.repo, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'nightly-backstop' });
+    expect(flagged.ok, JSON.stringify(flagged)).toBe(true);
+    if (flagged.ok) { expect(flagged.plan.sha).toBe(head); expect(flagged.plan.via).toBe('nightly-backstop'); }
+
+    f.state.checks[head] = [{ name: 'ci', status: 'completed', conclusion: 'success' }, { name: 'nightly-backstop', status: 'completed', conclusion: 'neutral' }];
+    note(f, train('t9', 'merged', [{ sha: head, tree: treeOf(f, head) }]), head, 'refs/notes/other-trains');
+    const defaultRef = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'nightly-backstop' });
+    expect(defaultRef.ok).toBe(false);
+    if (!defaultRef.ok) expect(defaultRef.message).toBe('--ref ' + head.slice(0, 12) + ' is not green: nightly-backstop concluded neutral');
+    const otherRef = planRelease({ repo: f.repo, ref: head, git: f.git, gh: f.gh, requiredCheck: 'ci', backstopCheck: 'nightly-backstop', notesRef: 'refs/notes/other-trains' });
+    expect(otherRef.ok, JSON.stringify(otherRef)).toBe(true);
+    if (otherRef.ok) expect(otherRef.plan.via).toBe('train t9');
+
+    if (process.platform === 'win32') return;
+    const shim = path.join(f.base, 'shim');
+    fs.mkdirSync(shim);
+    fs.writeFileSync(path.join(shim, 'gh'), '#!/usr/bin/env bash\ncase "$*" in\n  *check-runs*) echo \'' + JSON.stringify([{ check_runs: f.state.checks[head] }]) + '\' ;;\n  *) exit 1 ;;\nesac\n', { mode: 0o755 });
+    const run = (...args: string[]) => spawnSync(process.execPath, [...bunIsolationArgs(), 'run', path.join(path.resolve(import.meta.dir, '..'), 'scripts', 'release-cut.ts'), ...args],
+      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: { ...process.env, PATH: shim + path.delimiter + process.env.PATH } });
+    const cli = run('--repo', f.repo, '--dry-run', '--ref', head, '--required-check', 'ci', '--backstop-check', 'nightly-backstop', '--notes-ref', 'refs/notes/other-trains');
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(cli.stdout.split('\n')[0]).toBe('CANDIDATE: ' + head + ' (' + git(f.seed, 'show', '-s', '--format=%cs', head) + ') [hotfix: --ref] gated by train t9');
+    const unnamed = run('--repo', f.repo, '--dry-run', '--ref', head, '--required-check', 'ci', '--backstop-check', 'nightly-backstop');
+    expect(unnamed.status).toBe(1);
+    expect(unnamed.stdout.split('\n')[0]).toBe('REFUSED: --ref ' + head.slice(0, 12) + ' is not green: nightly-backstop concluded neutral');
   });
 });
 

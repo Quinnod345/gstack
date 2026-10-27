@@ -1,6 +1,6 @@
 {
   "_comment": "Context-budget ratchet ceilings (~tokens). Regenerate: bun test/helpers/capture-context-budget.ts. Headroom: alwaysOnTotal x1.05, eagerPerInvocation x1.1. Graded by test/context-budget-ratchet.test.ts via lib/context-bill.ts checkBudget.",
-  "alwaysOnTotal": 7458,
+  "alwaysOnTotal": 7880,
   "eagerPerInvocation": {
     "autoplan": 17005,
     "benchmark": 7813,
@@ -9,14 +9,15 @@
     "browser-skills/hackernews-frontpage": 371,
     "canary": 13441,
     "captain": 12011,
-    "capy/skill/gstack": 3498,
+    "capy/skill/gstack": 4075,
     "careful": 1239,
     "codex": 15594,
     "context-restore": 10909,
     "context-save": 10517,
-    "cso": 4660,
+    "cso": 4924,
     "design-consultation": 16188,
     "design-html": 14380,
+    "design-motion": 10409,
     "design-review": 35808,
     "design-shotgun": 14901,
     "deslop-shared-libs": 3411,
@@ -40,7 +41,7 @@
     "landing-report": 8901,
     "learn": 8626,
     "make-pdf": 5204,
-    "modernize": 8896,
+    "modernize": 9466,
     "office-hours": 24792,
     "open-gstack-browser": 4872,
     "openclaw/skills/gstack-openclaw-ceo-review": 2764,
@@ -66,6 +67,7 @@
     "spec": 14840,
     "sync-gbrain": 15399,
     "test-audit": 10324,
+    "ubicloud": 9033,
     "unfreeze": 409
   }
 }

@@ -23,6 +23,7 @@ Conventions:
 - [/cso](cso/SKILL.md): Security audit: supported static findings; qualified profiles add reproduction and repair candidates.
 - [/design-consultation](design-consultation/SKILL.md): Design consultation: understands your product, researches the landscape, proposes a complete design system (aesthetic, typography, color, layout, spacing, motion), and generates font+color preview pages.
 - [/design-html](design-html/SKILL.md): Design finalization: generates production-quality Pretext-native HTML/CSS.
+- [/design-motion](design-motion/SKILL.md): Design motion: animate an approved design into a seamless MP4 and GIF loop.
 - [/design-review](design-review/SKILL.md): Designer's eye QA: finds visual inconsistency, spacing issues, hierarchy problems, AI slop patterns, and slow interactions — then fixes them.
 - [/design-shotgun](design-shotgun/SKILL.md): Design shotgun: generate multiple AI design variants, open a comparison board, collect structured feedback, and iterate.
 - [/deslop-shared-libs](deslop-shared-libs/SKILL.md): Find worthwhile shared-code extractions in recent work.
@@ -68,6 +69,7 @@ Conventions:
 - [/spec](spec/SKILL.md): Turn vague intent into a precise, executable spec in five phases.
 - [/sync-gbrain](sync-gbrain/SKILL.md): Keep gbrain current with this repo's code and refresh agent search guidance in CLAUDE.md.
 - [/test-audit](test-audit/SKILL.md): Find low-value or duplicate tests and the test-only code they keep alive.
+- [/ubicloud](ubicloud/SKILL.md): Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs, a reaper, quota preflight and a hang watchdog.
 - [/unfreeze](unfreeze/SKILL.md): Clear the freeze boundary set by /freeze, allowing edits to all directories again.
 
 ## Browse Commands

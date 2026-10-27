@@ -26,6 +26,12 @@ and the Captain's drive) is the `/captain` skill and `docs/captain.md` in the gs
   - a change to a threshold, budget, trial count or test kind;
   - closing someone's contribution without landing it;
   - anything destructive or irreversible.
+- **Observable questions are not the person's to answer.** A question a command, a render or a measurement
+  can settle locally, read-only and for free ("is the new path faster", "does the test endpoint take this
+  payload", "does the test still fail") is settled by the thread: it runs the thing and reports the result.
+  A call that changes state, reaches a live system or spends money is still an ask. Only a product or preference call
+  goes up, with the observation already made. A Captain that receives an observable question sends it
+  back with the check that answers it instead of relaying it.
 - **What a gstack workflow does in Capy.** Launched with `GSTACK_SESSION_KIND=unattended`, a workflow takes
   each recommended option, writes everything else as a pending gate item, and stops. Your job is to carry
   those pending items to the Captain or person in the shape below, then feed the answer back.

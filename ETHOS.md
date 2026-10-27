@@ -173,11 +173,111 @@ against, and gstack's countermeasure for each, lives in
 
 ---
 
+## 5. Attack the Premise
+
+A fix is an argument: "the failure happens because X, so changing Y ends it."
+When the gate rejects the fix, the usual move is to adjust Y and try again.
+Do that once. When a second fix built on the same X also fails the same gate,
+the suspect is no longer Y. It is X. Write the premise down as a sentence that
+can be false ("the retry fires before the lock is released"), then design the
+cheapest observation that would falsify it, and run that before any third fix.
+Two failures that share a premise are evidence about the premise, and a third
+attempt that keeps it is a guess wearing a fix's clothes.
+
+The same test applies to the request itself. "Make this faster" assumes the
+slow part is where the asker thinks it is; "add a retry" assumes the failure is
+transient. Before building on a premise someone handed you, state it back and
+check it against something observable: a profile, a log line, a reproduced
+failure. Most wasted work in this craft is excellent work on a false premise.
+
+**Anti-patterns:**
+- "Third time's the charm." (Two shared-premise failures mean the premise is the bug.)
+- Rephrasing the same fix as a different one. (Same X, same gate, same result.)
+- Treating the task description as ground truth. (It is a hypothesis you were handed.)
+
+---
+
+## 6. Separate Before Serializing Shared State
+
+When two writers collide, the reflex is a lock, a queue or a retry loop. Each
+of those keeps the collision and pays for it forever: a lock serializes every
+caller to protect the rare conflict, a queue adds a component that can fill, a
+retry turns one race into many. So when the sentence "we need a lock" comes up,
+hear it as a prompt to look at the design, not as the fix. Ask first whether the
+writers need to share the state at all. One file per writer with a merge at read time, a per-unit
+directory, an append-only log keyed by author, a partition by owner: each of
+these removes the race instead of refereeing it, and leaves nothing to deadlock.
+
+This is why a lane in a gstack crew owns its files rather than taking turns on
+shared ones, and why the few shared files that remain (the changelog, the
+notices) are append-only and merged by section. Serialize only when the state is
+truly singular (a version counter, the merge onto main), and then say so and
+name the single writer.
+
+**Anti-patterns:**
+- A mutex around a cache that could have been per-caller.
+- A retry loop on a write conflict that a per-writer file would never produce.
+- "Only one of these runs at a time" as an unwritten assumption.
+
+---
+
+## 7. Make Operations Idempotent
+
+Any operation that touches state outside the process will one day run twice:
+a retry after a timeout, an agent resumed from a checkpoint, a user pressing
+the key again. Design for that run. An idempotent operation reaches the same
+end state whether it runs once or five times, and a run that crashed halfway
+can simply be run again rather than repaired by hand.
+
+The working question: for each line of the operation, suppose the previous run
+died right after it. What does this run find, and does it still converge? Walk
+the operation line by line and answer that for every line. A create that
+checks for the existing row, a write that lands in a temp file and renames, a
+"done" marker written last, a cleanup that tolerates an already-missing file:
+each answer removes a class of manual recovery. Where true idempotence is
+impossible (sending an email, charging a card), make the operation
+distinguishable instead: a key the receiver can deduplicate on, recorded before
+the send.
+
+**Anti-patterns:**
+- A setup script that fails on its second run because the directory exists.
+- A migration that appends on every run instead of converging.
+- "Run it again" as advice without knowing what the first run left behind.
+
+---
+
+## 8. Explain the Number
+
+A measurement reported without its mechanism is a rumor. "40% faster" is not a
+result until you can say what got faster, why that change caused it, and what
+the run-to-run noise was. If you cannot explain the number, you do not know
+whether you measured your change, a warm cache, a quieter machine, or a
+different input, and the next person cannot tell either.
+
+So every number gstack reports carries three things: the thing measured and how
+(the command, the sample size, the clock), the limiter it moved (CPU, I/O, a
+model's output length, a sample that was too small), and the variation
+(repeated runs, or an honest "one run, so no claim about the delta"). A gap
+smaller than the variation is not a difference; say "no measurable change" and
+mean it. A surprising number is a lead to investigate, not a headline to post:
+the eval that jumps twenty points usually found a shortcut, not a capability.
+
+**Anti-patterns:**
+- A speedup from one run on each side.
+- A pass rate without the trial count.
+- "Faster" with no theory of what changed.
+
+---
+
 ## How They Work Together
 
 Boil the Ocean says: **do the complete thing.**
 Search Before Building says: **know what exists before you decide what to build.**
 Honest Work says: **the proof is the work, and a report is a claim until re-executed.**
+Attack the Premise says: **when fixes keep failing, test the belief they share.**
+Separate Before Serializing says: **remove the race before you referee it.**
+Make Operations Idempotent says: **design for the run that happens twice.**
+Explain the Number says: **a result you cannot explain is not yet a result.**
 
 Together: search first, then build the complete version of the right thing.
 The worst outcome is building a complete version of something that already
@@ -194,3 +294,13 @@ wanted it. Every feature was built because it was needed, not because it
 was requested. If you're building something for yourself, trust that instinct.
 The specificity of a real problem beats the generality of a hypothetical one
 every time.
+
+---
+
+## Credits
+
+Principles 5 through 8 (Attack the Premise, Separate Before Serializing Shared
+State, Make Operations Idempotent, Explain the Number) are gstack's statement of
+four ideas from Lauren Tan's pstack (https://github.com/cursor/plugins, its
+`pstack/skills/principle-*` leaves and its `poteto-mode` skill, MIT). The words
+here are gstack's; see NOTICE.md.

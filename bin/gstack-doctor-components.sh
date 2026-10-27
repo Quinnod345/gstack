@@ -4,13 +4,17 @@
 # freshness test is test/doctor-components.test.ts. Sourced by
 # bin/gstack-doctor-check.sh; Bash 3.2 builtins only.
 
-GSTACK_DOCTOR_COMPONENTS="claude codex patch codex-cli browse-bundle browser cso helpers runtime pins state-root privacy cores revision wrapper"
-GSTACK_DOCTOR_CORE="runtime pins state-root privacy cores revision wrapper"
+GSTACK_DOCTOR_COMPONENTS="claude codex patch codex-cli browse-bundle browser cso helpers runtime pins state-root privacy cores revision floor wrapper"
+GSTACK_DOCTOR_CORE="runtime pins state-root privacy cores revision floor wrapper"
 GSTACK_DOCTOR_HOSTS="claude codex"
 GSTACK_DOCTOR_OPTIONAL="codex-cli cso"
-GSTACK_DOCTOR_SKILLS="autoplan plan-ceo-review plan-eng-review plan-design-review plan-devex-review plan-tune office-hours spec review ship investigate codex cso browse qa qa-only design-review design-consultation design-html devex-review scrape skillify canary benchmark make-pdf diagram pair-agent open-gstack-browser setup-browser-cookies connect-chrome land-and-deploy benchmark-models captain careful claude-code context-restore context-save design-shotgun deslop-shared-libs document-generate document-release eval-plan freeze gstack-upgrade guard health ios-clean ios-design-review ios-fix ios-qa ios-sync landing-report learn modernize retro setup-deploy setup-gbrain sync-gbrain test-audit unfreeze review-voice"
+GSTACK_DOCTOR_SKILLS="autoplan plan-ceo-review plan-eng-review plan-design-review plan-devex-review plan-tune office-hours spec review ship investigate codex cso browse qa qa-only design-review design-consultation design-html design-motion devex-review scrape skillify canary benchmark make-pdf diagram pair-agent open-gstack-browser setup-browser-cookies connect-chrome land-and-deploy benchmark-models captain careful claude-code context-restore context-save design-shotgun deslop-shared-libs document-generate document-release eval-plan freeze gstack-upgrade guard health ios-clean ios-design-review ios-fix ios-qa ios-sync landing-report learn modernize retro setup-deploy setup-gbrain sync-gbrain test-audit ubicloud unfreeze review-voice"
 GSTACK_BROWSER_LAZY_REASON="lazy; gstack-browser-ensure installs on first use"
 GSTACK_DOCTOR_HELPERS="gstack-pregate gstack-plan-reality gstack-artifact gstack-autoplan"
+GSTACK_DOCTOR_NOT_NEEDED="none"
+GSTACK_DOCTOR_NOT_NEEDED_REVISION="not-needed"
+GSTACK_PROJECT_FLOOR_FILE=".gstack/ship-policy.json"
+GSTACK_PROJECT_FLOOR_FIELD="min_gstack_version"
 
 # gstack_doctor_component_title ID — the human title; returns 1 for an unknown id.
 gstack_doctor_component_title() {
@@ -29,6 +33,7 @@ gstack_doctor_component_title() {
     privacy) printf '%s' 'privacy' ;;
     cores) printf '%s' 'cores' ;;
     revision) printf '%s' 'revision' ;;
+    floor) printf '%s' 'the project'\''s gstack floor (min_gstack_version in .gstack/ship-policy.json)' ;;
     wrapper) printf '%s' 'Capy skill copy (bootstrapper revision)' ;;
     *) return 1 ;;
   esac
@@ -51,6 +56,7 @@ gstack_doctor_component_kind() {
     privacy) printf '%s' 'core' ;;
     cores) printf '%s' 'core' ;;
     revision) printf '%s' 'core' ;;
+    floor) printf '%s' 'core' ;;
     wrapper) printf '%s' 'core' ;;
     *) return 1 ;;
   esac
@@ -62,8 +68,8 @@ gstack_doctor_skill_requires() {
     autoplan|plan-ceo-review|plan-eng-review|plan-design-review|plan-devex-review|plan-tune|office-hours|spec|review|ship|investigate) printf '%s' 'claude codex patch' ;;
     codex) printf '%s' 'claude codex patch codex-cli' ;;
     cso) printf '%s' 'claude cso' ;;
-    browse|qa|qa-only|design-review|design-consultation|design-html|devex-review|scrape|skillify|canary|benchmark|make-pdf|diagram|pair-agent|open-gstack-browser|setup-browser-cookies|connect-chrome|land-and-deploy) printf '%s' 'claude codex patch browse-bundle browser' ;;
-    benchmark-models|captain|careful|claude-code|context-restore|context-save|design-shotgun|deslop-shared-libs|document-generate|document-release|eval-plan|freeze|gstack-upgrade|guard|health|ios-clean|ios-design-review|ios-fix|ios-qa|ios-sync|landing-report|learn|modernize|retro|setup-deploy|setup-gbrain|sync-gbrain|test-audit|unfreeze) printf '%s' 'claude' ;;
+    browse|qa|qa-only|design-review|design-consultation|design-html|design-motion|devex-review|scrape|skillify|canary|benchmark|make-pdf|diagram|pair-agent|open-gstack-browser|setup-browser-cookies|connect-chrome|land-and-deploy) printf '%s' 'claude codex patch browse-bundle browser' ;;
+    benchmark-models|captain|careful|claude-code|context-restore|context-save|design-shotgun|deslop-shared-libs|document-generate|document-release|eval-plan|freeze|gstack-upgrade|guard|health|ios-clean|ios-design-review|ios-fix|ios-qa|ios-sync|landing-report|learn|modernize|retro|setup-deploy|setup-gbrain|sync-gbrain|test-audit|ubicloud|unfreeze) printf '%s' 'claude' ;;
     review-voice) printf '%s' 'helpers' ;;
     *) return 1 ;;
   esac
@@ -75,8 +81,8 @@ gstack_doctor_skill_optional() {
     autoplan|plan-ceo-review|plan-eng-review|plan-design-review|plan-devex-review|plan-tune|office-hours|spec|review|ship|investigate) printf '%s' 'codex-cli' ;;
     codex) printf '%s' '' ;;
     cso) printf '%s' '' ;;
-    browse|qa|qa-only|design-review|design-consultation|design-html|devex-review|scrape|skillify|canary|benchmark|make-pdf|diagram|pair-agent|open-gstack-browser|setup-browser-cookies|connect-chrome|land-and-deploy) printf '%s' 'codex-cli' ;;
-    benchmark-models|captain|careful|claude-code|context-restore|context-save|design-shotgun|deslop-shared-libs|document-generate|document-release|eval-plan|freeze|gstack-upgrade|guard|health|ios-clean|ios-design-review|ios-fix|ios-qa|ios-sync|landing-report|learn|modernize|retro|setup-deploy|setup-gbrain|sync-gbrain|test-audit|unfreeze) printf '%s' '' ;;
+    browse|qa|qa-only|design-review|design-consultation|design-html|design-motion|devex-review|scrape|skillify|canary|benchmark|make-pdf|diagram|pair-agent|open-gstack-browser|setup-browser-cookies|connect-chrome|land-and-deploy) printf '%s' 'codex-cli' ;;
+    benchmark-models|captain|careful|claude-code|context-restore|context-save|design-shotgun|deslop-shared-libs|document-generate|document-release|eval-plan|freeze|gstack-upgrade|guard|health|ios-clean|ios-design-review|ios-fix|ios-qa|ios-sync|landing-report|learn|modernize|retro|setup-deploy|setup-gbrain|sync-gbrain|test-audit|ubicloud|unfreeze) printf '%s' '' ;;
     review-voice) printf '%s' '' ;;
     *) return 1 ;;
   esac
@@ -280,6 +286,10 @@ gstack_result_anchor() {
     QUEUE_RECEIPT_MISSING) printf '%s' 'queue-receipt-missing' ;;
     QUEUE_RECEIPT_STALE) printf '%s' 'queue-receipt-stale' ;;
     QUEUE_SCREEN_STALE_REF) printf '%s' 'queue-screen-stale-ref' ;;
+    QUEUE_SCREEN_NOT_RUN) printf '%s' 'queue-screen-not-run' ;;
+    QUEUE_TRAIN_STACK_RED) printf '%s' 'queue-train-stack-red' ;;
+    QUEUE_POST_MERGE_RED) printf '%s' 'queue-post-merge-red' ;;
+    QUEUE_SCREEN_RED) printf '%s' 'queue-screen-red' ;;
     READY_SCREEN_CHOICE_REQUIRED) printf '%s' 'ready-screen-choice-required' ;;
     PREGATE_TIMING_ASSERTION) printf '%s' 'pregate-timing-assertion' ;;
     PREGATE_NO_POLICY) printf '%s' 'pregate-no-policy' ;;
@@ -295,6 +305,8 @@ gstack_result_anchor() {
     REVIEW_SCOPE_RANGE) printf '%s' 'review-scope-range' ;;
     RECEIPT_CARRY_REFUSED) printf '%s' 'receipt-carry-refused' ;;
     RECEIPT_CARRY_PRODUCT_CHANGED) printf '%s' 'receipt-carry-product-changed' ;;
+    PR_WAIT_BLOCKED) printf '%s' 'pr-wait-blocked' ;;
+    PR_WAIT_REFUSED) printf '%s' 'pr-wait-refused' ;;
     APPROVAL_RECORD_INVALID) printf '%s' 'approval-record-invalid' ;;
     APPROVAL_RECORD_SECRET) printf '%s' 'approval-record-secret' ;;
     APPROVAL_RECORD_NO_BRANCH) printf '%s' 'approval-record-no-branch' ;;
@@ -307,6 +319,9 @@ gstack_result_anchor() {
     PR_SHOTS_IDENTICAL) printf '%s' 'pr-shots-identical' ;;
     PR_SHOTS_RENDER_FAILED) printf '%s' 'pr-shots-render-failed' ;;
     LAUNCH_FILE_UNWRITABLE) printf '%s' 'capy-install-launch-file-unwritable' ;;
+    PROJECT_FLOOR_UNMET) printf '%s' 'project-floor-unmet' ;;
+    PROJECT_NODE_PIN_UNMET) printf '%s' 'project-node-pin-unmet' ;;
+    UPGRADE_SKIPPED) printf '%s' 'upgrade-skipped' ;;
     *) return 1 ;;
   esac
 }
