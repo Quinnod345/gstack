@@ -182,7 +182,7 @@ sections. Read a section in full before doing its step; do not work from memory.
 
 | When | Read this section |
 |------|-------------------|
-| finishing Step 1.5's Scope Check | `sections/plan-completion.md` |
+| leaving Step 1.5 | `sections/plan-completion.md` |
 | Select surfaces and read QA methods | Inline in [Step 4](#step-4-critical-pass-core-review); setup and probes run in Step 4.7 |
 | dispatching the Review Army specialists and merging their findings after the critical pass (Step 4.5) | `sections/review-army.md` |
 | running the always-on native adversarial review before fixes (Step 4.8) | `sections/adversarial.md` |
@@ -213,10 +213,10 @@ Compare the stated intent with the actual changes before reviewing code quality.
    incidental changes that expand the blast radius. Identify **MISSING REQUIREMENTS**:
    unaddressed requirements, missing test coverage or partial implementations.
 4. Keep these notes provisional. Next, execute the plan-completion section;
-   it resolves the HIGH-impact decision and emits the single final Scope Check
-   before Step 2. The Scope Check itself is informational, not another gate.
+   it resolves the HIGH-impact decision before Step 2; Step 3 emits the single
+   final Scope Check after its full diff read. It is informational, not another gate.
 
-> **STOP.** Before finishing Step 1.5's Scope Check, Read `~/.claude/skills/gstack/review/sections/plan-completion.md` and execute it
+> **STOP.** Before leaving Step 1.5, Read `~/.claude/skills/gstack/review/sections/plan-completion.md` and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
 
 ## Step 2: Read the checklist
@@ -229,9 +229,9 @@ Read `~/.claude/skills/gstack/review/checklist.md`.
 
 ## Step 2.5: Check for Greptile review comments
 
-Read `~/.claude/skills/gstack/review/greptile-triage.md` and follow the fetch, filter, classify, and **escalation detection** steps.
+Read `~/.claude/skills/gstack/review/greptile-triage.md` and follow its fetch, filter, classify and **escalation detection** steps.
 
-**No PR, a `gh` or API failure, or zero Greptile comments:** skip silently; the review works without Greptile.
+**No PR, a `gh` or API failure, or zero Greptile comments:** skip silently; review works without Greptile.
 
 **Comments found:** store the classifications (VALID & ACTIONABLE, VALID BUT ALREADY FIXED, FALSE POSITIVE, SUPPRESSED) for Step 5.
 
@@ -263,6 +263,7 @@ git diff "$DIFF_BASE"
 3. Native/outside reviewer attempts own separate PASS_START tokens, not REVIEW_START.
 4. Read non-ignored untracked source too (`git ls-files --others --exclude-standard`);
    the captured candidate includes it.
+5. First pass only: emit Step 1.5's final Scope Check; `Diff read` records this read.
 
 Keep the review-record terms separate:
 
@@ -291,7 +292,7 @@ OFFLINE=$(echo "$QUEUE_JSON" | jq -r '.offline // false')
 ```
 
 - `OFFLINE=true`: skip this section.
-- Otherwise, include ONE line in the review output: `Version claimed: v<BRANCH_VERSION>. Queue: <CLAIMED_COUNT> PR(s) ahead. <VERDICT>` where VERDICT is either `Slot free` (if `BRANCH_VERSION >= NEXT_SLOT`) or `⚠ queue moved — rerun /ship to reconcile v<BRANCH_VERSION> → v<NEXT_SLOT>`.
+- Otherwise, include ONE line in the review output: `Version claimed: v<BRANCH_VERSION>. Queue: <CLAIMED_COUNT> PR(s) ahead. <VERDICT>` where VERDICT is `Slot free` (`BRANCH_VERSION >= NEXT_SLOT`) or `⚠ queue moved — rerun /ship to reconcile v<BRANCH_VERSION> → v<NEXT_SLOT>`.
 
 Compare versions numerically per dotted component; missing ones count as zero.
 
@@ -346,14 +347,14 @@ category, Step 5.8's record and the final report.
 bun run slop:diff origin/<base> 2>/dev/null || true
 ```
 
-Findings are non-blocking informational diagnostics; skip if unavailable.
+Advisory findings only; skip if unavailable.
 
 ---
 
 ## Step 3.6: Gather review context
 
-Run Prior Learnings, then Web research readiness after Step 3.5, before Step 4.
-Use their results in the core review.
+Run Prior Learnings, then Web research readiness, before Step 4; use both in
+the core review.
 
 ## Prior Learnings
 
@@ -468,14 +469,14 @@ read-level hunk (`[<id>] <tag> <path> @<hunk>`) into the checklist's Gate Integr
 category: read each hunk in the diff with its one question, keep groups as one
 finding, and record `gate` (the RH tag) and `gate_id` (the tool's id) on each gate
 finding. A partial or UNAVAILABLE scan is missing coverage for this category, never
-a clean result. Gate findings are ASK in Step 5 regardless of how mechanical the
-revert looks. A test-only flake fix (timeout, retry, looser assertion, skip) states `P(fail | regression)` before and after, from a forced probe; without both numbers it is RH-15.
+a clean result. Gate findings are ASK in Step 5 however mechanical the revert
+looks. A test-only flake fix (timeout, retry, looser assertion, skip) states `P(fail | regression)` before and after, from a forced probe; without both numbers it is RH-15.
 
 **Search-before-recommending:** Research proposed fixes through Aside, especially
 concurrency, caching, auth and framework behavior: current best practice for the
-installed version, newer built-ins that replace a workaround, and current API signatures.
+installed version, built-ins that replace a workaround, and current API signatures.
 
-Prompt file text (create, write and send it with the Web research runs in Aside blocks above): `{framework} {version} {pattern} current best practice and whether a built-in replaces it. Reply with up to 5 bullets, each with its source URL.`
+Prompt file text (write and send it with the Web research runs in the Aside blocks above): `{framework} {version} {pattern} current best practice and whether a built-in replaces it. Reply with up to 5 bullets, each with its source URL.`
 
 Without Aside `READY`, use WebSearch if available; with neither, disclose the gap
 and use existing knowledge. Research runs alongside specialist dispatch.
@@ -483,7 +484,7 @@ and use existing knowledge. Research runs alongside specialist dispatch.
 ### Shared-code opportunities (core pass)
 
 Run this check on every diff, including fewer than 50 changed lines and hosts without Review Army:
-1. Read the changed code and related unchanged callers using the rubric below. Do not run the standalone history/PR sweep or impose candidate quotas.
+1. Read the changed code and related unchanged callers using the rubric below; no standalone history/PR sweep, no candidate quotas.
 2. Require at least one verified authored location changed in this diff and at least two actual authored source locations needing the shared behavior. Added or uncommitted source qualifies; invented future callers do not.
 3. Trace generated copies to authored templates/resolvers. Exclude generated and third-party copies from evidence and savings.
 
@@ -574,7 +575,7 @@ real, log the corrected pattern as a learning.
 ### TODOS cross-reference
 
 If root `TODOS.md` exists, report closed items as "This PR addresses TODO: <title>".
-Flag new TODOs as informational and cite related items. Otherwise skip silently.
+Flag new TODOs as informational and cite related items; otherwise skip silently.
 
 ### Documentation staleness check
 
@@ -650,7 +651,7 @@ findings and decides completion.
 ## Step 5: Fix-First Review
 
 Before edits, confirm every dispatched reader has returned or is confirmed stopped.
-For an active or unknown reader/writer, wait or confirm it is stopped. If settlement
+For an active or unknown reader/writer, wait or confirm it is stopped; if that
 cannot be confirmed, persist incomplete at Step 5.8 and STOP without edits.
 Terminal failure does not block fixes from independent evidence. Missing required
 output still makes the pass incomplete, even after the reader is stopped.
@@ -659,7 +660,7 @@ Combine core, specialist, Step 4.7 QA, Step 4.8 adversarial and VALID & ACTIONAB
 For QA findings, assign confidence (1–10) from replay/code evidence using Confidence
 Calibration; retain Step 4.7's severity, not a severity inferred from confidence.
 Run Step 5.0 severity/prior-skip dedup on all
-findings before Step 5a classification. Then action every remaining finding.
+findings before Step 5a classification, then action every remaining finding.
 Structured approval does not waive advisory/test_stub ASK gates.
 
 ### Step 5.0: Cross-review finding dedup
@@ -729,24 +730,22 @@ or missing-reviewer rules.
 ### Step 5a: Classify each finding
 
 For each finding, classify as AUTO-FIX or ASK per the Fix-First Heuristic in
-checklist.md. Critical findings lean toward ASK; informational findings lean
-toward AUTO-FIX.
+checklist.md. Critical findings lean toward ASK; informational toward AUTO-FIX.
 
 **Advisory override:** After severity validation, `advisory:true` is ASK-only. Never auto-apply an optional extraction, even when mechanical. Show `[ADVISORY]`, helper, caller migration, tests and estimated total savings for approval or Skip. Handle real defects independently.
 
-**Test stub override:** Any finding that has a `test_stub` field, from a specialist or exploratory QA,
-is reclassified as ASK regardless of its original classification. When presenting the ASK
-item, show the proposed test file path and the test code. Step 5c's A) Fix writes the test and
+**Test stub override:** Any finding with a `test_stub` field, from a specialist or exploratory QA,
+is reclassified as ASK whatever its original classification. Show the proposed test
+file path and test code in the ASK item. Step 5c's A) Fix writes the test and
 repair in Step 5d's regression-before-repair order; B) Skip skips both; the defect stays unresolved. Derive the test file path from
 the finding's `path` using project conventions (`spec/` for RSpec, `__tests__/` for
-Jest/Vitest, `test_` prefix for pytest, `_test.go` suffix for Go). If the test file
-already exists, append the new test.
+Jest/Vitest, `test_` prefix for pytest, `_test.go` suffix for Go). If it already exists, append the new test.
 
 ### Step 5b: Auto-fix all AUTO-FIX items
 
-Apply each fix directly, with a one-line summary each:
+Apply each fix directly, with a one-line summary:
 `[AUTO-FIXED] [file:line] Problem → what you did`
-Retain the completed action in the invocation action list before starting any re-review.
+Retain the completed action in the invocation action list before any re-review.
 
 ### Step 5c: Batch-ask about ASK items
 
@@ -830,14 +829,14 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
    - Edited: increment CYCLES once, then fill and save the record below with
      `converged:false`. Step 5.0 never treats this invocation's records as prior
      reviews. Below 3, repeat Steps 3–5 with a new REVIEW_START. At 3, report
-     nonconvergence and coverage gaps, then STOP this invocation, without a clean
-     summary or a fourth pass.
+     nonconvergence and coverage gaps, then STOP this invocation without a clean
+     summary or fourth pass.
    - No edits: after a full pass, fill the record below. A fix-range pass is never
      final: repeat Steps 3–5 with a full start.
-2. On a repeat, execute Steps 3–5 in order. At Step 4.7, reuse only this invocation's
-   unchanged-input QA evidence; rerun a probe if its source, tests, entrypoint,
-   dependencies, contract, command, fixture or replay inputs changed, or if uncertain.
-   Reusing a probe never skips a review step.
+2. On a repeat, execute Steps 3–5 in order. At Step 4.7, an edited pass supersedes
+   every earlier QA capture (exploratory §4): rerun each probe the verdict relies on.
+   A zero-edit pass reuses only this invocation's unchanged-input QA evidence,
+   rerunning any probe whose inputs changed or are uncertain. Reusing never skips a review step.
 3. **Verify completed actions.** On the final zero-edit pass, reconcile this
    invocation's actions with current findings. Deduplicate by structural identity
    and advisory/defect kind. For a completed extraction, retain `fixed` and the
@@ -871,7 +870,7 @@ for the native result, or vice versa. Step 4.8's structured-review gate still ap
 An outside review reporting `unverified` or `unavailable` is missing coverage, never a
 pass: report it with its reason.
 
-- Use Step 4.6's `specialists` object unchanged, including its empty small-diff map.
+- Use Step 4.6's `specialists` object unchanged, including its small-diff map.
   If this host omits Review Army, use `specialists: {}` without claiming specialist coverage.
 - Build `findings` from Step 5's combined findings (core, specialist,
   adversarial, actionable Greptile, verified exploratory QA findings) and invocation actions. Retain `fingerprint`, `severity`
@@ -945,7 +944,7 @@ staleness detection: if those files are later deleted, the learning can be flagg
 **Only log genuine discoveries.** Don't log obvious things. Don't log things the user
 already knows. A good test: would this insight save time in a future session? If yes, log it.
 
-If the review exits early (for example, no diff against the base branch), do **not** write this entry.
+If the review exits early (e.g. no diff against the base), do **not** write this entry.
 
 ## Important Rules
 

@@ -564,3 +564,33 @@ test('Step 14.5 housekeeping commands and the docs record are declared exactly a
   expect(gate.stdout.trim()).toBe('DOCS_CAP: none declared');
   expect(gate.status).toBe(0);
 });
+
+// Gates 40458489644 and 40477638211 (ship-docsync-store, both red on the fourth call, both green on the in-run rerun): each
+// parent oriented with one line of reads that ended in `git branch -a`, and the grammar admitted only `branch --show-current`.
+// A branch listing reads refs, so every operand-free listing form is a Git read; an operand or any other option still writes.
+test.skipIf(process.platform === 'win32')('the captured store orientations with git branch -a replay clean, and branch writes stay refused', () => {
+  const store = fixtureDocs('store');
+  try {
+    const captured = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/docsync-branch-listing-public.json'), 'utf8')) as
+      { runs: Array<{ sourceRun: string; calls: SkillTestResult['toolCalls'] }> };
+    const publish = path.join(store.home, 'fixture-publish.ts');
+    const fill = (text: string) => text.replaceAll('{home}', store.home).replaceAll('{shard}', path.dirname(path.dirname(store.home)));
+    expect(captured.runs).toHaveLength(2);
+    for (const run of captured.runs) {
+      const replayed = run.calls.map(call => ({ ...call, input: Object.fromEntries(Object.entries(call.input).map(([key, value]) =>
+        [key, typeof value === 'string' ? fill(value) : value])), output: fill(call.output) }));
+      const orientation = replayed.find(call => /;\s*git branch -a(?:;|$)/.test(String(call.input?.command ?? '')));
+      expect(orientation, run.sourceRun).toBeDefined();
+      expect(docsToolFailures({ toolCalls: replayed, exitReason: 'success' } as SkillTestResult, store, [publish], true), run.sourceRun).toEqual([]);
+      const narrowed = String(orientation!.input.command).replace(/git branch -a/, 'git branch --show-current');
+      expect(docsCommandAllowed(narrowed, store, [publish])).toBe(true);
+    }
+    for (const listing of ['git branch', 'git branch -a', 'git branch -avv', 'git branch -r', 'git branch --list', 'git branch --all --no-color', 'git status; git branch -a; git log --oneline -3'])
+      expect(docsCommandAllowed(listing, store, [publish]), listing).toBe(true);
+    for (const write of ['git branch feature', 'git branch -d feature', 'git branch -D feature', 'git branch -m old new', 'git branch -M main', 'git branch -f main HEAD~1',
+      'git branch --set-upstream-to=origin/main', 'git branch -u origin/main', 'git branch -c a b', 'git branch --edit-description', 'git branch --list "feat*"',
+      'git branch --contains HEAD', 'git branch -ad feature', 'git branch -a; rm -rf handbook'])
+      expect(docsCommandAllowed(write, store, [publish]), write).toBe(false);
+    expect(docsNativeInterface(store, [publish], false, true)).toContain('branch listings with no operand and only --show-current, -a/--all, -r/--remotes, -v/--verbose, -l/--list, --no-color or --no-abbrev (no --merged, --sort, --format or --contains)');
+  } finally { store.clean(); }
+});

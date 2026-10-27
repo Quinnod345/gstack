@@ -40,13 +40,13 @@ echo "TEST_FW: ${TEST_FW:-unknown}"
 
 Select specialists from the scope signals above.
 
-**Always-on (dispatch on every review with 50+ changed lines):**
+**Always-on (every review with 50+ changed lines):**
 1. **Testing** — read `~/.claude/skills/gstack/review/specialists/testing.md`
 2. **Maintainability** — read `~/.claude/skills/gstack/review/specialists/maintainability.md`
 
-**If DIFF_LINES < 50:** Skip all specialists except State Machines. Print: "Small diff ($DIFF_LINES lines) — specialists skipped." Continue to Step 4.6 with the core findings and an empty specialist list, then the parent's Exploratory QA step and Step 4.8 (adversarial review), then Step 5. Small diffs skip fan-out, never the parent-owned smoke probes. Core shared-code checks also remain required.
+**If DIFF_LINES < 50:** Skip all specialists except State Machines (item 9 decides it). Print: "Small diff ($DIFF_LINES lines) — specialists skipped." Continue to Step 4.6 with the core findings and an empty or State Machines-only specialist list, then the parent's Exploratory QA step and Step 4.8 (adversarial review), then Step 5. Small diffs skip fan-out, never the parent-owned smoke probes or core shared-code checks.
 
-**Conditional (dispatch if the matching scope signal is true):**
+**Conditional (dispatch when its scope signal is true):**
 3. **Security** — if SCOPE_AUTH=true, OR if SCOPE_BACKEND=true AND DIFF_LINES > 100. Read `~/.claude/skills/gstack/review/specialists/security.md`
 4. **Performance** — if SCOPE_BACKEND=true OR SCOPE_FRONTEND=true. Read `~/.claude/skills/gstack/review/specialists/performance.md`
 5. **Data Migration** — if SCOPE_MIGRATIONS=true. Read `~/.claude/skills/gstack/review/specialists/data-migration.md`
@@ -173,20 +173,22 @@ Core findings never earn a specialist confidence boost. Preserve `advisory`,
 
 #### 4. Lead judgment
 
-Reviewers fill the space they are given. Before any merged finding counts, the
-parent reads each one and drops or downgrades it on these grounds, saying so:
-- **Nit gravity.** When a reviewer's whole return is style, naming and preference,
-  the code is probably fine; write that down and count nothing from it as a defect.
+Reviewers fill the space they are given. Before a merged finding counts, the
+parent reads it and drops or downgrades it on these grounds, saying so:
+- **Nit gravity.** A reviewer whose whole return is style, naming and preference
+  found nothing; say so and count no defect.
 - **Hypothetical, not actual.** A defect names the call site or input that reaches
-  it. One that does not is a note until someone traces it.
+  it; one that does not is a note until someone traces it.
 - **Structure for a case that does not exist.** Advice to abstract, generalize or
-  guard a path nothing takes is advisory, never a defect.
+  guard a path nothing takes is advisory.
 - **A different design is not a defect.** "I would have done it differently" with
-  no failing case behind it is dropped.
+  no failing case is dropped.
 - **Missing context.** A finding that assumes a rule the repository documents
   otherwise is dropped with the pointer.
-Agreement between reviewers that did not see each other's output is the strongest
-signal; the `MULTI-SPECIALIST CONFIRMED` boost above records it. A reviewer that
+- **On record.** A class `docs/review-policy.md` rules below the floor is a note,
+  named by its ruling.
+Independent agreement between reviewers is the strongest signal (the
+`MULTI-SPECIALIST CONFIRMED` boost records it). A reviewer that
 returned `NO FINDINGS` was right until a traced defect says otherwise.
 
 #### 5. Apply specialist confidence gates
@@ -235,7 +237,7 @@ Core shared-code savings never enter this footer; explain any overlap once in th
 #### 7. Save specialist activity
 
 Compile a `specialists` object for the review-log entry in Step 5.8.
-For DIFF_LINES < 50, keep `specialists: {}`; do not manufacture per-specialist scope records. Otherwise record each considered specialist (testing, maintainability, security, performance, data-migration, api-contract, design, simplification, state-machines, red-team):
+For DIFF_LINES < 50, keep `specialists: {}` (or `state-machines` alone when it dispatched); do not manufacture per-specialist scope records. Otherwise record each considered specialist (testing, maintainability, security, performance, data-migration, api-contract, design, simplification, state-machines, red-team):
 - If dispatched: `{"dispatched": true, "findings": N, "critical": N, "informational": N}`
 - If skipped by scope: `{"dispatched": false, "reason": "scope"}`
 - If skipped by gating: `{"dispatched": false, "reason": "gated"}`

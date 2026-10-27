@@ -36,8 +36,8 @@ ${isShip ? `4. Output before Step 9:
 5. The Scope Check is **INFORMATIONAL**, not a separate blocker; retain it for the PR body and continue to Step 9. It never waives the plan audit's discrepancy gate.
 
 ---` : `4. Keep these notes provisional. Next, execute the plan-completion section;
-   it resolves the HIGH-impact decision and emits the single final Scope Check
-   before Step 2. The Scope Check itself is informational, not another gate.`}`;
+   it resolves the HIGH-impact decision before Step 2; Step 3 emits the single
+   final Scope Check after its full diff read. It is informational, not another gate.`}`;
 }
 
 // ─── Cross-Review Finding Dedup ──────────────────────────────────────

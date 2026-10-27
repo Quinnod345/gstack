@@ -285,21 +285,23 @@ describe('pregate-remote.sh keyed path (stub ubi-runner)', () => {
       while (!cond()) { if (Date.now() > deadline) throw new Error('condition not met in time'); await Bun.sleep(50); }
     };
     const vmLog = (f: Fixture) => { try { return fs.readFileSync(fs.readdirSync(path.join(f.repo, '.context/pregate-remote')).map(d => path.join(f.repo, '.context/pregate-remote', d, 'run.log'))[0]!, 'utf8'); } catch { return ''; } };
+    // The stub's `>>` creates the file before echo writes the line; wait for the line itself.
+    const down = (f: Fixture) => { try { return fs.readFileSync(f.calls + '.down', 'utf8'); } catch { return ''; } };
     const killed = fixture();
     const a = run(killed);
     await until(() => vmLog(killed).includes('ubi-runner: running on'), 30_000);
     process.kill(-a.pid, 'SIGKILL');
     await a.exited;
-    await until(() => fs.existsSync(killed.calls + '.down'), 30_000);
-    expect(fs.readFileSync(killed.calls + '.down', 'utf8')).toMatch(/^exit ubirun-stub-\d+-[0-9a-f]{8}\n$/);
+    await until(() => down(killed).endsWith('\n'), 30_000);
+    expect(down(killed)).toMatch(/^exit ubirun-stub-\d+-[0-9a-f]{8}\n$/);
     const termed = fixture();
     const b = run(termed);
     await until(() => vmLog(termed).includes('ubi-runner: running on'), 30_000);
     process.kill(b.pid, 'SIGTERM');
     expect(await b.exited).toBe(130);
     expect(await new Response(b.stdout).text()).toContain('interrupted: ubi-runner is tearing the VM down on its own');
-    await until(() => fs.existsSync(termed.calls + '.down'), 10_000);
-    expect(fs.readFileSync(termed.calls + '.down', 'utf8')).toMatch(/^term ubirun-stub-\d+-[0-9a-f]{8}\n$/);
+    await until(() => down(termed).endsWith('\n'), 10_000);
+    expect(down(termed)).toMatch(/^term ubirun-stub-\d+-[0-9a-f]{8}\n$/);
     const edited = fixture();
     const c = run(edited);
     await until(() => vmLog(edited).includes('ubi-runner: running on'), 30_000);

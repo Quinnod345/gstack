@@ -222,6 +222,7 @@ Keep artifacts concise: update the invocation record in place with ids, counts, 
 const DOCS_READ_COMMANDS = ['pwd', 'ls', 'cat', 'sha256sum', 'stat'];
 const DOCS_GIT_READS = ['status', 'diff', 'show', 'log', 'ls-files', 'ls-tree', 'check-ignore', 'rev-parse', 'merge-base', 'hash-object'];
 const DOCS_DESCRIBE_FLAGS = /^(?:--tags|--always|--exact-match|--abbrev=\d+)$/;
+const DOCS_BRANCH_LIST_FLAGS = /^(?:-[arlv]+|--(?:all|remotes|list|verbose|show-current|no-color|no-abbrev))$/;
 const DOCS_SAFE_GIT_CONFIG = /^(?:core\.pager=cat|core\.quotepath=(?:true|false|on|off)|color\.[a-z.]+=(?:true|false|never|always|auto))$/i;
 
 /**
@@ -380,7 +381,9 @@ function literalDocsCommandAllowed(text: string, fixture: ReturnType<typeof fixt
   if (commandName === 'git') {
     if (rest.some(arg => /^(?:--output|--ext-diff|--textconv|-w)(?:=|$)/.test(arg))) return false;
     if (rest[0] === 'hash-object' && rest.some(arg => /^-[^-]*w/.test(arg))) return false;
-    if (rest[0] === 'branch') return rest.length === 2 && rest[1] === '--show-current';
+    // A branch listing reads refs (gates 40458489644 and 40477638211: the parent oriented with `git branch -a`);
+    // an operand or any other option creates, moves, deletes or retargets a branch.
+    if (rest[0] === 'branch') return rest.slice(1).every(arg => DOCS_BRANCH_LIST_FLAGS.test(arg));
     if (rest[0] === 'describe') {
       const operands = rest.slice(1).filter(arg => !DOCS_DESCRIBE_FLAGS.test(arg));
       return operands.length <= 1 && operands.every(arg => !arg.startsWith('-'));

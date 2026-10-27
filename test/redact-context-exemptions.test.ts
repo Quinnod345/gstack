@@ -225,6 +225,14 @@ describe("pii.phone.e164: GitHub Actions run and job ids in their id positions",
       "https://github.com/garrytan/gstack/actions/runs/37235771700/job/111534615007",
       "GITHUB_RUN_ID=37235771700",
       '{"run_id": 37235771700}',
+      // An 11-digit id after a run word, as a READY block, a ship receipt or an approval record names one (GSTA-121's `screen <id> GREEN`).
+      "citing screen 40477638211 GREEN at 5619199800a2",
+      "gate=40477638211",
+      "rerun passed 40477638211",
+      "run #40477638211",
+      "Screens: 40477638211",
+      "dispatched 40477638211 at the pin",
+      "cleared by run 19368712345",
     ],
     [
       "call 37235771700 tomorrow",
@@ -232,6 +240,12 @@ describe("pii.phone.e164: GitHub Actions run and job ids in their id positions",
       "https://example.com/contact/37235771700",
       '{"phone_id": 37235771700}',
       "run 4155550123 laps",
+      // A run word before a 10-digit national number, a bare 11-digit number and a generic word exempt nothing.
+      "gate 4155550123",
+      "the id is 40477638211",
+      "job 40477638211",
+      "workflow 40477638211",
+      "40477638211 failed",
     ],
   );
 });
