@@ -48,7 +48,10 @@ Flag each learning that is:
 - **CONFLICT**: the same key appears under two types with opposing insights (within one type the latest entry already wins).
 
 For each flagged entry, unless the user already approved the action, ask: remove, keep, or update.
-- Remove: delete its lines (that key and type) from `$GSTACK_STATE_ROOT/projects/$SLUG/learnings.jsonl`, where
-  `SLUG=$(~/.claude/skills/gstack/bin/gstack-slug --get SLUG)` and
-  `GSTACK_STATE_ROOT=$(~/.claude/skills/gstack/bin/gstack-paths --get GSTACK_STATE_ROOT)`. Leave every other line as it is.
+- Remove: delete its lines (that key and type) from the file this prints, leaving every other line as it is:
+  ```bash
+  SLUG=$(~/.claude/skills/gstack/bin/gstack-slug --get SLUG)
+  GSTACK_STATE_ROOT=$(~/.claude/skills/gstack/bin/gstack-paths --get GSTACK_STATE_ROOT); : "${GSTACK_STATE_ROOT:?gstack-paths failed; reinstall with ./setup or /gstack-upgrade}"
+  echo "$GSTACK_STATE_ROOT/projects/$SLUG/learnings.jsonl"
+  ```
 - Update: log a corrected entry with the same key and type; the latest one wins.
