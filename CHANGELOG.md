@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+**Two ship-touching PRs in one merge train no longer overshoot ship's size cap together, and verify stops freezing the queue on a train whose PRs all landed long ago.** Train 26's free run failed twice ("size ratio 1.753 > maxSizeRatio 1.7528", then "1.752 > 1.7524") because each PR re-pinned the same ratio on its own tree. Ship's cap is now a byte ledger. Each branch records its own signed delta, and the deltas add up exactly in any train order. Train 24's leftover record froze the queue on a main train 28 had already verified (#3519); verify now calls that record stale instead.
+
+### Changed
+- **Ship's parity size cap** (`test/helpers/carve-guards.ts`, `test/helpers/parity-harness.ts`, `test/helpers/size-ledger.ts`): ship's `maxSizeRatio: 1.7525` is replaced by `sizeLedger: 'test/size-ledger/ship'`. The parity suite requires ship's union bytes to equal `base.json` (328,937 bytes, measured on main 9ccb5233) plus one `<branch>.json` entry (`{ bytes, why }`) per branch that changed them. A missing base, a malformed entry, an under-declared growth and an undeclared shrink all fail with the exact byte gap and the command that fixes it. Other skills keep their ratio caps. The ratio's history moved verbatim to `test/size-ledger/ship/HISTORY.md`.
+
+### Added
+- **`scripts/size-ledger.ts`**: `record <skill> --why "<what changed>"` writes this branch's entry from the measured difference (and deletes it when the difference is zero), `check <skill>` prints measured, expected and every entry, and `fold <skill> --measured-at "<tree>"` moves the entries into `base.json` in a tidy-up PR. `record` refuses on main, master or a detached HEAD.
+- **`QUEUE_TRAIN_STALE`** (`gstack-ship-queue verify --train`): when every slot of the train already merged on GitHub and main's sha is a prefix another train's verify confirmed (read after the notes ref), verify refuses with `NEXT: gstack-ship-queue train prune --stale --train <nonce>`, freezes nothing and dispatches no backstop. A train with a slot still open, a main no train verified, or a `--no-fetch` run freezes as before.
+
+### Fixed
+- **Freeze records keep unreadable slots** (`lib/ship-queue-train-record.ts`, `lib/ship-queue-train.ts`): a slot GitHub could not answer for beside a merged one is stored under an optional `unreadable` field, printed on an `unreadable:` line, and named after the repair as `gh pr view <n> --json state,headRefOid` so the operator checks it before seating it. Records written before the field read unchanged.
+
+### Tests
+- `test/size-ledger.test.ts`: the train-26 shape fails under ratio pins and passes under the ledger in both merge orders through the real `buildChain`; missing, under-declared, shrinking, duplicate-edit and malformed ledgers fail. The fixture repo checks out with `core.autocrlf false`, so Windows counts the same bytes.
+- `test/ship-queue-train.test.ts`: an all-merged train on a main another train verified refuses as stale; the same train with a slot still open freezes; unreadable slots land in the field, the freeze lines and the post-repair NEXT.
+
+### Docs
+- docs/ship-policy.md § Run a merge train: size caps compose through the ledger, and the stale-train and unreadable-slot rules. docs/troubleshooting.md: `QUEUE_TRAIN_STALE`.
+
+### Gate integrity
+- Ship's union-size gate changes from a ceiling (`maxSizeRatio`) to an equality ledger at the same value (328,937 bytes, the size main measured); no skill prose changed, so ship's bytes did not move. No other threshold, timeout, trial count or case kind changed.
+
 ## [1.91.282.0] - 2026-10-27
 
 **A merge the pre-merge verify accepted no longer freezes the queue, and a slot stamp touches only the stamp files.** Train 24 (2026-10-27) merged #3434 and #3453, then froze on #3453's post-merge check and paid a $31 backstop: the pre-merge verify judged the lane's CHANGELOG as main's plus the pin's own entry and said MERGE_CONDITION, the post-merge check compared main to T2 section by section, and T2's one `[Unreleased]` (both stacked entries) had become two released sections. In both slots `gstack-restamp` also listed `lib/ship-policy.ts` as a fifth stamp file, because the lane's uncommitted base merge made #3511's `DOCS_CAPS_KEY_VERSION` look like the branch's own tentative key. And `mergeChangelogs` refused the stacked child outright, so the lane's hand resolve dropped #3453's two wording fixes to the released 1.91.276.0 entry.
