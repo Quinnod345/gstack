@@ -48,6 +48,7 @@ describe('craft resolvers', () => {
     expect(audit).toContain('`empty-mount-node` (script renders the page): lint the saved DOM, not the repo file.');
     expect(audit).toContain('A `waived` line is one the page answered on the record: list it with its reason, do not file it, except `needs-proof` and `lorem`');
     expect(audit).not.toContain('gstack-design-craft');
+    expect(audit).toContain('A saved page loses its linked CSS (`skipped … not found`): file only its `craft`-gate lines');
     expect(audit).toContain('Never mark or cut a claim as a rule or fix says: defer it and ask for the proof.');
     expect(audit).toContain('never copy it to the report directory');
   });

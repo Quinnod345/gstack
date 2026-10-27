@@ -57,7 +57,7 @@
 
 ### Design lint
 
-At Step 4, after the Slop Gate and before the screenshots, run the free lint on the finalized page (`--scope component` for a component file alone):
+At Step 4, after the Slop Gate and before the screenshots, run the free lint on the finalized page (`--scope component` for a component file alone; its copy tier reads HTML only, so judge those tells by eye there):
 
 ```bash
 {{BIN_DIR}}/gstack-design-lint <path-to-finalized.html> --render
@@ -65,7 +65,7 @@ At Step 4, after the Slop Gate and before the screenshots, run the free lint on 
 
 It prints one `LINT: <grade> <rule-id> <file>:<line> <evidence> | fix: <fix>` line per tell (the realism rules above among them), then `LINT_SUMMARY: blocks=N ask=N waived=N polish=N render=…`. Read the exit code: 2, fix every `blocks` line (never waivable); 1, fix each `ask` line or waive it; 0, list the `polish` lines as notes. No `LINT_SUMMARY` line: say the lint was unavailable and continue. A `render` line or `render=skipped`: say the page was not measured; the static lines stand. Same contract as the Slop Gate: one surgical fix pass, one rerun. Rerun once when the refinement loop exits; report only new lines.
 
-**Waivers live in the page.** A tell that is right for this page (a real customer named Nexus, a supplied 50% figure) gets a comment beside it, `<!-- gstack-lint-disable <rule-id>: <reason about this page, 24+ chars> -->`, and prints as `waived` with its reason on every later run, an evolve included. Waive only what the user supplied or confirmed, never a line you could fix.
+**Waivers live in the page.** A tell that is right for this page (a real customer named Nexus, a supplied 50% figure, which `invented-proof` may also flag) gets a comment per rule, `<!-- gstack-lint-disable <rule-id>: <reason about this page, 24+ chars> -->`, and prints as `waived` with its reason on every later run, an evolve included. Waive only what the user supplied or confirmed, never a line you could fix.
 
 **Before this can ship.** Open the Step 4 hand-off, and repeat before Step 5's "Copy to project": every `[Needs proof: …]` marker, the dependencies the page cannot own (legal URLs, form endpoint, og:image, indexing, analytics and cookie consent where required), every waiver, and every claim the lint made you change.
 

@@ -12,7 +12,7 @@
 //     │                                          design-html anti-slop line (catalogEntries)
 //     ├─ scripts/resolvers/design-checklist.ts   review/design-checklist.md (generated)
 //     ├─ bin/gstack-design-detect.ts             normalizes engine findings by impeccableId
-//     ├─ lib/design-lint/rules/ids.ts            copy-tier ids print the catalog's `fix` (test-enforced)
+//     ├─ lib/design-lint/rules/ids.ts            copy-tier ids but empty-mount-node print the catalog's `fix` (test-enforced)
 //     └─ design/src/brief.ts                     MOCKUP_NEVER_NAMES in the image-generation prompt
 //
 // Rule ids. An entry's `impeccableId` is set only when that id exists in

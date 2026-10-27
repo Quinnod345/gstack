@@ -393,6 +393,20 @@ describe('design-lint: the copy tier', () => {
     expect(copy(shell, 'component').some((f) => f.rule === 'empty-mount-node')).toBe(false);
   });
 
+  // Value: protects=the five content-realism ids sit at ask so a page waiver answers a supplied name or figure, as the owner chose; fails_when=one moves back to blocks, or a waiver beside a copy-tier tell is refused or ignored; why_new=option (a) moved them and no test pinned the tier or the waived grade; seam=none; no_claim=how far one page waiver reaches
+  test('the content-realism ids sit at ask, and a waiver about the page answers a copy-tier tell', () => {
+    for (const id of ['placeholder-name', 'placeholder-brand', 'lorem', 'round-number', 'needs-proof']) expect(RULES[id].tier, id).toBe('ask');
+    const page = '<!doctype html><html lang="en"><head><title>Freight ledger</title></head><body>\n<!-- gstack-lint-disable placeholder-brand: Nexus is the freight customer this ledger page was built for -->\n<p>Nexus closes its freight ledger in two days.</p></body></html>';
+    expect(copy(page).filter((f) => f.rule === 'placeholder-brand').map((f) => [f.grade, f.line, f.waiver])).toEqual([['waived', 3, 'Nexus is the freight customer this ledger page was built for']]);
+  });
+
+  // Value: protects=an inline handler's tell reports at the line its code is on, and a shell with no <body> tag is still an empty mount node; fails_when=the handler position is the attribute's start, or the <title> text counts as body text; why_new=the /ship review found both; seam=none; no_claim=every implicit-body layout
+  test('an inline handler reports at its value\'s line; a shell without a <body> tag is an empty mount node', () => {
+    expect(copy('<button\nonclick="alert(1)">Go</button>').map((f) => [f.rule, f.line])).toEqual([['alert', 2]]);
+    const bare = '<!doctype html><html lang="en"><head><title>App</title></head>\n<div id="root"></div><script src="/app.js"></script></html>';
+    expect(copy(bare).filter((f) => f.rule === 'empty-mount-node').map((f) => f.line)).toEqual([2]);
+  });
+
   test('a component file gets no copy findings', () => {
     const dir = tmpTree({ 'Card.tsx': 'export const Card = () => <article className="p-4"><p>Lorem ipsum in a component</p><img src="c.png" /></article>;' });
     expect(lintStatic([dir], { cwd: dir, warn: () => {} }).findings.some((f) => f.source === 'copy')).toBe(false);

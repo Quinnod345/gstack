@@ -88,7 +88,10 @@ function codeOf(doc: Doc): Array<{ code: string; pos: number }> {
   doc.tags.forEach((t, i) => {
     if (t.close) return;
     if (t.name === 'script' && close[i] >= 0) out.push({ code: doc.src.slice(t.end, doc.tags[close[i]].pos), pos: t.end });
-    for (const m of t.attrs.matchAll(/(?:^|\s)on[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) out.push({ code: m[1] ?? m[2], pos: t.pos + 1 + t.name.length + m.index! });
+    for (const m of t.attrs.matchAll(/(?:^|\s)on[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+      const code = m[1] ?? m[2];
+      out.push({ code, pos: t.pos + 1 + t.name.length + m.index! + m[0].length - 1 - code.length });
+    }
   });
   return out;
 }
@@ -129,12 +132,19 @@ export function run(ctx: LintContext, r: Reporter): void {
         ?? doc.tags.find((t) => !t.close && getAttr(t.attrs, 'role') === 'main' && getAttr(t.attrs, 'id'));
       if (!skipTarget || skipTarget !== getAttr(mainTag?.attrs ?? '', 'id')) hit('missing-skip-link', bodyTag?.pos ?? at0, '');
       const { close } = treeOf(doc);
-      const navs = doc.tags.map((t, i) => [t, i] as const).filter(([t]) => !t.close && t.name === 'nav');
-      const routeLinks = navs.flatMap(([, i]) => doc.tags.slice(i, close[i] < 0 ? doc.tags.length : close[i]))
-        .filter((t) => !t.close && t.name === 'a' && /^[^#]/.test(getAttr(t.attrs, 'href') ?? '')).length;
-      if (routeLinks >= 2 && !doc.tags.some((t) => !t.close && getAttr(t.attrs, 'aria-current') === 'page')) hit('missing-aria-current', navs[0][0].pos, '');
+      let firstNav = -1, navEnd = -1, routeLinks = 0;
+      for (let i = 0; i < doc.tags.length && routeLinks < 2; i++) {
+        const t = doc.tags[i];
+        if (t.close) continue;
+        if (t.name === 'nav') {
+          if (firstNav < 0) firstNav = i;
+          navEnd = Math.max(navEnd, close[i] < 0 ? doc.tags.length : close[i]);
+        } else if (i < navEnd && t.name === 'a' && /^[^#]/.test(getAttr(t.attrs, 'href') ?? '')) routeLinks++;
+      }
+      if (routeLinks >= 2 && !doc.tags.some((t) => !t.close && getAttr(t.attrs, 'aria-current') === 'page')) hit('missing-aria-current', doc.tags[firstNav].pos, '');
     }
-    const bodyFrom = bodyTag?.pos ?? 0;
+    const headClose = head >= 0 ? treeOf(doc).close[head] : -1;
+    const bodyFrom = bodyTag?.pos ?? (headClose >= 0 ? doc.tags[headClose].end : 0);
     const shellText = visible(doc, new Set(['template', 'noscript']));
     const bodyStart = shellText.at.findIndex((p) => p >= bodyFrom);
     const bodyText = bodyStart < 0 ? '' : shellText.text.slice(bodyStart);
