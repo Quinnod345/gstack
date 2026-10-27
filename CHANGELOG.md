@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.263.0] - 2026-10-27
 
 **Merge trains read their screens from the run, follow themselves without a daemon, and refuse what would have cost a gate.** Operating trains on 2026-10-26 showed the gaps: two screens were VERDICT RED while their lanes reported green and the heads were READY'd anyway; 18 of 41 PR screens concluded success with no slice; a PR whose merge ref lagged main could not be screened at all (#3465); two trains whose PRs merged elsewhere sat in `merging`/`green` forever; a background `gh run watch` chain died with every machine restart; a PR's new tests passed on its branch and failed once stacked behind another PR; and the four-step hand procedure for a conflicting PR's CI was typed by hand each time.
 
