@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.276.0] - 2026-10-27
 
 **Tier 2+ skills load the shared preamble once per session instead of once per invocation.** Every tier 2+ SKILL.md carried the same ~23 KB of preamble (AskUserQuestion format, voice, writing style, completeness, completion protocol and more), so each skill invocation re-read text the conversation already held. That text now renders once per host into `sections/preamble.md` beside each tier 2+ SKILL.md. The SKILL.md keeps a short "Shared preamble (load first)" pointer naming the file and its id (a hash of the shared text before host rewrites), and asks for the Read unless the skill's own earlier Read of that file, headed by that id, is still in context, so other text that merely carries the id cannot stand in for the shared rules. Measured with Anthropic token counting: review's SKILL.md drops from 21,884 to 16,103 tokens, ship from 22,688 to 16,907, office-hours from 27,100 to 23,085 and design-review from 39,040 to 33,261. The shared file is 5,953 tokens, so a skill's first invocation in a session costs about 170 tokens more than before (about 1,900 for office-hours, about 3,800 for plan-eng-review) and every later invocation of that skill saves about 5,800 (4,000 for office-hours, 2,200 for plan-eng-review). The skip is tied to the skill's own copy of the file, so the first invocation of each different skill pays the Read again. A /autoplan run's four review-skill loads carry 17,941 fewer SKILL.md tokens (191,871 → 173,930), and /autoplan and the inline /office-hours loader skip each loaded skill's "Shared preamble (load first)" section, because the parent already holds the shared preamble.
 
@@ -49,6 +49,11 @@
 
 ### Gate integrity
 - No threshold, budget, timeout, trial count, case kind or assertion weakened. The section heading "Completeness Principle — Boil the Ocean" is unchanged.
+
+## [1.91.275.0] - 2026-10-27
+
+### Changed
+- **Policy key versions are stamped, not hand-moved** (`lib/ship-policy.ts`, `.gstack/ship-policy.json`): `DOCS_CAPS_KEY_VERSION` is 1.91.270.0, the release that shipped `docs.caps` (#3487 was written naming 1.91.258.0, which main stamped for another PR; a slot call never permits an edit beyond the four stamp files, so the constant could not move at the slot). gstack's own policy now lists `lib/ship-policy.ts` under `stamp_paths` with the `_KEY_VERSION = '{version}'` template in `stamp_patterns`: a new key's constant is written as a tentative future version clear of main's pace (the next minor) and `gstack-restamp`'s stamp_paths stage moves it to the allocated version at the slot stamp, reading the base branch's policy, so the stage is live for the PRs after this one; the tree receipt's stamp-only check still accepts that move only when the tentative value equals the base version at the slot, so a PR that adds a key cannot clear the train until #3512 lands. `test/gstack-ship-policy.test.ts` adds the check the incident lacked: a released key's version must be a CHANGELOG heading whose entry names the key, so a tentative value no stamp moved fails (keys from before `review_scope` are exempt).
 
 ## [1.91.274.0] - 2026-10-27
 
