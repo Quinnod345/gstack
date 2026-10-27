@@ -26,7 +26,7 @@ gstack/
 │   ├── gen-agents-digest.ts  # Generates the budget-capped instruction-tier digest (agents-digest/)
 │   ├── host-config.ts     # HostConfig interface + validator
 │   ├── host-config-export.ts  # Shell bridge for setup script
-│   ├── resolvers/   # Template resolver modules (preamble, aside = the Aside driver contract + research, browse = $B fallback setup + command reference, qa = surface-aware QA/exploration, sections = lazy loading, design, design-checklist = renders review/design-checklist.md from lib/design-catalog.ts, review-dashboard / plan-gates / spec-review / review-scope, outside-voice = outside-voice primitives + the one failure policy, outside-voice-steps = second opinion / adversarial / plan and doc review, gbrain, etc.)
+│   ├── resolvers/   # Template resolver modules (preamble, aside = the Aside driver contract + research, browse = $B fallback setup + command reference, qa = surface-aware QA/exploration, sections = lazy loading, design, design-checklist = renders review/design-checklist.md from lib/design-catalog.ts, design-craft = craft-section paragraphs and the Persuade checks for /design-review's craft audit and /plan-design-review, review-dashboard / plan-gates / spec-review / review-scope, outside-voice = outside-voice primitives + the one failure policy, outside-voice-steps = second opinion / adversarial / plan and doc review, gbrain, etc.)
 │   ├── lib/shard-engine.ts  # Shared shard engine for both test lanes: spawn, group kill, strict verdicts, per-shard sandbox, logs, duration seeds, flags
 │   ├── skill-check.ts     # Health dashboard
 │   ├── test-free-shards.ts  # Free-lane policy on the shard engine (GSTACK_FREE_JOBS, opt-in flaky retry)
@@ -60,6 +60,7 @@ gstack/
 ├── plan-eng-review/ # /plan-eng-review skill
 ├── autoplan/        # /autoplan skill (auto-review pipeline: CEO → design → DX → eng, eng always last)
 ├── benchmark/       # /benchmark skill (performance regression detection)
+├── ubicloud/        # /ubicloud skill (ephemeral Ubicloud VMs: TTL + reaper, quota preflight, watchdog, verify; bin/gstack-ubi)
 ├── canary/          # /canary skill (post-deploy monitoring loop)
 ├── codex/           # /codex skill (multi-AI second opinion via OpenAI Codex CLI)
 ├── land-and-deploy/ # /land-and-deploy skill (merge → deploy → canary verify)

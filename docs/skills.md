@@ -23,6 +23,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/land-and-deploy`](#land-and-deploy) | **Release Engineer** | Merge the PR, wait for CI and deploy, verify production health. One command from "approved" to "verified in production." |
 | [`/canary`](#canary) | **SRE** | Post-deploy monitoring loop. Watches for console errors, performance regressions, and page failures in your Aside browser. |
 | [`/benchmark`](#benchmark) | **Performance Engineer** | Baseline page load times, Core Web Vitals, and resource sizes. Compare before/after on every PR. Track trends over time. |
+| [`/ubicloud`](#ubicloud) | **Remote Runner** | Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs with a reaper, quota preflight, a hang watchdog and one committed verify per repository. |
 | [`/cso`](#cso) | **Chief Security Officer** | Supported security findings with explicit coverage. Static assessment remains available without catalog profiles; contained runtime/scanner execution requires matching qualified profiles. Runtime-tested bundles authenticate separate external assertions. Project-test completion remains `self_reported` because target code controls the test process; `tested` is reserved for a future target-independent completion witness. |
 | [`/document-release`](#document-release) | **Technical Writer** | Audit relevant docs on every ship before final verification; standalone runs can also update docs after a PR exists. Catches stale READMEs and reports unresolved gaps. |
 | [`/document-generate`](#document-generate) | **Technical Writer** | Generate Diataxis docs (tutorial / how-to / reference / explanation) for a feature from code. |
@@ -863,6 +864,45 @@ Claude: Benchmarking 5 pages (3 runs each)...
         /settings   load: 0.8s  LCP: 0.6s  CLS: 0.00  resources: 18 (420KB)
 
         Baseline saved. Run again after changes to compare.
+```
+
+---
+
+## `/ubicloud`
+
+This is my **Remote Runner**.
+
+A suite that takes an hour on a 4-core sandbox takes minutes on a `standard-16`
+VM. `/ubicloud` runs it there through one entry point, `bin/gstack-ubi`
+(`scripts/ubicloud/ubi-runner.sh`), with the discipline a shared quota needs:
+every VM is named `ubirun-<owner>-<epoch>-<suffix>-t<hours>`, so its owner
+(`UBI_OWNER`) and TTL (`UBI_TTL_HOURS`, default 4) are visible to everyone;
+every `up` first reaps VMs whose TTL ended, whichever owner made them; the
+quota preflight refuses before the create request when the project's running
+VMs plus the new size exceed the known ceiling (`UBI_QUOTA_VCPUS`, or the
+maximum the last refusal printed; `UBI_QUOTA_WAIT` waits for room instead); a
+watchdog kills a remote command silent for `UBI_IDLE_TIMEOUT` seconds (1800)
+with exit 124 and its last 40 lines, and prints a heartbeat every
+`UBI_HEARTBEAT` seconds; and `gstack-ubi verify` runs the repository's
+committed `.gstack/ubicloud.json` (setup, command, size, env, pass, pull)
+instead of a wrapper per lane, with the file confined to the checkout: setup
+and pull paths resolve inside `--src`, and a `pass` name is forwarded only
+when the command line grants it (`--pass NAME` or `--trust-config`), never
+`UBICLOUD_*`. The skill insists on a watched launch (a
+background operation that is waited on, or `gstack-detach`), because the
+runner destroys its VM on every exit path only while it is alive.
+
+```
+You:   /ubicloud run the full verify
+
+Claude: UBICLOUD_API_KEY: set; UBI_OWNER=lane7
+        gstack-ubi verify  (.gstack/ubicloud.json: bootstrap.sh, "bash scripts/verify.sh", standard-16)
+        ubi-runner: reap: no expired VMs
+        ubi-runner: creating eu-central-h1/ubirun-lane7-1761500000-9f3a2c10-t4 (standard-16)
+        ubi-runner: ubirun-lane7-1761500000-9f3a2c10-t4 carries a 4h TTL (any later run of this script reaps it); if this process dies first: gstack-ubi down ubirun-lane7-1761500000-9f3a2c10-t4
+        ubi-runner: heartbeat: command 300s elapsed, last output 2s ago
+        ubi-runner: command exited 0 after 1140s
+        ubi-runner: destroyed eu-central-h1/ubirun-lane7-1761500000-9f3a2c10-t4
 ```
 
 ---

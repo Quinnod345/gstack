@@ -1,5 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// gstack-design-craft — free craft check for a generated page (/design-html Step 4).
+// gstack-design-craft — free craft check for a page (/design-html Step 4,
+// /design-review craft audit).
 //
 // Usage: gstack-design-craft <file.html> [--accepted <finalized.json>]
 //

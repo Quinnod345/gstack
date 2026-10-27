@@ -533,8 +533,9 @@ describe('gstack-pregate on a Dart repo with a committed policy', () => {
     for (const tool of ['fvm', 'dart', 'flutter']) fs.rmSync(path.join(bin, tool));
     const missing = run(repo, env);
     expect(missing.status).not.toBe(EXIT.ok);
-    expect(missing.out).toMatch(/^tests {6}lanes {5}incomplete .*not on PATH: dart/m);
-    expect(missing.out).toContain('fix: install dart (or fvm, which this repo pins) and rerun');
+    expect(missing.out).toMatch(/^tests {6}lanes {5}incomplete .*not on PATH: dart.*\(PREGATE_ENVIRONMENT\)/m);
+    expect(missing.out).toContain('fix: install dart (or fvm, which this repo pins) on this machine and rerun, or run the lane remotely; the diff is not at fault');
+    expect(missing.out).toContain('environment: missing-binary — not on PATH: dart');
   }, 30_000);
 
   // Value: protects=without an fvm pin the missing-SDK fix names only the SDK, never fvm; fails_when=fvmPinnedFor always reports a pin
@@ -546,8 +547,8 @@ describe('gstack-pregate on a Dart repo with a committed policy', () => {
     commit(repo, { 'packages/core/lib/core.dart': 'int one() => 2;\n' });
     const r = run(repo, { PATH: bin });
     expect(r.status).not.toBe(EXIT.ok);
-    expect(r.out).toMatch(/^tests {6}lanes {5}incomplete .*not on PATH: dart/m);
-    expect(r.out).toContain('fix: install dart and rerun');
+    expect(r.out).toMatch(/^tests {6}lanes {5}incomplete .*not on PATH: dart.*\(PREGATE_ENVIRONMENT\)/m);
+    expect(r.out).toContain('fix: install dart on this machine and rerun, or run the lane remotely; the diff is not at fault');
     expect(r.out).not.toContain('(or fvm');
   }, 30_000);
 
@@ -612,7 +613,8 @@ describe('gstack-pregate on a Dart repo with a committed policy', () => {
     const r = run(repo, env);
     expect(r.status).not.toBe(EXIT.ok);
     expect(r.out).toMatch(/^tests {6}lanes {5}incomplete .*2 tests ran in 2 file\(s\), exit 0; no test runner detected for 1 of 3 selected file\(s\): packages\/ui\/test\/ui_test\.dart; not on PATH: flutter/m);
-    expect(r.out).toContain('fix: install flutter and rerun');
+    expect(r.out).toContain('fix: install flutter on this machine and rerun, or run the lane remotely; the diff is not at fault');
+    expect(r.out).toContain('(PREGATE_ENVIRONMENT)');
     expect(fs.readFileSync(/log: (\S+)/.exec(r.out)![1]!, 'utf8')).toContain('ran in core: test/core_test.dart');
   }, 30_000);
 

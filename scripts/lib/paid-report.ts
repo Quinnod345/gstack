@@ -275,7 +275,9 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
         const kind = (E2E_KINDS[id] ?? 'rule') as EvalCaseKind;
         const failed = cases.find(tc => tc.outcome === 'failed');
         const caseOutcome: TrialOutcome = failed ? 'failed' : cases.some(tc => tc.outcome === 'passed') ? 'passed' : 'skipped';
-        const mine = records.filter((r: any) => r?.name === id || r?.case_id === id);
+        // A record is named by its case id or carries case_id; an E2E record named by its display label ("/qa fix loop") is
+        // the shard's only case's when the shard ran one case, else it stays unattributed and the trial's cost unknown.
+        const mine = records.filter((r: any) => r?.name === id || r?.case_id === id || (byCase.size === 1 && !r?.case_id));
         const failedRecord = mine.find((r: any) => r.passed === false);
         const recorded: TrialFailureClass | undefined = !failed ? undefined
           : failed.failureType === 'TimeoutError' ? 'timeout' : failedRecord ? failureClassOf(failedRecord) : 'assertion';

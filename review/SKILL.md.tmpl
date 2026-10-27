@@ -168,6 +168,9 @@ Use their results in the core review.
 {{QA_REVIEW_PREFLIGHT}}
 
 Apply both checklist passes in order: CRITICAL, then INFORMATIONAL. Respect its suppressions.
+CRITICAL is the blocking floor (docs/review-policy.md): a finding that would fail a
+test, break production, or lose data or secrets. Everything else is INFORMATIONAL and
+never earns another pass. `NO FINDINGS` is a complete result from any reviewer.
 
 {{SIDEWAYS_SWEEP}}
 

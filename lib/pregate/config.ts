@@ -33,6 +33,12 @@
  *   remote_gate   the repo's remote test gate command: under 8 cores the test
  *                 tier is a requires-remote obligation naming it, and
  *                 `--remote` runs it (it prints `PREGATE_REMOTE: tree=… tests=… failed=…`)
+ *   allowlist     `{ finding, paths?, pattern?, reason }` entries the `secrets`
+ *                 check accepts as benign: a gstack-redact finding id or a
+ *                 non-secret category, scoped by path globs and/or a regex
+ *                 anchored at the finding (lib/pregate/allowlist.ts); never
+ *                 `env.value` (a configured credential's real value) and never
+ *                 the whole `secret` category
  *
  * A repo that keeps `.gstack/` out of git can hold the same file at
  * `<state root>/projects/<slug>/pregate.json` (lib/state-root.ts), honoured
@@ -50,6 +56,12 @@ import { containedRelative, globToRegExp } from '../ship-policy';
 export const PREGATE_CONFIG_PATH = '.gstack/pregate.json';
 export const PREGATE_CONFIG_SCHEMA = 'https://github.com/garrytan/gstack/docs/pregate.md#pregate-v1';
 export const NON_DOWNGRADABLE = ['secrets', 'guards'] as const;
+/** Finding ids (or categories) no allowlist entry may name: the real value of a credential-named environment variable (#3449), and the secret wildcard. */
+export const NON_ALLOWLISTABLE = ['env.value', 'secret'] as const;
+/** Whether no entry may name this finding id: the list above, plus the scanner's own `engine.*` refusals (an oversize input fails closed and is never benign). */
+export const nonAllowlistable = (id: string) => (NON_ALLOWLISTABLE as readonly string[]).includes(id) || id.startsWith('engine.');
+/** Categories an allowlist entry may name whole; a secret is always named by its id. */
+export const ALLOWLISTABLE_CATEGORIES = ['pii', 'internal', 'hygiene', 'legal'] as const;
 export const DEFAULT_SERIAL_PATTERNS = ['**/*.serial.test.*'];
 
 export interface PregateConfig {
@@ -67,17 +79,23 @@ export interface PregateConfig {
   price_file: string | null;
   stall_timeout_s: number | null;
   remote_gate: string | null;
+  allowlist: AllowlistEntry[];
 }
 export interface Guard { id: string; when: string[]; command: string; fix?: string; timeout_s?: number }
-export const DEFAULT_CONFIG: PregateConfig = { runner: null, dependencies: {}, empty_lanes: [], selection: {}, warn: [], strays: { allow: [] }, local: [], guards: [], serial_patterns: DEFAULT_SERIAL_PATTERNS, price_file: null, stall_timeout_s: null, remote_gate: null };
+export interface AllowlistEntry { finding: string; paths?: string[]; pattern?: string; reason: string }
+export const DEFAULT_CONFIG: PregateConfig = { runner: null, dependencies: {}, empty_lanes: [], selection: {}, warn: [], strays: { allow: [] }, local: [], guards: [], serial_patterns: DEFAULT_SERIAL_PATTERNS, price_file: null, stall_timeout_s: null, remote_gate: null, allowlist: [] };
 export interface ConfigError { code: ResultCodeName; path: string; message: string }
 
 export const MAX_LIST = 256;
 const MAX_COMMAND = 512;
-const KEYS = ['runner', 'dependencies', 'empty_lanes', 'selection', 'warn', 'strays', 'local', 'guards', 'serial_patterns', 'price_file', 'sealed', 'stall_timeout_s', 'remote_gate'];
+const KEYS = ['runner', 'dependencies', 'empty_lanes', 'selection', 'warn', 'strays', 'local', 'guards', 'serial_patterns', 'price_file', 'sealed', 'stall_timeout_s', 'remote_gate', 'allowlist'];
 const LANE_ID = /^[A-Za-z0-9_.-]+\.ya?ml\/[A-Za-z0-9_-]+$/;
 const MAX_GUARDS = 32;
 const GUARD_KEYS = ['id', 'when', 'command', 'fix', 'timeout_s'];
+const MAX_ALLOWLIST = 64;
+const MAX_PATTERN = 256;
+const ALLOWLIST_KEYS = ['finding', 'paths', 'pattern', 'reason'];
+const FINDING_ID = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/;
 
 function globError(g: string): string | null {
   const why = containedRelative(g);
@@ -113,6 +131,30 @@ function guardErrors(raw: unknown, errors: ConfigError[]): void {
   });
 }
 
+function allowlistErrors(raw: unknown, errors: ConfigError[]): void {
+  const bad = (p: string, message: string) => errors.push({ code: 'PREGATE_CONFIG_INVALID', path: p, message });
+  if (!Array.isArray(raw)) { bad('allowlist', 'must be an array of { finding, paths?, pattern?, reason }'); return; }
+  if (raw.length > MAX_ALLOWLIST) bad('allowlist', `more than ${MAX_ALLOWLIST} entries`);
+  raw.forEach((e, i) => {
+    const at = `allowlist[${i}]`;
+    if (!e || typeof e !== 'object' || Array.isArray(e)) { bad(at, 'must be an object { finding, paths?, pattern?, reason }'); return; }
+    const o = e as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (!ALLOWLIST_KEYS.includes(k)) bad(`${at}.${k}`, `unknown key; valid keys: ${ALLOWLIST_KEYS.join(', ')}`);
+    if (typeof o.finding !== 'string' || !FINDING_ID.test(o.finding)) bad(`${at}.finding`, 'must be a gstack-redact finding id (env.kv, google.api_key, pii.phone.e164, …) or one of the categories pii, internal, hygiene, legal');
+    else if (nonAllowlistable(o.finding)) bad(`${at}.finding`, `${o.finding} cannot be allowlisted (${o.finding === 'env.value' ? 'the real value of a credential-named environment variable is never benign' : o.finding === 'secret' ? 'name the secret finding by its id, never the whole category' : 'an engine.* finding is the scanner refusing its input, not a finding in it'})`);
+    if (!('paths' in o) && !('pattern' in o)) bad(at, 'needs paths, pattern or both: an entry with no scope would allowlist every finding of that kind');
+    if ('paths' in o) {
+      if (!Array.isArray(o.paths) || o.paths.length === 0 || o.paths.some(p => typeof p !== 'string')) bad(`${at}.paths`, 'must be a non-empty array of globs');
+      else (o.paths as string[]).forEach((g, j) => { const why = globError(g); if (why) bad(`${at}.paths[${j}]`, `${JSON.stringify(g)} ${why}`); });
+    }
+    if ('pattern' in o) {
+      if (typeof o.pattern !== 'string' || !o.pattern.trim() || o.pattern.length > MAX_PATTERN) bad(`${at}.pattern`, `must be a regular expression under ${MAX_PATTERN} characters, matched at the finding's position in the added line`);
+      else { try { new RegExp(o.pattern); } catch (err: any) { bad(`${at}.pattern`, `not a valid regular expression: ${err.message}`); } }
+    }
+    if (typeof o.reason !== 'string' || !o.reason.trim()) bad(`${at}.reason`, 'must say why the finding is benign (the record repeats it)');
+  });
+}
+
 export function validateConfig(raw: unknown, knownChecks: readonly string[] = []): ConfigError[] {
   const errors: ConfigError[] = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [{ code: 'PREGATE_CONFIG_INVALID', path: '', message: 'config must be a JSON object' }];
@@ -135,6 +177,7 @@ export function validateConfig(raw: unknown, knownChecks: readonly string[] = []
     if (why) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'remote_gate', message: why });
   }
   if ('guards' in obj) guardErrors(obj.guards, errors);
+  if ('allowlist' in obj) allowlistErrors(obj.allowlist, errors);
   if ('sealed' in obj) for (const e of sealedErrors(obj.sealed)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: e.path, message: e.message });
   if ('serial_patterns' in obj) {
     const list = obj.serial_patterns;
@@ -201,7 +244,7 @@ export function parseConfig(text: string, knownChecks: readonly string[] = []): 
   const errors = validateConfig(raw, knownChecks);
   if (errors.length) return { config: DEFAULT_CONFIG, errors };
   const o = raw as Partial<PregateConfig>;
-  return { config: { $schema: o.$schema, runner: o.runner ?? null, dependencies: o.dependencies ?? {}, empty_lanes: o.empty_lanes ?? [], selection: o.selection ?? {}, warn: o.warn ?? [], strays: { allow: o.strays?.allow ?? [] }, local: o.local ?? [], guards: o.guards ?? [], serial_patterns: o.serial_patterns ?? DEFAULT_SERIAL_PATTERNS, price_file: o.price_file ?? null, stall_timeout_s: o.stall_timeout_s ?? null, remote_gate: o.remote_gate ?? null }, errors: [] };
+  return { config: { $schema: o.$schema, runner: o.runner ?? null, dependencies: o.dependencies ?? {}, empty_lanes: o.empty_lanes ?? [], selection: o.selection ?? {}, warn: o.warn ?? [], strays: { allow: o.strays?.allow ?? [] }, local: o.local ?? [], guards: o.guards ?? [], serial_patterns: o.serial_patterns ?? DEFAULT_SERIAL_PATTERNS, price_file: o.price_file ?? null, stall_timeout_s: o.stall_timeout_s ?? null, remote_gate: o.remote_gate ?? null, allowlist: o.allowlist ?? [] }, errors: [] };
 }
 
 export type ConfigLoad = { config: PregateConfig; errors: ConfigError[]; present: boolean; label: string; kind: 'base' | 'head' | 'user' | 'none'; /** sha256 of the user file's bytes (kind 'user' only). */ digest?: string } | { unavailable: true; base: string; detail: string };
@@ -282,6 +325,7 @@ export function explainConfig(): string {
     'price_file: repo-relative path of the GSTACK_EVAL_CALLS v1 call-plan file `gstack-eval-plan price-gate` prices a paid gate from; never executed (docs/eval-calls.md)',
     'stall_timeout_s: seconds without test output before the lanes check kills the runner\'s process group and records it incomplete (default 300; 0 disables; --stall-timeout overrides)',
     'remote_gate: the repo\'s remote test gate command; under 8 cores the test tier becomes a requires-remote obligation naming it, and gstack-pregate --remote runs it (it must print PREGATE_REMOTE: tree=<tree> tests=<n> failed=<n>) (docs/pregate.md#remote-gate)',
+    `allowlist: [{ finding, paths?, pattern?, reason }]: benign findings the secrets check accepts and names as allowlisted. finding is a gstack-redact id (env.kv, google.api_key, pii.phone.e164, …) or a category (${ALLOWLISTABLE_CATEGORIES.join(', ')}); paths are globs; pattern is a regex matched at the finding's position in the added line; one of the two is required, reason always. Never ${NON_ALLOWLISTABLE.join(' or ')} or engine.* (docs/pregate.md#allowlist)`,
     'no .gstack/pregate.json on the base: <state root>/projects/<slug>/pregate.json is read instead (state root: GSTACK_STATE_ROOT, else GSTACK_HOME, else GSTACK_STATE_DIR, else a gstack plugin data dir, else ~/.gstack, per docs/state-root.md; run --explain prints the resolved path; outside the repo, so a PR cannot reach it; a path inside the checkout is ignored)',
   ].join('\n') + '\n';
 }

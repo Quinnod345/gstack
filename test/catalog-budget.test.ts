@@ -54,8 +54,16 @@ import { skillCensus } from './helpers/skill-census';
  * New-skill ratchet: previous ceiling 1,197 + ceil(214 / 4) = 1,251
  * token-equivalents (5,004 bytes), leaving 4 bytes. Existing descriptions
  * are unchanged.
+ *   ref     ubicloud addition on base 4d48d39e (2026-10-26)
+ *   result  pre-addition aggregate 5,000 bytes; ubicloud adds 150 bytes
+ *           (name + the generator's catalog-trimmed one-line description),
+ *           yielding 5,150 bytes = 1,288 token-equivalents including the
+ *           root router alias.
+ * New-skill ratchet: previous ceiling 1,251 + ceil(150 / 4) = 1,289
+ * token-equivalents (5,156 bytes), leaving 6 bytes. Existing descriptions
+ * are unchanged.
  */
-const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_251;
+const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_289;
 
 // Largest today: design-consultation at 229 bytes. A description that needs
 // more than 260 bytes is a body paragraph, not a catalog entry.

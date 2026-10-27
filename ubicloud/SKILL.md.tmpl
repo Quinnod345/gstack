@@ -1,0 +1,190 @@
+---
+name: ubicloud
+preamble-tier: 2
+version: 1.0.0
+description: |
+  Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named
+  VMs, a reaper, quota preflight and a hang watchdog. Use when a run is slow
+  locally or asked to use Ubicloud. (gstack)
+triggers:
+  - run on ubicloud
+  - ubicloud vm
+  - remote test run
+  - full suite on a vm
+allowed-tools:
+  - Bash
+  - Read
+sensitive: false
+---
+
+# /ubicloud — Ephemeral VMs for heavy runs
+
+{{PREAMBLE}}
+
+---
+
+## Why this skill exists
+
+A full suite or verify that takes an hour on a 4-core sandbox takes minutes on a
+`standard-16` VM, and a VM that outlives its run costs the whole project its
+shared vCPU quota. This skill is one runner with the discipline built in: every
+VM carries its owner and a TTL in its name, any later run reaps expired VMs, the
+create is refused before the quota fills, a silent remote command is killed with
+its last output instead of hanging, and a repository's verify is one committed
+definition rather than a wrapper per lane.
+
+`U=~/.claude/skills/gstack/bin/gstack-ubi` is the only entry point (it runs
+`scripts/ubicloud/ubi-runner.sh`; `$U help` lists every command). Every fence
+below starts by binding `U`, because a host that runs each fence in a fresh
+shell (Capy's bash tool does) keeps nothing from the one before.
+
+---
+
+## Step 0: Prerequisites (set/unset only)
+
+```bash
+U=~/.claude/skills/gstack/bin/gstack-ubi
+[ -n "${UBICLOUD_API_KEY:-}" ] && echo "UBICLOUD_API_KEY: set" || echo "UBICLOUD_API_KEY: unset"
+export UBI_OWNER=lane7   # your thread or session code: lowercase letters and digits; it names your VMs
+$U owner
+```
+
+`UBICLOUD_API_KEY` (or `UBICLOUD_API_TOKEN`) is a project-scoped token. When it
+is unset, ask for it as an environment variable and stop; never echo it, write
+it to a file or commit, and never run `env`, `printenv` or `set -x` while it is
+in the environment. `UBI_OWNER` is what `usage` and `list --mine` key on, so set
+it before the first `up` of every session and on every machine.
+
+---
+
+## Step 1: Preflight the project
+
+```bash
+U=~/.claude/skills/gstack/bin/gstack-ubi
+$U records        # VMs this machine created and never confirmed gone
+$U list --mine    # this owner's VMs in the project
+$U usage          # VMs and vCPUs per owner: who holds the shared quota
+```
+
+A VM in `records` but absent from `list` is already gone: `$U down <name>`
+forgets it. A VM in the project under another owner is theirs; leave it (its
+TTL will reap it). Every `up` runs `$U reap` first, destroying any VM whose
+`-t<hours>` TTL ended more than ten minutes ago, whichever owner made it; a name
+without a TTL is never reaped.
+
+Quota: with `UBI_QUOTA_VCPUS=<project ceiling>` exported (or after one refusal,
+whose maximum the runner remembers), `up` adds the size's vCPUs to the project's
+running VMs and refuses before the create request when that exceeds the
+ceiling; `UBI_QUOTA_WAIT=<seconds>` waits for room instead. Prefer waiting or a
+smaller size over a second lane of VMs.
+
+---
+
+## Step 2: Launch watched, with a TTL that covers the run
+
+The runner destroys its VM on every exit path, but only while it is alive. A
+process killed by a sleeping machine, a dropped terminal or a cancelled
+background operation leaves its VM until the reaper. So:
+
+- On Capy, run it with the bash tool in `execution: "background"` with a
+  timeout that covers setup plus the run, then wait on the operation id. Never
+  detach it, and never leave it unwatched when the thread goes idle.
+- In Claude Code, run it under `gstack-detach` and poll the log for its
+  `### gstack-detach EXIT=<code> ###` sentinel.
+- Set `UBI_TTL_HOURS` above the longest plausible run (default 4) and name the
+  expected duration in the thread before launching anything over an hour.
+
+The runner prints `<name> carries a <n>h TTL ...; if this process dies first:
+<self> down <name>` right after the VM is ready; quote that line in your report
+so the next turn can clean up without guessing.
+
+```bash
+U=~/.claude/skills/gstack/bin/gstack-ubi
+cd /path/to/checkout
+UBI_TTL_HOURS=3 $U run --setup scripts/ubicloud/bootstrap.sh -- 'make test'
+```
+
+`run` creates the VM (`-s SIZE`, default `standard-16`; `-l LOCATION`, default
+`eu-central-h1`), streams the checkout (tracked files, untracked files that
+are not ignored, and `.git`, so uncommitted edits are tested), runs the
+bootstrap once, runs the command in a login shell with `umask 022`, copies
+`--pull REMOTE_GLOB:LOCAL_DIR` artifacts back and destroys the VM. It exits
+with the command's status. `--env K=V` passes a literal; `--pass NAME` forwards
+a local variable's value without printing it (never `UBICLOUD_*`: the runner's
+own credentials stay on this machine); `--keep` skips teardown for debugging,
+and then `$U down <name>` is yours to run.
+
+---
+
+## Step 3: One committed verify per repository
+
+Per-lane wrappers drift: a stale one skipped a service start and failed a full
+verify for nothing. Commit the definition once as `.gstack/ubicloud.json` and
+run it through `verify`, which refuses when the file is missing:
+
+```json
+{
+  "setup": "scripts/ubicloud/bootstrap.sh",
+  "command": "bash scripts/ubicloud/verify.sh",
+  "size": "standard-16",
+  "env": ["CI=1"],
+  "pass": ["ANTHROPIC_API_KEY"],
+  "pull": ["work/<repo>/.context/verify-logs:.context/ubicloud"]
+}
+```
+
+```bash
+U=~/.claude/skills/gstack/bin/gstack-ubi
+$U verify --pass ANTHROPIC_API_KEY   # the committed definition; grant each name it lists under pass
+$U verify --trust-config             # or grant every name the file lists
+$U verify -s standard-30             # flags override the file
+$U verify -- 'pnpm e2e'              # a different command on the same bootstrap
+```
+
+The file is repository content, so it gets no reach beyond the checkout on its
+own: `setup` and the local side of each `pull` must be relative paths that
+resolve inside `--src` (absolute, `~` and `..` paths are refused before any
+API call, and each destination is resolved again right before its pull), and a
+name under `pass` is forwarded only when your command line
+grants it with `--pass NAME` or `--trust-config`. Run `verify` only on a tree
+you have reviewed: its bootstrap and command run on the VM with whatever you
+granted.
+
+The bootstrap mirrors the repository's CI job: toolchain, dependencies, services,
+and for browser tests `xvfb` plus
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (a stock Ubuntu
+24.04 VM has neither; `clang` and `python3-venv` are absent too). Relative
+`setup` paths resolve against `--src` (default `.`). gstack's own definition is
+`bun run test:ubicloud` (the free suite with the CI lane's environment) and
+`gstack-pregate --stage tests --remote` under 8 cores.
+
+---
+
+## Step 4: Read the result
+
+- `ubi-runner: command exited <rc> after <n>s` is the verdict line; the exit
+  status is the command's.
+- Exit 124 with `watchdog: <phase> printed nothing for <n>s` (or `ran <n>s`)
+  means the remote hung or exceeded its budget; the last 40 lines follow.
+  Diagnose from them before rerunning; a hang is a failure, not infrastructure.
+  Defaults: `UBI_IDLE_TIMEOUT=1800`, `UBI_RUN_TIMEOUT=0` (unlimited),
+  `UBI_HEARTBEAT=300` (a `heartbeat:` line with elapsed time and output age).
+- `quota preflight refused` or `quota refused` lists the project's VMs by owner;
+  wait (`UBI_QUOTA_WAIT`), reap, or use a smaller size. Do not start more lanes.
+- `WARNING: failed to destroy <name>` or `could not confirm ... is gone`: run the
+  printed `down` command now and report it; never end a turn with that line
+  unanswered.
+
+Report the VM name, size, wall time and verdict line in the thread so the cost
+is visible: a `standard-16` run is billed from create to confirmed teardown.
+
+---
+
+## Resume checklist after a wake or a machine swap
+
+1. `$U records` and `$U list --mine`, then `$U down` anything of yours that is
+   still running without a live runner.
+2. A background log without its exit sentinel after the VM is gone is an
+   interrupted run, not a pass; rerun it.
+3. Measure before/after pairs on the same size and location, never one side
+   local and the other remote.
