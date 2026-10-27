@@ -209,6 +209,8 @@ export function renderDeferredIssue(f: ScopedFinding, ctx: DeferContext): { titl
 }
 
 export interface DeferredRecord { fingerprint: string; path: string; severity: string; summary: string; issue: number | null; url?: string; reason?: string }
+/** `defer`'s reason when the marker search found the finding's issue already open; the section renders such a record as a plain `#N`. */
+export const ALREADY_FILED_REASON = 'already filed';
 
 /** The PR-body section for deferred findings: references, never closing keywords, so a merge closes nothing. Only `frozen` defers. */
 export function renderDeferredSection(deferred: readonly DeferredRecord[], noted: readonly ScopeFinding[] = []): string {
@@ -216,7 +218,7 @@ export function renderDeferredSection(deferred: readonly DeferredRecord[], noted
   if (deferred.length) {
     out.push('## Deferred findings', '', 'Blocking findings in code this PR did not change (review scope: frozen); filed as issues and not closed by this PR.', '');
     for (const d of deferred) {
-      const ref = d.issue ? `#${d.issue}` : `unfiled${d.reason ? ` (${oneLine(d.reason)})` : ''}`;
+      const ref = d.issue ? `#${d.issue}${d.reason && d.reason !== ALREADY_FILED_REASON ? ` (${oneLine(d.reason)})` : ''}` : `unfiled${d.reason ? ` (${oneLine(d.reason)})` : ''}`;
       out.push(`- Deferred: ${ref} — ${oneLine(d.severity)} \`${oneLine(d.path)}\` ${oneLine(d.summary)}`);
     }
     out.push('');
@@ -249,16 +251,26 @@ function rowTime(row: Record<string, any>): number {
   return NaN;
 }
 
+/**
+ * A Step 11 late defer (a queued adversarial finding scoped `defer` after the
+ * last Step 9 pass) is logged under this skill, not as a `review` row: its
+ * deferred findings count here, it is not a pass, and the dashboards and
+ * readiness gates that pick the newest `review` row never see it (a `review`
+ * row without a start token would read as UNVERIFIED and displace the pass).
+ */
+export const LATE_DEFER_SKILL = 'review-late-defer';
+
 export function summarizeReviewLoop(rows: readonly Record<string, any>[], since: string): ReviewLoopSummary {
   const sinceMs = Date.parse(since);
-  const passes = rows.filter(r => r && r.skill === 'review' && r.via === 'ship' && Number.isFinite(rowTime(r))
+  const loopRows = rows.filter(r => r && (r.skill === 'review' || r.skill === LATE_DEFER_SKILL) && r.via === 'ship' && Number.isFinite(rowTime(r))
     && (!Number.isFinite(sinceMs) || rowTime(r) >= sinceMs));
+  const passes = loopRows.filter(r => r.skill === 'review');
   const blocking = new Set<string>();
   const deferred = new Set<string>();
   const noted = new Set<string>();
   const fixed = new Set<string>();
   let scope: ReviewLoopSummary['scope'] = 'unknown';
-  for (const row of passes) {
+  for (const row of loopRows) {
     if (REVIEW_SCOPE_POLICIES.includes(row.review_scope)) scope = row.review_scope;
     for (const f of Array.isArray(row.findings) ? row.findings : []) {
       if (!f || typeof f !== 'object') continue;
