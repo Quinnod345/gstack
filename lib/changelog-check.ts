@@ -140,8 +140,9 @@ export function normalizeChangelog(text: string): string {
 /**
  * A merged-in head's CHANGELOG, however its conflict was resolved: why it is
  * not main's CHANGELOG with the PR's own entry above it, or null. Main's
- * header and every main section must follow unchanged and in order, and the
- * sections above them may hold only lines the PR itself added (`authored`,
+ * header and every main section must follow unchanged and in order, at least
+ * one section must sit above them (a CHANGELOG equal to main's has lost the
+ * entry the gate carried), and those sections may hold only lines the PR itself added (`authored`,
  * the + lines of its pin's CHANGELOG diff), so a hand resolve can drop
  * damage but never add text the train gate did not carry.
  */
@@ -154,6 +155,7 @@ export function ownEntryAboveMain(head: string, main: string, authored: Readonly
   if (own < 0) return `it has ${h.sections.length} sections, main has ${m.sections.length}`;
   const moved = m.sections.findIndex((s, i) => trim(s.lines) !== trim(h.sections[own + i]!.lines));
   if (moved >= 0) return `main's ${m.sections[moved]!.heading.trim()} is not carried unchanged below the PR's entry`;
+  if (own === 0) return "it is main's CHANGELOG unchanged, with no entry of the PR's own above it";
   const mainKeys = new Set(m.sections.map(s => s.version ?? 'Unreleased'));
   const clash = h.sections.slice(0, own).find(s => mainKeys.has(s.version ?? 'Unreleased'));
   if (clash) return `${clash.heading.trim()} is headed twice`;

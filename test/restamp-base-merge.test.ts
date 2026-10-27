@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { mergeChangelogs } from '../lib/changelog-check';
-import { stampOnlyLine } from '../lib/restamp';
+import { branchAddedLines, stampOnlyLine } from '../lib/restamp';
 import { gitArgvIn } from './helpers/scratch-repo';
 import { BASE_POLICY, cleanup, makeFixtureRepo, makePr, readFile, restamp, type FixtureRepo } from './helpers/restamp-fixture';
 
@@ -106,4 +106,11 @@ describe('stamp_paths: a key the base introduced after the fork stays, base merg
     const moved = stampOnlyLine(key('DOCS_CAPS', keyVersion).trim(), key('DOCS_CAPS', '1.2.6.0').trim(), '1.2.5.0', '1.2.6.0', TEMPLATES);
     expect(moved).toBe(receiptAccepts);
   }, 120_000);
+
+  // Value: protects=the base-added read fails closed; fails_when=a diff git cannot run reads as "nothing added" and the base's key line moves again (red-team review of GSTA-129); why_new=the test above only runs the stage with a readable base; seam=none; no_claim=which git errors occur in practice
+  test('a base diff git cannot run is a refusal, never an empty "nothing added" set', () => {
+    const repo = makeFixtureRepo({ prefix: 'restamp-train24-', policy: POLICY }); repos.push(repo);
+    expect(branchAddedLines(repo.work, 'HEAD', ['VERSION'], 'HEAD').size).toBe(0);
+    expect(() => branchAddedLines(repo.work, 'HEAD', ['VERSION'], 'f'.repeat(40))).toThrow(/^cannot diff HEAD\.\.ffffffffffff for the stamp_paths stage \(.+\); nothing written$/);
+  });
 });

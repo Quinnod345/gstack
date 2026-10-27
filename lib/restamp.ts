@@ -283,6 +283,8 @@ export function branchAddedLines(cwd: string, since: string, files: string[], to
   const out = new Map<string, AddedLines>();
   if (files.length === 0) return out;
   const diff = git(cwd, ['diff', '--unified=0', '--inter-hunk-context=0', '--no-color', '--no-ext-diff', since, ...(to ? [to] : []), '--', ...files]);
+  // A failed diff must not read as "the branch added nothing" (or "the base added nothing"), which would move the base's lines again.
+  if (!diff.ok) throw new Refusal('POLICY_SOURCE_UNAVAILABLE', `cannot diff ${since.slice(0, 12)}..${to ? to.slice(0, 12) : 'the worktree'} for the stamp_paths stage (${(diff.err || diff.out).split('\n')[0]}); nothing written`);
   for (const f of parseUnifiedDiff(diff.out)) {
     const own = out.get(f.path) ?? { text: new Set<string>(), at: new Set<number>(), notOwn: 0 };
     const base = notOwn?.get(f.path)?.text;

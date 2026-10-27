@@ -78,6 +78,8 @@ describe("ownEntryAboveMain: a merged-in head's CHANGELOG however it was resolve
     expect(ownEntryAboveMain(stamped.replace('## [1.91.178.0]', '## [1.91.178.0]\n\n- smuggled'), main, authored)).toBe("main's ## [1.91.178.0] - 2026-10-22 is not carried unchanged below the PR's entry");
     expect(ownEntryAboveMain(stamped.replace('# Changelog', '# Change log'), main, authored)).toBe('the header differs from main');
     expect(ownEntryAboveMain(stamped.replace('## [1.91.182.0]', '## [1.91.181.0]'), main, authored)).toMatch(/is headed twice$/);
+    // Main's CHANGELOG unchanged is not main's plus the PR's entry: the entry the gate carried is missing (state-machines review of GSTA-129).
+    expect(ownEntryAboveMain(main, main, authored)).toBe("it is main's CHANGELOG unchanged, with no entry of the PR's own above it");
   });
 });
 
@@ -135,5 +137,16 @@ describe("a stacked child whose parent was released since the fork (GSTA-96, tra
     expect(mergeChangelogs(child('**Parent paragraph.**\n\n### Changed\n- one\n- two, now better\n- four\n'), theirs, base)).toBe(`# C\n\n## [Unreleased]\n\n**Child.**\n\n### Changed\n- mine\n\n### Gate integrity\n- Correction to the 1.0.1 entry below: "two" should read "two, now better".\n- Correction to the 1.0.1 entry below: "three" no longer applies.\n- Addition to the 1.0.1 entry below: four\n\n${released}\n## [1.0.0] - d\n\n- base\n`);
     expect(carryReleasedParent(`# C\n\n## [Unreleased]\n\n**Parent paragraph.**\n\n### Changed\n- one\n- two\n- three\n\n## [1.0.0] - d\n\n- base\n`, theirs, base)).toBeNull();
     expect(carryReleasedParent(`# C\n\n## [Unreleased]\n\n- a\n\n## [Unreleased]\n\n**Parent paragraph.**\n\n### Changed\n- one\n\n## [1.0.0] - d\n\n- base\n`, theirs, base)).toBeNull();
+  });
+
+  // Value: protects=carryReleasedParent rewrites only a child that still holds the released parent's entry and keeps an existing Gate integrity section's neighbours in place; fails_when=an unrelated [Unreleased] or an already-stamped head is rewritten or the correction lands outside Gate integrity; why_new=the shapes test above never has a child without the parent's entry, a head without [Unreleased], or a Gate integrity section followed by another heading; seam=none; no_claim=the wording of corrections beyond one edited line
+  test('shapes: a child that does not hold the released parent, or a head already stamped, is null; a correction joins the child\'s existing Gate integrity section without crossing the next heading', () => {
+    const released = '## [1.0.1] - d\n\n**Parent paragraph.**\n\n### Changed\n- one\n- two\n- three\n';
+    const theirs = `# C\n\n${released}\n## [1.0.0] - d\n\n- base\n`;
+    const base = '# C\n\n## [Unreleased]\n\n**Parent paragraph.**\n\n### Changed\n- one\n- two\n- three\n\n## [1.0.0] - d\n\n- base\n';
+    expect(carryReleasedParent('# C\n\n## [Unreleased]\n\n- totally other\n\n## [1.0.0] - d\n\n- base\n', theirs, base)).toBeNull();
+    expect(carryReleasedParent('# C\n\n## [1.0.2] - d\n\n- mine\n\n## [1.0.0] - d\n\n- base\n', theirs, base)).toBeNull();
+    const child = '# C\n\n## [Unreleased]\n\n**Child.**\n\n### Changed\n- mine\n\n### Gate integrity\n- child gate\n\n### Tests\n- child test\n\n**Parent paragraph.**\n\n### Changed\n- one\n- two edited\n- three\n\n## [1.0.0] - d\n\n- base\n';
+    expect(carryReleasedParent(child, theirs, base)!.text).toBe('# C\n\n## [Unreleased]\n\n**Child.**\n\n### Changed\n- mine\n\n### Gate integrity\n- child gate\n- Correction to the 1.0.1 entry below: "two" should read "two edited".\n\n### Tests\n- child test\n\n## [1.0.0] - d\n\n- base\n');
   });
 });

@@ -207,10 +207,12 @@ files. In practice slot 1 needs the same merge whenever the base moved after the
 taken. A stamp commit with one extra byte freezes the queue for every
 lane behind it.
 
-The slot stamp is the base merge, `mergeChangelogs`, and the restamp's stamp files
-(`STAMP_FILES` in CREW.md; gstack's are `CHANGELOG.md`, `VERSION`, `package.json` and
-`agents-digest/gstack-AGENTS.md`), never a fifth: a file the restamp lists beyond them is
-not a stamp, so the lane leaves it out and says so in its READY. The restamp itself never
+The slot stamp is the base merge, `mergeChangelogs`, and the stamp files the slot call
+names (`STAMP_FILES` in CREW.md; gstack's are `CHANGELOG.md`, `VERSION`, `package.json` and
+`agents-digest/gstack-AGENTS.md`, plus the file carrying a `*_KEY_VERSION` the PR
+introduced, which the restamp moves on the PR's own line, when the call names it), never a
+fifth: a file the restamp lists that the call did not name is not a stamp, so the lane
+leaves it out and says so in its READY. The restamp itself never
 moves a line the base added since the pin's fork point, base merge committed or staged. A
 pin stacked on a PR that squash-merged earlier conflicts beyond the CHANGELOG where the
 parent's squash touched the pin's lines: the lane takes its pin's bytes for those files
