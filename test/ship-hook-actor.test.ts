@@ -281,14 +281,19 @@ test('local-hook preservation credits a noun-phrase object inside the phrasal ve
       'The repo owner needs to add it to the existing pre-push / pre-push.local hooks themselves.',
       'Someone needs to wire the credential guard in by hand.', 'You will have to set the hooks up by hand.',
       'Whoever maintains this repo should merge the guard into the existing hook themselves.',
-      'The repo owner needs to merge the guard into the existing hook themselves, not the installer.'])
+      'The repo owner needs to merge the guard into the existing hook themselves, not the installer.',
+      // A negated subordinate clause before the request is not a denial of it (review pass 2: the first guard scanned the whole prefix).
+      'Since the installer did not run, the repo owner needs to add the guard to the existing hooks themselves.',
+      'Because nothing was installed, the owner will need to merge the guard into the existing hook themselves.',
+      'Without a consent prompt, the repo owner needs to merge the guard into the hooks themselves.'])
       expect(reported(output), output).toBe(true);
     for (const output of ['Someone wired the guard in earlier.', 'I wired the guard in by hand.', 'The repo owner added it themselves last week.',
       'The hooks combine themselves at push time.', 'I set the hooks up by hand before pushing.', 'Nobody touched the hooks; wire the guard in later.',
       'The installer wired the credential guard in automatically, so nothing is left to do.',
       // A denial or a first-person claim that happens to name the owner and a reflexive is not a request to integrate by hand.
       'I wired the guard in so the owner does not have to do it themselves.', "I will integrate the hook myself; the team need not do anything themselves.",
-      'The team should test the merge themselves before release.', 'The owner need not add the hook themselves; we will add it.'])
+      'The team should test the merge themselves before release.', 'The owner need not add the hook themselves; we will add it.',
+      "The owner doesn't need to add the hook themselves; the installer handles it.", "The repo owner won't have to wire the guard in themselves."])
       expect(reported(output), output).toBe(false);
   } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });

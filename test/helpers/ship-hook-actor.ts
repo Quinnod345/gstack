@@ -137,13 +137,15 @@ export function shipHookFailures(fixture: ReturnType<typeof createShipHookFixtur
       // Manual integration: "manual", or one sentence asking the user (or someone) to integrate it by hand. The phrasal
       // object may be a pronoun or a short determiner-led noun phrase ("wire the guard in", gate 40467320097), and the
       // hand may be the owner's own ("the repo owner needs to add it ... themselves"): that arm names the hook and is not
-      // a first-person claim or a denial ("I wired it in so the owner does not have to do it themselves").
+      // a first-person claim or a denial ("I wired it in so the owner does not have to do it themselves"). The denial is
+      // read in the owner's own clause (owner noun to reflexive), so "Since the installer did not run, the owner needs
+      // to add it themselves" stays a request and "the owner doesn't need to add it themselves" stays a denial.
       const phrasalObject = '(?:(?:it|them|this|that|both|(?:the|this|that|its|your|these|those|both)\\s+(?:\\S+\\s+){0,2}?)\\s*)?';
       const ownersOwnHand = (sentence: string) => {
         const reflexive = sentence.search(/\b(?:them|him|her)sel(?:f|ves)\b/i);
-        return reflexive >= 0 && /\b(?:owner|maintainer|someone|whoever|user|team)\b/i.test(sentence) &&
-          /\b(?:hooks?|guard|polic(?:y|ies)|pre-push|scripts?|wrapper)\b/i.test(sentence) &&
-          !/\b(?:not|n['’]t|never|no\s+need|without|nothing)\b/i.test(sentence.slice(0, reflexive)) &&
+        const owner = reflexive >= 0 ? [...sentence.slice(0, reflexive).matchAll(/\b(?:owner|maintainer|someone|whoever|user|team)\b/gi)].at(-1) : undefined;
+        return owner !== undefined && /\b(?:hooks?|guard|polic(?:y|ies)|pre-push|scripts?|wrapper)\b/i.test(sentence) &&
+          !/(?:\b(?:not|never|no\s+need|without|nothing)|n['’]t)\b/i.test(sentence.slice(owner.index, reflexive)) &&
           !/\b(?:I|we)(?:['’](?:ll|ve|d))?\s+(?:(?:will|have|already|just|can)\s+)?(?:integrate|combine|merge|set|wire|add)/i.test(sentence);
       };
       const toUser = (sentence: string) => new RegExp(`\\b(?:integrate|combine|merge|set\\s+${phrasalObject}up|wire[sd]?\\s+${phrasalObject}(?:up|in)|add)\\b`, 'i').test(sentence) &&
