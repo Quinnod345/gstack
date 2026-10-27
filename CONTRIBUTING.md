@@ -804,7 +804,7 @@ install ownership rules in the guide.
 ### Adding a new skill
 
 When you add a new skill template, every host renders it; a few static lists still need a row:
-1. Create `{skill}/SKILL.md.tmpl`
+1. Create `{skill}/SKILL.md.tmpl` (optionally with a one-line `codex_default_prompt:` frontmatter key, the sentence Codex's picker inserts for the skill; without it the picker gets `Use <name> for this task.`)
 2. Run `bun run gen:skill-docs --host all`
 3. The dynamic template discovery picks it up for every host render and for `gstack/llms.txt`. Two things it does not fill in: a row in `SKILL_REQUIREMENTS` in `lib/doctor-components.ts` (the doctor's `--for <skill>` table; `test/doctor-components.test.ts` fails on a skill directory without one, and the same gen run rerenders `bin/gstack-doctor-components.sh`), and the catalog rows readers find the skill through (README.md, AGENTS.md, `docs/skills.md`, `docs/PROJECT_STRUCTURE.md`, the root `SKILL.md.tmpl` router)
 4. Budget it: run `bun test/helpers/capture-context-budget.ts` and commit the refreshed `test/fixtures/context-budget.json` — the context-budget ratchet fails any skill without a ceiling; the catalog budget (`test/catalog-budget.test.ts`) fails until its cap is ratcheted by the protocol in its failure message, and the number is quoted in CLAUDE.md, this file and `docs/CONTRIBUTOR_REFERENCE.md`
