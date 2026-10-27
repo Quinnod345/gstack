@@ -124,10 +124,11 @@ alone is not an ask.
 
 ## Plan before build
 
-A lane that builds something plans first. Its first act, before any product code, is a
-`/autoplan` run on its brief, sized to the work. The phases run in order, CEO, then design,
-then DX, then eng, with design and DX only when the scope has them, and a one-file fix
-gets a short run (`--no-ui --no-dx --max-rounds 1` and a small `--spend-cap`), not no run. On Capy the
+A lane that builds something plans first. Its first act after the session-start install
+check, before any product code, is a `/autoplan` run on its brief, sized to the work. The
+phases run in order, CEO, then design, then DX, then eng, with design and DX only when the
+scope has them, and a one-file fix gets a short run (`--no-ui --no-dx --max-rounds 1`, with
+`--estimate-usd` set so a small `--spend-cap` still seats its attempts), not no run. On Capy the
 unattended loop is `autoplan/DRIVER.md` in the gstack checkout. New functionality a lane
 takes on part-way, scope its brief did not name, gets its own plan and its own ask before
 the lane builds it. In the rules file this is rule 24 of the
@@ -157,11 +158,13 @@ finished, and the run reports `APPROVED` (`status=complete` after `export`). An 
 gate that still prints `PLAN_AMEND_PENDING` or `REOPENED:` is not a completed plan, and an
 imported approval row alone is not completion.
 
-**The record.** `gstack-approvals import --autoplan <run dir> --by "<owner> (via <controller>)"`
-writes the approval row (date, the ask, the owner's exact words, who relayed them, what it
-covers); `gstack-approvals render` puts it in the report and the PR body, where the
-controller reads it before training the PR (shape A). The brief's done line names the row.
-A plan approval is not a READY field; the [READY contract](#the-ready-contract) is unchanged.
+**The record.** `gstack-approvals import --autoplan <run dir> --by "<owner>"` writes the
+approval row (date, the ask, the owner's exact words, the lane that answered as relayer,
+what it covers); `gstack-approvals render` puts it in the report and the PR body. Before
+training the PR the controller compares that row's words and `gate_rev` with the ask it
+relayed and the reply it carried back; a row that does not match is not READY (shape A).
+The brief's done line names the row. A plan approval is not a READY field; the
+[READY contract](#the-ready-contract) is unchanged.
 
 **Exemptions.** Read-only lanes (triage, research, measurement, a review voice), the daily
 flaky pass's repairs, slot stamps, CHANGELOG-only conflict resolves and a size or budget

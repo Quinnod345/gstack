@@ -46,8 +46,8 @@ Capy checklist for `/autoplan`: drive `gstack-autoplan`, never a hand adaptation
 
 Every Capy thread that uses gstack follows these for new work, under a Captain or on its own. The rule in full is `docs/captain.md`, "Plan before build"; the lane side is section 3 of captain.md in this folder.
 
-- **Plan first.** Before building new functionality, run `/autoplan` on it as the first act, sized to the work (scope flags and `--max-rounds`; a one-file fix gets `--no-ui --no-dx --max-rounds 1` and a small `--spend-cap`, never no run).
-- **ELI5, then the word.** Send the plan and gate to the person, or the Captain, in plain language: `gstack-owner-brief render --captain --out <run dir>`, with `rec` as the one-word default and a "do it" reply that takes every recommendation at full scope. Build only after their word is answered into the run and it reports `APPROVED`; then `gstack-approvals import --autoplan <run dir>`.
+- **Plan first.** Before building new functionality, run `/autoplan` on it as the first act after the install check, sized to the work (scope flags and `--max-rounds`; a one-file fix gets `--no-ui --no-dx --max-rounds 1` with `--estimate-usd` and a small `--spend-cap`, never no run).
+- **ELI5, then the word.** Send the plan and gate to the person, or the Captain, in plain language: `gstack-owner-brief render --captain --out <run dir>`, with `rec` as the one-word default and a "do it" reply that takes every recommendation at full scope. Build only after their word is answered into the run and it reports `APPROVED`; then `gstack-approvals import --autoplan <run dir> --by "<owner>"`.
 - **/ship before ready.** Run /ship at the final pushed head before a PR is called ready; `SHIP_RECEIPT: pr=<n> head=<head>` must name that head, and a later push needs a new /ship. The review inside /ship, like the autoplan, is sized to the change.
 - **No merge without the owner's word.** A thread never merges on its own; under a Captain the controller merges on a recorded standing approval, and a thread with no Captain asks the person.
 

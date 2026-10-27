@@ -30,5 +30,5 @@ named: docs, trains, cleanups>, and carry them through to done with no further a
 
 When the answer comes back, record it before the work starts. For an autoplan gate:
 `gstack-autoplan answer --out <run dir> --gate-rev <n> --reply <tokens> --by agent:<thread> --owner-reply "<exact words>"`,
-then `gstack-approvals import --autoplan <run dir> --by "<owner> (via <controller>)"`. For any
+then `gstack-approvals import --autoplan <run dir> --by "<owner>"` (the tool records the relayer). For any
 other plan: `gstack-approvals add --ask "<what>" --words "<exact words>" --by "<owner> (via <controller>)" --scope "<what it covers>"`.

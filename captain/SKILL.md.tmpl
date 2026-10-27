@@ -280,7 +280,7 @@ with one line saying what it covers. `gstack-owner-brief render --captain` print
 a plan; relay it whole. Template: `captain/templates/plan-ask.md`.
 
 **Plan before build.** A lane that builds something runs a sized `/autoplan` on its brief as
-its first act and sends the controller the plan ask above; the controller relays it, and the
+its first act after the session-start check and sends the controller the plan ask above; the controller relays it, and the
 lane builds only after the owner's word is answered into the run and it reports `APPROVED`.
 New scope taken on part-way gets its own plan. Read-only lanes, the flaky pass's repairs,
 slot stamps, CHANGELOG resolves and cap re-pins under a grant are exempt. The brief a

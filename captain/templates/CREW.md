@@ -127,7 +127,7 @@ Homes are paths in the gstack checkout the lane checked at session start.
     `/ship` and `/review` skills.
 
 24. **Plan before build.** If you build something, a `/autoplan` run on your brief, sized
-    to the work, is your first act; send `CONTROLLER` the plan and its gate in plain
+    to the work, is your first act after the session-start check; send `CONTROLLER` the plan and its gate in plain
     language with the recommended reply named; build only after the owner's word is
     answered into the run and it reports `APPROVED`; record it with `gstack-approvals
     import --autoplan`. New scope taken on part-way gets the same. Exempt: read-only

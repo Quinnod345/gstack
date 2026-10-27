@@ -66,7 +66,8 @@ describe('/captain skill', () => {
     for (const h of ['## Lane discipline', '## Plan before build', '## Contributions from outside the crew']) expect(doc).toContain(h);
     expect(doc).toMatch(/## Plan before build[^]*?reports `APPROVED`[^]*?## Contributions from outside the crew/);
     const brief = read('captain/templates/brief.md');
-    expect(brief).toContain('Plan: required | approved: <autoplan run id> | exempt: <reason');
+    expect(brief).toContain('Plan: required | approved: <autoplan run dir, or its checkpoint dir> | exempt: <reason');
+    expect(brief).toContain('gstack-autoplan answer --out <run dir> --gate-rev <n> --reply <tokens>');
     expect(brief).toMatch(/^1\. Plan[^]*?^2\. Build after the word[^]*?^3\. Ship[^]*?^Done when:/m);
     expect(brief).toContain('gstack-approvals import --autoplan');
     expect(flat).toContain('**Plan before build.**');

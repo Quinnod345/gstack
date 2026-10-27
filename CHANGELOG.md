@@ -12,7 +12,7 @@
 ### Changed
 - **`captain/SKILL.md.tmpl`**: the approvals part carries a "Plan before build" paragraph pointing at the section and the brief, and the rules enumeration names the rule.
 - **`capy/skill/gstack/SKILL.md` § Plan, approve, ship**: the short form every Capy thread follows, under a Captain or on its own (the owner, 2026-10-27: "Also incorporate the autoplan and eli5 and ship instructions for Capy-specific gstack usage"): /autoplan sized to the work before new functionality, the ELI5 with `rec` as the one-word default and a "do it" reply, the build only after the word and an `APPROVED` run, /ship at the final pushed head before a PR is called ready with the receipt naming that head, no merge without the owner's word, the review inside /ship and the autoplan sized to the change, and the exempt work. References are plain text, since the folder is copied to a Drive without the repository; the owner copies `capy/skill/gstack/` over the Drive skill folder to pick it up.
-- **`capy/skill/gstack/captain.md` § 3**: the lane-side pointer, so a thread launched on Capy sees the first-act rule where it reads the plan-ask shape, linking to the SKILL.md section.
+- **`capy/skill/gstack/captain.md` § 3**: the lane-side pointer, so a thread launched on Capy sees the first-act rule where it reads the plan-ask shape, pointing at the SKILL.md section.
 - **`captain/templates/plan-ask.md`**: the record line names the autoplan path (`gstack-autoplan answer … --owner-reply`, then `gstack-approvals import --autoplan`) and keeps `gstack-approvals add` for plans that are not autoplan gates.
 - **`docs/captain.md` Setting it up, step 5**: lanes start with the brief.
 
