@@ -382,9 +382,12 @@ export function parseRemoteReport(output: string): RemoteReport | null {
   return m ? { tree: m[1]!, tests: Number(m[2]), failed: Number(m[3]), spent: m[4] } : null;
 }
 
+/** The tree-mismatch clause `--remote`, `clear --receipt` and the stamp-only substitution (lib/pregate/remote-receipt.ts) all open with. */
+export const treeMismatch = (tested: string, tree: string) => `the remote gate tested tree ${tested.slice(0, 12)}, not ${tree.slice(0, 12)}`;
+
 /** Why a remote gate report does not clear the obligation for `tree` (`--remote` and `clear --receipt`), or null when it does. */
 export function remoteReportProblem(report: RemoteReport, tree: string): string | null {
-  if (report.tree !== tree) return `the remote gate tested tree ${report.tree.slice(0, 12)}, not ${tree.slice(0, 12)}`;
+  if (report.tree !== tree) return treeMismatch(report.tree, tree);
   if (report.tests === 0) return 'the remote gate reported 0 tests';
   if (report.failed > 0) return `the remote gate reported ${report.failed} failed of ${report.tests}`;
   return null;

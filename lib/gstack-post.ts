@@ -6,6 +6,12 @@
  * the agent wrote with its file tool; the helper reads each file once, scans
  * those exact bytes with the shared redaction engine, and sends the same bytes.
  *
+ * `pr-body` merges by `## ` section into the PR's current body (read through
+ * the same runner): a section in the file replaces the same-titled one, the
+ * ship-receipt block is a section of its own, sections the file does not
+ * rewrite are kept, new ones are appended; `--replace` overwrites instead.
+ * The scan runs on the merged bytes, which are the bytes sent.
+ *
  * Exit codes: 0 posted; 1 HIGH finding (or oversize input) refused;
  * 2 MEDIUM findings need confirmation, printed as `RULE:` lines plus a
  * `TOKEN:` that binds the bytes, destination, operation and findings;
@@ -15,6 +21,7 @@
  */
 import { createHash } from "crypto";
 import { scan, type Finding, type RepoVisibility } from "./redact-engine";
+import { RECEIPT_FENCE } from "./ship-receipt";
 import { canonicalRemote } from "./remote-identity";
 import { parseChangelog } from "./changelog-check";
 import { versionWidth } from "./version-source";
@@ -40,7 +47,7 @@ export const USAGE = `usage: gstack-post <op> [<target>] [options]
   gstack-post issue-comment <issue> --body-file F
   gstack-post reply         <pr>    --to <review-comment-id> --body-file F   (GitHub only)
   gstack-post pr-title      <pr>    --title-file F
-  gstack-post pr-body       <pr>    --body-file F
+  gstack-post pr-body       <pr>    --body-file F [--replace]
   gstack-post pr-create --base <branch> [--head <branch>] [--draft] --title-file F --body-file F
   gstack-post issue-create  --title-file F --body-file F
 
@@ -48,6 +55,9 @@ export const USAGE = `usage: gstack-post <op> [<target>] [options]
   Options: --host github|gitlab (default: detected from the origin remote)
            --repo-visibility public|private|unknown (default: config, then gh/glab)
            --confirm <token>   post bytes whose MEDIUM findings the user confirmed
+           --replace           pr-body: overwrite the whole body instead of merging it by
+                               ## section into the current one (the default keeps every
+                               section the file does not rewrite, the ship receipt included)
 
   Write the text files with your file-write tool; never put the text in a
   shell command. The helper scans the exact bytes it sends.
@@ -63,6 +73,7 @@ interface Request {
   base?: string;
   head?: string;
   draft: boolean;
+  replace: boolean;
   titleFile?: string;
   bodyFile?: string;
   host?: HostKind;
@@ -80,9 +91,11 @@ function parseArgs(argv: string[]): Request {
   const flags = new Map<string, string>();
   const positional: string[] = [];
   let draft = false;
+  let replace = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
     if (a === "--draft") { draft = true; continue; }
+    if (a === "--replace") { replace = true; continue; }
     const eq = a.indexOf("=");
     const name = a.startsWith("--") && eq > 0 ? a.slice(0, eq) : a;
     if (VALUE_FLAGS.has(name)) {
@@ -100,7 +113,7 @@ function parseArgs(argv: string[]): Request {
   const vis = flags.get("--repo-visibility");
   if (vis !== undefined && !["public", "private", "unknown"].includes(vis)) throw new UsageError("--repo-visibility must be public, private or unknown");
   const req: Request = {
-    op: op as Op, draft,
+    op: op as Op, draft, replace,
     target: positional[0], to: flags.get("--to"), base: flags.get("--base"), head: flags.get("--head"),
     titleFile: flags.get("--title-file"), bodyFile: flags.get("--body-file"),
     host: host as HostKind | undefined, visibility: vis as RepoVisibility | undefined, confirm: flags.get("--confirm"),
@@ -116,7 +129,94 @@ function parseArgs(argv: string[]): Request {
   if (req.to !== undefined && !/^[1-9][0-9]*$/.test(req.to)) throw new UsageError("--to must be a numeric comment id");
   if ((req.op === "pr-create") !== !!req.base) throw new UsageError(req.op === "pr-create" ? "pr-create needs --base <branch>" : "--base applies to pr-create only");
   if (req.op !== "pr-create" && (req.head || req.draft)) throw new UsageError("--head and --draft apply to pr-create only");
+  if (req.op !== "pr-body" && req.replace) throw new UsageError("--replace applies to pr-body only");
   return req;
+}
+
+/** One piece of a PR body: the leading text, a `## ` section, the ship-receipt block, or text after a receipt block. */
+interface Section { key: string; label: string; text: string }
+
+/**
+ * Split a body into its sections, in order. A `## ` line outside a code
+ * fence opens a section keyed by its title (trimmed, case-insensitive); the
+ * ````gstack-ship-receipt```` block is its own section (lib/ship-receipt.ts
+ * extractReceipt reads it); text before the first heading is the leading
+ * text, and text after a receipt block before the next heading is kept with
+ * a key of its own, so it is never replaced. A fence closes only on a run of
+ * its own character at least as long as the opener with nothing after it
+ * (CommonMark), so a ``` line inside a ```` block and a ```js line close
+ * nothing; a receipt fence that never closes makes the body from that line
+ * on one section the merge never matches (`unclosed-receipt`), so it is kept
+ * byte for byte instead of being read as a receipt or as replaceable text.
+ */
+function splitSections(body: string): Section[] {
+  const out: Section[] = [];
+  let fence: string | null = null;
+  let plain = 0;
+  const open = (key: string, label: string) => out.push({ key, label, text: "" });
+  const openText = () => out.length === 0 ? open("text:lead", "leading text") : open(`text:${plain++}`, "trailing text");
+  const closes = (run: string) => new RegExp(`^ {0,3}${run[0] === "`" ? "`" : "~"}{${run.length},}\\s*$`).test(bare);
+  let bare = "";
+  for (const line of body.split(/(?<=\n)/)) {
+    bare = line.replace(/\r?\n$/, "");
+    const fenceOpen: RegExpExecArray | null = fence === null ? /^ {0,3}(`{3,}|~{3,})/.exec(bare) : null;
+    if (fenceOpen && bare.trim() === "```" + RECEIPT_FENCE) { open("receipt", "ship receipt"); fence = "receipt"; }
+    else if (fence === "receipt") { out.at(-1)!.text += line; if (closes("```")) { fence = null; openText(); } continue; }
+    else if (fenceOpen) fence = fenceOpen[1]!;
+    else if (fence && closes(fence)) fence = null;
+    else if (fence === null && /^ {0,3}## /.test(bare)) { const title = bare.replace(/^ {0,3}## /, "").trim(); open(`h2:${title.toLowerCase()}`, title); }
+    if (out.length === 0) openText();
+    out.at(-1)!.text += line;
+  }
+  if (fence === "receipt") Object.assign(out.at(-1)!, { key: "unclosed-receipt", label: "unclosed receipt fence" });
+  return out.filter(s => s.text !== "");
+}
+
+/**
+ * The body to send for `pr-body` without `--replace`: each section of the
+ * file replaces the same-keyed section of the current body in place, current
+ * sections the file does not rewrite are kept byte for byte, new `## `
+ * sections are appended after them, and a new receipt or leading text goes
+ * first (where lib/ship-receipt.ts puts the receipt). Text outside sections
+ * matches by role (the file's leading text replaces the leading text; text
+ * after a receipt block never replaces an intro), and whitespace-only text in
+ * the file is dropped, so reposting the body /ship composes (receipt, blank
+ * line, sections) yields the same bytes. A blank
+ * line separates the two sides of every seam the merge creates; two kept
+ * neighbours keep their bytes. An empty current body yields the file unchanged.
+ */
+export function mergeBodySections(current: string, incoming: string): { body: string; replaced: string[]; kept: string[]; added: string[] } {
+  const now = splitSections(current);
+  const next = splitSections(incoming).filter(n => !(n.key.startsWith("text:") && n.text.trim() === ""));
+  const used = new Set<Section>();
+  const replaced: string[] = [], kept: string[] = [], added: string[] = [];
+  const merged: Section[] = now.map(s => {
+    const match = s.key === "unclosed-receipt" ? undefined : next.find(n => !used.has(n) && n.key === s.key);
+    if (!match) { if (s.text.trim()) kept.push(s.label); return s; }
+    used.add(match); replaced.push(s.label); return match;
+  });
+  const fresh = next.filter(n => !used.has(n));
+  for (const n of fresh) added.push(n.label);
+  const first = fresh.filter(n => !n.key.startsWith("h2:"));
+  if (now.length === 0) return { body: incoming, replaced, kept, added };
+  const all = [...first, ...merged, ...fresh.filter(n => n.key.startsWith("h2:"))];
+  const fromFile = (s: Section) => next.includes(s);
+  const body = all.map((s, i) => {
+    const after = all[i + 1];
+    if (!after) return s.text;
+    const seam = (fromFile(s) || fromFile(after)) && s.text.trim() !== "" && !/^\r?\n/.test(after.text);
+    return seam ? s.text.replace(/\n*$/, "\n\n") : s.text.endsWith("\n") ? s.text : s.text + "\n";
+  }).join("");
+  return { body, replaced, kept, added };
+}
+
+/** The PR's current body for a merge; GitHub's `--jq .body` prints it raw, GitLab's JSON carries `description`. */
+function currentBody(env: PostEnv, kind: HostKind, n: string): { body: string } | { error: string } {
+  const r = kind === "github" ? env.run("gh", ["pr", "view", n, "--json", "body", "--jq", ".body"]) : env.run("glab", ["mr", "view", n, "--output", "json"]);
+  if (r.status !== 0) return { error: r.stderr.trim() || `exit ${r.status}` };
+  if (kind === "github") return { body: r.stdout.replace(/\r?\n$/, "") };
+  if (!r.stdout.trim()) return { body: "" };
+  try { return { body: String(JSON.parse(r.stdout).description ?? "") }; } catch { return { error: "glab returned no JSON" }; }
 }
 
 interface Remote { host: string; segments: string[]; kind: HostKind }
@@ -229,22 +329,43 @@ function repoReleaseVersions(env: PostEnv): string[] {
   return [...versions];
 }
 
+/** A run word with an optional ':' '#' '=' right before an 11-digit token: `run 19368712345`, `gate=40323989742`, `rerun passed 40287239206`. */
+const RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed)\s*[:#=]?\s*$/i;
+/** Between two 11-digit tokens of one list: `, `, ` and `, ` & `, ` or `, ` / `, with an optional `(#1234)` after the first. */
+const RUN_ID_CHAIN = /^(?:\s*\(#\d+\))?\s*(?:,|and|&|or|\/)\s*$/i;
+
 /**
- * All-digit identifiers a ship receipt or a CI link names, which pii.phone.e164
- * reads as phone numbers: a 12-hex receipt sha that happens to be all digits
- * (`tree=704992822996`, `tree 704992822996`, and the receipt's `head=`,
- * `gated_tree=` and `predecessor=` keys) and an 11-digit GitHub Actions
- * run id as prose or link text (`run 19368712345`, `[run 19368712345](…/actions/runs/19368712345)`;
- * the engine already exempts the id inside the URL itself). Only the exact
- * tokens found in those positions are allowlisted, so a bare 11-digit number,
- * a 10-digit national number and an E.164 `+14155551234` still report.
+ * All-digit identifiers a ship receipt or a CI report names, which
+ * pii.phone.e164 reads as phone numbers: a 12-hex receipt sha that happens to
+ * be all digits (`tree=704992822996`, `tree 704992822996`, and the receipt's
+ * `head=`, `gated_tree=` and `predecessor=` keys), an 11-digit GitHub Actions
+ * run id inside an /actions/runs/ URL (the engine already exempts the URL
+ * itself; this covers its link text), and an 11-digit run id right after a run
+ * word on the same line (run, runs, screen, screens, gate, gates, backstop,
+ * bisect, rerun, dispatched, dispatch, failed, passed, with an optional ':'
+ * '#' '=' between: `failed 40269992077`, `gate 40323989742`,
+ * `run #19368712345`; generic words such as id, job, attempt and workflow
+ * exempt nothing, since `customer id 14155551234` is a number), plus every 11-digit id chained
+ * after an allowlisted one through ", ", " and ", " & ", " or " or " / ",
+ * optionally with a "(#1234)" between (`screen 40269992077 (#3434) and
+ * 40275443393 (#3453)`). Only the exact tokens found in those positions are
+ * allowlisted, so a bare 11-digit number, a 10-digit national number and an
+ * E.164 `+14155551234` still report.
  */
 function receiptDigitTokens(texts: string[]): string[] {
   const tokens = new Set<string>();
   for (const text of texts) {
     for (const m of text.matchAll(/(?:^|[^\w])(?:tree|gated_tree|head|predecessor)[= ](\d{12})\b/g)) tokens.add(m[1]!);
-    for (const m of text.matchAll(/\brun #?(\d{11})\b/g)) tokens.add(m[1]!);
     for (const m of text.matchAll(/\/actions\/runs\/(\d{11})\b/g)) tokens.add(m[1]!);
+    for (const line of text.split("\n")) {
+      let chainFrom = -1;
+      for (const m of line.matchAll(/(?<![\d+])\d{11}(?!\d)/g)) {
+        const at = m.index!;
+        const listed = RUN_WORD_BEFORE.test(line.slice(0, at)) || (chainFrom >= 0 && RUN_ID_CHAIN.test(line.slice(chainFrom, at)));
+        if (listed) tokens.add(m[0]);
+        chainFrom = listed ? at + m[0].length : -1;
+      }
+    }
   }
   return [...tokens];
 }
@@ -348,7 +469,18 @@ export function runPost(argv: string[], env: PostEnv, configBin = "gstack-config
     if (req.op === "reply" && remote.kind !== "github") throw new UsageError("reply is supported on GitHub only");
     const n = req.target === undefined ? undefined : targetNumber(req.target, req.op, remote);
     const title = req.titleFile ? readText(env, req.titleFile, "title") : undefined;
-    const body = req.bodyFile ? readText(env, req.bodyFile, "body") : undefined;
+    let body = req.bodyFile ? readText(env, req.bodyFile, "body") : undefined;
+    if (req.op === "pr-body" && !req.replace) {
+      const current = currentBody(env, remote.kind, n!);
+      if ("error" in current) {
+        env.err(`gstack-post: cannot read PR ${n}'s current body to merge into (${current.error}); nothing was posted. Rerun with --replace to overwrite the whole body.\n`);
+        return EXIT.cliFailed;
+      }
+      const m = mergeBodySections(current.body, body!);
+      body = m.body;
+      const list = (names: string[]) => (names.length ? names.join(", ") : "none");
+      env.err(`gstack-post: pr-body merged by section: replaced ${list(m.replaced)}; kept ${list(m.kept)}; added ${list(m.added)}\n`);
+    }
     const parts: Array<[Part, string]> = [];
     if (title !== undefined) parts.push(["title", title]);
     if (body !== undefined) parts.push(["body", body]);

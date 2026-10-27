@@ -13,7 +13,7 @@ import type { Doc } from '../html';
 import type { Reporter } from '../report';
 import { ruleMeta } from './ids';
 
-const STATIC_OWNS = new Set(['transition-all', 'vh-height']);
+const STATIC_OWNS = new Set(['layout-transition', 'vh-height']);
 
 /** The elements the craft check reads from open tag to close tag with a lazy scan. */
 const SPANNED = new Set(['script', 'style', 'template', 'nav']);
