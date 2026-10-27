@@ -17,7 +17,7 @@
 - `test/gstack-post.test.ts`: no flag means the body is sent as written; the callout on all three comment operations and on GitLab; scan and token cover the callout; refusals on the other operations and bad text.
 
 ### Gate integrity
-- No threshold, timeout, trial count or case kind changed. `test/catalog-budget.test.ts` moves 1,251 → 1,296 token-equivalents for the new skill (pre-addition 5,000 bytes, modernize adds 178, measured 5,178 = 1,295; 6 bytes left) and `test/fixtures/context-budget.json` gains `modernize: 8896`. No pinned render in `test/fixtures/skill-md-size-allowlist.json` changed size; the ship union is 321,800 / 187,706 = 1.7144 against the 1.7150 cap (87 bytes in the lazy handoff section, 0 in the skeleton).
+- No threshold, timeout, trial count or case kind changed. `test/catalog-budget.test.ts` moves 1,314 → 1,359 token-equivalents for the new skill, re-measured on top of main's `/ubicloud` and `/design-motion` rows (pre-addition 5,249 bytes on d9b0d600, modernize adds 178, measured 5,427 = 1,357; 9 bytes left), and `test/fixtures/context-budget.json` is recaptured on the same base: `modernize: 9466` and `alwaysOnTotal` 7458 → 7880 (capture × 1.05). No pinned render in `test/fixtures/skill-md-size-allowlist.json` changed size; the ship union is 321,800 / 187,706 = 1.7144 against the 1.7150 cap (87 bytes in the lazy handoff section, 0 in the skeleton).
 
 ## [1.91.267.0] - 2026-10-27
 
