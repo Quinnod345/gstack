@@ -19,7 +19,7 @@ import { getHostConfig } from '../../hosts/index';
 import { outsideVoiceFor, outsideVoiceGuard, outsideVoiceInvocation, outsideVoicePreflight, outsideVoiceProvenance, generateOutsideVoiceRouting } from './outside-voice';
 
 // Domain modules
-import { generatePreamble } from './preamble';
+import { generateSkillPreamble } from './preamble-hoist';
 import { generateTestFailureTriage } from './preamble';
 import { generateDesignMethodology, generateDesignHardRules, generateDesignOutsideVoices, generateDesignReviewLite, generateDesignSketch, generateDesignSetup, generateDesignMockup, generateDesignShotgunGeneration, generateDesignShotgunLoop, generateTasteProfile, generateUXPrinciples, generateOverusedFonts, generateDesignSlopBullets, generateDesignDetector, generateDesignMdCheck } from './design';
 import { generateTestBootstrap, generateTestCoverageAuditPlan, generateTestCoverageAuditShip, generateTestCoverageGateShip } from './testing';
@@ -90,7 +90,7 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   SNAPSHOT_FLAGS: generateSnapshotFlags,
   BROWSE_SETUP: generateBrowseSetup,
   BROWSE_FALLBACK: generateBrowseFallback,
-  PREAMBLE: generatePreamble,
+  PREAMBLE: generateSkillPreamble,
   ASIDE_SETUP: generateAsideSetup,
   ASIDE_COOKBOOK: generateAsideCookbook,
   ASIDE_RESEARCH: generateAsideResearch,

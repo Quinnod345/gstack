@@ -117,7 +117,9 @@ SKILL.md files are **generated** from `.tmpl` templates. To update docs:
 
 1. Edit the `.tmpl` file (e.g. `SKILL.md.tmpl` or `browse/SKILL.md.tmpl`)
 2. Run `bun run gen:skill-docs` (or `bun run build` which does it automatically)
-3. Commit both the `.tmpl` and generated `.md` files
+3. Commit both the `.tmpl` and generated `.md` files, including a tier 2+ skill's
+   `sections/preamble.md` (the shared preamble, rendered by
+   `scripts/resolvers/preamble-hoist.ts`; change the preamble resolvers, never that file)
 
 The same `gen:skill-docs` run writes two more generated files from `lib/`:
 `review/design-checklist.md` (from `lib/design-catalog.ts`, through
@@ -402,10 +404,10 @@ When estimating or discussing effort, always show both human-team and CC+gstack 
 | Architecture / design | 2 days | 4 hours | ~5x |
 | Research / exploration | 1 day | 3 hours | ~3x |
 
-Completeness is cheap. Don't recommend shortcuts when the complete implementation
-is achievable. Boil the ocean — the complete thing is the goal; only genuinely
-unrelated multi-quarter migrations are separate scope, never an excuse for a
-shortcut. See the Completeness Principle in the skill preamble for the full
+Complete coverage, minimal code. Don't recommend shortcuts that leave part of
+the requirement uncovered, and don't add code beyond it: when options cover the
+same, prefer the smaller diff. Only genuinely unrelated multi-quarter migrations
+are separate scope, never an excuse for a coverage gap. See the Completeness Principle in the skill preamble for the full
 philosophy.
 
 ## Search before building

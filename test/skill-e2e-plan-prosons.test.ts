@@ -126,10 +126,13 @@ function setupPlanDir(tmpPrefix: string, planContent: string, skillName: string)
   run('git', ['commit', '-m', 'add plan']);
 
   fs.mkdirSync(path.join(planDir, skillName), { recursive: true });
-  fs.copyFileSync(
-    path.join(ROOT, skillName, 'SKILL.md'),
+  const sections = path.join(planDir, skillName, 'sections');
+  fs.writeFileSync(
     path.join(planDir, skillName, 'SKILL.md'),
+    fs.readFileSync(path.join(ROOT, skillName, 'SKILL.md'), 'utf-8')
+      .replaceAll(`~/.claude/skills/gstack/${skillName}/sections/`, sections + '/'),
   );
+  fs.cpSync(path.join(ROOT, skillName, 'sections'), sections, { recursive: true });
 
   return planDir;
 }

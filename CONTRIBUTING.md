@@ -807,7 +807,7 @@ When you add a new skill template, all hosts get it automatically:
 2. Run `bun run gen:skill-docs --host all`
 3. The dynamic template discovery picks it up, no static list to update
 4. Budget it: run `bun test/helpers/capture-context-budget.ts` and commit the refreshed `test/fixtures/context-budget.json` — the context-budget ratchet fails any skill without a ceiling
-5. Commit `{skill}/SKILL.md`, external host output is generated at setup time and gitignored
+5. Commit `{skill}/SKILL.md` (and the generated `{skill}/sections/preamble.md` when the template's `preamble-tier` is 2 or higher), external host output is generated at setup time and gitignored
 
 ## Conductor workspaces
 
@@ -828,7 +828,7 @@ When Conductor creates a new workspace, `bin/dev-setup` runs automatically. It d
 
 ## Things to know
 
-- **SKILL.md files are generated.** Edit the `.tmpl` template, not the `.md`. Run `bun run gen:skill-docs` to regenerate. The same run generates `review/design-checklist.md` from `lib/design-catalog.ts` and `lib/dom-dump.js` from `lib/dom-dump-script.ts`: edit those sources, never the generated files (`test/design-checklist-sync.test.ts` fails on drift).
+- **SKILL.md files are generated.** Edit the `.tmpl` template, not the `.md`. Run `bun run gen:skill-docs` to regenerate. The same run generates `review/design-checklist.md` from `lib/design-catalog.ts` and `lib/dom-dump.js` from `lib/dom-dump-script.ts`: edit those sources, never the generated files (`test/design-checklist-sync.test.ts` fails on drift). Tier 2+ skills also get a generated `sections/preamble.md`, the shared preamble rendered by `scripts/resolvers/preamble-hoist.ts`: change the preamble resolvers, never that file.
 - **TODOS.md is the unified backlog.** Organized by skill/component with P0-P4 priorities. `/ship` auto-detects completed items. All planning/review/retro skills read it for context.
 - **Browse, make-pdf, design, and `lib/` source changes need a rebuild.** If you touch `browse/src/*.ts`, `make-pdf/src/*.ts`, `design/src/*.ts`, or anything under `lib/` (the canonical `claude-bin.ts`, `error-handling.ts`, and `aside-render.ts` the binaries embed, plus `design-catalog.ts`, whose `MOCKUP_NEVER_NAMES` the design binary's mockup prompt embeds; `browse/src` re-exports the first three), run `bun run build`. `./setup` makes the same call on its own: it rebuilds when any of the three binaries is missing or when those sources, `package.json`, or `bun.lock` are newer than the browse binary (`test/setup-needs-build.test.ts` pins the decision).
 - **Dev mode shadows your global install.** Project-local skills take priority over `~/.claude/skills/gstack`. `bin/dev-teardown` restores the global one.

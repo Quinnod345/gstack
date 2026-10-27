@@ -303,7 +303,7 @@ export async function captureNativeFirstAuq(opts: NativeAuqCaptureOptions): Prom
       trustedDirs: [cwd],
     })), {mode:0o600});
     const skillPath = path.join(cwd, opts.skillName, 'SKILL.md');
-    const prompt = `The ONLY skill file you may read is this absolute path: ${skillPath}. Do NOT search for, Glob, find, or read any other SKILL.md anywhere — especially nothing under ~/.claude or /Users.
+    const prompt = `The ONLY skill file you may read is this absolute path: ${skillPath}, together with the files in its sections/ directory that it tells you to Read. Do NOT search for, Glob, find, or read any other SKILL.md anywhere — especially nothing under ~/.claude or /Users.
 
 Read ${skillPath} and follow its workflow for this scenario:
 

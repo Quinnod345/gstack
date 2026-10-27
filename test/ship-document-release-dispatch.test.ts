@@ -241,6 +241,7 @@ describe('native docs fixture preflight', () => {
     const withPreamble = fs.mkdtempSync(path.join(os.tmpdir(), 'docsync-preamble-'));
     try {
       fs.cpSync(generated, withPreamble, { recursive: true });
+      fs.rmSync(path.join(withPreamble, 'ship/sections/preamble.md'), { force: true });
       const preamble = path.join(withPreamble, 'document-release/sections/preamble.md');
       fs.writeFileSync(preamble, '# Shared preamble\n\nFixture copy marker.\n');
       const fixture = fixtureDocs('risky', withPreamble);

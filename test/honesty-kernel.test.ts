@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { readSkillStartup } from './helpers/skill-startup';
 import { generatePreamble } from '../scripts/resolvers/preamble';
 import {
   EVIDENCE_KERNEL_BULLETS, EVIDENCE_KERNEL_HEADING, KERNEL_MAX_BYTES, generateEvidenceDirective,
@@ -68,7 +69,7 @@ describe('Claims Need Evidence kernel', () => {
     expect(skills.length).toBeGreaterThan(20);
     for (const skill of skills) {
       const tier = Number(/preamble-tier:\s*(\d)/.exec(fs.readFileSync(path.join(ROOT, skill, 'SKILL.md.tmpl'), 'utf8'))?.[1]);
-      const rendered = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf8');
+      const rendered = readSkillStartup(path.join(ROOT, skill, 'SKILL.md'));
       expect(rendered, `${skill} still carries the retired heading`).not.toContain('Claimed Limitations Need Evidence');
       if (tier >= 2) expect(rendered, `${skill} (tier ${tier}) lacks the kernel; run bun run gen:skill-docs`).toContain(EVIDENCE_KERNEL_HEADING);
     }

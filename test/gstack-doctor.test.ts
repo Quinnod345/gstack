@@ -529,6 +529,14 @@ describe('gstack-doctor --check', () => {
     expect(noPatch.trailer).toBe('gstack: fail patch');
   });
 
+  test('--for autoplan: a hoisted Codex render carries the patch in its shared sections/preamble.md', () => {
+    const f = makeFixture();
+    const dest = installCodex(f, false);
+    write(path.join(dest, 'gstack-review/sections/preamble.md'), '# gstack shared preamble 0123456789ab\n\n## Model-Specific Behavioral Patch (gpt-6-astra)\n');
+    const r = row(f, ['--for', 'autoplan']);
+    expect(r.rows.patch, r.out).toEqual({ status: 'PASS', rest: 'gpt-6-astra (gstack-review/sections/preamble.md)' });
+  });
+
   test('an empty installed-host set is never ok: claude is required and FAILs', () => {
     const f = makeFixture();
     write(path.join(f.state, 'installs.tsv'), '');

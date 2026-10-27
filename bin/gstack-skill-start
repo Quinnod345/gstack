@@ -538,7 +538,7 @@ fi
 # Lake intro (one-time; the offer is interactive, so the model acks).
 if [ "$_LAKE_SEEN" = "no" ]; then
   _emit_block lake-intro <<EOI
-Say: "gstack follows the **Boil the Ocean** principle — do the complete thing when AI makes marginal cost near-zero. Read more: https://garryslist.org/posts/boil-the-ocean" and offer to open it. Only run \`open https://garryslist.org/posts/boil-the-ocean\` if the user says yes. Always run: \`touch "$_GH/.completeness-intro-seen"\`.
+Say: "gstack follows the **Boil the Ocean** principle — complete coverage, minimal code: cover the whole requirement and write no code beyond it. Read more: https://garryslist.org/posts/boil-the-ocean" and offer to open it. Only run \`open https://garryslist.org/posts/boil-the-ocean\` if the user says yes. Always run: \`touch "$_GH/.completeness-intro-seen"\`.
 EOI
 fi
 

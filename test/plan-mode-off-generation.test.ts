@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runGeneration } from '../scripts/gen-skill-docs';
+import { readSkillEffective } from './helpers/skill-startup';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const SAFE = '## Plan Mode Safe Operations\n';
@@ -33,6 +34,16 @@ beforeAll(async () => {
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const read = (root: string, rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
+/** Every section a skill follows, once each: SKILL.md with its shared preamble applied. */
+const effective = (root: string, rel: string) => readSkillEffective(path.join(root, rel));
+
+/**
+ * The upgrade-check rules have no heading, so the effective view keeps them with
+ * whichever SKILL.md section precedes them, which can be a plan-mode section's
+ * skill variant. Compare them apart from the rest: same text, any position.
+ */
+const UPGRADE_RULES = /\n\nIf `PROACTIVE` is [^\n]*\n\nIf `SKILL_PREFIX` is [^\n]*/;
+const apart = (text: string) => [text.replace(UPGRADE_RULES, ''), UPGRADE_RULES.exec(text)?.[0] ?? null];
 
 /** The committed text with the two plan-mode sections (each heading plus one paragraph) cut out. */
 function withoutPlanMode(text: string): string {
@@ -52,15 +63,15 @@ describe('gen-skill-docs --plan-mode=off (claude host)', () => {
   test('off drops exactly the two plan-mode sections and leaves other skills untouched', () => {
     let stripped = 0;
     for (const rel of skills) {
-      const committed = read(ROOT, rel);
-      const off = read(path.join(tmp, 'off'), rel);
+      const committed = effective(ROOT, rel);
+      const off = effective(path.join(tmp, 'off'), rel);
       expect(off, rel).not.toContain(SAFE);
       expect(off, rel).not.toContain('## Skill Invocation During Plan Mode');
       if (!committed.includes(SAFE)) {
         expect(off, rel).toBe(committed);
         continue;
       }
-      expect(off, rel).toBe(withoutPlanMode(committed));
+      expect(apart(off), rel).toEqual(apart(withoutPlanMode(committed)));
       stripped++;
     }
     expect(stripped).toBeGreaterThan(40);

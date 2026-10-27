@@ -57,18 +57,18 @@
 - Curves are named tokens: DESIGN.md's, else `cubic-bezier(0.16, 1, 0.3, 1)` for entrances and `cubic-bezier(0.65, 0, 0.35, 1)` for wipes; `linear` only for constant motion.
 - Loops pause off-screen. `prefers-reduced-motion: reduce` shows the final state. Full-height sections use `min-height: 100dvh`, not `100vh`.
 
-### Craft check
+### Design lint
 
-At Step 4, after the Slop Gate and before the screenshots, run the free checker on a vanilla HTML output (for framework output, say it is unavailable):
+At Step 4, after the Slop Gate and before the screenshots, run the free lint on the finalized page (`--scope component` for a component file alone; its copy tier reads HTML only, so judge those tells by eye there):
 
 ```bash
-~/.claude/skills/gstack/bin/gstack-design-craft <path-to-finalized.html>
+~/.claude/skills/gstack/bin/gstack-design-lint <path-to-finalized.html> --render
 ```
 
-It prints one `CRAFT_CHECK: <id> <count> <fix>` line per tell (the realism rules above, `[Needs proof:` markers, scroll listeners, `100vh`, `transition: all`, `href="#"`, `alert()`, missing alt; on a full document a missing title, description, favicon, working skip link, or `aria-current` on route navigation), then `CRAFT_RESULT: clean` or `CRAFT_RESULT: <n> issue(s)`, plus the accepted count when `--accepted` covers any. No `CRAFT_RESULT` line: say the check was unavailable and continue. Same contract as the Slop Gate: one surgical fix pass, one rerun, the rest listed as accepted-with-reason (a real customer named Nexus, a supplied 50% figure). Rerun once when the refinement loop exits; report only new lines.
+It prints one `LINT: <grade> <rule-id> <file>:<line> <evidence> | fix: <fix>` line per tell (the realism rules above among them), then `LINT_SUMMARY: blocks=N ask=N waived=N polish=N render=…`. Read the exit code: 2, fix every `blocks` line (never waivable); 1, fix each `ask` line or waive it; 0, list the `polish` lines as notes. No `LINT_SUMMARY` line: say the lint was unavailable and continue. A `render` line or `render=skipped`: say the page was not measured; the static lines stand. Same contract as the Slop Gate: one surgical fix pass, one rerun. Rerun once when the refinement loop exits; report only new lines.
 
-**Accepted exceptions persist.** Step 5's finalized.json records each one in `craft_exceptions` as `{ id, count, reason }`, carrying forward earlier ones the check still reports at the count it reports now (`[]` when none, never the template's placeholder entry). When evolving a finalized page, or rerunning on the page this run finalized, append `--accepted <that finalized.json>` to the command; never after Start fresh or for a new page, whose old exceptions covered different content: a tell it covers prints `CRAFT_ACCEPTED: <id> <count> <reason>` and does not fail the check, so name those as accepted earlier instead of fixing or re-flagging them. A count above the accepted one stays a `CRAFT_CHECK` line; it is new, so fix it or accept the new count with a reason. A `cannot use exceptions` warning with exit 2 means that record is malformed: the page was still checked with none accepted, so treat every line as new and write `craft_exceptions` correctly at Step 5.
+**Waivers live in the page.** A tell that is right for this page (a real customer named Nexus, a supplied 50% figure, which `invented-proof` may also flag) gets a comment per rule, `<!-- gstack-lint-disable <rule-id>: <reason about this page, 24+ chars> -->`, and prints as `waived` with its reason on every later run, an evolve included. Waive only what the user supplied or confirmed, never a line you could fix.
 
-**Before this can ship.** Open the Step 4 hand-off, and repeat before Step 5's "Copy to project": every `[Needs proof: …]` marker, the dependencies the page cannot own (legal URLs, form endpoint, og:image, indexing, analytics and cookie consent where required), the accepted exceptions, and every claim the check made you change.
+**Before this can ship.** Open the Step 4 hand-off, and repeat before Step 5's "Copy to project": every `[Needs proof: …]` marker, the dependencies the page cannot own (legal URLs, form endpoint, og:image, indexing, analytics and cookie consent where required), every waiver, and every claim the lint made you change.
 
 Adapted from Elaya's [ai-design-skills](https://github.com/elayadesign/ai-design-skills) and [redesign-skill](https://github.com/elayadesign/redesign-skill) (MIT, © 2026 Elaya), rewritten for gstack. See NOTICE.md.

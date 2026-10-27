@@ -140,7 +140,11 @@ _dc_check_patch() {
     _dc_fail_or_skip patch "no review skill in the Codex render at $_dc_hs_dest" "$fix" COMPONENT_MISSING "not needed; no Codex review render"
     return
   fi
-  model=$(grep -F 'Model-Specific Behavioral Patch (' "$file" 2>/dev/null | head -1 | sed 's/.*Model-Specific Behavioral Patch (\([^)]*\)).*/\1/' | clamp 'A-Za-z0-9._:/-' 60)
+  # A tier 2+ render keeps the patch in the shared sections/preamble.md its SKILL.md points to.
+  for f in "$file" "${file%/SKILL.md}/sections/preamble.md"; do
+    model=$(grep -F 'Model-Specific Behavioral Patch (' "$f" 2>/dev/null | head -1 | sed 's/.*Model-Specific Behavioral Patch (\([^)]*\)).*/\1/' | clamp 'A-Za-z0-9._:/-' 60)
+    [ -n "$model" ] && { file="$f"; break; }
+  done
   if [ -n "$model" ]; then
     _dc_row PASS patch "$model (${file#"$_dc_hs_dest"/})"
   else

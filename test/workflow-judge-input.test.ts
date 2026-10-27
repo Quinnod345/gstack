@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readWorkflowJudgeInput, buildWorkflowJudgePrompt, QA_DISCOVERY_REFERENCES, WORKFLOW_JUDGE_RESPONSE_SCHEMA, WORKFLOW_JUDGE_REASONING_WORD_LIMIT } from './helpers/workflow-judge-input';
 import { ASK_QUESTIONS_HEADING, ENG_REVIEW_EXCERPT } from './helpers/workflow-excerpt';
+import { readSkillStartup, SHARED_PREAMBLE_FILE } from './helpers/skill-startup';
 
 const ROOT = resolve(import.meta.dir, '..');
 const scratchRoots: string[] = [];
@@ -78,7 +79,7 @@ function sectionPaths(skill: string): string[] {
   const runnerOnly = new Set((JSON.parse(readFileSync(join(ROOT, skill, 'sections', 'manifest.json'), 'utf8')).sections as Array<{ file: string; runner_only?: boolean }>)
     .filter(section => section.runner_only).map(section => section.file));
   return readdirSync(join(ROOT, skill, 'sections'))
-    .filter(name => name.endsWith('.md') && !runnerOnly.has(name))
+    .filter(name => name.endsWith('.md') && !runnerOnly.has(name) && name !== SHARED_PREAMBLE_FILE)
     .sort()
     .map(name => `${skill}/sections/${name}`);
 }
@@ -91,7 +92,7 @@ describe('workflow judge file bundle', () => {
     const options = new Function('ENG_REVIEW_EXCERPT', `return ({${registration![1]}});`)(ENG_REVIEW_EXCERPT);
     const input = readWorkflowJudgeInput({ root: ROOT, ...options });
     const entry = input.files.find(file => file.kind === 'entrypoint')!;
-    const complete = readFileSync(join(ROOT, options.skillPath), 'utf8');
+    const complete = readSkillStartup(join(ROOT, options.skillPath));
     expect(entry.content).toBe(complete.slice(complete.indexOf('# Plan Review Mode')));
     expect(entry.content).toContain('Do not build features, acceptance suites or benchmarks unless explicitly authorized');
     expect(entry.content).toContain('## Scope gate');

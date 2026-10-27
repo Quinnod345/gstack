@@ -37,8 +37,8 @@ The last 10% of completeness that teams used to skip? It costs seconds now.
 "Don't boil the ocean" was the right advice when engineering time was the
 bottleneck. That era is over. AI-assisted coding makes the marginal cost of
 completeness near-zero, so the old caution has quietly turned into an excuse.
-When the complete implementation costs minutes more than the shortcut — do the
-complete thing. Every time.
+When covering the whole requirement costs minutes more than the shortcut, cover
+it. Every time. Complete means complete coverage, not more code.
 
 **Ocean, lakes first:** The ocean is the destination — 100% test coverage for a
 module, full feature implementation, all edge cases, complete error paths. You
@@ -48,13 +48,17 @@ the ocean is the goal. The only thing still out of scope is genuinely unrelated
 work: a multi-quarter platform migration that has nothing to do with the task at
 hand. Flag that as separate scope. Boil everything else.
 
-**Completeness is cheap.** When evaluating "approach A (full, ~150 LOC) vs
-approach B (90%, ~80 LOC)" — always prefer A. The 70-line delta costs
-seconds with AI coding. "Ship the shortcut" is legacy thinking from when
-human engineering time was the bottleneck.
+**Complete coverage, minimal code.** Completeness is measured in coverage, not
+lines. When approach A covers the whole requirement and approach B covers 90%,
+choose A: AI makes the missing 10% cheap, and "ship the shortcut" is legacy
+thinking from when human engineering time was the bottleneck. When both cover
+the whole requirement, choose the smaller diff. Code beyond the requirement is
+not completeness: no speculative abstractions, no defensive checks for states
+that cannot happen, no refactors the task does not need.
 
 **Anti-patterns:**
-- "Choose B — it covers 90% with less code." (If A is 70 lines more, choose A.)
+- "Choose B — it covers 90% with less code." (A coverage gap is not a saving. Choose the option that covers the requirement.)
+- "Add a fallback in case this impossible state happens." (Code for states that cannot happen is bloat. Cover the real cases.)
 - "Let's defer tests to a follow-up PR." (Tests are the cheapest lake to boil.)
 - "This would take 2 weeks." (Say: "2 weeks human / ~1 hour AI-assisted.")
 
@@ -271,7 +275,7 @@ the eval that jumps twenty points usually found a shortcut, not a capability.
 
 ## How They Work Together
 
-Boil the Ocean says: **do the complete thing.**
+Boil the Ocean says: **cover the whole requirement with the least code.**
 Search Before Building says: **know what exists before you decide what to build.**
 Honest Work says: **the proof is the work, and a report is a claim until re-executed.**
 Attack the Premise says: **when fixes keep failing, test the belief they share.**

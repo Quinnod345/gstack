@@ -36,7 +36,7 @@ Tell these apart:
 2. **Completeness scores per choice** — explicit on EACH choice, per the Completeness rule in the Format section below; never drop the score.
 3. **The recommendation and why** — the \`Recommendation: <choice> because <reason>\` line plus the \`(recommended)\` marker on that choice.
 
-Layout: a \`D<N>\` title; an explicit reply line listing the offered selectors; the issue ELI10; the Recommendation line; ONE paragraph per choice with its \`(recommended)\` marker, \`Completeness: X/10\`, and 2-4 sentences of reasoning (never a bare bullet list); a closing \`Net:\` line. With \`QUESTION_TUNING: true\`, append the checked \`<gstack-qid:{question_id}>\` to the explicit reply line. Split chains / 5+ options: one prose block per per-option call, in order. Before an interactive prose question, finish the tool calls that do not depend on its answer; then send the complete brief as the turn's final message and STOP and wait for the typed answer.${openQuestions ? ' An open-ended question with no options list uses the `Q<N>` form below instead of a `D<N>` brief; a free-text reply answers the most recent unanswered `Q<N>`.' : ''} Do not publish an earlier copy during tool work or follow it with tools or a waiting message. In plan mode this satisfies end-of-turn like a tool call.
+Layout: a \`D<N>\` title; an explicit reply line listing the offered selectors; the issue ELI10; the Recommendation line; ONE paragraph per choice with its \`(recommended)\` marker, \`Completeness: X/10\`, and 2-4 sentences of reasoning (never a bare bullet list); a closing \`Net:\` line. With \`QUESTION_TUNING: true\`, append the checked \`<gstack-qid:{question_id}>\` to the explicit reply line. Split chains / 5+ options: one prose block per per-option call, in order. Before an interactive prose question, finish the tool calls that do not depend on its answer; then send the complete brief as the turn's final message and STOP and wait for the typed answer. Do not publish an earlier copy during tool work or follow it with tools or a waiting message. In plan mode this satisfies end-of-turn like a tool call.
 
 **Continuation — mapping a typed reply back to a brief.** Each brief carries a stable label (\`D<N>\`, or \`D<N>.k\` in a split chain) the user references (e.g. "3.2: B"). A bare letter maps to the most-recent UNANSWERED brief; if more than one is open (a split chain), do NOT guess — ask which \`D<N>.k\` it answers. Never apply a bare letter ambiguously across a chain.
 
@@ -45,18 +45,7 @@ Layout: a \`D<N>\` title; an explicit reply line listing the offered selectors; 
 ### Format
 
 Every AskUserQuestion is a decision brief and must be sent as tool_use, not prose — unless the documented failure fallback above applies (interactive session + the call is unavailable/erroring), when the prose fallback is the correct output.
-${openQuestions ? `
-**Open-question prose form (\`Q<N>\`)** — for open-ended questions with no fixed option set (the Phase 2A/2B diagnostic questions) when you are in prose:
 
-\`\`\`text
-Q<N> — <question, verbatim>
-Why I'm asking: <1-2 sentences: stakes, what a weak answer would mean>
-What a strong answer sounds like: <the section's "push until you hear" line>
-Reply in your own words — I'll wait.
-\`\`\`
-
-Q-numbering starts at \`Q1\` per invocation, independent of D-numbering. Questions with discrete options always use \`D<N>\`.
-` : ''}
 \`\`\`
 D<N> — <one-line question title>
 Project/branch/task: <1 short grounding sentence using _BRANCH>
@@ -137,5 +126,18 @@ ${planReview ? `Before emitting a tool or prose decision brief, verify:
 - [ ] If you had 5+ options, you split (or batched into ≤4-groups) — did NOT drop any
 - [ ] If you split, you checked dependencies between options before firing the chain
 - [ ] If a per-option Hold fires, you stopped the chain immediately (didn't queue)`}
-`;
+${openQuestions ? `
+### Open-ended questions
+
+**Open-question prose form (\`Q<N>\`)** — for open-ended questions with no fixed option set (the Phase 2A/2B diagnostic questions) when you are in prose, use this form instead of a \`D<N>\` brief; a free-text reply answers the most recent unanswered \`Q<N>\`:
+
+\`\`\`text
+Q<N> — <question, verbatim>
+Why I'm asking: <1-2 sentences: stakes, what a weak answer would mean>
+What a strong answer sounds like: <the section's "push until you hear" line>
+Reply in your own words — I'll wait.
+\`\`\`
+
+Q-numbering starts at \`Q1\` per invocation, independent of D-numbering. Questions with discrete options always use \`D<N>\`.
+` : ''}`;
 }
