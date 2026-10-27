@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-**Five paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
+**Four paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
 
 ### Fixed
 - **Ship doc-sync gate** (`ship-docsync-store`, `ship-docsync-completion`): the read grammar accepts an orientation `git branch` listing with no operand (`--show-current`, `-a`, `-r`, `-v`, `--list`), and the declared interface names exactly that set. A /document-release re-audit after a rejected first attempt is judged on the attempt the parent accepted: the accepted contract is the last foreground dispatch, a rejected attempt's retained edit is not its unreported edit, and a re-audit that edits the same document again and says so passes.
