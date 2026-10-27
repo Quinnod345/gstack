@@ -30,6 +30,11 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(codes({ history: 'rebase' })).toEqual(['POLICY_INVALID:history']);
     expect(codes({ release_tool: 42 })).toEqual(['POLICY_INVALID:release_tool']);
     expect(codes({ pr_count: { default_pr_count: 0, split_requires_owner: 'yes' } })).toEqual(['POLICY_INVALID:pr_count.default_pr_count', 'POLICY_INVALID:pr_count.split_requires_owner']);
+    expect(codes({ review_scope: 'loose' })).toEqual(['POLICY_INVALID:review_scope', 'POLICY_INVALID:review_scope']);
+    expect(codes({ review_scope: 'all' })).toEqual(['POLICY_INVALID:review_scope']);
+    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'frozen' })).toEqual([]);
     expect(codes([])).toEqual(['POLICY_INVALID:']);
   });
 
@@ -110,7 +115,7 @@ describe('gstack-ship-policy (bin)', () => {
     expect(r.out).not.toMatch(/^ship: history/m);
     const strict = fixture({ policy: { ...BASE_POLICY, history: 'merge-only', queue_mode: 'claim-at-open', bump: 'ask', release_tool: null, preregistration_shas: ['0123456789abcdef0123456789abcdef01234567'] } });
     const lines = runBin(strict, 'gstack-ship-policy', ['show-effective', '--base', 'main']).out.split('\n').filter(l => l.startsWith('ship: '));
-    expect(lines.map(l => l.split(':')[1]!.trim())).toEqual(['history merge-only', 'queue_mode claim-at-open', 'bump ask', 'preregistration']);
+    expect(lines.map(l => l.split(':')[1]!.trim())).toEqual(['history merge-only', 'queue_mode claim-at-open', 'bump ask', 'review_scope frozen', 'preregistration']);
     const j = JSON.parse(runBin(repo, 'gstack-ship-policy', ['show-effective', '--base', 'main', '--json']).out);
     expect(j.valid).toBe(true);
     expect(j.source.kind).toBe('base');

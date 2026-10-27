@@ -8,6 +8,12 @@
  *               CI at that exact head, the PREGATE line, the gate state and the
  *               /ship receipt; refused when the tree is not the pushed PR head
  *               or the PR body carries no receipt for it (QUEUE_RECEIPT_*).
+ *               A pregate record missing from this checkout, unreadable,
+ *               recorded for another tree, or current but still waiting on a
+ *               remote receipt, is looked up by the current tree under
+ *               <state root>/pregate/by-tree/ (gstack-pregate mirrors every
+ *               record there), and the PREGATE line says where it came from;
+ *               a record whose own checks failed or stayed incomplete stands.
  *   stamp       preflight (gated head equals HEAD modulo stamps, base, policy,
  *               gate record under full_e2e), restamp, commit, tree receipt,
  *               each stage journaled; QUEUE_STAMP: <pr> <version> head= gated=
@@ -21,7 +27,8 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
+import type { PregateFile } from './headless-artifacts';
+import { CHECKS, pregateMirrorPath, readPregateFile, verifyPregate, PREGATE_OUT_REL } from './pregate/index';
 import { ensureTmpExcluded, restamp, versionAtRef } from './restamp';
 import type { ResultCodeName } from './result-codes';
 import { bindReceipt, extractReceipt } from './ship-receipt';
@@ -30,6 +37,7 @@ import {
   QUEUE_DIR_REL, applyStampPatch, commitForTree, currentAttempt, git, listAttempts, recomputeMergeTree, sha256, writeJsonAtomic,
   type AttemptRecord, type QueueFailure,
 } from './ship-queue-gate';
+import { wtreeFingerprint } from './script-invocation';
 import { buildReceipt, type TreeReceipt } from './tree-receipt';
 
 export type Gh = (args: string[]) => { ok: boolean; out: string; err?: string };
@@ -179,6 +187,22 @@ function gateEvidence(ctx: QueueContext, pr: string, head: string, attempt: Atte
   return { ok: false, line: `gate-evidence: missing for ${head.slice(0, 12)} (gate-ahead --record, or --gate-exit 0 --gate-log <file>)` };
 }
 
+/**
+ * Why a by-tree pregate mirror cannot stand in for this checkout's own
+ * record, or null. The mirror is keyed by tree alone, so any pregate run
+ * anywhere mints one; what the lane case needs from it is the test tier that
+ * `gstack-pregate --stage tests --remote` ran in the clone, so the mirror
+ * must hold every tests-stage check (a `--only timing` or preflight-only run
+ * is not evidence), be recorded against the same base, and not come from
+ * `--policy-from head`.
+ */
+function mirrorGap(file: PregateFile, base: string): string | null {
+  if (!(file.base ?? '').startsWith(`origin/${base}@`)) return `recorded against ${file.base ?? 'no base'}, not origin/${base}`;
+  if (file.policy?.startsWith('head ')) return 'recorded under the unreviewed head policy';
+  const missing = CHECKS.filter(c => c.stage === 'tests' && !file.checks.some(k => k.id === c.id)).map(c => c.id);
+  return missing.length ? `a run without the tests stage (${missing.join(', ')})` : null;
+}
+
 function gateLine(policy: LoadedPolicy, attempt: AttemptRecord | null): string {
   const p = policy.policy;
   const rec = attempt ? `attempt=${attempt.attempt} gated_tree=${attempt.gated_tree.slice(0, 12)} ${attempt.result ? `exit=${attempt.result.exit}` : 'not recorded'}` : 'none';
@@ -206,13 +230,29 @@ export function ready(ctx: QueueContext, o: { pr: string; pregate?: string; gate
   const pregateFile = path.resolve(ctx.repoRoot, o.pregate ?? PREGATE_OUT_REL);
   let pregateLine = `PREGATE: missing (${path.relative(ctx.repoRoot, pregateFile)}; run gstack-pregate run --allow-repo-commands)`;
   let pregateOk = false;
+  const treeNow = wtreeFingerprint({ cwd: ctx.repoRoot });
+  // The mirror stands in for a record that is missing, unreadable, recorded for another tree, or current but
+  // waiting on a remote receipt another checkout holds; a record whose own checks failed or stayed incomplete (the diff's doing
+  // or the environment's) is final.
+  let useMirror = true;
   if (fs.existsSync(pregateFile)) {
     const read = readPregateFile(pregateFile);
     if (read.file) {
-      const v = verifyPregate(ctx.repoRoot, read.file);
+      const v = verifyPregate(ctx.repoRoot, read.file, treeNow);
       pregateOk = v.ok;
+      useMirror = !v.ok && v.code !== 'PREGATE_LANE_FAILED' && v.code !== 'PREGATE_INCOMPLETE' && v.code !== 'PREGATE_ENVIRONMENT';
       pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length}${v.ok ? '' : ` — ${v.message} (${v.code})`}`;
     } else pregateLine = `PREGATE: unreadable (${read.errors[0]?.message ?? 'invalid'})`;
+  }
+  if (useMirror && 'tree' in treeNow) {
+    const mirror = pregateMirrorPath(treeNow.tree);
+    const read = fs.existsSync(mirror) ? readPregateFile(mirror) : null;
+    const gap = read?.file ? mirrorGap(read.file, ctx.base) : null;
+    const v = read?.file && !gap ? verifyPregate(ctx.repoRoot, read.file, treeNow) : null;
+    if (read?.file && v?.ok) {
+      pregateOk = true;
+      pregateLine = `PREGATE: ${read.file.verdict} tree=${read.file.tree.slice(0, 12)} head=${(read.file.head ?? '').slice(0, 12)} checks=${read.file.checks.length} (from the state root's pregate/by-tree/${treeNow.tree.slice(0, 12)}.json, recorded by another checkout)`;
+    } else if (gap) pregateLine += `; the state root's mirror for this tree cannot stand in: ${gap}`;
   }
   const receipt = bindReceipt(info.body ?? '', o.pr, acceptedReceiptHeads(ctx, policy, head, info.body ?? ''));
   const attempt = currentAttempt(ctx.repoRoot, o.pr);

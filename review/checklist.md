@@ -206,6 +206,12 @@ the fix, it's ASK.
 **Critical findings default toward ASK** (they're inherently riskier).
 **Informational findings default toward AUTO-FIX** (they're more mechanical).
 
+**Severity glossary** (the words /ship's review loop budgets by; docs/review-policy.md):
+- **blocker**: the intended case is wrong. A test would fail, production breaks, or data or secrets are lost. CRITICAL; fixed on every pass, or named to the owner at the cap.
+- **should**: a real bug a caller will hit, inside the intended case. Fixed when it is in the diff on pass 1; filed and deferred when it is in code the PR did not change.
+- **nit**: everything else, including style, naming, wording and "I would have done it differently". A named note in the PR body; never a reason for another pass.
+Two stop rules follow from the budget: if a pass's fixes grew the diff past what the request needs, cut that growth first; and reaching the cap approves nothing, so a standing blocker is reported, not waved through.
+
 ---
 
 ## Suppressions — DO NOT flag these

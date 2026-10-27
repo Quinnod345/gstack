@@ -1566,6 +1566,18 @@ Tie everything to user goals and product objectives. Always suggest specific imp
 
 Source: [OpenAI "Designing Delightful Frontends with GPT-5.4"](https://developers.openai.com/blog/designing-delightful-frontends-with-gpt-5-4) (Mar 2026) + gstack design methodology.
 
+## Section index — Read each section when its situation applies
+
+This skill is a decision-tree skeleton. The steps below point to on-demand
+sections. Read a section in full before doing its step; do not work from memory.
+
+| When | Read this section |
+|------|-------------------|
+| a craft, Persuade or redesign audit | `sections/craft-audit.md` |
+
+> **STOP.** Before a craft, Persuade or redesign audit, Read `~/.claude/skills/gstack/design-review/sections/craft-audit.md` and execute it
+> in full. Do not work from memory — that section is the source of truth for this step.
+
 Record baseline design score and AI slop score at end of Phase 6.
 
 ---
