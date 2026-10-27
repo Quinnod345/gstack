@@ -203,4 +203,23 @@ describe('ship is on the ledger', () => {
     expect(ledgerFailure('ship', readSkillForParity(repo, 'ship', true).unionBytes, l)).toBeNull();
     expect('error' in l ? 0 : ledgerExpected(l)).toBeGreaterThan(0);
   });
+  // Value: protects=the scripts/size-ledger.ts CLI contract lanes run (check exits 0 with SIZE_LEDGER: ok on a tree the ledger accounts for; record refuses on main or without --why, fold without --measured-at, a skill with no ledger; none of them writes); fails_when=a refusal is dropped, an exit code changes or a refused call writes an entry; why_new=the tests above call the helpers, never the script; seam=none; no_claim=the exit-1 mismatch path (needs a ship tree off the ledger)
+  test('scripts/size-ledger.ts checks this tree and refuses unsafe calls without writing', () => {
+    const run = (...args: string[]) => spawnSync(process.execPath, ['--no-env-file', '--config=/dev/null', path.join(repo, 'scripts/size-ledger.ts'), ...args], { cwd: repo, encoding: 'utf-8', timeout: 60_000 });
+    const dir = path.join(repo, 'test/size-ledger/ship');
+    const before = fs.readdirSync(dir).sort();
+    const check = run('check', 'ship');
+    expect([check.status, check.stdout.trim().split('\n').at(-1)]).toEqual([0, 'SIZE_LEDGER: ok']);
+    const refusals: Array<[string[], string]> = [
+      [['record', 'ship', '--why', 'probe', '--branch', 'main'], 'refusing to record on main'],
+      [['record', 'ship'], 'record needs --why'],
+      [['fold', 'ship'], 'fold needs --measured-at'],
+      [['check', 'plan-eng-review'], 'plan-eng-review has no sizeLedger'],
+    ];
+    for (const [args, message] of refusals) {
+      const r = run(...args);
+      expect([r.status, r.stderr.includes(message)]).toEqual([2, true]);
+    }
+    expect(fs.readdirSync(dir).sort()).toEqual(before);
+  });
 });
