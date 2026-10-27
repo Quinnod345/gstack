@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DOC_PATH, fixtureDocs, gitAt, repoSnapshot } from './helpers/docsync-fixture';
-import { docsCommandAllowed, docsCompletedRead, docsNativeInterface, docsSessionOptions, docsToolFailures } from './helpers/docsync-observer';
+import { docsCommandAllowed, docsCompletedRead, docsNativeInterface, docsSessionOptions, docsToolFailures, docsWriteFailures } from './helpers/docsync-observer';
 import { parseNDJSON, type SkillTestResult } from './helpers/session-runner';
 
 let fixture: ReturnType<typeof fixtureDocs>;
@@ -500,4 +500,67 @@ test('the docs interface names the Claude config dir and private actor state as 
   expect(guidance).toContain("every agent's session transcript");
   expect(guidance).toContain('judge a child only by the output it returns');
   expect(guidance).toContain('Every read stays off actor-state.json');
+});
+
+// /ship Step 14.5's continue path (PR 2 of the convergence lane) runs three own-tree housekeeping commands and writes
+// the receipt's docs record inside the repository. The closed interface declares exactly those, byte for byte with the
+// generated section, and nothing adjacent: a reworded exclude line, a bare rm, another receipt subcommand or another
+// write under .gstack/ stay outside it (gate: ship-docsync-completion/current red twice at 775d9804 before they were declared).
+test('Step 14.5 housekeeping commands and the docs record are declared exactly as the generated section writes them', () => {
+  const { DOCS_AUDIT_RECORD, DOCS_AUDIT_RECORD_PATHS, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } = require('./helpers/docsync-interface') as typeof import('./helpers/docsync-interface');
+  const section = fs.readFileSync(path.resolve(import.meta.dir, '..', 'ship/sections/documentation.md'), 'utf8');
+  expect(section).toContain(DOCS_TMP_EXCLUDE);
+  expect(section).toContain(DOCS_AUDIT_RESET);
+  expect(section).toContain('gstack-ship-receipt docs-caps --base <base>');
+  const skills = fixture.skills.split(path.sep).join('/');
+  const caps = docsCapsCommand(skills);
+  const interfaceText = docsNativeInterface(fixture);
+  for (const command of [DOCS_TMP_EXCLUDE, DOCS_AUDIT_RESET, caps, docsCapsCommand('~/.claude/skills/gstack')]) {
+    if (command === caps) expect(interfaceText).toContain(command);
+    expect(docsCommandAllowed(command, fixture)).toBe(true);
+    expect(docsToolFailures(nativeResult(command, 'DOCS_CAP: none declared'), fixture, [], true)).toEqual([]);
+  }
+  for (const command of [DOCS_TMP_EXCLUDE.replace("'/.gstack/tmp/'", "'/.gstack/'"), `${DOCS_TMP_EXCLUDE}; git add -A`, 'rm -f .gstack/tmp', 'rm -rf .gstack/tmp/docs-audit.json',
+    `${skills}/bin/gstack-ship-receipt docs-caps --base feature/docs`, '~/.claude/skills/other/bin/gstack-ship-receipt docs-caps --base main', `${skills}/bin/gstack-ship-receipt write --docs @${DOCS_AUDIT_RECORD}`, `${skills}/bin/gstack-ship-receipt docs-caps --base main --json`]) {
+    expect(docsCommandAllowed(command, fixture)).toBe(false);
+  }
+  const write = (file: string): SkillTestResult => {
+    const parsed = parseNDJSON([
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'docs-write', name: 'Write', input: { file_path: file, content: '{"status":"current","scope":"handbook"}' } }] } },
+      { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'docs-write', content: 'ok', is_error: false }] } },
+    ].map(event => JSON.stringify(event)));
+    return { ...parsed, exitReason: 'success' } as unknown as SkillTestResult;
+  };
+  expect(docsToolFailures(write(path.join(fixture.repo, DOCS_AUDIT_RECORD)), fixture, [], false)).toEqual([]);
+  expect(docsToolFailures(write(path.join(fixture.repo, DOCS_AUDIT_RECORD)), fixture, [], true)).toEqual([]);
+  expect(docsToolFailures(write(path.join(fixture.repo, DOC_PATH)), fixture, [], true)).toEqual(['read-only docs write attempt']);
+  // The kernel observer sees the exclude file and the record's directories in every scenario that runs the Entry, the fault cases'
+  // unseeded first attempts included, so the shared list is permitted without each caller naming it; anything else under .git or .gstack is not.
+  const observed = (paths: string[]) => ({ complete: true, failures: [], events: paths.map(p => ({ path: p, mask: 0x2, cookie: 0, at: 0 })), changed: paths, before: {}, after: {}, limits: [] });
+  expect(docsWriteFailures(observed(['.qa-state/.observer-check', ...DOCS_AUDIT_RECORD_PATHS]), [])).toEqual([]);
+  expect(docsWriteFailures(observed(['.git/info/attributes']), [])).toEqual(['forbidden docs write: .git/info/attributes']);
+  expect(docsWriteFailures(observed(['.gstack/tmp/review-loop.json']), [DOC_PATH])).toEqual(['forbidden docs write: .gstack/tmp/review-loop.json']);
+  // The Write tool lands the record through `<record>.tmp.<pid>.<12 hex>` + rename (gate: both lifecycle cases red at 0230fc2 on exactly
+  // that sibling). The sibling is admitted only as the cookie-paired source of a move onto the record that leaves nothing behind.
+  const temp = `${DOCS_AUDIT_RECORD}.tmp.564.6161e6c7f0b7`;
+  const moved = (edits: { path: string; mask: number; cookie?: number }[], after: Record<string, string> = {}) => ({
+    complete: true, failures: [], events: edits.map((e, at) => ({ path: e.path, mask: e.mask, cookie: e.cookie ?? 0, at })), changed: Object.keys(after), before: {}, after, limits: [],
+  });
+  const landing = [{ path: temp, mask: 0x100 }, { path: temp, mask: 0x2 }, { path: temp, mask: 0x8 }, { path: temp, mask: 0x40, cookie: 7 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 7 }];
+  expect(docsWriteFailures(moved(landing), [])).toEqual([]);
+  expect(docsWriteFailures(moved(landing.slice(1)), [])).toEqual([]);
+  expect(docsWriteFailures(moved(landing, { [temp]: '0:' + 'a'.repeat(64) }), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved(landing.slice(0, 3)), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved([...landing.slice(0, 4), { path: '.gstack/tmp/other.json', mask: 0x80, cookie: 7 }]), [])).toEqual([`forbidden docs write: ${temp}`, 'forbidden docs write: .gstack/tmp/other.json']);
+  expect(docsWriteFailures(moved([...landing.slice(0, 3), { path: temp, mask: 0x40, cookie: 7 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 7 }, { path: temp, mask: 0x100 }]), [])).toEqual([`forbidden docs write: ${temp}`]);
+  expect(docsWriteFailures(moved([{ path: `${DOC_PATH}.tmp.564.6161e6c7f0b7`, mask: 0x40, cookie: 9 }, { path: DOCS_AUDIT_RECORD, mask: 0x80, cookie: 9 }]), [])).toEqual([`forbidden docs write: ${DOC_PATH}.tmp.564.6161e6c7f0b7`]);
+  expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/tmp/review-loop.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
+  expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/ship-policy.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
+  expect(gitAt(fixture.repo, 'rev-parse', '--verify', 'origin/main')).toBe(gitAt(fixture.repo, 'rev-parse', '--verify', 'main'));
+  // The declared gate must run from the fixture install: bin/gstack-ship-receipt imports ../lib/*, so the install carries lib/ too.
+  const gate = spawnSync('bun', ['--no-env-file', '--config=/dev/null', path.join(fixture.skills, 'bin/gstack-ship-receipt'), 'docs-caps', '--base', 'main'],
+    { cwd: fixture.repo, encoding: 'utf8', env: { ...process.env, ...fixture.env, HOME: fixture.home }, timeout: 60_000 });
+  expect(gate.stderr).toBe('');
+  expect(gate.stdout.trim()).toBe('DOCS_CAP: none declared');
+  expect(gate.status).toBe(0);
 });

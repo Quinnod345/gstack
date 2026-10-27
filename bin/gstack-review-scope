@@ -27,7 +27,7 @@ import { isUnavailable, loadPolicyFromBase, policyUnavailableLine, resolveBaseBr
 import { EXIT as POST_EXIT, runPost } from '../lib/gstack-post';
 import {
   parseHunks, renderDeferredIssue, renderDeferredSection, reviewLoopLine, scopeFindings, scopeLine, summarizeReviewLoop,
-  DEFERRED_MARKER, findingIdentity, findingWhere, REVIEW_SCOPE_POLICIES, type DeferredRecord, type ReviewScopePolicy, type ScopeFinding, type ScopedFinding,
+  ALREADY_FILED_REASON, DEFERRED_MARKER, findingIdentity, findingWhere, REVIEW_SCOPE_POLICIES, type DeferredRecord, type ReviewScopePolicy, type ScopeFinding, type ScopedFinding,
 } from '../lib/review-scope';
 
 const HELP = `gstack-review-scope — finding scope for /ship's review loop (docs/ship-policy.md#review-scope)
@@ -83,8 +83,10 @@ function publishIssue(repoRoot: string, repo: string | undefined, title: string,
     const code = runPost(['issue-create', '--title-file', titleFile, '--body-file', bodyFile], {
       run(cmd, args, input) {
         // --repo names the destination: the remote is that GitHub repository and every gh call targets it.
+        // `gh repo view` takes the repository as its positional argument and rejects --repo, so the visibility read
+        // (public-strict scan or not) names it that way; every other gh command takes --repo.
         if (repo && cmd === 'git' && args[0] === 'remote') return { status: 0, stdout: `https://github.com/${repo}\n`, stderr: '' };
-        const argv = cmd === 'gh' && repo ? [...args, '--repo', repo] : args;
+        const argv = cmd === 'gh' && repo ? (args[0] === 'repo' && args[1] === 'view' ? [...args.slice(0, 2), repo, ...args.slice(2)] : [...args, '--repo', repo]) : args;
         const r = spawnSync(cmd, argv, { cwd: repoRoot, input: input ?? '', encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
         if (r.error) return { status: 1, stdout: '', stderr: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? `${cmd} is not installed` : r.error.message };
         return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
@@ -103,6 +105,9 @@ function publishIssue(repoRoot: string, repo: string | undefined, title: string,
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+/** One `gh issue list` page; a page exactly this full may hide older markers, so the run says so and the records carry it. */
+const DEFERRED_SEARCH_LIMIT = 200;
 
 function readFindings(spec: string | undefined, what: string): ScopeFinding[] {
   const text = spec === undefined || spec === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(spec, 'utf8');
@@ -178,11 +183,15 @@ function cmdDefer(rest: string[], json: boolean): number {
   // One search for every marker, before any create: a failed search files nothing, so a rate-limited rerun cannot duplicate issues.
   let filed: Array<{ number: number; url: string; body: string }> | null = null;
   let searchError = '';
+  let truncated = false;
   if (!dryRun && toDefer.length) {
-    const existing = gh(['issue', 'list', ...repoArgs, '--state', 'open', '--search', `"${DEFERRED_MARKER}" in:body`, '--json', 'number,url,body', '--limit', '200'], repoRoot);
+    const existing = gh(['issue', 'list', ...repoArgs, '--state', 'open', '--search', `"${DEFERRED_MARKER}" in:body`, '--json', 'number,url,body', '--limit', String(DEFERRED_SEARCH_LIMIT)], repoRoot);
     if (existing.ok) { try { filed = JSON.parse(existing.out); } catch { searchError = 'gh issue list returned no JSON'; } }
     else searchError = `gh issue list failed: ${(existing.err || 'unknown').split('\n')[0]!.slice(0, 160)}`;
     if (!Array.isArray(filed)) filed = null;
+    // An exactly-full page is read as truncated: an older issue with this finding's marker may sit past it, so a new issue may duplicate one.
+    truncated = (filed?.length ?? 0) >= DEFERRED_SEARCH_LIMIT;
+    if (truncated) process.stderr.write(`DEFERRED_SEARCH: truncated at ${DEFERRED_SEARCH_LIMIT} open issues; an existing issue for a finding may not have been found\n`);
   }
   const records: DeferredRecord[] = [];
   for (const f of toDefer) {
@@ -192,12 +201,12 @@ function cmdDefer(rest: string[], json: boolean): number {
     if (dryRun) { record.reason = 'dry run'; continue; }
     if (!filed) { record.reason = searchError; continue; }
     const hit = filed.find(i => typeof i.body === 'string' && i.body.includes(marker));
-    if (hit) { record.issue = hit.number; record.url = hit.url; record.reason = 'already filed'; continue; }
+    if (hit) { record.issue = hit.number; record.url = hit.url; record.reason = ALREADY_FILED_REASON; continue; }
     const created = publishIssue(repoRoot, repo, title, body);
     if (created.ok) {
       const url = created.out.split('\n').map(l => l.trim()).filter(l => /\/issues\/\d+$/.test(l)).pop() ?? '';
       const n = Number(/\/issues\/(\d+)$/.exec(url)?.[1]);
-      if (Number.isInteger(n)) { record.issue = n; record.url = url; } else record.reason = `gh returned no issue url: ${url.slice(0, 120)}`;
+      if (Number.isInteger(n)) { record.issue = n; record.url = url; if (truncated) record.reason = `filed; the marker search was truncated at ${DEFERRED_SEARCH_LIMIT}, so an older issue may duplicate it`; } else record.reason = `gh returned no issue url: ${url.slice(0, 120)}`;
     } else record.reason = created.err;
   }
   // Unfiled is the documented degraded path, not a failure: the finding stays deferred and the PR body names the reason.

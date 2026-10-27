@@ -6,8 +6,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { EXIT } from '../lib/headless-artifacts';
-import { DEFAULT_POLICY, POLICY_KEYS, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
+import { DEFAULT_POLICY, POLICY_KEYS, POLICY_KEY_INTRODUCED, REVIEW_SCOPE_KEY_VERSION, globToRegExp, matchesAny, validatePolicy } from '../lib/ship-policy';
 import { fillDue } from '../lib/ship-queue-train';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
@@ -32,8 +33,11 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(codes({ pr_count: { default_pr_count: 0, split_requires_owner: 'yes' } })).toEqual(['POLICY_INVALID:pr_count.default_pr_count', 'POLICY_INVALID:pr_count.split_requires_owner']);
     expect(codes({ review_scope: 'loose' })).toEqual(['POLICY_INVALID:review_scope', 'POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'all' })).toEqual(['POLICY_INVALID:review_scope']);
-    expect(codes({ review_scope: 'all', min_gstack_version: '1.91.249.0' })).toEqual([]);
-    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: '1.91.249.0' })).toEqual([]);
+    expect(codes({ review_scope: 'all', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
+    expect(codes({ review_scope: 'diff-plus-blocking', min_gstack_version: REVIEW_SCOPE_KEY_VERSION })).toEqual([]);
+    // The constant is the release that first read the key; any earlier minimum would admit a gstack that fails on the unknown key.
+    const earlier = REVIEW_SCOPE_KEY_VERSION.replace(/(\d+)\.0$/, (_, p) => `${Number(p) - 7}.0`);
+    expect(codes({ review_scope: 'all', min_gstack_version: earlier })).toEqual(['POLICY_INVALID:review_scope']);
     expect(codes({ review_scope: 'frozen' })).toEqual([]);
     expect(codes([])).toEqual(['POLICY_INVALID:']);
   });
@@ -67,6 +71,25 @@ describe('validatePolicy (schema + containment, pure)', () => {
     expect(matchesAny(['a+b(c).md'], 'a+b(c).md')).toBe(true);
     expect(() => globToRegExp('?'.repeat(150))).toThrow(/512/);
     expect(validatePolicy({ stamp_paths: ['?'.repeat(150)] }).map(e => e.code)).toEqual(['POLICY_CONTAINMENT']);
+  });
+});
+
+describe('policy key versions against the CHANGELOG', () => {
+  test('an unreleased key names a release newer than every heading the checkout can see', () => {
+    // The base branch's CHANGELOG counts when the checkout has it (a depth-1 CI clone does not): a stamp-at-merge
+    // branch carries main's headings only after the slot merge, and a release stamped under another number
+    // leaves the constant naming a release that never read the key, which the stamper moves by hand.
+    const root = path.join(import.meta.dir, '..');
+    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+    const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.status === 0 ? base.stdout : '');
+    const parse = (v: string) => v.split('.').map(Number);
+    const cmp = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!;
+    const headings = [...text.matchAll(/^## \[(\d+\.\d+\.\d+\.\d+)\]/gm)].map(m => m[1]!);
+    const newest = headings.map(parse).sort(cmp).at(-1)!;
+    for (const [key, version] of Object.entries(POLICY_KEY_INTRODUCED)) {
+      if (headings.includes(version)) continue;
+      expect(cmp(parse(version), newest), `${key} is introduced in ${version}, which has no CHANGELOG heading and is not newer than the newest heading ${newest.join('.')}; an unreleased key names the release that will stamp it`).toBeGreaterThan(0);
+    }
   });
 });
 

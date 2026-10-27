@@ -2,4 +2,11 @@
 
 **NO_VERSION (Step 12):** skip this step; write no CHANGELOG entry or version header.
 
+**No CHANGELOG:** when the policy's `changelog` is `null`, or the file it names
+(`CHANGELOG.md` by default) is absent at HEAD, print one line,
+`CHANGELOG: skipped (none at <path>)`, write nothing and never create the file;
+Step 19's PR body carries the release notes instead. A repository with neither a
+version source nor a CHANGELOG ships with both lines printed and a receipt whose
+`version` is `"none"` (docs/ship-policy.md#ship-receipt).
+
 ---

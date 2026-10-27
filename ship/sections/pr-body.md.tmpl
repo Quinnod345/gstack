@@ -144,7 +144,10 @@ Unavailable/inconclusive is never PASS.>
 its saved section file, inserted unchanged by the compose block's `DOCS_SECTION_FILE` lines.
 A blocked audit shipped under a user exception has no section file: state its
 blocked status, scope and exception here and drop the block's `DOCS_SECTION_FILE` guard
-and its `cat -- "$DOCS_SECTION_FILE" && echo &&` step.>
+and its `cat -- "$DOCS_SECTION_FILE" && echo &&` step. The exception is one line,
+word for word as Step 14.5 saved it in `.gstack/tmp/docs-audit.json`:
+`Documentation exception: accepted by <accepted_by> <date> via <via>: <reason>`;
+the receipt write below refuses (`DOCS_AUDIT_BLOCKED`) when the body lacks it.>
 <Always include the status and reviewed scope: updated, current, or blocked with the actual user's named risk exception. Never omit this section or reuse another invocation's audit.>
 
 ## Test plan
@@ -189,8 +192,12 @@ per-lane counts (`{"<lane>":{"pass":N,"fail":N,"skip":N}}`) to
 ```bash
 rm -f .gstack/tmp/review-loop.json
 ~/.claude/skills/gstack/bin/gstack-review-scope summary --since "$REVIEW_SINCE" --out .gstack/tmp/review-loop.json &&
-~/.claude/skills/gstack/bin/gstack-ship-receipt write --pr <pr-number> --base <base> --gate @.gstack/tmp/ship-gate.json --pregate .gstack/tmp/pregate.json --issues @.gstack/tmp/issues.json --review-loop @.gstack/tmp/review-loop.json --body "$PR_BODY_FILE"
+~/.claude/skills/gstack/bin/gstack-ship-receipt write --pr <pr-number> --base <base> --gate @.gstack/tmp/ship-gate.json --pregate .gstack/tmp/pregate.json --issues @.gstack/tmp/issues.json --review-loop @.gstack/tmp/review-loop.json --docs @.gstack/tmp/docs-audit.json --body "$PR_BODY_FILE"
 ```
+
+`--docs` reads the record Step 14.5 saved (`{status, scope[, exception]}`): the
+receipt carries it as `docs`, and a `blocked` status without the owner's exception,
+or a body missing the exception line, is `DOCS_AUDIT_BLOCKED` with nothing written.
 
 The summary reads this branch's review log for the invocation's passes (its
 `REVIEW_LOOP:` line is the one the Pre-Landing Review section carries). The `&&`
