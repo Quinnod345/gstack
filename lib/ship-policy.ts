@@ -170,7 +170,8 @@ export const TRAIN_KEYS_VERSION = '1.91.146.0';
 // an untouched released constant stays, and a branch-added line naming the base's own version is re-read as a
 // stale stamp and moves too, so never rewrite a released constant's line. Until the tree receipt accepts a
 // stamp-form move whose old value is not the base version (#3512), the train's stamp-only check passes such a
-// move only when the tentative value equals the base version at the slot. test/gstack-ship-policy.test.ts holds
+// move only when the tentative value equals the base version at the slot, which a next-minor value never does:
+// a PR that adds a key cannot clear the train until #3512 lands. test/gstack-ship-policy.test.ts holds
 // an unreleased constant newer than every CHANGELOG heading and a released one on a heading whose entry names
 // its key, so a value a stamp did not move fails there.
 export const REVIEW_SCOPE_KEY_VERSION = '1.91.256.0';

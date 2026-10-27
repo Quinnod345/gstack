@@ -76,11 +76,12 @@ describe('validatePolicy (schema + containment, pure)', () => {
 
 describe('policy key versions against the CHANGELOG', () => {
   test('an unreleased key names a release newer than every heading the checkout can see', () => {
-    // The base branch's CHANGELOG counts when the checkout has it (a depth-1 CI clone does not): a stamp-at-merge
+    // The base branch's CHANGELOG counts when the checkout has it (a depth-1 CI clone does not; the file is past 1 MiB,
+    // so spawnSync needs the explicit maxBuffer or it drops the read silently): a stamp-at-merge
     // branch carries main's headings only after the slot merge, and a release stamped under another number
     // leaves the constant naming a release that never read the key, which the stamper moves by hand.
     const root = path.join(import.meta.dir, '..');
-    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
     const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.status === 0 ? base.stdout : '');
     const parse = (v: string) => v.split('.').map(Number);
     const cmp = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]! || a[3]! - b[3]!;
@@ -98,7 +99,7 @@ describe('policy key versions against the CHANGELOG', () => {
     // a heading must be the one whose entry names the key (`\`<key>` at a word boundary in the section body, so `\`docs/` paths do not count); lib/ship-policy.ts sits in
     // stamp_paths so the slot stamp moves a tentative value there itself. Keys from before the convention are exempt.
     const root = path.join(import.meta.dir, '..');
-    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+    const base = spawnSync('git', ['show', 'origin/main:CHANGELOG.md'], { cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
     const text = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') + (base.status === 0 ? base.stdout : '');
     const sections = new Map<string, string>();
     for (const part of text.split(/^(?=## \[)/m)) {
