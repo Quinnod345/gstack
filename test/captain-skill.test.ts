@@ -70,6 +70,11 @@ describe('/captain skill', () => {
     expect(brief).toMatch(/^1\. Plan[^]*?^2\. Build after the word[^]*?^3\. Ship[^]*?^Done when:/m);
     expect(brief).toContain('gstack-approvals import --autoplan');
     expect(flat).toContain('**Plan before build.**');
+    const capySkill = read('capy/skill/gstack/SKILL.md');
+    expect(capySkill).toMatch(/^## Plan, approve, ship$/m);
+    expect(capySkill).toMatch(/## Plan, approve, ship[^]*?reports `APPROVED`[^]*?Exempt from the plan step[^]*?## Working under a Captain/);
+    expect(capySkill).not.toMatch(/## Plan, approve, ship[^]*?\]\((?:\.\.\/)?docs\//);
+    expect(read('capy/skill/gstack/captain.md')).toContain('"Plan, approve, ship" section of SKILL.md');
     expect(read('captain/templates/plan-ask.md')).toContain('**do it**');
     expect(read('captain/templates/plan-ask.md')).toContain('gstack-approvals import --autoplan');
     expect(read('captain/templates/automation-flaky-pass.md')).toContain('never merge');
