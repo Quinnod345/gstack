@@ -16,7 +16,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { DISPATCH_INPUTS, awaitNonceRun, dispatchWorkflow, listDispatchRuns, makeNonce, runForNonce, type WorkflowDispatch } from '../scripts/eval-bg';
-import { changelogDamage, mergeChangelogs, parseChangelog, type ChangelogSection } from './changelog-check';
+import { carryReleasedParent, changelogDamage, mergeChangelogs, parseChangelog, type ChangelogSection } from './changelog-check';
 import type { ResultStatus } from './headless-artifacts';
 import { baseOverlapLine } from './pr-wait';
 import { versionAtRef, versionFiles } from './restamp';
@@ -144,10 +144,13 @@ function unionChangelog(ours: string, theirs: string): string {
 /**
  * One train merge, in object storage: the PR head onto the previous prefix.
  * Version files take the prefix's side; the CHANGELOG merges by section (the
- * gate-ahead rule, else a union of sections, since each heading is restamped
- * at merge), unless a side damaged released history (changelogDamage), which
- * is a conflict the lane resolves. Any other conflict is reported with every
- * conflicting path.
+ * gate-ahead rule with the merge base, which also carries a stacked child
+ * past its released parent, else a union of sections, since each heading is
+ * restamped at merge; the union takes the carried side too, so a prefix that
+ * already holds an earlier slot's [Unreleased] never duplicates the released
+ * parent's text under the child's heading), unless a side damaged released history
+ * (changelogDamage), which is a conflict the lane resolves. Any other
+ * conflict is reported with every conflicting path.
  */
 export function mergeStep(repoRoot: string, pred: string, head: string, policy: ShipPolicy): { tree: string } | { conflicts: string[] } {
   const r = git(repoRoot, ['merge-tree', '--write-tree', head, pred]);
@@ -175,10 +178,11 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
     else if (file === policy.changelog) {
       const text = (sha: string) => git(repoRoot, ['cat-file', 'blob', sha]).out + '\n';
       const base = entry.get(1);
-      const damage = changelogDamage(text(ours), text(theirs), base ? text(base) : undefined);
+      const merged = mergeChangelogs(text(ours), text(theirs), base ? text(base) : undefined);
+      const damage = merged ? null : changelogDamage(text(ours), text(theirs), base ? text(base) : undefined);
       if (damage) { conflicts.push(`${file} (${damage})`); continue; }
-      const merged = mergeChangelogs(text(ours), text(theirs)) ?? unionChangelog(text(ours), text(theirs));
-      const blob = git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged);
+      const own = (base && carryReleasedParent(text(ours), text(theirs), text(base))?.text) || text(ours);
+      const blob = git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged ?? unionChangelog(own, text(theirs)));
       if (blob.ok) resolved.push({ path: file, blob: blob.out }); else conflicts.push(file);
     } else if (stampFiles.includes(file)) resolved.push({ path: file, blob: theirs });
     else conflicts.push(file);
@@ -605,7 +609,7 @@ export function trainStatus(ctx: QueueContext, o: { train?: string }): TrainOut 
 }
 
 /** A PR's state on GitHub for the stale check: MERGED, CLOSED, OPEN, or unreadable. */
-function prState(ctx: QueueContext, pr: string): string {
+export function prState(ctx: QueueContext, pr: string): string {
   const info = prInfo(ctx, pr);
   return 'error' in info ? 'unreadable' : info.state.toUpperCase();
 }

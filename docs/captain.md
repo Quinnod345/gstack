@@ -207,6 +207,21 @@ files. In practice slot 1 needs the same merge whenever the base moved after the
 taken. A stamp commit with one extra byte freezes the queue for every
 lane behind it.
 
+The slot stamp is the base merge, `mergeChangelogs`, and the stamp files the slot call
+names (`STAMP_FILES` in CREW.md; gstack's are `CHANGELOG.md`, `VERSION`, `package.json` and
+`agents-digest/gstack-AGENTS.md`, plus the file carrying a `*_KEY_VERSION` the PR
+introduced, which the restamp moves on the PR's own line, when the call names it), never a
+fifth: a file the restamp lists that the call did not name is not a stamp, so the lane
+leaves it out and says so in its READY. The restamp itself never
+moves a line the base added since the pin's fork point, base merge committed or staged. A
+pin stacked on a PR that squash-merged earlier conflicts beyond the CHANGELOG where the
+parent's squash touched the pin's lines, so the lane takes its pin's bytes for those files
+(`verify` checks the tree against T<i>, which already carries the parent), and
+`mergeChangelogs` carries the pin's edits to the parent's now-released entry as Gate
+integrity corrections in the pin's own entry. The post-merge `verify` judges the CHANGELOG
+by the same rule the pre-merge one did, so an accepted head never freezes the queue after
+its merge ([ship-policy.md](ship-policy.md#run-a-merge-train)).
+
 Options the controller writes into CREW.md rather than inheriting: squash versus merge
 commits; lane stamps versus controller stamps; gate-ahead (slot i+1 gates on slot i's
 head while i merges); the severe race (several severe lanes told at once that the next

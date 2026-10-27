@@ -150,6 +150,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/judge-panel-replay-2026-10-05.json': ['test/judge-panel-median.test.ts'],
   'test/fixtures/launch-env-echo/**': ['test/launch-env-echo-ratchet.test.ts'],
   'test/fixtures/merge-train-3345/**': ['test/changelog-merge-damage.test.ts', 'test/compare-pr-version.test.ts'],
+  'test/fixtures/merge-train-3453/**': ['test/changelog-merge-damage.test.ts'],
   'test/fixtures/module-size-ratchet.json': ['test/helpers/module-size.ts', 'test/module-size-ratchet.test.ts'],
   'test/fixtures/module-size/**': ['test/helpers/module-size.ts', 'test/module-size-ratchet.test.ts'],
   'test/fixtures/multi-agent-wave/**': ['test/headless-artifacts.test.ts', 'test/helpers/autoplan-run-fixture.ts', 'test/plan-reality.test.ts'],

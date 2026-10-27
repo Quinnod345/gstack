@@ -140,8 +140,9 @@ export function normalizeChangelog(text: string): string {
 /**
  * A merged-in head's CHANGELOG, however its conflict was resolved: why it is
  * not main's CHANGELOG with the PR's own entry above it, or null. Main's
- * header and every main section must follow unchanged and in order, and the
- * sections above them may hold only lines the PR itself added (`authored`,
+ * header and every main section must follow unchanged and in order, at least
+ * one section must sit above them (a CHANGELOG equal to main's has lost the
+ * entry the gate carried), and those sections may hold only lines the PR itself added (`authored`,
  * the + lines of its pin's CHANGELOG diff), so a hand resolve can drop
  * damage but never add text the train gate did not carry.
  */
@@ -154,6 +155,7 @@ export function ownEntryAboveMain(head: string, main: string, authored: Readonly
   if (own < 0) return `it has ${h.sections.length} sections, main has ${m.sections.length}`;
   const moved = m.sections.findIndex((s, i) => trim(s.lines) !== trim(h.sections[own + i]!.lines));
   if (moved >= 0) return `main's ${m.sections[moved]!.heading.trim()} is not carried unchanged below the PR's entry`;
+  if (own === 0) return "it is main's CHANGELOG unchanged, with no entry of the PR's own above it";
   const mainKeys = new Set(m.sections.map(s => s.version ?? 'Unreleased'));
   const clash = h.sections.slice(0, own).find(s => mainKeys.has(s.version ?? 'Unreleased'));
   if (clash) return `${clash.heading.trim()} is headed twice`;
@@ -207,6 +209,132 @@ export function changelogDamage(ours: string, theirs: string, base?: string): st
   return null;
 }
 
+const SIMILAR = 0.5;
+const GATE_INTEGRITY_RE = /^###\s+Gate integrity\s*$/;
+
+/** The characters two lines share at their start and end (together never more than the shorter line). */
+function commonEnds(a: string, b: string): { p: number; s: number } {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < Math.min(a.length, b.length) - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  return { p, s };
+}
+
+/** Whether one line is an edit of the other: half or more of the longer one is shared at its ends, or the shorter is wholly kept (an extension). */
+function isEdit(a: string, b: string): boolean {
+  const strip = (l: string) => l.trim().replace(/^[-*]\s+/, '');
+  const [x, y] = [strip(a), strip(b)];
+  const { p, s } = commonEnds(x, y);
+  const min = Math.min(x.length, y.length);
+  return p + s >= Math.max(x.length, y.length) * SIMILAR || (min >= 3 && p + s === min);
+}
+
+/** The fragments an edit replaced, widened to word boundaries and to at least one word on each side. */
+function fragments(removed: string, added: string): { old: string; new: string } {
+  const { p, s } = commonEnds(removed, added);
+  let from = removed.slice(0, p).search(/\S*$/);
+  let keep = s - (/^\S*/.exec(removed.slice(removed.length - s))?.[0].length ?? 0);
+  const cut = () => ({ old: removed.slice(from, removed.length - keep).trim(), new: added.slice(from, added.length - keep).trim() });
+  let f = cut();
+  while ((!f.old || !f.new) && (from > 0 || keep > 0)) {
+    from = Math.max(0, removed.slice(0, from).search(/\S+\s*$/));
+    keep -= /^\s*\S*/.exec(removed.slice(removed.length - keep))?.[0].length ?? keep;
+    f = cut();
+  }
+  return f.old && f.new ? f : { old: removed.trim(), new: added.trim() };
+}
+
+/**
+ * A stacked child whose parent squash-merged and was released since the fork
+ * (GSTA-96, train 24: #3453 after #3434 became 1.91.276.0). `ours`'
+ * `[Unreleased]` still holds the parent's entry as the child forked it, maybe
+ * edited, while `theirs` carries that entry under a released heading the
+ * merge base lacks. The parent's lines leave the child's section; each line
+ * the child changed inside them becomes a correction bullet under the child's
+ * own `### Gate integrity` (the convention #3453's entry used for its parent),
+ * so no wording the gate carried is lost and the released entry below stays
+ * byte for byte main's. Null when the shape is something else: no single
+ * `[Unreleased]` on our side, no released entry of theirs the base lacks whose
+ * text our section holds, or nothing of the child's own left.
+ */
+export function carryReleasedParent(ours: string, theirs: string, base: string): { text: string; notes: string[] } | null {
+  const a = parseChangelog(ours);
+  const unreleased = a.sections.filter(s => s.unreleased);
+  if (unreleased.length !== 1) return null;
+  const baseKeys = new Set(parseChangelog(base).sections.map(s => s.version ?? 'Unreleased'));
+  const content = (l: string) => Boolean(l.trim()) && !l.startsWith('#');
+  let lines = unreleased[0]!.lines.slice(1);
+  const notes: string[] = [];
+  const bullets: string[] = [];
+  let carried = false;
+  for (const parent of parseChangelog(theirs).sections.filter(s => !s.unreleased && !baseKeys.has(s.version!))) {
+    const pl = parent.lines.slice(1);
+    const ownBlocks = entryBlocks({ ...unreleased[0]!, lines: ['', ...lines] });
+    if (!entryBlocks(parent).some(b => ownBlocks.includes(b))) continue;
+    carried = true;
+    // LCS over content lines only: blanks and sub-headings recur in both entries and would anchor wrongly.
+    const lcs = Array.from({ length: pl.length + 1 }, () => new Uint32Array(lines.length + 1));
+    for (let i = pl.length - 1; i >= 0; i--) for (let j = lines.length - 1; j >= 0; j--) {
+      lcs[i]![j] = pl[i] === lines[j] && content(pl[i]!) ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+    const parentAt = new Set<number>();
+    const hunks: Array<{ removed: string[]; added: number[] }> = [{ removed: [], added: [] }];
+    for (let i = 0, j = 0; i < pl.length || j < lines.length;) {
+      if (i < pl.length && j < lines.length && pl[i] === lines[j] && content(pl[i]!)) { parentAt.add(j); i++; j++; hunks.push({ removed: [], added: [] }); }
+      else if (i < pl.length && (j === lines.length || lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) { if (content(pl[i]!)) hunks.at(-1)!.removed.push(pl[i]!); i++; }
+      else { if (content(lines[j]!)) hunks.at(-1)!.added.push(j); j++; }
+    }
+    const v = parent.version!;
+    const strip = (l: string) => l.trim().replace(/^[-*]\s+/, '');
+    hunks.forEach((h, k) => {
+      for (const removed of h.removed) {
+        const best = h.added.find(j => isEdit(removed, lines[j]!));
+        if (best !== undefined) {
+          h.added.splice(h.added.indexOf(best), 1);
+          parentAt.add(best);
+          const f = fragments(removed, lines[best]!);
+          bullets.push(`- Correction to the ${v} entry below: "${f.old}" should read "${f.new}".`);
+          notes.push(`${v}: "${f.old}" -> "${f.new}"`);
+        } else {
+          bullets.push(`- Correction to the ${v} entry below: "${strip(removed)}" no longer applies.`);
+          notes.push(`${v}: dropped "${strip(removed).slice(0, 60)}"`);
+        }
+      }
+      // Lines added between two of the parent's own lines, or after its last beside an edit there, belong to its entry; the rest are the child's.
+      if (k > 0 && (k < hunks.length - 1 || h.removed.length)) for (const j of h.added) {
+        parentAt.add(j);
+        bullets.push(`- Addition to the ${v} entry below: ${strip(lines[j]!)}`);
+        notes.push(`${v}: added "${strip(lines[j]!).slice(0, 60)}"`);
+      }
+    });
+    lines = lines.filter((_, j) => !parentAt.has(j));
+  }
+  if (!carried) return null;
+  // Sub-headings left without content, then runs of blank lines, then the edges.
+  const kept: string[] = [];
+  lines.forEach((l, j) => {
+    if (l.startsWith('#')) { const next = lines.slice(j + 1).find(x => x.trim()); if (!next || next.startsWith('#')) return; }
+    if (!l.trim() && (!kept.length || !kept.at(-1)!.trim())) return;
+    kept.push(l);
+  });
+  while (kept.length && !kept.at(-1)!.trim()) kept.pop();
+  if (!kept.some(content)) return null;
+  if (bullets.length) {
+    const at = kept.findIndex(l => GATE_INTEGRITY_RE.test(l));
+    if (at < 0) kept.push('', '### Gate integrity', ...bullets);
+    else {
+      let end = kept.findIndex((l, j) => j > at && l.startsWith('#'));
+      if (end < 0) end = kept.length;
+      while (end > at + 1 && !kept[end - 1]!.trim()) end--;
+      kept.splice(end, 0, ...bullets);
+    }
+  }
+  const section = { ...unreleased[0]!, lines: [unreleased[0]!.heading, '', ...kept, ''] };
+  const out = [...a.header, ...a.sections.flatMap(s => (s === unreleased[0] ? section.lines : s.lines))].join('\n');
+  return { text: out.endsWith('\n') ? out : out + '\n', notes };
+}
+
 /**
  * Gate-ahead merge of two CHANGELOGs that conflict textually but not
  * semantically: the predecessor's header and sections, with the branch's own
@@ -216,10 +344,20 @@ export function changelogDamage(ours: string, theirs: string, base?: string): st
  * branch's entry is kept under `[Unreleased]` so the restamp re-heads it.
  * Both sides carrying `[Unreleased]` is a real conflict and returns null, and
  * so is damage to released history (`changelogDamage`): null means a hand
- * resolve, never a merge that carries the damage through.
+ * resolve, never a merge that carries the damage through. With `base`, a
+ * stacked child whose parent was released since the fork is first rewritten
+ * by `carryReleasedParent`; `mergeChangelogsWithNotes` returns what it
+ * carried.
  */
 export function mergeChangelogs(ours: string, theirs: string, base?: string): string | null {
-  if (changelogDamage(ours, theirs, base)) return null;
+  return mergeChangelogsWithNotes(ours, theirs, base).text;
+}
+
+export function mergeChangelogsWithNotes(ours: string, theirs: string, base?: string): { text: string | null; notes: string[] } {
+  const carry = base !== undefined ? carryReleasedParent(ours, theirs, base) : null;
+  if (carry) ours = carry.text;
+  const notes = carry?.notes ?? [];
+  if (changelogDamage(ours, theirs, base)) return { text: null, notes };
   const a = parseChangelog(ours);
   const b = parseChangelog(theirs);
   const key = (s: ChangelogSection) => (s.unreleased ? 'Unreleased' : s.version!);
@@ -231,10 +369,10 @@ export function mergeChangelogs(ours: string, theirs: string, base?: string): st
   }
   const theirKeys = new Set(b.sections.map(key));
   const ownOnly = a.sections.filter(s => !theirKeys.has(key(s)));
-  if (a.sections.filter(s => s.unreleased).length > 1) return null;
-  if (a.sections.some(s => s.unreleased) && b.sections.some(s => s.unreleased)) return null;
+  if (a.sections.filter(s => s.unreleased).length > 1) return { text: null, notes };
+  if (a.sections.some(s => s.unreleased) && b.sections.some(s => s.unreleased)) return { text: null, notes };
   const header = [...b.header];
   while (header.length && header[header.length - 1] === '') header.pop();
   const body = [...ownOnly, ...b.sections].flatMap(s => { const lines = [...s.lines]; while (lines.length && lines[lines.length - 1] === '') lines.pop(); return [...lines, '']; });
-  return [...header, ...(header.length ? [''] : []), ...body].join('\n').replace(/\n+$/, '\n');
+  return { text: [...header, ...(header.length ? [''] : []), ...body].join('\n').replace(/\n+$/, '\n'), notes };
 }
