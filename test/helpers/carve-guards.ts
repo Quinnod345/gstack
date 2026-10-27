@@ -816,6 +816,42 @@ do not launch the downstream skill or open a browser.`,
     mustContain: ["Don't make me think", "Users scan, they don't read", 'trunk test', '44px minimum'],
   },
 
+  // ── GSTA-92 plan item 15 (Garry 2026-10-25 "Do it"): /design-motion ──
+  // Fidelity, motion and the optional Figma path are lazy; the doctrine, the
+  // capture/check/export steps and their bins stay always loaded. The paid
+  // design-motion-showcase case drives a fixture page through the whole flow
+  // and asserts the fidelity and motion reads.
+  'design-motion': {
+    skill: 'design-motion',
+    expectedSections: ['fidelity.md', 'motion.md', 'figma.md'],
+    requiredReads: ['fidelity.md', 'motion.md'],
+    scenario:
+      'Covered by the design-motion-showcase case in test/skill-e2e-design.test.ts: a finalized.html fixture is rebuilt into a page with the capture contract, captured, checked and exported.',
+    staticInvariants: {
+      mustStayInSkeleton: [
+        '## Motion doctrine',
+        'one authored motion moment per page',
+        '## Step 5: Capture',
+        '## Step 6: Motion checks (before any export)',
+        'gstack-motion-encode check',
+        '## Step 7: Export and report',
+        '## Important Rules',
+      ],
+      mustMoveToSection: [
+        '### Loading choreography',
+        '### Stories: one per visual',
+        '### Page architecture and the capture contract',
+        '### Layer export',
+      ],
+      gateAfterStop: undefined,
+    },
+    behavioral: 'external',
+    externalTest: 'test/skill-e2e-design.test.ts',
+    maxSkeletonBytes: 39_900, // new skill (GSTA-92 plan item 15, Garry 2026-10-25 "Do it"); measured skeleton 39,836 (2026-10-25)
+    minUnionBytes: 57_500, // measured union 58,666 (2026-10-25)
+    mustContain: ['window.__start()', 'window.__tick(dt)', 'whole milliseconds averaging 1000/60', 'Content never hides behind animation timing'],
+  },
+
   // ── Multi-agent wave PR D3 (2026-10-10): investigate recipes carve ──
   // Five lazy recipes (flake, polluter, race, eval-bisect, backlog) read when
   // the Phase 2 pattern or the --backlog argument matches; Phases 1–5, the

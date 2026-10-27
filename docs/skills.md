@@ -15,6 +15,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/design-review`](#design-review) | **Designer Who Codes** | Live-site visual audit + fix loop. 80-item audit, then fixes what it finds. Atomic commits, before/after screenshots. |
 | [`/design-shotgun`](#design-shotgun) | **Design Explorer** | Generate multiple AI design variants, open a comparison board in your browser, and iterate until you approve a direction. Taste memory biases toward your preferences. |
 | [`/design-html`](#design-html) | **Design Engineer** | Generates production-quality Pretext-native HTML. Works with approved mockups, CEO plans, design reviews, or from scratch. Text reflows on resize, heights adjust to content. Smart API routing per design type. Framework detection for React/Svelte/Vue. Previews render through your Aside browser. |
+| [`/design-motion`](#design-motion) | **Motion Designer** | Turns an approved design into a showcase loop: rebuilds the exact frame, loads it from empty, one story per visual, then an MP4 for X, a website GIF and an 800×500 GIF after seam, rest and overflow checks. |
 | [`/qa`](#qa) | **QA Lead** | Explore browser and functional behavior (APIs, CLIs, jobs, workers, webhooks), reproduce defects, prove regressions fail before repair, then fix and re-verify. |
 | [`/qa-only`](#qa) | **QA Reporter** | Explore the same surfaces and propose regression cases with evidence, without changing product code or tests. |
 | [`/scrape`](#browse) | **Browser Data Extractor** | Pull structured data off a web page — tables, lists, prices — in your Aside browser with the page's real logged-in state. Same driver contract as `/browse`. On the fallback browser, a codified browser-skill answers a repeat intent in ~200ms. |
@@ -551,6 +552,43 @@ Claude: [Edits font-size and margin, browser auto-reloads]
 You:    Done
 
 Claude: Saved to ~/.gstack/projects/myapp/designs/hero-20260330/finalized.html
+```
+
+---
+
+## `/design-motion`
+
+This is my **showcase mode**.
+
+A launch post on X wants the product moving, not a static mockup. Screen-recording a page in real time gives you dropped frames, a loop that jumps at the seam, and a card that drifts out of its container halfway through.
+
+`/design-motion` takes an approved mockup from `/design-shotgun`, a `finalized.html` from `/design-html`, or a URL. It rebuilds the exact frame as one self-contained page, starts it from an empty state, loads it in with a soft rise-and-resolve, and gives each visual one story: a chart gets read, a list receives a new item, a prompt retypes itself. Then it dissolves and repeats.
+
+Nothing is recorded in real time. `bin/gstack-motion-capture.ts` drives the page on Playwright's fake clock in whole-millisecond steps that average 1000/60, so frame N is always the same pixels. `bin/gstack-motion-encode check` then proves the loop with ffmpeg's PSNR: the first frame equals the frame one cycle later (seam), the empty beat equals the frame before the start (no JS state left over), the last frame before the dissolve equals the still design (every story came home), and nothing moves outside the containers (overflow). Only then does `export` write an MP4 for X, a 960 px website GIF and an 800×500 GIF.
+
+On a website it follows gstack's design rules instead: one authored motion moment per page, content visible without script, and no pulsing dots or marquees left running. ffmpeg is optional; without it the skill builds the page and tells you how to install it. A Figma source works when a `FIGMA_TOKEN` is set.
+
+Adapted from Elaya's [design-to-motion](https://github.com/elayadesign/ai-design-skills) (MIT, © 2026 Elaya).
+
+### Example
+
+```
+You:   /design-motion
+
+Claude: Found approved mockup: variant-B.png (analytics bento, 1440×990)
+        Context: showcase. Layout: separate cards (4).
+        Stories: chart scrubber, a new lead lands on the stack, KPI counts up.
+        Cycle: 12 s.
+
+        [Rebuilds the frame, still matches the mockup at 37 dB]
+        [Captures 744 frames on a fake clock]
+
+        MOTION_CHECK: seam pass
+        MOTION_CHECK: empty-beat pass
+        MOTION_CHECK: rest pass
+        MOTION_CHECK: overflow pass
+
+        bento-x.mp4 (1744×1200, 60 fps, 12 s), bento-loop.gif, bento-800x500.gif
 ```
 
 ---

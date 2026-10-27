@@ -857,6 +857,7 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
     'scripts/resolvers/testing.ts', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
   'design-review-plugin-handoff': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-review/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/design-craft.ts', 'scripts/resolvers/outside-voice.ts', 'scripts/resolvers/testing.ts', 'lib/design-catalog.ts', 'lib/design-detect-contract.ts', 'bin/gstack-design-detect.ts', 'test/helpers/hermetic-env.ts', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/skill-e2e-design.test.ts', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
   'design-html-slop-gate':          ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'design-html/**', 'scripts/resolvers/design.ts', 'scripts/resolvers/outside-voice.ts', 'lib/design-detect-contract.ts', 'bin/gstack-design-detect.ts', 'lib/design-craft.ts', 'lib/design-catalog.ts', 'bin/gstack-design-craft', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/impeccable-detect-sample.json', 'test/skill-e2e-design.test.ts', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
+  'design-motion-showcase':         ['design-motion/**', 'bin/gstack-motion-capture.ts', 'bin/gstack-motion-encode', 'lib/motion-capture.ts', 'lib/motion-encode.ts', 'test/fixtures/design-motion-finalized.html', 'bin/gstack-browser-ensure', 'bin/gstack-state-root.sh', 'lib/state-root.ts', 'test/skill-e2e-design.test.ts', 'test/helpers/fake-impeccable.ts', 'test/fixtures/fake-impeccable.ts', 'test/fixtures/review-eval-design-slop.html', 'test/fixtures/review-eval-design-slop.css', 'test/helpers/aside-available.ts', 'test/helpers/llm-judge.ts', 'test/helpers/office-hours-attempt.ts'],
 
   // /diagram (diagram-render bundle consumers). Triplet = deterministic
   // functional (gate); authoring quality = LLM-judged benchmark (periodic).
@@ -1448,6 +1449,7 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
   'design-review-detector-shim-dom': 'gate',   // same shim, DOM mode through the browse binary's dump; self-skips when the binary is absent
   'design-review-plugin-handoff': 'gate',
   'design-html-slop-gate': 'periodic',         // one-pass gate behavior is a judgment call on a fake engine's fixed output
+  'design-motion-showcase': 'marathon',       // a full capture-check-export flow (3-6 min a trial) that needs ffmpeg and Chromium; the periodic census is at its 38-slice cap
 
   // /diagram — triplet is deterministic functional (gstack-render falls back
   // to the browse daemon, so CI runs it); judge is a quality benchmark
@@ -1857,6 +1859,7 @@ export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
   'design-review-detector-shim-dom': 'rule',
   'design-review-plugin-handoff': 'rule',
   'design-html-slop-gate': 'behavior',
+  'design-motion-showcase': 'behavior',
   'diagram-triplet': 'rule',
   'diagram-authoring-quality': 'rule',
   'gstack-upgrade-happy-path': 'rule',
@@ -1981,6 +1984,8 @@ export const BEHAVIOR_WHY: Record<string, string> = {
     "Avoiding neutral posture and naming a because-reason is live formatting of one question.",
   'design-html-slop-gate':
     "How many scan passes the one-pass slop gate takes on a fake engine's fixed output is a judgment call.",
+  'design-motion-showcase':
+    "The stories and the number of check-fix rounds vary per run; reading the sections, running check before export and a clean result stay the contract.",
   'scrape-match-path':
     "The /scrape fallback no longer prescribes the browser-skills match flow, so taking it is prompt compliance.",
   'dx-error-contract-review':

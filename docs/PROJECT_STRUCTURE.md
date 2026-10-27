@@ -78,6 +78,7 @@ gstack/
 ├── cso/             # /cso skill (OWASP Top 10 + STRIDE security audit)
 ├── design-consultation/ # /design-consultation skill (design system from scratch)
 ├── design-shotgun/  # /design-shotgun skill (visual design exploration)
+├── design-motion/   # /design-motion skill (showcase loops: deterministic capture, MP4 and GIF exports)
 ├── open-gstack-browser/  # /open-gstack-browser skill (launch GStack Browser)
 ├── connect-chrome/  # symlink → open-gstack-browser (backwards compat)
 ├── setup-browser-cookies/, pair-agent/, skillify/  # Fallback-engine skills (cookie import, shared-browser tunnel, codify a /scrape)
