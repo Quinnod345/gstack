@@ -515,13 +515,13 @@ test('Step 14.5 housekeeping commands and the docs record are declared exactly a
   const skills = fixture.skills.split(path.sep).join('/');
   const caps = docsCapsCommand(skills);
   const interfaceText = docsNativeInterface(fixture);
-  for (const command of [DOCS_TMP_EXCLUDE, DOCS_AUDIT_RESET, caps]) {
-    expect(interfaceText).toContain(command);
+  for (const command of [DOCS_TMP_EXCLUDE, DOCS_AUDIT_RESET, caps, docsCapsCommand('~/.claude/skills/gstack')]) {
+    if (command === caps) expect(interfaceText).toContain(command);
     expect(docsCommandAllowed(command, fixture)).toBe(true);
     expect(docsToolFailures(nativeResult(command, 'DOCS_CAP: none declared'), fixture, [], true)).toEqual([]);
   }
   for (const command of [DOCS_TMP_EXCLUDE.replace("'/.gstack/tmp/'", "'/.gstack/'"), `${DOCS_TMP_EXCLUDE}; git add -A`, 'rm -f .gstack/tmp', 'rm -rf .gstack/tmp/docs-audit.json',
-    `${skills}/bin/gstack-ship-receipt docs-caps --base feature/docs`, `${skills}/bin/gstack-ship-receipt write --docs @${DOCS_AUDIT_RECORD}`, `${skills}/bin/gstack-ship-receipt docs-caps --base main --json`]) {
+    `${skills}/bin/gstack-ship-receipt docs-caps --base feature/docs`, '~/.claude/skills/other/bin/gstack-ship-receipt docs-caps --base main', `${skills}/bin/gstack-ship-receipt write --docs @${DOCS_AUDIT_RECORD}`, `${skills}/bin/gstack-ship-receipt docs-caps --base main --json`]) {
     expect(docsCommandAllowed(command, fixture)).toBe(false);
   }
   const write = (file: string): SkillTestResult => {
