@@ -208,4 +208,25 @@ export const RELEASE_RESULT_CODES = {
     summary: 'a regen command exited 0 with different outputs while package.json declares dependencies and node_modules is missing, so the outputs were not verified',
     fix: 'install the dependencies (the printed command, such as bun install), then rerun the check',
   },
+  // The /ship review loop's finding scope (gstack-review-scope) and the receipt carry (gstack-ship-receipt carry).
+  REVIEW_SCOPE_INPUT: {
+    anchor: 'review-scope-input',
+    summary: 'gstack-review-scope was given input it cannot classify: findings that are not a JSON array of objects, a --pass or --policy outside its values, or a pass 2+ call without --range-base',
+    fix: 'pass the Step 9.3 findings as a JSON array (--findings <file> or stdin), --pass <n> from the invocation record, and from pass 2 on --range-base <sha> (HEAD at the start of the previous pass)',
+  },
+  REVIEW_SCOPE_RANGE: {
+    anchor: 'review-scope-range',
+    summary: 'gstack-review-scope could not read the diff it scopes findings against: the base or the range base does not resolve, or the range base is not an ancestor of HEAD',
+    fix: 'fetch origin/<base>, check --range-base against the saved pass heads, and start a full pass (--pass 1) when history was rewritten',
+  },
+  RECEIPT_CARRY_REFUSED: {
+    anchor: 'receipt-carry-refused',
+    summary: 'gstack-ship-receipt carry could not carry the /ship receipt to HEAD: the PR body has no receipt, the receipt head is not an ancestor of HEAD (rebase or force-push), or the product diff could not be compared',
+    fix: 'merge the base in instead of rebasing, keep the reviewed head in HEAD\'s history, then rerun carry; otherwise run /ship on the new head',
+  },
+  RECEIPT_CARRY_PRODUCT_CHANGED: {
+    anchor: 'receipt-carry-product-changed',
+    summary: 'the product diff against the base changed between the receipt\'s head and HEAD (a product file differs beyond a base merge, a test-only fix or release metadata), so the reviewed verdict does not cover HEAD',
+    fix: 'run /ship on the new head; the receipt carries only when every changed path is a test, release metadata or the base merge and the product patch-id is unchanged',
+  },
 } as const satisfies Record<string, ResultCode>;
