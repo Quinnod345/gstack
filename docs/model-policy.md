@@ -156,15 +156,18 @@ set, because a higher effort would spend the time the gate is sized for.
 
 ### Review effort tiers
 
-Subagents that only read and report run at a lighter reasoning effort on the
-same model; gstack never swaps in a cheaper model family for them.
-`gstack-review-plan` names each dispatch's tier: `light` for specialists,
-audits, fix-checks, decision-trail reviewers and watchers, `full` for the core
-checklist, the Red Team and the native adversarial pass, `host` for the outside
-voice (its provider and `codex_effort` above). A host that can set a
-subagent's effort maps `light` to a medium or low setting; one that cannot runs
-it at its default. `gstack-config set review_effort_tiers off` (default `on`)
-renders every role at the host default
+Every reviewer that can block a ship runs at `full` effort on the lane's
+model: the core checklist, each specialist, the Red Team, the native
+adversarial pass and the fix-check. `gstack-review-plan` names each
+dispatch's effort, and `host` for the outside voice (its provider and
+`codex_effort` above). Only work that cannot block runs `light`, the same
+model at a medium or low setting and never a cheaper model family: the coverage,
+plan-completion and docs audits, decision-trail reviewers and watchers
+(`AUDIT_EFFORT:` in the plan's output). A paid replay showed why reviewers stay
+at full: a medium-effort fix-check missed a fail-open in gate code that the same
+check at full effort caught. A host that cannot set a subagent's effort runs it
+at its default. `gstack-config set review_effort_tiers off` (default `on`)
+runs the audits and watchers at the host default too
 ([review-policy.md](review-policy.md#review-depth)).
 
 ## Which workflows use the tiers?

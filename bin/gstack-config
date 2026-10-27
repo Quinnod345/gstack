@@ -200,9 +200,9 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 #                           #   Absent = every gate keeps its effort. GSTACK_CODEX_EFFORT
 #                           #   overrides it per run, /codex --effort per request;
 #                           #   /spec keeps medium (120 s budget).
-# review_effort_tiers: on   # on | off. on: read-and-report reviewers (specialists,
-#                           #   audits, fix-checks, watchers) run at light effort on
-#                           #   the same model; core and adversarial review keep full.
+# review_effort_tiers: on   # on | off. on: audits, trail reviewers and watchers
+#                           #   (nothing that can block a ship) run at light effort on
+#                           #   the same model; every reviewer keeps full.
 # Docs: docs/model-policy.md
 #
 # ─── Advanced ────────────────────────────────────────────────────────

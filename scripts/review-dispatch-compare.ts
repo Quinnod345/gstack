@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { runScriptSync } from '../lib/script-invocation';
 import { planReview, specialistsFor, type DiffClass, type Dispatch, type History, type NumbersResult } from '../lib/review-depth';
 
 const ROOT = path.resolve(import.meta.dir, '..');
@@ -113,7 +114,7 @@ function capture(sha: string, name: string, out: string): number {
   try {
     if (git(['worktree', 'add', '-q', '--detach', dir, sha]).status !== 0) throw new Error(`cannot check out ${sha}`);
     git(['branch', '-f', 'gsta131-capture-base', `${sha}^`], dir);
-    const r = spawnSync(path.join(ROOT, 'bin', 'gstack-review-plan'), ['--base', 'gsta131-capture-base', '--json'], { cwd: dir, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+    const r = runScriptSync(path.join(ROOT, 'bin', 'gstack-review-plan'), ['--base', 'gsta131-capture-base', '--json'], { cwd: dir, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
     if (r.status !== 0) throw new Error(`gstack-review-plan failed: ${r.stderr}`);
     const plan = JSON.parse(r.stdout);
     const diffBytes = Buffer.byteLength(git(['diff', `${sha}^`, sha], dir).stdout ?? '');

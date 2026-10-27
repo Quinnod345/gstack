@@ -33,18 +33,18 @@ describe('gstack-review-plan', () => {
     const r = run(repo({ 'docs/bench.md': 'Median latency fell 42% to 180 ms.\n' }), []);
     expect(r.stdout).toContain('DISPATCH: outside-voice outside-voice effort=host');
   });
-  test('--json carries the class, the next step and every dispatch with its effort; --no-tiers renders host effort', () => {
+  test('--json carries the class, the next step, every dispatch with its effort and the audit effort; --no-tiers renders audits at host effort', () => {
     const r = repo({ 'src/a.ts': Array.from({ length: 80 }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n' });
     const plan = JSON.parse(run(r, ['--json']).stdout);
     expect(plan).toMatchObject({ class: 'code', next: { step: 'full' }, pass: 0 });
-    expect(plan.dispatches.find((d: any) => d.role === 'specialist').effort).toBe('light');
-    const host = JSON.parse(run(r, ['--json', '--no-tiers']).stdout);
-    expect(host.dispatches.every((d: any) => d.effort === 'host')).toBe(true);
+    expect(plan.dispatches.find((d: any) => d.role === 'specialist').effort).toBe('full');
+    expect(plan.audit_effort).toBe('light');
+    expect(JSON.parse(run(r, ['--json', '--no-tiers']).stdout).audit_effort).toBe('host');
   });
   test('a below-floor fix after pass 1 plans one fix-check', () => {
     const r = run(repo({ 'src/a.ts': 'export const a = 1;\n' }), ['--pass', '1', '--last', 'full', '--fixed-below']);
     expect(r.stdout).toContain('next=fix-check dispatches=1');
-    expect(r.stdout).toContain('DISPATCH: fix-check fix-check effort=light');
+    expect(r.stdout).toContain('DISPATCH: fix-check fix-check effort=full');
   });
   test('usage errors exit 2', () => {
     expect(spawnSync(BIN, [], { encoding: 'utf8', timeout: 10_000 }).status).toBe(2);

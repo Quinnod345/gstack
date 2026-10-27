@@ -112,7 +112,7 @@ export interface History {
   /** A fix in the finished step touched a gate-class path. */
   touchedGate?: boolean;
 }
-export interface NextStep { step: Step; reason: string; effort: Effort }
+export interface NextStep { step: Step; reason: string }
 
 /**
  * The transition table (docs/review-policy.md#transitions). Pass 1 is full. A fixed
@@ -121,13 +121,13 @@ export interface NextStep { step: Step; reason: string; effort: Effort }
  * allowed step stops for the owner.
  */
 export function nextStep(h: History): NextStep {
-  if (h.last === 'none') return { step: 'full', reason: 'pass 1 reviews the whole diff', effort: 'full' };
+  if (h.last === 'none') return { step: 'full', reason: 'pass 1 reviews the whole diff' };
   const fixed = !!(h.fixedBlocking || h.fixedBelow);
-  if (h.last === 'fix-check') return h.blockingOpen || fixed ? { step: 'stop', reason: 'the fix-check found a blocking finding: name it for the owner, never a third full pass', effort: 'full' } : { step: 'done', reason: 'the fix-check found nothing blocking', effort: 'full' };
-  if (h.blockingOpen && h.fullPasses >= FULL_PASS_CAP) return { step: 'stop', reason: `a blocking finding is open after ${FULL_PASS_CAP} full passes: name it for the owner`, effort: 'full' };
-  if (!fixed) return h.blockingOpen ? { step: 'stop', reason: 'a blocking finding is open with no fix applied', effort: 'full' } : { step: 'done', reason: 'the step applied no edits', effort: 'full' };
-  if ((h.fixedBlocking || h.touchedGate) && h.fullPasses < FULL_PASS_CAP) return { step: 'full', reason: h.fixedBlocking ? 'a blocking finding was fixed: full pass on the range' : 'a fix touched a gate-class path: full pass on the range', effort: 'full' };
-  return { step: 'fix-check', reason: h.fixedBlocking ? `full-pass cap ${FULL_PASS_CAP} reached: one fix-check reads the fix` : 'only below-floor fixes: one fix-check reads the touched hunks', effort: h.touchedGate ? 'full' : 'light' };
+  if (h.last === 'fix-check') return h.blockingOpen || fixed ? { step: 'stop', reason: 'the fix-check found a blocking finding: name it for the owner, never a third full pass' } : { step: 'done', reason: 'the fix-check found nothing blocking' };
+  if (h.blockingOpen && h.fullPasses >= FULL_PASS_CAP) return { step: 'stop', reason: `a blocking finding is open after ${FULL_PASS_CAP} full passes: name it for the owner` };
+  if (!fixed) return h.blockingOpen ? { step: 'stop', reason: 'a blocking finding is open with no fix applied' } : { step: 'done', reason: 'the step applied no edits' };
+  if ((h.fixedBlocking || h.touchedGate) && h.fullPasses < FULL_PASS_CAP) return { step: 'full', reason: h.fixedBlocking ? 'a blocking finding was fixed: full pass on the range' : 'a fix touched a gate-class path: full pass on the range' };
+  return { step: 'fix-check', reason: h.fixedBlocking ? `full-pass cap ${FULL_PASS_CAP} reached: one fix-check reads the fix` : 'only below-floor fixes: one fix-check reads the touched hunks' };
 }
 
 // ---------------------------------------------------------------------------
@@ -145,8 +145,6 @@ export interface PlanInput extends ClassInput {
   criticalFound?: boolean;
   /** The numeric-claim fingerprint the outside voice last reviewed; a change reruns it. */
   reviewedNumbers?: string;
-  /** review_effort_tiers: off renders every role at the host's default effort. */
-  tiers?: boolean;
 }
 export interface Dispatch { role: Role; name: string; effort: Effort }
 export interface ReviewPlan { class: DiffClass; reasons: string[]; next: NextStep; numbers: NumbersResult; dispatches: Dispatch[]; skipped: string[] }
@@ -182,18 +180,17 @@ export function specialistsFor(cls: DiffClass, i: PlanInput, skipped: string[] =
 export function planReview(i: PlanInput): ReviewPlan {
   const { class: cls, reasons } = classifyDiff(i);
   const next = nextStep(i.history);
-  const tier = (e: Effort): Effort => (i.tiers === false ? 'host' : e);
   const skipped: string[] = [];
   const dispatches: Dispatch[] = [];
   const numbersChanged = i.numbers.publishes && i.reviewedNumbers !== undefined && i.reviewedNumbers !== i.numbers.fingerprint;
   if (next.step === 'full') {
-    for (const n of specialistsFor(cls, i, skipped)) dispatches.push({ role: 'specialist', name: n, effort: tier('light') });
+    for (const n of specialistsFor(cls, i, skipped)) dispatches.push({ role: 'specialist', name: n, effort: 'full' });
     const redTeam = cls === 'gate' || (cls === 'code' && (i.diffLines > RED_TEAM_LINES || !!i.criticalFound));
-    if (redTeam) dispatches.push({ role: 'red-team', name: 'red-team', effort: tier('full') });
+    if (redTeam) dispatches.push({ role: 'red-team', name: 'red-team', effort: 'full' });
     else skipped.push(`red-team (${cls} class${cls === 'code' ? `, ${i.diffLines} lines, no critical` : ''})`);
     if (i.history.fullPasses === 0) {
       if (cls === 'docs' || cls === 'tests') skipped.push(`adversarial-native (${cls} class)`);
-      else dispatches.push({ role: 'adversarial-native', name: 'adversarial', effort: tier('full') });
+      else dispatches.push({ role: 'adversarial-native', name: 'adversarial', effort: 'full' });
       if (cls === 'code' || cls === 'gate' || i.numbers.publishes) dispatches.push({ role: 'outside-voice', name: 'outside-voice', effort: 'host' });
       else skipped.push(`outside-voice (${cls} class, no numeric claims)`);
     } else {
@@ -201,7 +198,7 @@ export function planReview(i: PlanInput): ReviewPlan {
       if (numbersChanged) dispatches.push({ role: 'outside-voice', name: 'outside-voice (numbers changed)', effort: 'host' });
     }
   } else if (next.step === 'fix-check') {
-    dispatches.push({ role: 'fix-check', name: 'fix-check', effort: tier(next.effort) });
+    dispatches.push({ role: 'fix-check', name: 'fix-check', effort: 'full' });
     if (numbersChanged) dispatches.push({ role: 'outside-voice', name: 'outside-voice (numbers changed)', effort: 'host' });
   }
   return { class: cls, reasons, next, numbers: i.numbers, dispatches, skipped };

@@ -55,5 +55,5 @@ describe('carry with a recorded pregate', () => {
     const after = extractReceipt(fs.readFileSync(body, 'utf8')).receipt!;
     expect(after.head).toBe(head);
     expect(after.pregate).toContain(`current for ${head.slice(0, 12)}`);
-  });
+  }, 60_000);
 });

@@ -35,10 +35,10 @@ describe('nextStep: the transition table', () => {
   test('pass 1 is full', () => expect(nextStep({ fullPasses: 0, last: 'none' }).step).toBe('full'));
   test('no edits is done', () => expect(nextStep({ fullPasses: 1, last: 'full' }).step).toBe('done'));
   test('a fixed blocker earns full pass 2', () => expect(nextStep({ fullPasses: 1, last: 'full', fixedBlocking: true }).step).toBe('full'));
-  test('below-floor fixes earn one light fix-check', () => expect(nextStep({ fullPasses: 1, last: 'full', fixedBelow: true })).toMatchObject({ step: 'fix-check', effort: 'light' }));
+  test('below-floor fixes earn one fix-check', () => expect(nextStep({ fullPasses: 1, last: 'full', fixedBelow: true }).step).toBe('fix-check'));
   test('a fix touching gate code earns a full pass instead of a fix-check', () => expect(nextStep({ fullPasses: 1, last: 'full', fixedBelow: true, touchedGate: true }).step).toBe('full'));
   test('at the full-pass cap a fixed blocker gets a fix-check', () => expect(nextStep({ fullPasses: FULL_PASS_CAP, last: 'full', fixedBlocking: true }).step).toBe('fix-check'));
-  test('at the cap a gate-touching fix gets a full-effort fix-check', () => expect(nextStep({ fullPasses: FULL_PASS_CAP, last: 'full', fixedBlocking: true, touchedGate: true })).toMatchObject({ step: 'fix-check', effort: 'full' }));
+  test('at the cap a gate-touching fix still gets a fix-check, never a third full pass', () => expect(nextStep({ fullPasses: FULL_PASS_CAP, last: 'full', fixedBlocking: true, touchedGate: true }).step).toBe('fix-check'));
   test('a blocker open at the cap stops', () => expect(nextStep({ fullPasses: FULL_PASS_CAP, last: 'full', blockingOpen: true }).step).toBe('stop'));
   test('a blocker open with no fix stops', () => expect(nextStep({ fullPasses: 1, last: 'full', blockingOpen: true }).step).toBe('stop'));
   test('a fix-check that finds a blocker stops, never a third full pass', () => {
@@ -73,19 +73,19 @@ describe('planReview', () => {
   });
   test('tests class: testing specialist only', () => {
     const p = planReview(base({ paths: ['test/a.test.ts'], scope: { SCOPE_TESTS: 'true' } }));
-    expect(roles(p)).toEqual(['specialist:testing:light']);
+    expect(roles(p)).toEqual(['specialist:testing:full']);
   });
-  test('code class pass 1: specialists light, adversarial full, outside voice', () => {
+  test('code class pass 1: every reviewer at full effort, the outside voice at its own', () => {
     const p = planReview(base({}));
-    expect(roles(p)).toEqual(['specialist:testing:light', 'specialist:maintainability:light', 'specialist:security:light', 'specialist:performance:light', 'specialist:simplification:light', 'adversarial-native:adversarial:full', 'outside-voice:outside-voice:host']);
+    expect(roles(p)).toEqual(['specialist:testing:full', 'specialist:maintainability:full', 'specialist:security:full', 'specialist:performance:full', 'specialist:simplification:full', 'adversarial-native:adversarial:full', 'outside-voice:outside-voice:host']);
   });
   test('gate class forces red team and ignores hit-rate gating', () => {
     const p = planReview(base({ gateTagged: 1, gated: ['security'] }));
     expect(roles(p)).toContain('red-team:red-team:full');
-    expect(roles(p)).toContain('specialist:security:light');
+    expect(roles(p)).toContain('specialist:security:full');
   });
   test('code class honours hit-rate gating and small-diff skip', () => {
-    expect(roles(planReview(base({ gated: ['simplification'] })))).not.toContain('specialist:simplification:light');
+    expect(roles(planReview(base({ gated: ['simplification'] })))).not.toContain('specialist:simplification:full');
     expect(planReview(base({ diffLines: 20 })).dispatches.filter(d => d.role === 'specialist')).toEqual([]);
   });
   test('pass 2 reruns the army on the range but not the adversarial or outside voice', () => {
@@ -93,16 +93,17 @@ describe('planReview', () => {
     expect(p.next.step).toBe('full');
     expect(roles(p).some(r => r.startsWith('outside-voice') || r.startsWith('adversarial'))).toBe(false);
   });
-  test('a fix-check is one light dispatch', () => {
-    expect(roles(planReview(base({ history: { fullPasses: 1, last: 'full', fixedBelow: true } })))).toEqual(['fix-check:fix-check:light']);
+  test('a fix-check is one full-effort dispatch', () => {
+    expect(roles(planReview(base({ history: { fullPasses: 1, last: 'full', fixedBelow: true } })))).toEqual(['fix-check:fix-check:full']);
   });
   test('changed numeric claims rerun only the outside voice', () => {
     const numbers = scanNumbers({ 'docs/bench.md': ['3x faster'] });
     const p = planReview(base({ numbers, reviewedNumbers: 'old', history: { fullPasses: 1, last: 'full', fixedBelow: true } }));
-    expect(roles(p)).toEqual(['fix-check:fix-check:light', 'outside-voice:outside-voice (numbers changed):host']);
+    expect(roles(p)).toEqual(['fix-check:fix-check:full', 'outside-voice:outside-voice (numbers changed):host']);
   });
-  test('tiers off renders every role at the host default', () => {
-    expect(planReview(base({ tiers: false })).dispatches.every(d => d.effort === 'host')).toBe(true);
+  test('no reviewer runs below full effort (GSTA-131 eval: a light fix-check missed a fail-open a full one caught)', () => {
+    for (const h of [{ fullPasses: 0, last: 'none' }, { fullPasses: 1, last: 'full', fixedBelow: true }, { fullPasses: 1, last: 'full', fixedBlocking: true }] as const)
+      expect(planReview(base({ gateTagged: 1, history: h })).dispatches.filter(d => d.role !== 'outside-voice').every(d => d.effort === 'full')).toBe(true);
   });
   test('done dispatches nothing', () => expect(planReview(base({ history: { fullPasses: 1, last: 'full' } })).dispatches).toEqual([]));
 });

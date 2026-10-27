@@ -111,13 +111,13 @@ incomplete coverage, which blocks until the reviewer is rerun.
 | a full pass that fixed a blocking finding, below the cap | full pass on the range |
 | a full pass whose fix touched a gate-class path, below the cap | full pass on the range |
 | a full pass that fixed only below-floor findings | one fix-check |
-| a full pass at the cap that fixed a blocking finding | one fix-check (full effort when the fix touched gate code) |
+| a full pass at the cap that fixed a blocking finding | one fix-check |
 | a full pass at the cap, or with no fix, leaving a blocking finding open | stop: name it for the owner |
 | a fix-check that found nothing blocking | done |
 | a fix-check that found a blocking finding | stop: name it for the owner |
 
 A **fix-check** is one reviewer reading the touched hunks, the fix list, the
-test results and the callers of every changed symbol, at light effort. It is
+test results and the callers of every changed symbol, at full effort. It is
 logged as a `review-fix-check` row, so it never counts as a pass. No army, no
 Red Team and no outside voice run on it.
 
@@ -148,15 +148,16 @@ outside voice reruns, on the numbers.
 **The adversarial and outside voices run once**, on pass 1's diff (Step 11).
 Later full passes rerun the specialists on the range only.
 
-**Effort tiers.** Reviewers that only read and report (specialists, the Step 7
-coverage audit, the Step 8 plan-completion audit, the Step 14.5 docs audit,
-fix-checks, decision-trail reviewers, watchers) run at `effort: light`: the
-same model at a lower reasoning effort, never a cheaper model family. The core
-checklist, the Red Team and the native adversarial pass stay at `full`. The
-outside voice keeps its own provider and effort (`codex_effort`). A host that
-cannot set a subagent's effort runs it at its default.
-`gstack-config set review_effort_tiers off` (or `--no-tiers`) renders every
-role at the host default ([model-policy.md](model-policy.md#reasoning-effort)).
+**Effort.** Every reviewer that can block a ship (the core checklist,
+specialists, the Red Team, the native adversarial pass, fix-checks) runs at
+`full` effort. Work that cannot block (the Step 7 coverage audit, the Step 8
+plan-completion audit, the Step 14.5 docs audit, decision-trail reviewers,
+watchers) runs at `light`: the same model at a lower reasoning effort, never a
+cheaper model family. The outside voice keeps its own provider and effort
+(`codex_effort`). A host that cannot set a subagent's effort runs it at its
+default. `gstack-config set review_effort_tiers off` (or `--no-tiers`) runs
+the audits and watchers at the host default too
+([model-policy.md](model-policy.md#reasoning-effort)).
 
 ## What the receipt records
 
