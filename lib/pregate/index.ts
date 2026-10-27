@@ -15,6 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ARTIFACT_SCHEMAS, checkSchema, type PregateFile, type PregateReceiptSubstitution, type PregateRemote, type ValidationError } from '../headless-artifacts';
 import { wtreeFingerprint, type WtreeResult } from '../script-invocation';
+import { resolveStateRoot } from '../state-root';
 import { guardsCheck } from './checks/guards';
 import { clearHint, lanesCheck, parseRemoteReport, REMOTE_GATE_LANE, remoteReportProblem, treeMismatch } from './checks/lanes';
 import { literalsCheck } from './checks/literals';
@@ -100,6 +101,18 @@ export function renderTable(file: PregateFile, opts: { lines?: boolean } = { lin
   ].join('\n') + '\n';
 }
 
+/** Where a pregate record is mirrored by the tree it was recorded against: `<state root>/pregate/by-tree/<tree>.json`. */
+export function pregateMirrorPath(tree: string, env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveStateRoot(env), 'pregate', 'by-tree', `${tree}.json`);
+}
+
+/**
+ * Write the record, then mirror the same bytes under the state root by tree
+ * (pregateMirrorPath), so a checkout that did not run the pregate (a lane
+ * whose `--remote` run had to happen in a separate clone) can still find the
+ * verdict for its tree through `gstack-ship-queue ready`. The mirror is best
+ * effort: a failure to write it never fails the record.
+ */
 export function writePregateFile(repoRoot: string, rel: string, file: PregateFile): string {
   const abs = path.isAbsolute(rel) ? rel : path.join(repoRoot, rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -107,7 +120,16 @@ export function writePregateFile(repoRoot: string, rel: string, file: PregateFil
   const plain = JSON.parse(JSON.stringify(file));
   checkSchema(plain, ARTIFACT_SCHEMAS.pregate, '', errors, rel);
   if (errors.length) throw new Error(`pregate.json does not validate: ${errors.map(e => `${e.path}: ${e.message}`).join('; ')}`);
-  fs.writeFileSync(abs, JSON.stringify(plain, null, 2) + '\n');
+  const json = JSON.stringify(plain, null, 2) + '\n';
+  fs.writeFileSync(abs, json);
+  if (/^[0-9a-f]{12,128}$/.test(file.tree)) {
+    try {
+      const mirror = pregateMirrorPath(file.tree);
+      fs.mkdirSync(path.dirname(mirror), { recursive: true });
+      fs.writeFileSync(`${mirror}.${process.pid}.tmp`, json);
+      fs.renameSync(`${mirror}.${process.pid}.tmp`, mirror);
+    } catch {}
+  }
   return abs;
 }
 

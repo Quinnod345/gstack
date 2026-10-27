@@ -7,17 +7,27 @@
  * hotfix (--ref <sha on main>). Dry runs print the plan and change nothing.
  *
  *   bun scripts/release-cut.ts --repo owner/name [--ref <sha>] [--dry-run] [--summary <file>]
+ *     [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]
  *
  * The checkout needs origin's full history (fetch-depth 0). Green, for a
- * commit on main's first-parent history, means: its free-tests check run
- * succeeded (the status main requires), its main-backstop check run succeeded
- * (evals-main-backstop.yml publishes it: success only when a green train
- * record covers the tree or the backstop gated it green; a push main moved
- * past before it was gated is neutral, never green), every check run on it
- * has completed and none failed, and refs/notes/gstack-trains holds no active
- * freeze. The newest such commit in the window (7 days, 200 first-parent
- * commits) is the candidate; a commit with a check run still going is
- * skipped, not waited for.
+ * commit on main's first-parent history, means: its required check run
+ * succeeded (--required-check, default free-tests: the status main requires),
+ * it was gated (see below), every check run on it has completed and none
+ * failed, and the trains notes ref (--notes-ref, default
+ * refs/notes/gstack-trains) holds no active freeze. The newest such commit in
+ * the window (7 days, 200 first-parent commits) is the candidate; a commit
+ * with a check run still going is skipped, not waited for.
+ *
+ * Gated means one of two kinds of evidence. Either the backstop check run
+ * (--backstop-check, default main-backstop) succeeded: evals-main-backstop.yml
+ * publishes it, success only when a green train record covers the tree or the
+ * backstop gated it green, neutral when main moved past the push before it was
+ * gated. Or a train record in the notes ref (kind train, state green, merging
+ * or merged) lists the commit's sha or its tree in merged[]: those entries are
+ * the main commits `gstack-ship-queue verify --train` confirmed, so a neutral
+ * or absent backstop run on such a commit is not held against it, and the
+ * CANDIDATE line says "gated by train <nonce>". A red backstop run stays red
+ * either way. A commit with neither is not green.
  *
  * stable moves only forward: a candidate behind the current stable is refused
  * (REFUSED non-fast-forward), as is a tag v<VERSION> that already names another
@@ -66,43 +76,74 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export type Verdict = { green: true } | { green: false; why: string; pending: boolean };
+/** Green names what gated the commit: the backstop check's name, or `train <nonce>`. Pending means a check run on it is still going. */
+export type Verdict = { green: true; via: string } | { green: false; why: string; pending: boolean };
 interface CheckRun { name: string; status: string; conclusion: string | null }
 
-/** Why a commit is not releasable, or green. Pending means a check run on it is still going. */
-export function gateVerdict(gh: Gh, repo: string, sha: string): Verdict {
+/** Main commits a green, merging or merged train record lists in merged[], by sha and by tree, each naming the train. */
+export interface TrainEvidence { bySha: Map<string, string>; byTree: Map<string, string> }
+export interface GateOptions { requiredCheck?: string; backstopCheck?: string; evidence?: TrainEvidence; treeOf?: (sha: string) => string | null }
+
+/** Why a commit is not releasable, or green and through which evidence. */
+export function gateVerdict(gh: Gh, repo: string, sha: string, o: GateOptions = {}): Verdict {
+  const required = o.requiredCheck ?? REQUIRED_CHECK;
+  const backstop = o.backstopCheck ?? BACKSTOP_CHECK;
   const paged = parseJson<unknown>(gh(['api', '--paginate', '--slurp', `repos/${repo}/commits/${sha}/check-runs?per_page=100`]));
   if (!paged) return { green: false, why: 'cannot read its check runs', pending: false };
   const pages = (Array.isArray(paged) ? paged : [paged]) as Array<{ check_runs?: CheckRun[] }>;
   const runs = pages.flatMap(p => p.check_runs ?? []);
-  for (const name of [REQUIRED_CHECK, BACKSTOP_CHECK]) {
+  let via = backstop;
+  for (const name of [required, backstop]) {
     const named = runs.filter(c => c.name === name);
-    if (named.length === 0) return { green: false, why: `no ${name} check run`, pending: false };
     if (named.some(c => c.status !== 'completed')) return { green: false, why: `${name} is still running`, pending: true };
-    if (!named.some(c => c.conclusion === 'success')) return { green: false, why: `${name} concluded ${named.map(c => c.conclusion).join(',')}`, pending: false };
+    if (named.some(c => c.conclusion === 'success')) continue;
+    const train = name === backstop && name !== required && o.evidence ? o.evidence.bySha.get(sha) ?? o.evidence.byTree.get(o.treeOf?.(sha) ?? '') : undefined;
+    if (train) { via = `train ${train}`; continue; }
+    if (named.length === 0) return { green: false, why: `no ${name} check run`, pending: false };
+    return { green: false, why: `${name} concluded ${named.map(c => c.conclusion).join(',')}`, pending: false };
   }
   const red = runs.filter(c => c.status === 'completed' && RED.has(c.conclusion ?? ''));
   if (red.length > 0) return { green: false, why: `red check runs: ${[...new Set(red.map(c => c.name))].join(', ')}`, pending: false };
   const running = runs.filter(c => c.status !== 'completed');
   if (running.length > 0) return { green: false, why: `check runs still going: ${[...new Set(running.map(c => c.name))].join(', ')}`, pending: true };
-  return { green: true };
+  return { green: true, via };
 }
 
-/** An active freeze record (kind freeze, cleared_at null) in the trains notes ref, after fetching it. */
-export function activeFreeze(git: Git): string | null {
-  const f = git(['fetch', '--no-tags', '-q', 'origin', `+${NOTES_REF}:${NOTES_LOCAL}`]);
-  if (!f.ok) return /couldn't find remote ref|no such ref/i.test(f.out) ? null : `cannot fetch ${NOTES_REF}: ${f.out.slice(0, 160)}`;
+export interface TrainNotes { error: string | null; freeze: string | null; evidence: TrainEvidence }
+interface NoteRecord { kind?: string; state?: string; nonce?: string; merged?: Array<{ sha?: string; tree?: string }>; cleared_at?: string | null; reason?: string; train?: string }
+
+/**
+ * One read of the trains notes ref (fetched from origin): the active freeze
+ * record (kind freeze, cleared_at null) and the train evidence (lib/
+ * ship-queue-train-record.ts TrainRecord: kind train, state green, merging or
+ * merged, merged[].sha and .tree). A fetch failure other than a missing ref is
+ * an error; a missing ref holds nothing.
+ */
+export function readTrainNotes(git: Git, notesRef = NOTES_REF): TrainNotes {
+  const notes: TrainNotes = { error: null, freeze: null, evidence: { bySha: new Map(), byTree: new Map() } };
+  const f = git(['fetch', '--no-tags', '-q', 'origin', `+${notesRef}:${NOTES_LOCAL}`]);
+  if (!f.ok) {
+    if (!/couldn't find remote ref|no such ref/i.test(f.out)) notes.error = `cannot fetch ${notesRef}: ${f.out.slice(0, 160)}`;
+    return notes;
+  }
   const listed = git(['notes', `--ref=${NOTES_LOCAL}`, 'list']);
-  if (!listed.ok || !listed.out.trim()) return null;
+  if (!listed.ok || !listed.out.trim()) return notes;
   for (const line of listed.out.split('\n')) {
     const blob = line.split(' ')[0];
     if (!blob) continue;
-    try {
-      const r = JSON.parse(git(['cat-file', 'blob', blob]).out) as { kind?: string; cleared_at?: string | null; reason?: string; train?: string };
-      if (r.kind === 'freeze' && !r.cleared_at) return `queue frozen since train ${r.train ?? '?'}: ${r.reason ?? 'red backstop'}`;
-    } catch { /* not a record */ }
+    let parsed: unknown;
+    try { parsed = JSON.parse(git(['cat-file', 'blob', blob]).out); } catch { continue; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const r = parsed as NoteRecord;
+    if (r.kind === 'freeze' && !r.cleared_at) notes.freeze = `queue frozen since train ${r.train ?? '?'}: ${r.reason ?? 'red backstop'}`;
+    if (r.kind !== 'train' || typeof r.nonce !== 'string' || !r.nonce || !['green', 'merging', 'merged'].includes(r.state ?? '')) continue;
+    for (const m of Array.isArray(r.merged) ? r.merged : []) {
+      if (!m || typeof m !== 'object') continue;
+      if (typeof m.sha === 'string' && m.sha) notes.evidence.bySha.set(m.sha, r.nonce);
+      if (typeof m.tree === 'string' && m.tree) notes.evidence.byTree.set(m.tree, r.nonce);
+    }
   }
-  return null;
+  return notes;
 }
 
 export interface ChangelogEntry { version: string; date: string; headline: string }
@@ -158,13 +199,16 @@ export function releaseNotes(n: NotesInput): string {
 }
 
 export interface Plan {
-  sha: string; version: string; tag: string; date: string; hotfix: boolean;
+  sha: string; version: string; tag: string; date: string; hotfix: boolean; via: string;
   prevStable: string | null; prevVersion: string | null; prevTag: string | null;
   tagExists: 'no' | 'same' | 'other'; stableAt: boolean; notes: string; skipped: string[];
 }
 export type PlanResult = { ok: true; plan: Plan } | { ok: false; code: 'NOTHING_NEW' | 'NO_GREEN_COMMIT' | 'REFUSED'; message: string; skipped?: string[] };
 
-export interface PlanOptions { repo: string; ref?: string; git: Git; gh: Gh; now?: () => number; windowDays?: number; windowCommits?: number }
+export interface PlanOptions {
+  repo: string; ref?: string; git: Git; gh: Gh; now?: () => number; windowDays?: number; windowCommits?: number;
+  requiredCheck?: string; backstopCheck?: string; notesRef?: string;
+}
 
 export function planRelease(o: PlanOptions): PlanResult {
   const { git, gh, repo } = o;
@@ -174,8 +218,13 @@ export function planRelease(o: PlanOptions): PlanResult {
   if (!mainHead.ok) return { ok: false, code: 'REFUSED', message: 'origin/main is not fetched: ' + mainHead.out };
   const stable = git(['rev-parse', '--verify', '-q', 'refs/remotes/origin/stable^{commit}']);
   const prevStable = stable.ok ? stable.out : null;
-  const frozen = activeFreeze(git);
+  const trains = readTrainNotes(git, o.notesRef);
+  const frozen = trains.error ?? trains.freeze;
   if (frozen) return { ok: false, code: 'REFUSED', message: frozen };
+  const gate: GateOptions = {
+    requiredCheck: o.requiredCheck, backstopCheck: o.backstopCheck, evidence: trains.evidence,
+    treeOf: (sha) => { const t = git(['rev-parse', sha + '^{tree}']); return t.ok ? t.out : null; },
+  };
 
   let candidates: string[];
   if (o.ref) {
@@ -194,9 +243,10 @@ export function planRelease(o: PlanOptions): PlanResult {
   // stable itself stays a candidate so a cut that stopped half-way (tag and
   // stable pushed, release missing) is finished; nothing older is looked at.
   let sha: string | null = null;
+  let via = '';
   for (const c of candidates) {
-    const v = gateVerdict(gh, repo, c);
-    if (v.green) { sha = c; break; }
+    const v = gateVerdict(gh, repo, c, gate);
+    if (v.green) { sha = c; via = v.via; break; }
     skipped.push(c.slice(0, 12) + ': ' + v.why);
     if (prevStable && c === prevStable) { skipped.push(c.slice(0, 12) + ': already stable; nothing newer is green'); break; }
   }
@@ -240,7 +290,7 @@ export function planRelease(o: PlanOptions): PlanResult {
   const changelog = git(['show', sha + ':CHANGELOG.md']);
   const date = git(['show', '-s', '--format=%cs', sha]).out;
   const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !before });
-  return { ok: true, plan: { sha, version, tag, date, hotfix: Boolean(o.ref), prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped } };
+  return { ok: true, plan: { sha, version, tag, date, hotfix: Boolean(o.ref), via, prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped } };
 }
 
 export interface CutResult { ok: boolean; lines: string[] }
@@ -283,7 +333,7 @@ export function cutRelease(p: Plan, o: { repo: string; git: Git; gh: Gh; notesDi
 
 export function describePlan(p: Plan, dryRun: boolean): string[] {
   const lines = [
-    'CANDIDATE: ' + p.sha + ' (' + p.date + ')' + (p.hotfix ? ' [hotfix: --ref]' : ''),
+    'CANDIDATE: ' + p.sha + ' (' + p.date + ')' + (p.hotfix ? ' [hotfix: --ref]' : '') + ' gated by ' + p.via,
     'VERSION: ' + p.version + ' -> tag ' + p.tag + (p.tagExists === 'same' ? ' (exists at this commit)' : ''),
     'STABLE: ' + (p.stableAt ? 'already at ' + p.sha.slice(0, 12) + ' (finishing an earlier cut)' : (p.prevStable ? p.prevStable.slice(0, 12) + ' (v' + (p.prevVersion ?? '?') + ')' : 'none yet') + ' -> ' + p.sha.slice(0, 12)),
     'NOTES: ' + p.notes.split('\n').filter(l => l.startsWith('- ')).length + ' version lines, ' + p.notes.length + ' chars',
@@ -307,13 +357,13 @@ if (import.meta.main) {
   const repo = arg('--repo');
   const dryRun = process.argv.includes('--dry-run');
   const summary = arg('--summary');
-  if (!repo) { console.error('usage: release-cut.ts --repo owner/name [--ref <sha>] [--dry-run] [--summary <file>]'); process.exit(2); }
+  if (!repo) { console.error('usage: release-cut.ts --repo owner/name [--ref <sha>] [--dry-run] [--summary <file>] [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]'); process.exit(2); }
   const git = gitIn(process.cwd());
   const emit = (lines: string[]) => {
     for (const l of lines) console.log(l);
     if (summary) fs.appendFileSync(summary, lines.map(l => '- ' + l).join('\n') + '\n');
   };
-  const planned = planRelease({ repo, ref: arg('--ref'), git, gh: runGh });
+  const planned = planRelease({ repo, ref: arg('--ref'), git, gh: runGh, requiredCheck: arg('--required-check'), backstopCheck: arg('--backstop-check'), notesRef: arg('--notes-ref') });
   if (!planned.ok) {
     emit([planned.code + ': ' + planned.message, ...(planned.skipped ?? []).map(s => 'SKIPPED: ' + s)]);
     // A dry run that finds nothing green has done its job (the skips say why);
