@@ -597,7 +597,9 @@ cmd_down() {
 # origin/<base> still resolves, and the index is copied (git writes it
 # atomically through a rename). A linked worktree's .git is a one-line
 # pointer into the main repository, useless on the VM; the same snapshot
-# replaces it, on the worktree's own branch and index.
+# replaces it, on the worktree's own branch and index. Not carried: submodule
+# repositories (.git/modules) and a partial clone's promisor (the fetch pulls
+# every missing blob first); gstack has neither.
 cmd_pack() {
   local src tmp gitdir branch head entry
   src=$(cd "${1:-.}" && pwd)
@@ -605,6 +607,7 @@ cmd_pack() {
     head=$(git -C "$src" rev-parse --verify -q HEAD) || die "pack: $src has no commits; the VM needs a HEAD to fingerprint"
     branch=$(git -C "$src" symbolic-ref -q --short HEAD || true)
     tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
     git init -q --bare "$tmp/.git"
     git -C "$tmp/.git" fetch -q --no-tags --update-shallow "$src" '+refs/*:refs/*' \
       || die "pack: could not snapshot the refs of $src"
@@ -617,7 +620,7 @@ cmd_pack() {
     gitdir=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd)
     while IFS= read -r -d '' entry; do
       git -C "$tmp/.git" config --add "${entry%%$'\n'*}" "${entry#*$'\n'}"
-    done < <(git -C "$gitdir" config --local --null --get-regexp '^remote\.' 2>/dev/null || true)
+    done < <(git -C "$gitdir" config --local --null --get-regexp '^(remote|branch)\.' 2>/dev/null || true)
     # The checkout's index rides along so the VM's status matches, except a
     # split index, whose shared half lives only in the original git dir.
     [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" = true ] \
@@ -630,7 +633,7 @@ cmd_pack() {
           done \
         | tar --null -T - -c -C "$tmp" .git -zf -
     )
-    rm -rf "$tmp"
+    rm -rf "$tmp"; trap - EXIT
   else
     tar -C "$src" -czf - .
   fi

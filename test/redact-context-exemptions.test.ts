@@ -239,8 +239,12 @@ describe("pii.phone.e164: GitHub Actions run and job ids in their id positions",
       "https://example.com/contact/37235771700",
       '{"phone_id": 37235771700}',
       "run 4155550123 laps",
-      // A run word before a 10-digit national number, a bare 11-digit number and a generic word exempt nothing.
+      // A run word before a 10-digit national number, an 11-digit number with a leading 1 (a US or Chinese
+      // national number with its trunk prefix), a bare 11-digit number and a generic word exempt nothing.
       "gate 4155550123",
+      "call failed 14155551234",
+      "screen 13812345678 GREEN",
+      "run 19368712345",
       "the id is 40477638211",
       "job 40477638211",
       "workflow 40477638211",

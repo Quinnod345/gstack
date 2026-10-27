@@ -114,7 +114,7 @@ describe('paid/free dependency boundary', () => {
       expect(result.selection).toEqual({ e2e: [], judges: [] });
     }
     // Release metadata no paid case reads keeps the PR profile, alone and beside a mapped prompt (#3499).
-    for (const file of ['NOTICE.md', 'LICENSE', 'licenses/MIT-pstack.txt']) {
+    for (const file of ['NOTICE.md', 'LICENSE', 'licenses/MIT-pstack.txt', 'captain/templates/merge-ask.md']) {
       expect(fs.existsSync(path.join(ROOT, file)), file).toBe(true);
       const result = computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [file, 'CHANGELOG.md'] });
       expect(result.coverage?.mode, file).toBe('pr');

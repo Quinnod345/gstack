@@ -19,6 +19,10 @@
 /**
  * E2E test touchfiles — keyed by testName (the string passed to runSkillTest).
  * Each test lists the file patterns that, if changed, require the test to run.
+ *
+ * ETHOS.md is registered under the /office-hours and /plan-ceo-review cases,
+ * whose prompts quote it; the tier>=3 preamble (Search Before Building) only
+ * names it as a read-on-demand pointer that no paid case asserts on (#3499).
  */
 export const E2E_TOUCHFILES: Record<string, string[]> = {
   'ship-skipped-queued-finding': [ 'lib/outside-review-result.ts', 'lib/gate-outcomes.ts', 'bin/gstack-codex-probe','bin/gstack-state-root.sh', 'lib/state-root.ts', 'package.json', 'bun.lock', '.github/docker/Dockerfile.ci',
