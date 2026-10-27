@@ -53,9 +53,10 @@ gstack-approvals render                                    # the ## Approvals se
 
 - **Where it lives.** `<state root>/projects/<slug>/approvals/<branch key>.jsonl`, one file per branch,
   because one thread ships one branch. On Capy the state root is thrown away with the machine, so every write
-  is also mirrored to the private project-user Drive folder (`<drive>/approvals/<slug>/`), or to
-  `GSTACK_APPROVALS_DIR`. `GSTACK_APPROVALS_MIRROR=0` turns the mirror off. Reads merge both copies, and
-  `gstack-approvals sync` restores the local copy.
+  is also mirrored to `GSTACK_APPROVALS_DIR`, else to the `approvals/` directory in the mounted Captain
+  drive (`<captain drive>/approvals/<slug>/`, readable by the whole crew), else to the private project-user
+  Drive folder. `gstack-approvals path` prints the chosen mirror and `READ_ALSO:` roots, which reads still
+  merge. `GSTACK_APPROVALS_MIRROR=0` turns the mirror off, and `gstack-approvals sync` restores the local copy.
 - **The durable copies** are the `## Approvals` sections in the thread's report and in the PR body. Paste
   `render` output into them; never type rows by hand.
 - **Secret-free.** Every field passes gstack's secret scanner before it is written. A hit refuses the row
@@ -94,7 +95,8 @@ gstack-owner-brief render --captain --out <run dir>
 
 It prints a header line ("Decision needed … Reply **rec** …"), the four plan sections (each capped, with a
 pointer to the plan for the rest), and "What we need from you", which lists every choice `rec` takes, in
-words, and closes with the "do it" reply. The last line, "For the relaying agent", carries the run, `gate_rev`, `rec_hash` and the exact
+words, and closes with the "do it" reply, then a `### Cost` section (spent so far, worst case, and the estimate for
+the phases `rec` can reopen). The last line, "For the relaying agent", carries the run, `gate_rev`, `rec_hash` and the exact
 `gstack-autoplan answer` command. Relay everything above that line. When the reply comes back:
 
 ```bash

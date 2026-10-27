@@ -8,11 +8,12 @@
  *                             [--receipt <tree-receipt.json>] [--policy <label>] [--preregistration <text>] [--history <text>]
  *                             [--pregate <pregate.json>] [--issues <json|@file>] [--approval <line>]... [--approval-run <dir>]...
  *                             [--out <file>] [--body <pr-body.md>] [--json]
- *   gstack-ship-receipt read --pr <n> [--repo <owner/repo>] [--json]
+ *   gstack-ship-receipt read --pr <n> [--repo <owner/repo>] [--check-prose] [--json]
  *   gstack-ship-receipt read --body <file> [--json]
  *   gstack-ship-receipt result (--pr <n> [--repo <owner/repo>] | --body <file>) [--head <sha>] [--out <dir>] [--json]
  *   gstack-ship-receipt census --repo <owner/repo> --since <tag|YYYY-MM-DD> [--cohort <file>] [--limit <n>] [--json]
  *   gstack-ship-receipt carry (--pr <n> [--repo <owner/repo>] | --body <file>) [--base <ref>] [--head <sha>] [--dry-run] [--out <dir>] [--json]
+ *   gstack-ship-receipt docs-caps [--base <ref>] [--policy <ship-policy.json>] [--json]
  *
  * `write` validates against `gstack-artifact schema ship-receipt`, prints the
  * fenced block (and SHIP_RECEIPT: <identifiers> on stderr), writes it to --out,
@@ -35,13 +36,15 @@ import { EXIT, exitTableHelp, type ShipReceipt } from '../lib/headless-artifacts
 import { resultLine, resultLineWithDocs } from '../lib/result-codes';
 import { versionAtRef } from '../lib/restamp';
 import { readPregateFile, verifyPregate } from '../lib/pregate/index';
-import { isUnavailable, loadPolicyFromBase, matchesAny, resolveBaseBranch } from '../lib/ship-policy';
+import { isUnavailable, loadPolicyFromBase, matchesAny, policyUnavailableLine, resolveBaseBranch, stampFilesInTree, validatePolicy, type ShipPolicy } from '../lib/ship-policy';
 import { approvalForReceipt } from '../lib/approval-citations';
 import {
-  CARRY_METADATA_GLOBS, CARRY_TEST_GLOBS,
+  CARRY_METADATA_GLOBS, CARRY_NAMED_PATHS, CARRY_TEST_GLOBS,
   bindReceipt, carryReceipt, classifyCarryPath, computeCensus, extractReceipt, missingIssueLines, orderReceipt, parseReviewLoop, placeReceiptFirst, planCarry,
   receiptIssuesFrom, receiptSummaryLine, renderCensus, renderReceiptBlock, validateReceipt, type CensusPr,
 } from '../lib/ship-receipt';
+import { checkDocsCaps, docsCapLine, docsExceptionLine, parseReceiptDocs } from '../lib/ship-receipt-docs';
+import { checkReceiptProse, proseLine } from '../lib/ship-receipt-prose';
 import { resolveStateRoot } from '../lib/state-root';
 
 const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block (docs/ship-policy.md#ship-receipt)
@@ -49,6 +52,8 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
   write [flags]                       compose, validate and print the block; --body <file> puts it first in that PR body
   read --pr <n> [--repo <r>]          parse the block from the PR body through gh (RECEIPT_MISSING / RECEIPT_INVALID)
   read --body <file>                  parse the block from a file
+  read … --check-prose                also compare every counter the body quotes (passes=2, 1 deferred, passed: 41)
+                                      with the receipt's review_loop, gate and ci integers: RECEIPT_PROSE_MISMATCH (exit 1)
   result --pr <n> [--repo <r>] | --body <file> [--head <sha>] [--out <dir>]
                                       /ship's terminal line: binds the receipt to HEAD (QUEUE_RECEIPT_MISSING / QUEUE_RECEIPT_STALE),
                                       writes <state>/ship/runs/<utc>-<head12>/{ship-run.json,ship-receipt.md} and prints
@@ -59,7 +64,11 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
                                       carry the receipt to HEAD when only a base merge, tests or release metadata changed
                                       since its head (product patch-id unchanged): rewrites the receipt with a \`carry\` record,
                                       posts the body (gh pr edit) and prints GSTACK_RESULT: skill=ship status=complete;
-                                      RECEIPT_CARRY_PRODUCT_CHANGED / RECEIPT_CARRY_REFUSED leave the body unchanged (exit 3)
+                                      RECEIPT_CARRY_PRODUCT_CHANGED / RECEIPT_CARRY_REFUSED leave the body unchanged (exit 3);
+                                      needs git >= 2.39 (RECEIPT_GIT_TOO_OLD)
+  docs-caps [--base <ref>]            /ship Step 14.5: one DOCS_CAP: <path> <bytes>/<max> ok|over line per docs.caps entry of the
+                                      reviewed policy (origin/<base>'s .gstack/ship-policy.json; --policy <file> reads that file
+                                      instead); any over (or absent) file exits 1 (DOCS_AUDIT_BLOCKED)
 
 write flags: --pr --head --base --version --gated-tree --predecessor --gate <json|@file> --ci <json|@file> --spend-usd
   --session-kind --artifacts-consumed <n>/<m> --run --thread --receipt <tree-receipt.json> --policy --preregistration
@@ -68,10 +77,12 @@ write flags: --pr --head --base --version --gated-tree --predecessor --gate <jso
   (C6: gstack-issue-links --out/--json; with --body, refused with ISSUE_LINKS_MISSING unless the body carries every Fixes/Refs/Flake/Related line)
   --approval <"Approved by <owner> <YYYY-MM-DD> via <ref> [for <class>@<digest12>]"> (repeatable; the --body file's lines count too)
   --review-loop <json|@file> ({passes, blocking_found, deferred[, noted, fixed, scope]}: gstack-review-scope summary --out)
+  --docs <json|@file> ({status: updated|current|blocked, scope[, exception: {accepted_by, date, via, reason}]}: Step 14.5's outcome;
+  blocked without an exception is DOCS_AUDIT_BLOCKED, and with --body the body must carry the exception line verbatim)
   --approval-run <autoplan run dir> (repeatable; resolves plan-sha citations) (W2: a class declared in origin/<base>'s
   .gstack/approval-classes.json with hits needs a citation that resolves and binds to its effects: APPROVAL_CITATION_MISSING)
   --out <file> --body <pr-body.md>. Defaults: head=HEAD, base=origin/HEAD's branch, version=the
-  version source at HEAD, session_kind=$GSTACK_SESSION_KIND (gstack-session-kind), tree/gate_reuse/gated_tree/predecessor
+  version source at HEAD ("none" when HEAD has no version source, no policy stamp file and no CHANGELOG), session_kind=$GSTACK_SESSION_KIND (gstack-session-kind), tree/gate_reuse/gated_tree/predecessor
   from --receipt when given.
 --json: JSON only on stdout.
 ${exitTableHelp()}`;
@@ -99,11 +110,33 @@ function gh(args: string[]): { ok: boolean; out: string; err: string } {
   return { ok: r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '').trim() };
 }
 
+/**
+ * The receipt's `version`: the version source at HEAD (the pinned path, else
+ * VERSION, else package.json#version). A repository with none of those, no
+ * policy stamp file and no CHANGELOG at HEAD has no release version to record,
+ * and the receipt says so with `"none"` (docs/ship-policy.md#ship-receipt);
+ * `read`, `result` and the queue accept it like any other version string.
+ * Only an absent source is `"none"`: a VERSION that exists but holds no
+ * parsable version, a pin that escapes the repository, or an unreadable base
+ * policy keeps the existing no-version refusal.
+ */
+function receiptVersion(repoRoot: string, head: string, base: string): string | undefined {
+  const atHead = versionAtRef(repoRoot, head);
+  if ('version' in atHead) return atHead.version;
+  if (!/ does not exist at /.test(atHead.error)) return undefined;
+  const show = (rel: string) => git(['show', `${head}:${rel}`], repoRoot);
+  try { const v = JSON.parse(show('package.json') ?? 'null')?.version; if (typeof v === 'string' && v.trim()) return v.trim(); } catch { /* not a manifest */ }
+  const load = loadPolicyFromBase(repoRoot, base);
+  if (isUnavailable(load)) return undefined;
+  const changelogs = [...new Set([load.policy.changelog, 'CHANGELOG.md'].filter((p): p is string => !!p))];
+  if (stampFilesInTree(repoRoot, head, load.policy.stamp_files).length || changelogs.some(p => show(p) !== undefined)) return undefined;
+  return 'none';
+}
+
 function cmdWrite(rest: string[], json: boolean): number {
   const repoRoot = git(['rev-parse', '--show-toplevel']) ?? process.cwd();
   const head = flag(rest, '--head') ?? git(['rev-parse', 'HEAD'], repoRoot);
   if (!head) { process.stderr.write('gstack-ship-receipt write: --head is required outside a git repository\n'); return EXIT.usage; }
-  const atHead = versionAtRef(repoRoot, head);
   const receiptFile = flag(rest, '--receipt');
   const tree = receiptFile ? JSON.parse(fs.readFileSync(receiptFile, 'utf8')) : null;
   let sessionKind = flag(rest, '--session-kind') ?? process.env.GSTACK_SESSION_KIND;
@@ -127,6 +160,16 @@ function cmdWrite(rest: string[], json: boolean): number {
   const base = flag(rest, '--base') ?? resolveBaseBranch(repoRoot);
   const bodyFile = flag(rest, '--body');
   const bodyText = bodyFile && fs.existsSync(bodyFile) ? fs.readFileSync(bodyFile, 'utf8').replace(/```gstack-ship-receipt[\s\S]*?\n```/g, '') : '';
+  let docs: ReturnType<typeof parseReceiptDocs> | undefined;
+  if (flag(rest, '--docs') !== undefined) {
+    try { docs = parseReceiptDocs(jsonArg(flag(rest, '--docs'))); } catch (e: any) { process.stderr.write(`gstack-ship-receipt write: --docs: ${e.message}\n`); return EXIT.usage; }
+    if (!docs.ok) { process.stderr.write(resultLineWithDocs('gstack-ship-receipt write', docs.code, `${docs.message}; nothing written`) + '\n'); return docs.code === 'DOCS_AUDIT_BLOCKED' ? EXIT.refused : EXIT.fail; }
+    const exceptionLine = docsExceptionLine(docs.docs);
+    if (bodyFile && exceptionLine && !bodyText.split(/\r?\n/).some(l => l.trim() === exceptionLine)) {
+      process.stderr.write(resultLineWithDocs('gstack-ship-receipt write', 'DOCS_AUDIT_BLOCKED', `${bodyFile} does not carry the exception line verbatim: ${JSON.stringify(exceptionLine)}; nothing written`) + '\n');
+      return EXIT.refused;
+    }
+  }
   const approval = approvalForReceipt({ repoRoot, base, head, citationText: [bodyText, ...flags(rest, '--approval')].join('\n'), runDirs: flags(rest, '--approval-run') });
   if (approval.kind === 'invalid') {
     for (const line of approval.lines) process.stderr.write(resultLine('gstack-ship-receipt write', 'APPROVAL_CLASSES_INVALID', line) + '\n');
@@ -140,7 +183,7 @@ function cmdWrite(rest: string[], json: boolean): number {
     return EXIT.fail;
   }
   if (approval.kind === 'ok' && approval.note) process.stderr.write(approval.note + '\n');
-  let input: Partial<ShipReceipt>;
+  let input: Partial<ShipReceipt> & { docs?: unknown };
   try {
     const issuesFile = jsonArg(flag(rest, '--issues'));
     const loopRaw = jsonArg(flag(rest, '--review-loop'));
@@ -148,7 +191,7 @@ function cmdWrite(rest: string[], json: boolean): number {
     if (loopRaw && !reviewLoop) throw new Error('--review-loop needs integer passes, blocking_found and deferred (gstack-review-scope summary --out <file>, then @<file>)');
     input = {
       schema_version: 1, pr: flag(rest, '--pr') !== undefined ? Number(flag(rest, '--pr')) : undefined, head,
-      version: flag(rest, '--version') ?? ('version' in atHead ? atHead.version : undefined), base,
+      version: flag(rest, '--version') ?? receiptVersion(repoRoot, head, base), base,
       gated_tree: flag(rest, '--gated-tree') ?? tree?.gated_tree, predecessor: flag(rest, '--predecessor') ?? tree?.predecessor?.recorded_head ?? undefined,
       tree: tree?.tree, gate_reuse: tree ? `${tree.gate_reuse} (${tree.gate_reuse_reason})` : undefined,
       gate: jsonArg(flag(rest, '--gate')), ci: jsonArg(flag(rest, '--ci')),
@@ -156,7 +199,7 @@ function cmdWrite(rest: string[], json: boolean): number {
       session_kind: sessionKind, artifacts_consumed: flag(rest, '--artifacts-consumed'), run: flag(rest, '--run'), thread: flag(rest, '--thread'),
       policy: flag(rest, '--policy') ?? tree?.policy, queue_mode: flag(rest, '--queue-mode'), preregistration: flag(rest, '--preregistration'), history: flag(rest, '--history'),
       ...pregate, issues: issuesFile ? receiptIssuesFrom(issuesFile) : undefined, approval: approval.kind === 'ok' ? approval.approval : undefined,
-      review_loop: reviewLoop,
+      review_loop: reviewLoop, ...(docs?.ok ? { docs: docs.docs } : {}),
     };
   } catch (e: any) { process.stderr.write(`gstack-ship-receipt write: ${e.message}\n`); return EXIT.usage; }
   if (input.pr !== undefined && !Number.isInteger(input.pr)) { process.stderr.write('gstack-ship-receipt write: --pr must be an integer\n'); return EXIT.usage; }
@@ -205,6 +248,16 @@ function cmdRead(rest: string[], json: boolean): number {
     return EXIT.fail;
   }
   process.stderr.write(receiptSummaryLine(ex.receipt!) + '\n');
+  if (rest.includes('--check-prose')) {
+    const prose = checkReceiptProse(ex.receipt as unknown as Record<string, unknown>, body);
+    process.stderr.write(proseLine(prose) + '\n');
+    if (prose.mismatches.length) {
+      process.stderr.write(resultLineWithDocs('gstack-ship-receipt read', 'RECEIPT_PROSE_MISMATCH', prose.mismatches.map(m => `${m.field} body=${m.prose} receipt=${m.receipt}`).join(', ')) + '\n');
+      if (json) process.stdout.write(JSON.stringify({ found: true, valid: true, receipt: ex.receipt, prose }) + '\n');
+      return EXIT.fail;
+    }
+    if (json) { process.stdout.write(JSON.stringify({ found: true, valid: true, receipt: ex.receipt, prose }) + '\n'); return EXIT.ok; }
+  }
   process.stdout.write(json ? JSON.stringify(ex.receipt) + '\n' : renderReceiptBlock(ex.receipt!));
   return EXIT.ok;
 }
@@ -287,13 +340,25 @@ function writeRunRecord(a: { receipt: ShipReceipt; head: string; pr: string | un
  * moved in a shell line would read as the same patch) while still ignoring the
  * hunk line numbers a base merge shifts.
  */
-function patchId(repoRoot: string, from: string, to: string, pathspec: string[]): string | undefined {
+function patchId(repoRoot: string, from: string, to: string, pathspec: string[]): string | { error: string } {
+  const firstLine = (s: string | null | undefined, fallback: string) => (s ?? '').trim().split('\n')[0]?.slice(0, 200) || fallback;
   const diff = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', '--full-index', from, to, '--', ...pathspec], { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
-  if (diff.status !== 0) return undefined;
+  if (diff.status !== 0) return { error: `git diff ${from.slice(0, 12)} ${to.slice(0, 12)}: ${firstLine(diff.stderr, diff.signal ? `killed by ${diff.signal}` : `exit ${diff.status}`)}` };
   if (!diff.stdout.trim()) return '';
   const id = spawnSync('git', ['patch-id', '--verbatim'], { cwd: repoRoot, input: diff.stdout, encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
-  if (id.status !== 0) return undefined;
+  if (id.status !== 0) return { error: `git patch-id --verbatim: ${firstLine(id.stderr, id.signal ? `killed by ${id.signal}` : `exit ${id.status}`)}` };
   return id.stdout.trim().split(/\s+/)[0] ?? '';
+}
+
+/** `git patch-id --verbatim` exists from git 2.39 (docs/ship-policy.md#receipt-carry); an older git is a named refusal, never a silent fallback to the whitespace-stripping default. */
+const CARRY_MIN_GIT = '2.39';
+function gitVersionBelow(repoRoot: string, minimum: string): string | null {
+  const raw = git(['--version'], repoRoot) ?? '';
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(raw);
+  if (!m) return raw || 'unknown';
+  const [minMajor, minMinor] = minimum.split('.').map(Number) as [number, number];
+  const major = Number(m[1]); const minor = Number(m[2]);
+  return major > minMajor || (major === minMajor && minor >= minMinor) ? null : m[0];
 }
 
 /**
@@ -313,7 +378,7 @@ function cmdCarry(rest: string[], json: boolean): number {
   if (!repoRoot) { process.stderr.write('gstack-ship-receipt carry: run it inside the git checkout whose head carries the receipt\n'); return EXIT.usage; }
   const head = (flag(rest, '--head') ?? git(['rev-parse', 'HEAD'], repoRoot))?.toLowerCase();
   if (!head || !/^[0-9a-f]{40,64}$/.test(head)) { process.stderr.write('gstack-ship-receipt carry: cannot resolve HEAD\n'); return EXIT.usage; }
-  const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'RECEIPT_CARRY_REFUSED' | 'RECEIPT_CARRY_PRODUCT_CHANGED', message: string) => {
+  const refused = (code: 'QUEUE_RECEIPT_MISSING' | 'RECEIPT_CARRY_REFUSED' | 'RECEIPT_CARRY_PRODUCT_CHANGED' | 'RECEIPT_GIT_TOO_OLD', message: string) => {
     process.stderr.write(resultLineWithDocs('gstack-ship-receipt carry', code, message) + '\n');
     process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'refused', run: '-', code, message }) + '\n' : `CARRY: refused (${code})\nGSTACK_RESULT: skill=ship status=refused run=-\n`);
     return EXIT.refused;
@@ -352,6 +417,8 @@ function cmdCarry(rest: string[], json: boolean): number {
     process.stdout.write(json ? JSON.stringify({ skill: 'ship', status: 'current', head, carry: null }) + '\n' : `CARRY: current (the receipt already names ${head.slice(0, 12)})\n`);
     return EXIT.ok;
   }
+  const oldGit = gitVersionBelow(repoRoot, CARRY_MIN_GIT);
+  if (oldGit) return refused('RECEIPT_GIT_TOO_OLD', `git ${oldGit} cannot run patch-id --verbatim; the carry needs git ${CARRY_MIN_GIT} or later`);
   const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', from, head], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 });
   if (ancestor.status !== 0) return refused('RECEIPT_CARRY_REFUSED', `the receipt's head ${from.slice(0, 12)} is not an ancestor of HEAD ${head.slice(0, 12)} (rebased or force-pushed); merge the base in next time, and run /ship now`);
   // The carry binds HEAD alone: pending edits are not in the commits it compares, and a parent that stops at CARRY: carried would report them shipped.
@@ -389,17 +456,23 @@ function cmdCarry(rest: string[], json: boolean): number {
   const testSpec = [...CARRY_TEST_GLOBS.map(g => `:(glob)${g}`), ...excludeGlobs(metadataGlobs)];
   const productFrom = patchId(repoRoot, fromBase, from, productSpec);
   const productHead = patchId(repoRoot, headBase, head, productSpec);
-  const testFrom = patchId(repoRoot, fromBase, from, testSpec) ?? '';
-  const testHead = patchId(repoRoot, headBase, head, testSpec) ?? '';
-  if (productFrom === undefined || productHead === undefined) return refused('RECEIPT_CARRY_REFUSED', 'git could not compute the product patch-id at one of the heads');
-  // planCarry names at most 20 differing paths, so the per-path comparison (two patch-ids each) stops there.
+  const asId = (r: string | { error: string }) => (typeof r === 'string' ? r : '');
+  const testFrom = asId(patchId(repoRoot, fromBase, from, testSpec));
+  const testHead = asId(patchId(repoRoot, headBase, head, testSpec));
+  for (const r of [productFrom, productHead]) if (typeof r !== 'string') return refused('RECEIPT_CARRY_REFUSED', `git could not compute the product patch-id at one of the heads: ${r.error}`);
+  // planCarry names at most CARRY_NAMED_PATHS differing paths, so the per-path comparison (two patch-ids each) stops there,
+  // and it walks only the paths the branch itself touched against the base at either head: a base merge brings in every
+  // path the base changed, none of which can differ between the two base diffs.
   const changedProduct: string[] = [];
   if (productFrom !== productHead) {
-    for (const p of changed.filter(c => c.class === 'product').map(c => c.path)) {
-      if (changedProduct.length >= 20) break;
-      if (patchId(repoRoot, fromBase, from, [p]) !== patchId(repoRoot, headBase, head, [p])) changedProduct.push(p);
+    const touched = new Set([...(git(['diff', '--name-only', fromBase, from], repoRoot) ?? '').split('\n'), ...(git(['diff', '--name-only', headBase, head], repoRoot) ?? '').split('\n')].filter(Boolean));
+    for (const p of [...touched].sort()) {
+      if (changedProduct.length >= CARRY_NAMED_PATHS) break;
+      const cls = changed.find(c => c.path === p)?.class ?? classifyCarryPath(p, extra);
+      if (cls !== 'product') continue;
+      if (asId(patchId(repoRoot, fromBase, from, [p])) !== asId(patchId(repoRoot, headBase, head, [p]))) changedProduct.push(p);
     }
-    if (!changedProduct.length) changedProduct.push('(a product path outside the from..head file list; compare the two base diffs)');
+    if (!changedProduct.length) changedProduct.push('(a product path outside the branch\'s touched files; compare the two base diffs)');
   }
   const mergeCommits = (git(['rev-list', '--merges', '--count', `${from}..${head}`], repoRoot) ?? '0').trim();
   // Evidence for the record, never the decision: a slow range-diff is reported unavailable rather than waited for.
@@ -455,6 +528,45 @@ function cmdCensus(rest: string[], json: boolean): number {
   return EXIT.ok;
 }
 
+/**
+ * /ship Step 14.5's doc-cap check: every `docs.caps` entry of the reviewed
+ * policy (origin/<base>'s .gstack/ship-policy.json, like every other policy
+ * read here; the branch cannot raise its own cap) against the working tree,
+ * one DOCS_CAP: line each; any `over` (an absent file counts) exits 1 so the
+ * audit blocks before the verification gate. `--policy <file>` reads that
+ * file instead, for a repository bootstrapping its policy.
+ */
+function cmdDocsCaps(rest: string[], json: boolean): number {
+  const repoRoot = git(['rev-parse', '--show-toplevel']) ?? process.cwd();
+  const policyFile = flag(rest, '--policy');
+  let caps: NonNullable<ShipPolicy['docs']>['caps'] = [];
+  let source: string;
+  if (policyFile !== undefined) {
+    if (!fs.existsSync(policyFile)) { process.stderr.write(`gstack-ship-receipt docs-caps: ${policyFile} does not exist\n`); return EXIT.usage; }
+    let raw: unknown;
+    try { raw = JSON.parse(fs.readFileSync(policyFile, 'utf8')); } catch (e: any) { process.stderr.write(`gstack-ship-receipt docs-caps: ${policyFile} is not JSON: ${e.message}\n`); return EXIT.fail; }
+    const errors = validatePolicy(raw).filter(e => e.path === 'docs' || e.path.startsWith('docs.'));
+    if (errors.length) { for (const e of errors) process.stderr.write(resultLine('gstack-ship-receipt docs-caps', e.code, `${e.message} at ${e.path}`) + '\n'); return EXIT.fail; }
+    caps = (raw as Partial<ShipPolicy>).docs?.caps ?? [];
+    source = policyFile;
+  } else {
+    const base = flag(rest, '--base') ?? resolveBaseBranch(repoRoot);
+    const load = loadPolicyFromBase(repoRoot, base);
+    if (isUnavailable(load)) { process.stderr.write(policyUnavailableLine('gstack-ship-receipt docs-caps', base, `${load.detail}; pass --policy <file> to check caps without the base`) + '\n'); return EXIT.refused; }
+    const errors = load.errors.filter(e => e.path === 'docs' || e.path.startsWith('docs.'));
+    if (errors.length) { for (const e of errors) process.stderr.write(resultLine('gstack-ship-receipt docs-caps', e.code, `${e.message} at ${e.path} (${load.source.label})`) + '\n'); return EXIT.fail; }
+    caps = load.policy.docs?.caps ?? [];
+    source = load.source.label;
+  }
+  const results = checkDocsCaps(caps, rel => { try { const st = fs.statSync(path.join(repoRoot, rel)); return st.isFile() ? st.size : null; } catch { return null; } });
+  const over = results.filter(r => r.verdict === 'over');
+  const lines = results.length ? results.map(docsCapLine) : ['DOCS_CAP: none declared'];
+  process.stdout.write(json ? JSON.stringify({ policy: source, caps: results, over: over.length }) + '\n' : lines.join('\n') + '\n');
+  if (!over.length) return EXIT.ok;
+  process.stderr.write(resultLineWithDocs('gstack-ship-receipt docs-caps', 'DOCS_AUDIT_BLOCKED', `${over.length} of ${results.length} documentation cap${results.length === 1 ? '' : 's'} over: ${over.map(r => r.path).join(', ')}`) + '\n');
+  return EXIT.fail;
+}
+
 function main(argv: string[]): number {
   const [cmd, ...rest] = argv;
   const json = rest.includes('--json');
@@ -464,6 +576,7 @@ function main(argv: string[]): number {
   if (cmd === 'result') return cmdResult(rest, json);
   if (cmd === 'census') return cmdCensus(rest, json);
   if (cmd === 'carry') return cmdCarry(rest, json);
+  if (cmd === 'docs-caps') return cmdDocsCaps(rest, json);
   process.stderr.write(`gstack-ship-receipt: unknown command ${cmd}\n${HELP}\n`);
   return EXIT.usage;
 }

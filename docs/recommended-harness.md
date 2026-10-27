@@ -312,7 +312,7 @@ closed) holds the longer history behind these numbers; from here on
 |---|---|---|
 | Install and health | `./setup`, `gstack-doctor`, `gstack-upgrade` | the user-scope skill folder, `scripts/install.sh --check` and its trailer, the project Setup snapshot |
 | Running a workflow | the SKILL.md files, `GSTACK_SESSION_KIND=unattended`, `GSTACK_RESULT:` lines | the `GSTACK_LAUNCH` assignments, `GSTACK_CAPY=1` and the `capy-asks` block, no enforced hooks (safety skills are advisory) |
-| Approvals | `gstack-approvals`, `gstack-owner-brief render --captain`, the `## Approvals` table | the Captain relay (`needs_you`), the private Drive mirror |
+| Approvals | `gstack-approvals`, `gstack-owner-brief render --captain`, the `## Approvals` table | the Captain relay (`needs_you`), the Captain drive `approvals/` mirror |
 | Pull requests | `/ship`, the ship receipt, `gstack-pr-shots` | `tools.pr.create` (callbacks), `tools.pr.uploadAsset` (before/after images) |
 | Merging | `gstack-ship-queue` (ready, train build, verdict, verify), `gstack-restamp`, `gh pr merge --match-head-commit` | the controller is a Captain thread; slot calls are thread messages |
 | Flaky pass | the rerun rule, `flake-records-a*` and `flake-ledger-*` artifacts, `test:health` | the daily automation and the ledger in the Captain's Drive |
@@ -403,9 +403,11 @@ harness on it as of that date, with the workaround the crews use.
 
 - An autoplan gate inside a crew thread costs a Captain round trip even when
   the owner's standing answer is "take every recommendation"; record the
-  standing answer once with `gstack-approvals` and cite it. Approval rows
-  mirrored to the project-user Drive are not readable by other crew threads,
-  so the Captain carries the text into PR bodies.
+  standing answer once with `gstack-approvals` and cite it. Rows mirror to the
+  Captain drive's `approvals/` directory when the
+  Captain created one, so other crew threads can read them; without it they
+  stay in the private project-user Drive and the Captain carries the text into
+  PR bodies.
 
 **Harness gaps the same files name (fixed or owned in gstack, listed so the
 reader knows the date):** the pregate failing every touched file in a

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   buildPaidShardArgs, buildRunManifest, parseRunManifest, planPaidShards,
   DEFAULT_JOBS, parseCliOptions, paidShardWallUpperBoundMs, resolvePaidShardBudget, retriesForFiles, verifySliceResults, collectPaidTestFiles, selectPaidTestFiles,
-  shardFile, sliceExecutionOrder, sliceSupervisedWallMs, CASE_SHARDED_FILES, sliceCiTimeoutMinutes, resolvePaidShardTimeoutMs,
+  shardFile, shardCaseId, shardTrial, sliceExecutionOrder, sliceSupervisedWallMs, CASE_SHARDED_FILES, sliceCiTimeoutMinutes, resolvePaidShardTimeoutMs,
 } from '../scripts/test-paid-shards';
 import {
   ALL_TIERS, AUQ_CONSISTENCY_RETRY_BUDGET, FILE_RETRY_BUDGETS,
@@ -331,6 +331,7 @@ test('gate census requires all seven distinct slice results and its own reconcil
       files: [row.file], status: 'passed' as const, exitCode: 0, elapsedMs: 1, skippedTests: 0,
       executedTests: STRICT_RETRY_CASE_BUDGETS.find(budget => budget.file === row.file)?.cases ?? 1,
       ...(row.budget ? { budget: row.budget } : {}),
+      ...(row.trial ? { trial: { case: shardCaseId(row.file)!, trial: shardTrial(row.file)!, ...row.trial, outcome: 'passed' as const, cost_usd: 0, duration_ms: 1 } } : {}),
     })),
   }));
   expect(verifySliceResults(manifest, results)).toEqual({ ok: true, problems: [] });

@@ -95,7 +95,7 @@ const CLAUDE_ONLY: Readonly<Record<ClaudeOnlyReason, readonly string[]>> = {
     'plan-design-with-ui-scope', 'plan-devex-finding-floor', 'plan-devex-review-plan-mode', 'plan-mode-no-op'],
   sdk: ['auq-format-gate', 'investigate-owned-abort', 'investigate-owned-completion', 'investigate-owned-ending-error',
     'shared-libs-review-index-flags', 'shared-libs-review-lifecycle', 'shared-libs-review-path-eligibility',
-    'shared-libs-review-prior-coverage', 'shared-libs-review-revalidation', 'ship-local-hook-preservation',
+    'shared-libs-review-prior-coverage', 'shared-libs-review-revalidation', 'ship-frozen-scope-convergence', 'ship-local-hook-preservation',
     'ship-managed-hook-refresh', 'ship-skipped-queued-finding', 'ship-unmanaged-hook-consent'],
   subagents: ['docsync-spawned', 'review-army-perf-n-plus-one'],
   'skill-tool': ['router-failure-contradicted-cause', 'router-failure-triage-resolves', 'router-failure-triage-unclear',
