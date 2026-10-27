@@ -78,6 +78,12 @@ export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.
     recursive: true,
     filter: source => !fs.statSync(source).isFile() || fs.statSync(source).size < 5_000_000,
   });
+  // Step 14.5's cap gate (bin/gstack-ship-receipt docs-caps) imports ../lib/*; an install without lib/ fails the gate
+  // with a module error instead of a DOCS_CAP verdict (gate at 2524ec4: both lifecycle cases blocked on it).
+  fs.cpSync(path.join(DOCSYNC_ROOT, 'lib'), path.join(skills, 'lib'), {
+    recursive: true,
+    filter: source => !fs.statSync(source).isFile() || (/\.(?:ts|json)$/.test(source) && fs.statSync(source).size < 5_000_000),
+  });
   const state = path.join(home, 'state');
   fs.mkdirSync(state);
   fs.writeFileSync(path.join(state, 'config.yaml'), 'update_check: false\n');

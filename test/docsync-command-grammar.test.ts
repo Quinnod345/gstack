@@ -543,4 +543,10 @@ test('Step 14.5 housekeeping commands and the docs record are declared exactly a
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/tmp/review-loop.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/ship-policy.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(gitAt(fixture.repo, 'rev-parse', '--verify', 'origin/main')).toBe(gitAt(fixture.repo, 'rev-parse', '--verify', 'main'));
+  // The declared gate must run from the fixture install: bin/gstack-ship-receipt imports ../lib/*, so the install carries lib/ too.
+  const gate = spawnSync('bun', ['--no-env-file', '--config=/dev/null', path.join(fixture.skills, 'bin/gstack-ship-receipt'), 'docs-caps', '--base', 'main'],
+    { cwd: fixture.repo, encoding: 'utf8', env: { ...process.env, ...fixture.env, HOME: fixture.home }, timeout: 60_000 });
+  expect(gate.stderr).toBe('');
+  expect(gate.stdout.trim()).toBe('DOCS_CAP: none declared');
+  expect(gate.status).toBe(0);
 });
