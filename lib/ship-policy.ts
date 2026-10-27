@@ -71,6 +71,8 @@ export interface ShipPolicy {
   min_gstack_version: string | null;
   /** Merge trains in gstack-ship-queue (docs/ship-policy.md#run-a-merge-train); null keeps the per-PR queue. */
   train: TrainPolicy | null;
+  /** Documentation caps /ship Step 14.5 checks before the verification gate (`gstack-ship-receipt docs-caps`); null declares none. */
+  docs: { caps: Array<{ path: string; max_bytes: number }> } | null;
 }
 
 /** The `train` block: the gate workflow trains dispatch and how its verdict is read. */
@@ -115,6 +117,7 @@ export const DEFAULT_POLICY: ShipPolicy = {
   full_e2e: false,
   min_gstack_version: null,
   train: null,
+  docs: null,
 };
 
 export type PolicyKey = Exclude<keyof ShipPolicy, '$schema'>;
@@ -142,6 +145,7 @@ export const POLICY_EXPLANATIONS: Record<PolicyKey, string> = {
   gate_command: 'The repo’s full pre-merge gate command. gstack-ship-queue gate-ahead and ready print it for the caller to run (in the background or in CI); gstack never executes it. null when the repo has none.',
   full_e2e: 'true: every merge needs a passing full-gate result (gstack-ship-queue gate-ahead --record, or the lane\'s --gate-exit 0 --gate-log on the gated head) bound to a tree equal to the merging one modulo stamps; ready, stamp and verify refuse without one (QUEUE_GATE_MISSING).',
   train: '{ gate_workflow, free_workflow, full_gate_check, record_artifact, max_size, fill_hours, screen_selection, trial_reservation_usd } or null: turns on merge trains in gstack-ship-queue (train build|status|verdict|bisect|rebuild|prune, ready --screen|--no-screen, verify --train). null keeps today\'s per-PR queue unchanged.',
+  docs: '{ caps: [{ path, max_bytes }] } or null: documentation files with a byte cap. /ship Step 14.5 runs `gstack-ship-receipt docs-caps` before the verification gate and prints one DOCS_CAP: line per cap; a file over its cap (or absent) blocks the ship until the doc is trimmed or the cap raised on the base branch. null declares none.',
   min_gstack_version: 'The oldest gstack that may read this file. Any key newer than 1.91.98.0 set to a non-default value requires it at that key’s introducing version (validate prints each); a gstack older than it refuses the file (POLICY_GSTACK_TOO_OLD).',
 };
 
@@ -155,13 +159,19 @@ export const POLICY_EXPLANATIONS: Record<PolicyKey, string> = {
 export const POLICY_COMPAT_FLOOR = '1.91.98.0';
 export const SHIP_QUEUE_KEYS_VERSION = '1.91.108.0';
 export const TRAIN_KEYS_VERSION = '1.91.146.0';
-export const REVIEW_SCOPE_KEY_VERSION = '1.91.249.0';
+// Each constant is the release that first reads its key: a policy declaring the key must name at least
+// that version as min_gstack_version, so an older gstack refuses the policy by name instead of failing on
+// an unknown key. review_scope shipped in 1.91.256.0 (#3481). docs.caps is unreleased: its constant names the
+// release expected to stamp it (test/gstack-ship-policy.test.ts holds it newer than every CHANGELOG heading the
+// checkout sees); whoever stamps that release under another number moves the constant to the stamped version.
+export const REVIEW_SCOPE_KEY_VERSION = '1.91.256.0';
+export const DOCS_CAPS_KEY_VERSION = '1.91.258.0';
 export const POLICY_KEY_INTRODUCED: Record<PolicyKey, string> = {
   bump: '1.91.73.0', queue_mode: '1.91.73.0', release_tool: '1.91.73.0', release_outputs: '1.91.73.0', stamp_paths: '1.91.73.0',
   changelog: '1.91.73.0', mirror: '1.91.73.0', history: '1.91.73.0', preregistration_shas: '1.91.73.0', stamp_sensitive_gates: '1.91.73.0',
   pr_count: '1.91.73.0', maintainers: '1.91.73.0', stamp_files: '1.91.98.0', stamp_patterns: '1.91.98.0', restamp_command: '1.91.98.0',
   migrations: '1.91.98.0', gate_command: SHIP_QUEUE_KEYS_VERSION, full_e2e: SHIP_QUEUE_KEYS_VERSION, min_gstack_version: SHIP_QUEUE_KEYS_VERSION,
-  train: TRAIN_KEYS_VERSION, review_scope: REVIEW_SCOPE_KEY_VERSION,
+  train: TRAIN_KEYS_VERSION, review_scope: REVIEW_SCOPE_KEY_VERSION, docs: DOCS_CAPS_KEY_VERSION,
 };
 
 const newer = (a: string, b: string): boolean => cmpVersion(parseVersion(a)!, parseVersion(b)!) > 0;
@@ -339,6 +349,7 @@ export function validatePolicy(raw: unknown, opts: { gstackVersion?: string } = 
   }
   if ('full_e2e' in obj && typeof obj.full_e2e !== 'boolean') errors.push({ code: 'POLICY_INVALID', path: 'full_e2e', message: 'must be true or false' });
   if ('train' in obj && obj.train !== null) trainErrors(obj.train, errors);
+  if ('docs' in obj && obj.docs !== null) docsErrors(obj.docs, errors);
   if ('stamp_paths' in obj) listErrors('stamp_paths', obj.stamp_paths, errors, globError);
   for (const key of ['changelog', 'mirror'] as const) {
     if (!(key in obj) || obj[key] === null) continue;
@@ -401,6 +412,23 @@ function mirrorPathError(p: string): string | null {
   if (segs.slice(i).includes('..')) return 'must not contain an interior `..` segment';
   if (i === segs.length) return 'must name a directory, not only parents';
   return null;
+}
+
+/** `docs`: `{ caps: [{ path, max_bytes }] }`, every path contained, every cap a positive integer, at most 64 caps. */
+function docsErrors(raw: unknown, errors: PolicyError[]): void {
+  const d = raw as Record<string, unknown> | null;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) { errors.push({ code: 'POLICY_INVALID', path: 'docs', message: 'must be { caps: [{ path, max_bytes }] } or null' }); return; }
+  for (const k of Object.keys(d)) if (k !== 'caps') errors.push({ code: 'POLICY_INVALID', path: `docs.${k}`, message: 'unknown key' });
+  if (!Array.isArray(d.caps)) { errors.push({ code: 'POLICY_INVALID', path: 'docs.caps', message: 'must be an array of { path, max_bytes }' }); return; }
+  if (d.caps.length > MAX_LIST) errors.push({ code: 'POLICY_CONTAINMENT', path: 'docs.caps', message: `more than ${MAX_LIST} entries` });
+  d.caps.forEach((cap, i) => {
+    const c = cap as Record<string, unknown> | null;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) { errors.push({ code: 'POLICY_INVALID', path: `docs.caps[${i}]`, message: 'must be { path, max_bytes }' }); return; }
+    for (const k of Object.keys(c)) if (!['path', 'max_bytes'].includes(k)) errors.push({ code: 'POLICY_INVALID', path: `docs.caps[${i}].${k}`, message: 'unknown key' });
+    const why = typeof c.path === 'string' ? containedRelative(c.path) : 'must be a string';
+    if (why) errors.push({ code: 'POLICY_CONTAINMENT', path: `docs.caps[${i}].path`, message: `${JSON.stringify(c.path)} ${why}` });
+    if (!Number.isInteger(c.max_bytes) || (c.max_bytes as number) < 1) errors.push({ code: 'POLICY_INVALID', path: `docs.caps[${i}].max_bytes`, message: 'must be an integer >= 1' });
+  });
 }
 
 /** Merge a parsed file over the defaults, recording per-key provenance. */

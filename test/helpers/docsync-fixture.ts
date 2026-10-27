@@ -37,16 +37,18 @@ export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.
   gitAt(repo, 'add', 'README.md', 'AGENTS.md', DOC_PATH, 'app.ts', 'VERSION', 'CHANGELOG.md', 'TODOS.md', 'package.json');
   gitAt(repo, 'commit', '-m', 'fixture baseline');
   const base = gitAt(repo, 'rev-parse', 'HEAD');
+  // Steps 0–14 ran before this phase: origin/main exists (Step 14.5's docs-caps reads the base policy there).
+  const remote = path.join(home, 'remote.git');
+  fs.mkdirSync(remote);
+  gitAt(remote, 'init', '--bare', '-b', 'main');
+  gitAt(repo, 'remote', 'add', 'origin', remote);
+  gitAt(repo, 'push', '-q', 'origin', 'main');
   if (scenario !== 'store') gitAt(repo, 'checkout', '-b', 'feature/docs');
   if (scenario === 'current') {
     write(DOC_PATH, '# Widget reference\n\nDefault format: text.\n\nUser-maintained note: KEEP THIS EXACTLY.\n\nSupports plain text output.\n');
     gitAt(repo, 'add', DOC_PATH);
     gitAt(repo, 'commit', '-m', 'docs: clarify format');
-    const remote = path.join(home, 'remote.git');
-    fs.mkdirSync(remote);
-    gitAt(remote, 'init', '--bare', '-b', 'main');
-    gitAt(repo, 'remote', 'add', 'origin', remote);
-    gitAt(repo, 'push', '-u', 'origin', 'feature/docs');
+    gitAt(repo, 'push', '-q', '-u', 'origin', 'feature/docs');
   } else {
     write('app.ts', 'export const format = "json";\n');
     gitAt(repo, 'add', 'app.ts');
@@ -75,6 +77,12 @@ export function fixtureDocs(scenario: DocsScenario, generatedRoot = process.env.
   fs.cpSync(path.join(DOCSYNC_ROOT, 'bin'), path.join(skills, 'bin'), {
     recursive: true,
     filter: source => !fs.statSync(source).isFile() || fs.statSync(source).size < 5_000_000,
+  });
+  // Step 14.5's cap gate (bin/gstack-ship-receipt docs-caps) imports ../lib/*; an install without lib/ fails the gate
+  // with a module error instead of a DOCS_CAP verdict (gate at 2524ec4: both lifecycle cases blocked on it).
+  fs.cpSync(path.join(DOCSYNC_ROOT, 'lib'), path.join(skills, 'lib'), {
+    recursive: true,
+    filter: source => !fs.statSync(source).isFile() || (/\.(?:ts|json)$/.test(source) && fs.statSync(source).size < 5_000_000),
   });
   const state = path.join(home, 'state');
   fs.mkdirSync(state);

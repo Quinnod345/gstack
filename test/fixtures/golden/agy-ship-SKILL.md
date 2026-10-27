@@ -769,7 +769,7 @@ repeat Step 2 (decisions included) on the merged content, then Step 4.
 
 ## Step 12: Version bump (auto-decide)
 
-Item 3 needs `BUMP_LEVEL`: reuse this invocation's saved level. Otherwise FRESH
+Item 3 needs `BUMP_LEVEL`: reuse this invocation's saved level. Else FRESH
 chooses it in item 2 and ALREADY_BUMPED derives it in item 1.
 
 `ship: queue_mode stamp-at-merge` replaces items 1–4.
@@ -789,9 +789,10 @@ chooses it in item 2 and ALREADY_BUMPED derives it in item 1.
      Repair alone never re-bumps.
    - **DRIFT_UNEXPECTED** → STOP: package.json disagrees with VERSION while VERSION
      matches base. Reconcile the manual edit, then reclassify.
-   - **NO_VERSION** → print `notice` verbatim and ship without a version change: skip
-     the rest of Step 12 and Step 13's CHANGELOG entry, never create VERSION, use an
-     unprefixed title in Step 18 and log `"version":null` in Step 20.
+   - **NO_VERSION** → print `Version bump: skipped (no version source: <path, reason>)` and
+     `notice`; ship without a version change: skip the rest of Step 12 and Step 13's
+     CHANGELOG entry, never create VERSION, use an unprefixed title in Step 18 and log
+     `"version":null` in Step 20.
    - **Exit 2** → STOP and show stderr: a configured version file is missing, empty,
      unreadable or malformed. Fix it or its pin, then reclassify. Never substitute `0.0.0.0`.
 
