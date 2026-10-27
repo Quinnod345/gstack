@@ -5,7 +5,7 @@ import { CAPTURE_LONG_MS, CAPTURE_MS } from './helpers/eval-budgets';
 import { runSkillTest } from './helpers/session-runner';
 import { runId, describeIfSelected, testConcurrentIfSelected, createEvalCollector, recordE2E, finalizeEvalCollector, logCost } from './helpers/e2e-helpers';
 import { describeE2ETier } from './helpers/e2e-gate';
-import { docsDispatchIndices, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
+import { acceptedChangedPaths, docsDispatchIndices, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
 import { fixtureDocs, repoSnapshot, changedFiles, DOC_PATH, preserveDocsEvidence, sawSpawnedMarker, childReportedSpawnedMarker, type DocsScenario } from './helpers/docsync-fixture';
 import { observeDocsWrites, docsWriteFailures, docsShipPhase, docsToolFailures, docsCompletedRead, docsSessionOptions } from './helpers/docsync-observer';
 import type { SkillTestResult } from './helpers/session-runner';
@@ -81,7 +81,7 @@ async function runShipDocs(testName: string, scenario: DocsScenario) {
         expect(output).not.toMatch(/Documentation(?: is|:) current/i);
       } else {
         // The parent accepts the last attempt; a rejected earlier attempt's edits stay in the tree (Blocked recovery preserves
-        // partial content), so the accepted contract owns only the paths no earlier attempt reported.
+        // partial content), so the accepted contract owns the paths no earlier attempt reported plus any it claims itself.
         const contracts = dispatches.map(index => {
           const raw = JSON.parse(calls[index].output.trimEnd().split('\n').at(-1)!);
           const contract = parseDocsCompletion(calls[index].output, raw.audit_id);
@@ -90,13 +90,12 @@ async function runShipDocs(testName: string, scenario: DocsScenario) {
           return contract;
         });
         const contract = contracts.at(-1)!;
-        const retained = contracts.slice(0, -1).flatMap(earlier => earlier.files_updated);
         expect(sawSpawnedMarker(result)).toBe(true);
         vetDocsCompletion(contract, {
           settled: result.exitReason === 'success', markerSeen: sawSpawnedMarker(result),
           headUnchanged: after.head === fixture.before.head, indexUnchanged: after.index === fixture.before.index,
           candidateUnchanged: changed.every(p => p === DOC_PATH), readOnly: false,
-          changedPaths: changed.filter(p => !retained.includes(p)), allowedDocs: [DOC_PATH],
+          changedPaths: acceptedChangedPaths(changed, contracts), allowedDocs: [DOC_PATH],
         });
         expect(contract.status).not.toBe('blocked');
         if (scenario === 'current') expect(contracts.map(attempt => attempt.status)).toEqual(contracts.map(() => 'current'));

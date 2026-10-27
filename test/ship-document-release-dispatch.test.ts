@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runGeneration } from '../scripts/gen-skill-docs';
-import { docsDispatchIndex, docsDispatchIndices, extractDocsDispatch, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
+import { acceptedChangedPaths, docsDispatchIndex, docsDispatchIndices, extractDocsDispatch, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
 import { fixtureDocs, repoSnapshot, changedFiles, gitAt, DOC_PATH, preserveDocsEvidence } from './helpers/docsync-fixture';
 import { parseNDJSON, type SkillTestResult } from './helpers/session-runner';
 import { observeDocsWrites, docsWriteFailures, docsCommandAllowed, docsPreambleCommands, docsCompletedRead } from './helpers/docsync-observer';
@@ -610,9 +610,16 @@ describe('two-attempt documentation audits', () => {
     expect(report).toContain(accepted.documentation_section);
     const evidence = { settled: true, markerSeen: true, headUnchanged: true, indexUnchanged: true, candidateUnchanged: true, readOnly: false, allowedDocs: [DOC_PATH] };
     expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: [DOC_PATH] })).toThrow('unreported edits');
-    const retained = [first].flatMap(attempt => attempt.files_updated);
-    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: [DOC_PATH].filter(p => !retained.includes(p)) })).not.toThrow();
-    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: [DOC_PATH, 'README.md'].filter(p => !retained.includes(p)) })).toThrow('unreported edits');
+    expect(acceptedChangedPaths([DOC_PATH], [first, accepted])).toEqual([]);
+    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH], [first, accepted]) })).not.toThrow();
+    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH, 'README.md'], [first, accepted]) })).toThrow('unreported edits');
+    // The other honest shape: the re-audit edits the same document further and reports it. Its claim keeps the path in the
+    // accepted attempt's set; filtering on attempt 1's report alone would compare [] with [DOC_PATH] and red the re-audit.
+    const reaudit = { ...accepted, status: 'updated' as const, files_updated: [DOC_PATH] };
+    expect(acceptedChangedPaths([DOC_PATH], [first, reaudit])).toEqual([DOC_PATH]);
+    expect(() => vetDocsCompletion(reaudit, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH], [first, reaudit]) })).not.toThrow();
+    expect(() => vetDocsCompletion(reaudit, { ...evidence, changedPaths: [DOC_PATH].filter(p => !first.files_updated.includes(p)) })).toThrow('unreported edits');
+    expect(acceptedChangedPaths([DOC_PATH], [accepted])).toEqual([DOC_PATH]);
     const publish = calls.findIndex(call => call.tool === 'Bash' && /^bun .*fixture-publish\.ts/.test(String(call.input?.command)));
     expect(publish).toBeGreaterThan(dispatches[1]);
     for (const index of dispatches) expect(calls[index].input.run_in_background).toBe(false);

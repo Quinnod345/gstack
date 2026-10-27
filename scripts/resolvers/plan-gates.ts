@@ -563,7 +563,7 @@ ${undeclaredBehaviorLines().fields}
 ${undeclaredBehaviorLines().rule}
 
 **No plan file found:** Use commit messages and TODOS.md as fallback sources (see above).
-Emit Step 1.5's Scope Check once without plan fields. If no intent sources exist, state
+Step 3 emits the Scope Check once without plan fields. If no intent sources exist, state
 "No intent sources detected — skipping completion audit." rather than claiming requirements were verified.`;
 }
 

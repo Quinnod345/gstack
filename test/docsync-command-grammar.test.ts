@@ -591,6 +591,6 @@ test.skipIf(process.platform === 'win32')('the captured store orientations with 
       'git branch --set-upstream-to=origin/main', 'git branch -u origin/main', 'git branch -c a b', 'git branch --edit-description', 'git branch --list "feat*"',
       'git branch --contains HEAD', 'git branch -ad feature', 'git branch -a; rm -rf handbook'])
       expect(docsCommandAllowed(write, store, [publish]), write).toBe(false);
-    expect(docsNativeInterface(store, [publish], false, true)).toContain('branch listings with no operand (--show-current, -a, -r, -v, --list)');
+    expect(docsNativeInterface(store, [publish], false, true)).toContain('branch listings with no operand and only --show-current, -a/--all, -r/--remotes, -v/--verbose, -l/--list, --no-color or --no-abbrev (no --merged, --sort, --format or --contains)');
   } finally { store.clean(); }
 });

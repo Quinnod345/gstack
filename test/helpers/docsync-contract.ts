@@ -55,6 +55,17 @@ export function vetDocsCompletion(result: DocsCompletion, evidence: {
   if (evidence.changedPaths.some(p => forbidden.test(p) || !evidence.allowedDocs.includes(p))) throw new Error('non-doc mutation');
 }
 
+/**
+ * The changed paths the accepted (last) attempt answers for. A rejected earlier attempt's reported edit stays in the tree
+ * (Blocked recovery preserves partial content), so it is not the accepted attempt's unreported edit; the accepted attempt
+ * answers for it again only when its own `files_updated` claims it (an honest re-audit that re-edited the same document).
+ */
+export function acceptedChangedPaths(changed: string[], contracts: DocsCompletion[]): string[] {
+  const accepted = contracts.at(-1)!;
+  const retained = contracts.slice(0, -1).flatMap(earlier => earlier.files_updated);
+  return changed.filter(p => !retained.includes(p) || accepted.files_updated.includes(p));
+}
+
 export function extractDocsDispatch(section: string): string {
   const begin = section.indexOf('**Subagent prompt:**');
   const end = section.indexOf('**Parent processing:**');

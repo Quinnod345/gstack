@@ -229,5 +229,5 @@ Undeclared behavior changes: <behavior the diff changes that the PR body, commit
 `Diff read` records Step 3's full-diff read; `Scope Check: CLEAN`, and options B and C above, count as approved only with `Diff read: full` recorded. A partial read is `DRIFT DETECTED` naming the unread paths. `Undeclared behavior changes` lists every behavior the diff changes (a default, an exit code, a stored value, a route, a side effect) that the author's own summary omits; each is a Scope Check item for the reviewer, never silently CLEAN.
 
 **No plan file found:** Use commit messages and TODOS.md as fallback sources (see above).
-Emit Step 1.5's Scope Check once without plan fields. If no intent sources exist, state
+Step 3 emits the Scope Check once without plan fields. If no intent sources exist, state
 "No intent sources detected — skipping completion audit." rather than claiming requirements were verified.

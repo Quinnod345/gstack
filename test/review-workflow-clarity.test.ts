@@ -124,6 +124,22 @@ test('small-diff persistence uses an empty specialist map without manufacturing 
   const ship = readFileSync(join(root, 'ship/sections/review-army.md.tmpl'), 'utf8');
   expect(ship).toContain('`specialists`: `{}` for a small-diff skip');
   expect(ship.replace(/\s+/g, ' ')).toMatch(/all required probes pass/i);
+  // Value: protects=the small-diff instruction and the specialist record agree that State Machines is the one specialist a
+  // small diff may still dispatch (item 9 decides), so the record never contradicts the dispatch (gate 40454750574 judged
+  // "skip all except State Machines" beside an unconditional `{}` record); fails_when=either sentence drops the State
+  // Machines allowance while the other keeps it, another specialist joins the exemption, or the small-diff line stops keeping
+  // the parent-owned probes and core shared-code checks; why_new=the `{}` pin above matches both the old and the new record
+  // wording; seam=none; no_claim=the ship persist line, which still says `{}` for every small-diff skip.
+  for (const skillName of ['review', 'ship']) {
+    const section = generateReviewArmy({ skillName, tmplPath: `${skillName}/SKILL.md.tmpl`, host: 'claude', paths: HOST_PATHS.claude });
+    const small = section.match(/^\*\*If DIFF_LINES < 50:\*\*[^\n]*/m)![0];
+    expect(small, skillName).toContain('Skip all specialists except State Machines (item 9 decides it).');
+    expect(small, skillName).toContain('an empty or State Machines-only specialist list');
+    expect(small, skillName).toContain('never the parent-owned smoke probes or core shared-code checks');
+    expect(small.replace(/State Machines/g, ''), skillName).not.toMatch(/Testing|Maintainability|Security|Performance|Data Migration|API Contract|Design|Simplification|Red Team/);
+    expect(section, skillName).toContain('9. **State Machines** — if SCOPE_STATE_MACHINE is true or unknown');
+  }
+  expect(army).toContain('For DIFF_LINES < 50, keep `specialists: {}` (or `state-machines` alone when it dispatched); do not manufacture per-specialist scope records.');
 });
 
 test('caller QA runs charter and setup after resource loading and has a severity for unmatched functional failures', () => {
@@ -260,6 +276,16 @@ test('review finalization ownership: affected QA reuse cannot replace a full rev
   const flat = step.replace(/\s+/g, ' ');
   expect(flat).toContain('execute Steps 3–5 in order');
   expectMentions(flat, [['only', 'unchanged-input', 'evidence']], 'flat');
+  // Value: protects=an edited pass reruns every probe its verdict relies on instead of reusing QA captured before the edit,
+  // and only a zero-edit pass may reuse unchanged-input evidence (gate 40454750574 read the old sentence as one reuse rule
+  // for both); fails_when=the edited-pass rule disappears, reuse is offered to an edited pass, or the two rules swap order;
+  // why_new=the only+unchanged-input+evidence pin above also matched the old single-rule wording; seam=none;
+  // no_claim=the judged clarity of the sentence.
+  const repeat = flat.slice(flat.indexOf('2. On a repeat, execute Steps 3–5 in order.'), flat.indexOf('3. **Verify completed actions.**'));
+  expect(repeat).toMatch(/an edited pass supersedes every earlier QA capture \(exploratory §4\): rerun each probe the verdict relies on\./);
+  expect(repeat).toMatch(/A zero-edit pass reuses only this invocation's unchanged-input QA evidence, rerunning any probe whose inputs changed or are uncertain\./);
+  expect(repeat.indexOf('an edited pass supersedes')).toBeLessThan(repeat.indexOf('A zero-edit pass reuses'));
+  expect(repeat).not.toMatch(/reuse only this invocation's unchanged-input QA evidence; rerun a probe if/);
   expectMentions(flat, [['never', 'reusing', 'review']], 'flat');
   expectMentions(flat, [['do not', 'suppress', 'earlier']], 'flat');
   expect(flat).toContain('logger computes `snapshot_covered_paths`');
@@ -313,6 +339,38 @@ test('review scope notes remain provisional until the plan section emits the onl
   expectMentions(scope, [['before', 'single', 'final']], 'scope');
   expect(scope).not.toContain('Scope Check: [CLEAN');
   expect(scope).not.toContain('available plan-audit results');
+});
+
+// Value: protects=the single final Scope Check is emitted in Step 3 after the full diff read, and the three owners of that
+// rule (the Step 3 skeleton, the plan-completion audit and the Step 1.5 scope notes) name the same point, so `Diff read: full`
+// is recordable when the check is emitted (gate 40454750574: the audit emitted the check before Step 2 while its own rule
+// required Step 3's diff read, a circular prerequisite); fails_when=any owner moves the emission before Step 2, Step 3 loses
+// its emit instruction, the B/C route resurrects "the final Scope Check and Step 2", or the fence is emitted from more than one
+// place; why_new=the provisional-notes test above checks three words in one sentence and the ordering test checks placeholder
+// order, neither pins where the check is emitted; seam=none; no_claim=the judged clarity of the sentences.
+test('the final Scope Check is emitted once, in Step 3 after the full diff read, and every owner names that point', () => {
+  const ctx: TemplateContext = { skillName: 'review', tmplPath: 'review/SKILL.md.tmpl', host: 'claude', paths: HOST_PATHS.claude };
+  const step3 = between(skill, '## Step 3: Get the diff', '## Step 3.4:');
+  expectOrdered(step3, ['git diff "$DIFF_BASE"', "5. First pass only: emit Step 1.5's final Scope Check; `Diff read` records this read."], 'step3');
+  expect(skill.split("emit Step 1.5's final Scope Check")).toHaveLength(2);
+  const audit = generatePlanCompletionAuditReview(ctx);
+  const flatAudit = audit.replace(/\s+/g, ' ');
+  expect(flatAudit).toContain('B/C continue to Step 2. None of these choices authorizes shipping');
+  expect(flatAudit).not.toContain('continue to the final Scope Check and Step 2');
+  expect(flatAudit).toContain("emit the single final Scope Check in Step 3, after its full diff read, from Step 1.5's provisional notes and this plan context:");
+  expect(flatAudit).toContain("`Diff read` records Step 3's full-diff read; `Scope Check: CLEAN`, and options B and C above, count as approved only with `Diff read: full` recorded.");
+  expect(audit.split('Scope Check: [CLEAN / DRIFT DETECTED / REQUIREMENTS MISSING]')).toHaveLength(2);
+  // The no-plan path and the section's STOP trigger name the same point; neither may say the check is emitted or finished in Step 1.5.
+  expect(flatAudit).toContain('**No plan file found:** Use commit messages and TODOS.md as fallback sources (see above). Step 3 emits the Scope Check once without plan fields.');
+  expect(audit).not.toMatch(/Emit Step 1\.5's/);
+  const rendered = readFileSync(join(root, 'review/SKILL.md'), 'utf8');
+  expect(rendered).toContain('> **STOP.** Before leaving Step 1.5, Read');
+  expect(rendered).not.toContain("finishing Step 1.5's Scope Check");
+  const scope = generateScopeDrift(ctx).replace(/\s+/g, ' ');
+  expect(scope).toContain('it resolves the HIGH-impact decision before Step 2; Step 3 emits the single final Scope Check after its full diff read.');
+  expect(scope).not.toMatch(/emits the single final Scope Check before Step 2/);
+  expect(scope).not.toContain('Scope Check: [CLEAN');
+  expect(skill).not.toContain('Scope Check: [CLEAN');
 });
 
 test('review confidence uses its severity labels without an undefined P0 exception', () => {

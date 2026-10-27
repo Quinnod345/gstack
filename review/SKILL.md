@@ -182,7 +182,7 @@ sections. Read a section in full before doing its step; do not work from memory.
 
 | When | Read this section |
 |------|-------------------|
-| finishing Step 1.5's Scope Check | `sections/plan-completion.md` |
+| leaving Step 1.5 | `sections/plan-completion.md` |
 | Select surfaces and read QA methods | Inline in [Step 4](#step-4-critical-pass-core-review); setup and probes run in Step 4.7 |
 | dispatching the Review Army specialists and merging their findings after the critical pass (Step 4.5) | `sections/review-army.md` |
 | running the always-on native adversarial review before fixes (Step 4.8) | `sections/adversarial.md` |
@@ -216,7 +216,7 @@ Compare the stated intent with the actual changes before reviewing code quality.
    it resolves the HIGH-impact decision before Step 2; Step 3 emits the single
    final Scope Check after its full diff read. It is informational, not another gate.
 
-> **STOP.** Before finishing Step 1.5's Scope Check, Read `~/.claude/skills/gstack/review/sections/plan-completion.md` and execute it
+> **STOP.** Before leaving Step 1.5, Read `~/.claude/skills/gstack/review/sections/plan-completion.md` and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
 
 ## Step 2: Read the checklist
@@ -263,7 +263,7 @@ git diff "$DIFF_BASE"
 3. Native/outside reviewer attempts own separate PASS_START tokens, not REVIEW_START.
 4. Read non-ignored untracked source too (`git ls-files --others --exclude-standard`);
    the captured candidate includes it.
-5. Now emit Step 1.5's final Scope Check; `Diff read` records this read.
+5. First pass only: emit Step 1.5's final Scope Check; `Diff read` records this read.
 
 Keep the review-record terms separate:
 
@@ -353,8 +353,8 @@ Advisory findings only; skip if unavailable.
 
 ## Step 3.6: Gather review context
 
-Run Prior Learnings, then Web research readiness, before Step 4; use their
-results in the core review.
+Run Prior Learnings, then Web research readiness, before Step 4; use both in
+the core review.
 
 ## Prior Learnings
 
@@ -944,7 +944,7 @@ staleness detection: if those files are later deleted, the learning can be flagg
 **Only log genuine discoveries.** Don't log obvious things. Don't log things the user
 already knows. A good test: would this insight save time in a future session? If yes, log it.
 
-If the review exits early (for example, no diff against the base), do **not** write this entry.
+If the review exits early (e.g. no diff against the base), do **not** write this entry.
 
 ## Important Rules
 

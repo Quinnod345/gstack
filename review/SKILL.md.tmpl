@@ -95,7 +95,7 @@ git diff "$DIFF_BASE"
 3. Native/outside reviewer attempts own separate PASS_START tokens, not REVIEW_START.
 4. Read non-ignored untracked source too (`git ls-files --others --exclude-standard`);
    the captured candidate includes it.
-5. Now emit Step 1.5's final Scope Check; `Diff read` records this read.
+5. First pass only: emit Step 1.5's final Scope Check; `Diff read` records this read.
 
 Keep the review-record terms separate:
 
@@ -157,8 +157,8 @@ Advisory findings only; skip if unavailable.
 
 ## Step 3.6: Gather review context
 
-Run Prior Learnings, then Web research readiness, before Step 4; use their
-results in the core review.
+Run Prior Learnings, then Web research readiness, before Step 4; use both in
+the core review.
 
 {{LEARNINGS_SEARCH}}
 
@@ -471,7 +471,7 @@ Emit one final report merging all reviewers:
 
 {{LEARNINGS_LOG}}
 
-If the review exits early (for example, no diff against the base), do **not** write this entry.
+If the review exits early (e.g. no diff against the base), do **not** write this entry.
 
 ## Important Rules
 
