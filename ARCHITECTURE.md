@@ -356,6 +356,8 @@ Templates contain the workflows, tips, and examples that require human judgment.
 | `{{DESIGN_MD_CHECK}}` | `resolvers/design.ts` | Open DESIGN.md format check through `bin/gstack-design-md.ts`, with the one-time conversion offer persisted in the file; `:calibrate` renders the tokens-as-calibration form for /design-review |
 | `{{OVERUSED_FONTS}}` | `resolvers/design.ts` | Role-scoped font lists from `lib/design-catalog.ts` (overused as display, fine as body/UI, mono, banned, verified-free) for /design-consultation |
 | `{{DESIGN_SLOP_BULLETS}}` | `resolvers/design.ts` | Prose-only slop bullets from `lib/design-catalog.ts` (no rule ids) for the proposal skills |
+| `{{DESIGN_CRAFT_RULE:<lead>}}` | `resolvers/design-craft.ts` | One paragraph of `design-html/sections/craft.md.tmpl`, found by its bold lead, with its bullets, for /design-review's craft audit; a missing or ambiguous lead fails generation |
+| `{{DESIGN_PERSUADE_CHECKS}}` | `resolvers/design-craft.ts` | The five Persuade conversion checks (one primary action, named objections, proof beside each claim, a real risk reversal, an index/noindex decision) for /design-review's craft audit and /plan-design-review Pass 1 |
 | `{{DESIGN_SHOTGUN_LOOP}}` | `resolvers/design.ts` | Shared comparison board feedback loop for /design-shotgun, /plan-design-review, /design-consultation |
 | `{{UX_PRINCIPLES}}` | `resolvers/design.ts` | User behavioral foundations (scanning, satisficing, goodwill reservoir, trunk test) for /design-html, /design-shotgun, /design-review, /plan-design-review |
 | `{{GBRAIN_CONTEXT_LOAD}}` | `resolvers/gbrain.ts` | Brain-first context search with keyword extraction, health awareness, and data-research routing. Injected into 10 brain-aware skills. Suppressed on non-brain hosts. |
@@ -369,7 +371,9 @@ This is structurally sound — if a command exists in code, it appears in docs. 
 The generator also owns two files that are not skill docs: `review/design-checklist.md` is rendered from `lib/design-catalog.ts` (through `scripts/resolvers/design-checklist.ts`), and `lib/dom-dump.js` is written from `lib/dom-dump-script.ts`. The checklist `/review` and `/ship` read and the DOM dump `/design-review` runs therefore cannot drift from the catalog and the script the templates describe; `test/design-checklist-sync.test.ts` pins both.
 
 The internal async `runGeneration()` driver inventories skills, Claude sections
-and QA/qa-only sections on every supported host, host metadata, OpenClaw snippets,
+and, on every supported host, the sections of the skills carved on every host
+(`CARVED_ON_EVERY_HOST` in `scripts/resolvers/sections.ts`: qa, qa-only, ship,
+plan-ceo-review, office-hours and design-review), host metadata, OpenClaw snippets,
 the index, the agent digest, and auxiliary assets. Other skills remain inline on
 non-Claude hosts; QA assets resolve relative to the installed host skill.
 Every artifact goes through one compare-or-write function. Dry runs

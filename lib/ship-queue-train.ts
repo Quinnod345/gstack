@@ -23,7 +23,9 @@ import type { LoadedPolicy, ShipPolicy, TrainPolicy } from './ship-policy';
 import { loadBasePolicy, type QueueContext } from './ship-queue';
 import { bindReceipt } from './ship-receipt';
 import { git, sha256, withIndex, type QueueFailure } from './ship-queue-gate';
-import { asRun, execFor, hollowScreen, newestBranchRun, prInfo, remoteBranchSha, repoSlug, runView, checkRun } from './ship-queue-train-github';
+import { recordVerdict, screenVerdict, verdictLines } from './ship-queue-screen';
+import { stackTestLine, stackTests } from './ship-queue-stack-tests';
+import { asRun, execFor, newestBranchRun, prInfo, remoteBranchSha, repoSlug, runView, checkRun } from './ship-queue-train-github';
 import {
   TERMINAL_STATES, activeFreeze, attemptsOf, listTrains, loadBisect, loadReady, loadTrain, nowIso, persist, rebuildFromNotes, repoIdentity, trainFile,
   type AttemptPurpose, type AttemptRecord, type TrainRecord, type TrainSlot,
@@ -51,7 +53,7 @@ export function trainEnv(ctx: QueueContext): TrainEnv | QueueFailure {
 export function fetchBase(ctx: QueueContext): string | null {
   const remote = ctx.remote ?? 'origin';
   const f = git(ctx.repoRoot, ['fetch', '--no-tags', '-q', remote, `+refs/heads/${ctx.base}:refs/remotes/${remote}/${ctx.base}`]);
-  return f.ok ? null : `git fetch ${remote} ${ctx.base} failed: ${f.err.slice(0, 160)}`;
+  return f.ok ? null : `git fetch ${remote} ${ctx.base} failed: ${f.err.replace(/\s+/g, ' ').trim().slice(0, 160)}`;
 }
 
 /** Make the train's prefix commits local (another machine built them): fetch train/<nonce>. */
@@ -195,17 +197,28 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
 const TRAIN_IDENTITY = { GIT_AUTHOR_NAME: 'gstack-ship-queue', GIT_AUTHOR_EMAIL: 'ship-queue@gstack.local', GIT_COMMITTER_NAME: 'gstack-ship-queue',
   GIT_COMMITTER_EMAIL: 'ship-queue@gstack.local', GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' };
 
+/**
+ * One train merge as a commit with a fixed identity and date: parents are the
+ * predecessor (first, as GitHub's merge ref) and the PR head. Prefix commits
+ * and the scratch merge a screen is planned on (`ready --screen` when
+ * GitHub's refs/pull/<n>/merge lags the head) are both built here.
+ */
+export function mergeCommit(repoRoot: string, pred: string, head: string, policy: ShipPolicy, message: string): { commit: string; tree: string } | { conflicts: string[] } {
+  const m = mergeStep(repoRoot, pred, head, policy);
+  if ('conflicts' in m) return m;
+  const c = git(repoRoot, ['commit-tree', m.tree, '-p', pred, '-p', head, '-m', message], { ...process.env, ...TRAIN_IDENTITY });
+  return c.ok ? { commit: c.out, tree: m.tree } : { conflicts: [`(commit-tree failed: ${c.err.slice(0, 120)})`] };
+}
+
 /** Build T1..Tk on T0 = base; a conflict stops at the PR that conflicts. */
 export function buildChain(repoRoot: string, baseSha: string, slots: TrainSlot[], policy: ShipPolicy):
   { prefixes: TrainRecord['prefixes'] } | { stoppedAt: string; conflicts: string[]; merged: string[] } {
   const prefixes: TrainRecord['prefixes'] = [{ index: 0, commit: baseSha, tree: git(repoRoot, ['rev-parse', `${baseSha}^{tree}`]).out, pr: null }];
   for (const [i, slot] of slots.entries()) {
     const pred = prefixes[i]!.commit;
-    const m = mergeStep(repoRoot, pred, slot.head, policy);
+    const m = mergeCommit(repoRoot, pred, slot.head, policy, `train T${i + 1}: merge #${slot.pr} at ${slot.head.slice(0, 12)}`);
     if ('conflicts' in m) return { stoppedAt: slot.pr, conflicts: m.conflicts, merged: slots.slice(0, i).map(s => s.pr) };
-    const c = git(repoRoot, ['commit-tree', m.tree, '-p', pred, '-p', slot.head, '-m', `train T${i + 1}: merge #${slot.pr} at ${slot.head.slice(0, 12)}`], { ...process.env, ...TRAIN_IDENTITY });
-    if (!c.ok) return { stoppedAt: slot.pr, conflicts: [`(commit-tree failed: ${c.err.slice(0, 120)})`], merged: slots.slice(0, i).map(s => s.pr) };
-    prefixes.push({ index: i + 1, commit: c.out, tree: m.tree, pr: slot.pr });
+    prefixes.push({ index: i + 1, commit: m.commit, tree: m.tree, pr: slot.pr });
   }
   return { prefixes };
 }
@@ -266,7 +279,11 @@ export function gateDispatch(env: TrainEnv, train: TrainRecord, nonce: string): 
   return { workflow: env.train.gate_workflow, inputs: { [DISPATCH_INPUTS.evalsAll]: 'true', [DISPATCH_INPUTS.expectedSha]: train.head, [DISPATCH_INPUTS.nonce]: nonce } };
 }
 
-export interface BuildOptions { pins?: string; order?: string; resume?: string; dryRun: boolean; urgent: boolean; repair: boolean; freeTimeoutSec: number; pollMs: number }
+export interface BuildOptions {
+  pins?: string; order?: string; resume?: string; dryRun: boolean; urgent: boolean; repair: boolean; freeTimeoutSec: number; pollMs: number;
+  /** `--dry-run --stack-tests`: run each PR's new test files on its integrated prefix (lib/ship-queue-stack-tests.ts); the command's words when `--stack-tests-command` names one. */
+  stackTests?: string[] | true;
+}
 
 /** `--order <pr>,<pr>,...`: every pinned PR exactly once (a leading # allowed). */
 export function parseOrder(spec: string | undefined, pins: Array<{ pr: string }>): string[] | undefined | { error: string } {
@@ -279,7 +296,7 @@ export function parseOrder(spec: string | undefined, pins: Array<{ pr: string }>
 }
 
 /** The slots a new train would carry: trusted, unmoved, READY PRs, in slot order. */
-function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { slots: TrainSlot[]; lines: string[] } | TrainOut {
+function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>, dryRun: boolean): { slots: TrainSlot[]; lines: string[] } | TrainOut {
   const { ctx } = env;
   const specs = pins.map(p => `+refs/pull/${p.pr}/head:refs/gstack/train/pr-${p.pr}`);
   const f = git(ctx.repoRoot, ['fetch', '--no-tags', '-q', env.remote, ...specs]);
@@ -302,9 +319,16 @@ function admitSlots(env: TrainEnv, pins: Array<{ pr: string; sha: string }>): { 
     if (!ready) return outRefused({ code: 'QUEUE_NOT_READY', message: `no READY receipt for #${p.pr} at ${info.headRefOid.slice(0, 12)} (local state or ${'refs/notes/gstack-trains'})` }, [], `the lane runs ${Q} ready --pr ${p.pr} --screen|--no-screen`, 'none');
     let screen = ready.screen;
     if (screen.choice === 'screen' && screen.run && slug === undefined) slug = repoSlug(ctx);
-    const plan = screen.choice === 'screen' && screen.run ? (slug ? hollowScreen(ctx, slug, screen.run) : { kind: 'unknown' as const, reason: 'the repository slug is unreadable' }) : null;
-    if (plan?.kind === 'hollow') { lines.push(`SCREEN: #${p.pr} ${plan.reason}; counted as not-run, the slot rides unscreened`); screen = { ...screen, choice: 'no-screen' }; }
-    else if (plan?.kind === 'unknown') lines.push(`SCREEN: #${p.pr} ${plan.reason}; counted as screened, unverified`);
+    const read = screen.choice === 'screen' && screen.run ? (slug ? screenVerdict(ctx, slug, screen.run) : { kind: 'unknown' as const, detail: 'the repository slug is unreadable' }) : null;
+    if (read && screen.run && recordVerdict(ready.screen, read) && !dryRun) { ready.updated_at = nowIso(); persist(ctx.repoRoot, [ready], { remote: env.remote }); }
+    if (read?.kind === 'red') {
+      return outRefused({ code: 'QUEUE_SCREEN_RED', message: `#${p.pr}'s screen run ${screen.run} is RED on ${read.red.join(', ') || 'its gate binding'} (${read.detail}); a red head is not seated` },
+        [...lines, ...verdictLines(p.pr, screen.run!, read)], without ? `${Q} train build --prs ${without}` : 'none', 'none');
+    }
+    if (read?.kind === 'not-run' || read?.kind === 'incomplete') { lines.push(`SCREEN: #${p.pr} ${read.detail}; counted as not-run, the slot rides unscreened`); screen = { ...screen, choice: 'no-screen' }; }
+    else if (read?.kind === 'unknown') lines.push(`SCREEN: #${p.pr} ${read.detail}; counted as screened, unverified`);
+    else if (read?.kind === 'green') lines.push(`SCREEN: #${p.pr} run ${screen.run} GREEN${read.flaky.length ? ` (flaky: ${read.flaky.join(', ')})` : ''}`);
+    else if (read?.kind === 'pending') lines.push(`SCREEN: #${p.pr} run ${screen.run} still running; counted as screened`);
     slots.push({ pr: p.pr, head: info.headRefOid, ready_at: ready.ready_at, screen });
   }
   return { slots, lines };
@@ -321,7 +345,7 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
     frozenLines(freeze), `${Q} train build --repair --prs <repair-pr>@<sha>`, 'none');
   const explicit = parseOrder(o.order, pins);
   if (explicit && 'error' in explicit) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: explicit.error }, [], 'none', 'none');
-  const admitted = admitSlots(env, pins);
+  const admitted = admitSlots(env, pins, o.dryRun);
   if ('exit' in admitted) return admitted;
   const order = orderSlots(admitted.slots, o.repair ? 1 : env.train.max_size, explicit);
   const lines = [
@@ -460,8 +484,18 @@ export async function buildTrain(ctx: QueueContext, o: BuildOptions): Promise<Tr
   }
   if (!('kind' in t)) return t;
   if (o.dryRun) {
-    return outOk([...lines, ...describe(t), `ESTIMATE: one ${env.train.gate_workflow} full gate (evals_all) on T${t.prefixes.length - 1} plus ${env.train.free_workflow}; dollar figure pending the T0 cost replay (lib/gate-cost.ts)`,
-      'DRY-RUN: nothing written, pushed or dispatched'], `${Q} train build ${prsArgs(t.slots, t.explicit_order)}`, 'none');
+    const dry = [...lines, ...describe(t), `ESTIMATE: one ${env.train.gate_workflow} full gate (evals_all) on T${t.prefixes.length - 1} plus ${env.train.free_workflow}; dollar figure pending the T0 cost replay (lib/gate-cost.ts)`];
+    if (o.stackTests) {
+      const results = stackTests(env.ctx.repoRoot, t.prefixes[0]!.commit, t.slots, t.prefixes, o.stackTests === true ? undefined : o.stackTests);
+      dry.push(...results.map(stackTestLine));
+      const red = results.filter(r => !r.ok);
+      if (red.length) {
+        const again = `${Q} train build ${prsArgs(t.slots, t.explicit_order)} --dry-run --stack-tests`;
+        return outFailed({ code: 'QUEUE_TRAIN_STACK_RED', message: red.map(r => `#${r.pr}'s new tests fail on the integrated prefix T${r.prefix} (${r.files.join(', ')})`).join('; ') + '; they pass on the PR head alone only if nothing before it in the train changes what they read' },
+          [...dry, 'DRY-RUN: nothing written, pushed or dispatched'], `fix ${red.map(r => `#${r.pr}'s tests against T${r.prefix}`).join(' and ')}, or reorder with --order, then ${again}`, 'none');
+      }
+    }
+    return outOk([...dry, 'DRY-RUN: nothing written, pushed or dispatched'], `${Q} train build ${prsArgs(t.slots, t.explicit_order)}`, 'none');
   }
   if (t.state === 'built' && !t.attempts.length && !loadTrain(t.nonce)) {
     effect(t, 'train.json written');
@@ -528,21 +562,64 @@ export function trainStatus(ctx: QueueContext, o: { train?: string }): TrainOut 
   return outOk(lines, next, single ? trainFile(single.nonce) : 'none');
 }
 
-/** `train prune`: delete train/<nonce> on the remote for every finished (merged, superseded, dropped) train. */
-export function pruneTrains(ctx: QueueContext, o: { dryRun: boolean; train?: string }): TrainOut {
+/** A PR's state on GitHub for the stale check: MERGED, CLOSED, OPEN, or unreadable. */
+function prState(ctx: QueueContext, pr: string): string {
+  const info = prInfo(ctx, pr);
+  return 'error' in info ? 'unreadable' : info.state.toUpperCase();
+}
+
+/**
+ * `--stale`: a merging or green train whose every PR is MERGED or CLOSED on
+ * GitHub (merged elsewhere, closed, or merged outside the train) never
+ * finishes on its own; it becomes `stale` (terminal) and is pruned, with
+ * each PR's state in the log. Any OPEN or unreadable PR keeps the train.
+ */
+function staleCheck(ctx: QueueContext, t: TrainRecord): { stale: true; detail: string } | { stale: false; detail: string } {
+  const unmerged = t.slots.filter(s => !t.merged.some(m => m.pr === s.pr));
+  const states = unmerged.map(s => `#${s.pr} ${prState(ctx, s.pr)}`);
+  const open = states.filter(s => !/ (MERGED|CLOSED)$/.test(s));
+  const detail = `${t.merged.map(m => `#${m.pr} merged by the train`).concat(states).join(', ')}`;
+  return open.length ? { stale: false, detail: `${open.join(', ')} still ${open.length === 1 ? 'needs' : 'need'} the train` } : { stale: true, detail };
+}
+
+/** `train prune`: delete train/<nonce> on the remote for every finished (merged, superseded, dropped, stale) train; `--stale` first settles merging and green trains whose PRs all merged or closed elsewhere, and the screen/<pr>-* branches of merged or closed PRs. */
+export function pruneTrains(ctx: QueueContext, o: { dryRun: boolean; train?: string; stale?: boolean }): TrainOut {
   const env = trainEnv(ctx);
   if ('code' in env) return outRefused(env, [], 'none', 'none');
   rebuildFromNotes(ctx.repoRoot, env.remote);
   const lines: string[] = [];
   const rgit = (args: string[]) => git(ctx.repoRoot, args);
+  const remove = (branch: string, label: string, after?: () => void) => {
+    if (!remoteBranchSha(rgit, env.remote, branch)) { lines.push(`GONE: ${branch} (${label})`); return; }
+    if (o.dryRun) { lines.push(`WOULD-DELETE: ${branch} (${label})`); return; }
+    const d = git(ctx.repoRoot, ['push', '-q', env.remote, '--delete', `refs/heads/${branch}`]);
+    lines.push(d.ok ? `DELETED: ${branch} (${label})` : `FAILED: ${branch}: ${d.err.slice(0, 120)}`);
+    if (d.ok) after?.();
+  };
   for (const t of listTrains(env.repo.keys).filter(x => !o.train || x.nonce === o.train)) {
+    if (o.stale && (t.state === 'merging' || t.state === 'green')) {
+      const s = staleCheck(ctx, t);
+      if (s.stale) {
+        lines.push(`STALE: ${t.nonce} (${t.state}): ${s.detail}${o.dryRun ? '; would mark stale' : ''}`);
+        if (!o.dryRun) { t.state = 'stale'; effect(t, `marked stale by train prune --stale: ${s.detail}`); save(env, t); }
+        remove(t.branch, o.dryRun ? 'stale' : t.state, () => { effect(t, `branch deleted: ${t.branch}`); save(env, t); });
+        continue;
+      }
+      lines.push(`KEEP: ${t.branch} (${t.state}; ${s.detail})`);
+      continue;
+    }
     if (!TERMINAL_STATES.includes(t.state)) { lines.push(`KEEP: ${t.branch} (${t.state})`); continue; }
-    if (!remoteBranchSha(rgit, env.remote, t.branch)) { lines.push(`GONE: ${t.branch} (${t.state})`); continue; }
-    if (o.dryRun) { lines.push(`WOULD-DELETE: ${t.branch} (${t.state})`); continue; }
-    const d = git(ctx.repoRoot, ['push', '-q', env.remote, '--delete', `refs/heads/${t.branch}`]);
-    lines.push(d.ok ? `DELETED: ${t.branch} (${t.state})` : `FAILED: ${t.branch}: ${d.err.slice(0, 120)}`);
-    if (d.ok) { effect(t, `branch deleted: ${t.branch}`); save(env, t); }
+    remove(t.branch, t.state, () => { effect(t, `branch deleted: ${t.branch}`); save(env, t); });
+  }
+  if (o.stale && !o.train) {
+    const refs = git(ctx.repoRoot, ['ls-remote', env.remote, 'refs/heads/screen/*']);
+    for (const ref of refs.ok ? refs.out.split('\n') : []) {
+      const m = /refs\/heads\/(screen\/(\d+)-[0-9a-f]{12})$/.exec(ref.split(/\s/)[1] ?? '');
+      if (!m) continue;
+      const state = prState(ctx, m[2]!);
+      if (state === 'MERGED' || state === 'CLOSED') remove(m[1]!, `#${m[2]} ${state}`); else lines.push(`KEEP: ${m[1]} (#${m[2]} ${state})`);
+    }
   }
   if (!lines.length) lines.push('PRUNE: no trains');
-  return outOk(lines, o.dryRun ? `${Q} train prune` : 'none', 'none');
+  return outOk(lines, o.dryRun ? `${Q} train prune${o.stale ? ' --stale' : ''}` : 'none', 'none');
 }

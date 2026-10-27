@@ -68,7 +68,7 @@ function jsonEqualModuloVersion(a: string | null, b: string | null, name: string
   return normalizeLockfile(name, a) === normalizeLockfile(name, b);
 }
 
-function classifyFile(repoRoot: string, f: FileDiff, gated: string, current: string, policy: ShipPolicy, versionRel: string, oldV: string | null, newV: string | null): FileVerdict {
+export function classifyFile(repoRoot: string, f: FileDiff, gated: string, current: string, policy: ShipPolicy, versionRel: string, oldV: string | null, newV: string | null): FileVerdict {
   const changed = (rule: string, residual: string, line = f.hunks[0]?.at): FileVerdict => ({ path: f.path, rule, verdict: 'changed', residual, line });
   const stamp = (rule: string): FileVerdict => ({ path: f.path, rule, verdict: 'stamp' });
   if (f.binary) return changed('binary', 'binary content differs');

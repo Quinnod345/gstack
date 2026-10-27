@@ -38,7 +38,9 @@ _dc_has() { case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac; }
 _dc_url() { printf '(%s; %s#%s)' "$1" "$DOCS" "$(gstack_result_anchor "$1")"; }
 
 # _dc_row STATUS ID DETAIL [FIX] [CODE] — record and (in text mode) print one
-# row. WARN is an owner action that never fails the run.
+# row. WARN never fails the run: its FIX is printed as given, so a row whose
+# action belongs to the owner says `owner action: ...` and one the lane can run
+# itself says `fix: ...` (the floor, a skipped upgrade, a Node pin).
 _dc_row() {
   local status="$1" id="$2" detail="$3" fix="${4:-}" code="${5:-}"
   _dc_rows="$_dc_rows$status	$id	$detail	$fix	$code
@@ -48,7 +50,7 @@ _dc_row() {
   case "$status" in
     PASS) printf 'PASS %s%s\n' "$id" "${detail:+ $detail}" ;;
     SKIP) printf 'SKIP %s (%s)\n' "$id" "$detail" ;;
-    WARN) printf 'WARN %s — %s; owner action: %s %s\n' "$id" "$detail" "$fix" "$(_dc_url "$code")" ;;
+    WARN) printf 'WARN %s — %s; %s %s\n' "$id" "$detail" "$fix" "$(_dc_url "$code")" ;;
     FAIL) printf 'FAIL %s — %s; fix: %s %s\n' "$id" "$detail" "$fix" "$(_dc_url "$code")" ;;
   esac
 }
@@ -361,6 +363,14 @@ _dc_check_pins() {
              && bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$BIN/gstack-runtime-pins.ts" --project "$project" --bun "$_dc_ln_ver" ${node:+--node "$node"} </dev/null 2>/dev/null | grep -q '^PINS_VERDICT: pass'; then
             note="; bun $_dc_ln_ver found at $_dc_ln_dir (not on PATH) satisfies them" fix="$_dc_ln_fix"
           fi
+          # Only the Node pin unmet: a WARN, never a FAIL. gstack itself runs
+          # on Bun, and the project's tests may select their own Node (nvm, a
+          # CI matrix), so the image's Node must not fail the session; the row
+          # still names the Node read and the fix.
+          if ! printf '%s\n' "$out" | grep -v '^PIN_FAIL: node ' | grep -q '^PIN_FAIL: '; then
+            _dc_row WARN pins "$failline$note (node pin only; bun pins pass)" "fix: $fix" PROJECT_NODE_PIN_UNMET
+            return
+          fi
           _dc_row FAIL pins "$failline$note" "$fix" PROJECT_PIN_MISMATCH ;;
     *) _dc_row SKIP pins "gstack-runtime-pins could not evaluate $project (exit $rc: $(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -1 | clamp ' -~' 120))" ;;
   esac
@@ -460,6 +470,54 @@ _dc_check_revision() {
   _dc_row FAIL revision "installed ${installed:-unknown}${head:+ at $head} (requested $want)" "cd $SRC && git fetch origin && git checkout $want && ./setup, or run $SRC/bin/gstack-upgrade to move to the latest release (interactive: /gstack-upgrade)" REVISION_UNMET
 }
 
+# _dc_check_floor — the project's own gstack floor: `min_gstack_version` in
+# its .gstack/ship-policy.json (GSTACK_PROJECT_FLOOR_FILE/FIELD, the field
+# gstack-ship-queue already validates). A consuming repo raises it in one
+# commit instead of broadcasting a minimum to every thread; the next session
+# check on each machine then WARNs with the upgrade as its fix. It is a
+# project rule, never a security minimum, so the row is PASS, SKIP or WARN
+# and never fails the run (the supported minimum is _dc_check_min_revision).
+_dc_check_floor() {
+  local project="$CHECK_PROJECT" file flat floor installed fix
+  if [ -z "$project" ]; then
+    project=$(git rev-parse --show-toplevel 2>/dev/null)
+    [ -n "$project" ] && [ "$(cd "$project" && pwd -P)" = "$ROOT_REAL" ] && project=""
+  fi
+  if [ -z "$project" ] || [ ! -d "$project" ]; then
+    _dc_row SKIP floor "no project to read $GSTACK_PROJECT_FLOOR_FILE from (pass --project <path>)"
+    return
+  fi
+  file="$project/$GSTACK_PROJECT_FLOOR_FILE"
+  if [ ! -f "$file" ]; then
+    _dc_row SKIP floor "$project declares none ($GSTACK_PROJECT_FLOOR_FILE absent; set $GSTACK_PROJECT_FLOOR_FIELD there to require a gstack version)"
+    return
+  fi
+  # Whitespace-insensitive (the value may sit on the line after its field), the
+  # first occurrence wins (the top-level field in a policy file), and only the
+  # first 64 KiB are read: a real policy is a few KB.
+  flat=$(head -c 65536 "$file" 2>/dev/null | tr '\n\r\t' '   ')
+  floor=$(printf '%s' "$flat" | grep -o '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"[0-9][0-9.]*"' | head -1 | sed 's/.*"\([0-9][0-9.]*\)"$/\1/' | clamp '0-9.' 32)
+  if [ -z "$floor" ]; then
+    if printf '%s' "$flat" | grep -q '"'"$GSTACK_PROJECT_FLOOR_FIELD"'" *: *"'; then
+      _dc_row SKIP floor "$file sets $GSTACK_PROJECT_FLOOR_FIELD to something other than a plain dotted version"
+    else
+      _dc_row SKIP floor "$file sets no $GSTACK_PROJECT_FLOOR_FIELD (null or absent)"
+    fi
+    return
+  fi
+  installed=$(head -1 "$ROOT/VERSION" 2>/dev/null | clamp '0-9A-Za-z.+-' 40)
+  if _dc_version_below "${installed:-0}" "$floor"; then
+    if [ -n "${GSTACK_CAPY_WRAPPER_PATH:-}" ]; then
+      fix="bash $GSTACK_CAPY_WRAPPER_PATH${CHECK_FOR:+ --for $CHECK_FOR} (fast-forwards a clean checkout to origin and reinstalls), or $SRC/bin/gstack-upgrade"
+    else
+      fix="$SRC/bin/gstack-upgrade (fast-forwards to the remote default branch, then reinstalls; interactive: /gstack-upgrade)"
+    fi
+    _dc_row WARN floor "installed ${installed:-unknown} is below the floor $floor that $file declares ($GSTACK_PROJECT_FLOOR_FIELD)" "fix: $fix" PROJECT_FLOOR_UNMET
+    return
+  fi
+  _dc_row PASS floor "$floor declared by $file (installed ${installed:-unknown})"
+}
+
 # _dc_wrapper_rev FILE — the GSTACK_CAPY_WRAPPER revision a Capy skill copy
 # declares; 0 for a copy without one (the pre-bootstrapper wrapper).
 _dc_wrapper_rev() {
@@ -477,19 +535,21 @@ _dc_wrapper_rev() {
 # ~/.capy/drive/*/skills/gstack/scripts/install.sh, failing only when each is
 # stale. The workaround runs the checkout's own copy, which certifies.
 _dc_check_wrapper() {
-  local min copy rev stale="" current="" active="${GSTACK_CAPY_WRAPPER_PATH:-}" workaround owner
+  local min copy rev stale="" current="" pre="" active="${GSTACK_CAPY_WRAPPER_PATH:-}" workaround owner
   min=$(sed -n 's/^GSTACK_CAPY_MIN_WRAPPER=\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$SRC/capy/support.env" 2>/dev/null | head -1); min="${min:-1}"
   workaround="bash $SRC/capy/skill/gstack/scripts/install.sh --check${CHECK_FOR:+ --for $CHECK_FOR} (this session)"
-  owner="copy $SRC/capy/skill/gstack/ over the Drive skill folder, or have Capy re-sync it; this recurs every session until the Drive copy changes"
+  owner="owner action: copy $SRC/capy/skill/gstack/ over the Drive skill folder, or have Capy re-sync it; this recurs every session until the Drive copy changes"
   for copy in "$HOME"/.capy/drive/*/skills/gstack/scripts/install.sh; do
     [ -f "$copy" ] || continue
     [ -n "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ "$copy" = "$active" ] && continue
     [ -z "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ -n "$active" ] && [ -f "$active" ] && [ "$copy" != "$active" ] && continue
     rev=$(_dc_wrapper_rev "$copy")
+    [ "$rev" -eq 0 ] 2>/dev/null && pre=1
     if [ "$rev" -lt "$min" ] 2>/dev/null; then stale="${stale:+$stale, }$copy (wrapper $rev)"; else current="${current:+$current, }$copy (wrapper $rev)"; fi
   done
   if [ -z "${GSTACK_CAPY_WRAPPER_REV:-}" ] && [ -n "$active" ] && [ -f "$active" ] && [ -z "$stale$current" ]; then
     rev=$(_dc_wrapper_rev "$active")
+    [ "$rev" -eq 0 ] 2>/dev/null && pre=1
     if [ "$rev" -lt "$min" ] 2>/dev/null; then stale="$active (wrapper $rev)"; else current="$active (wrapper $rev)"; fi
   fi
   if [ -n "${GSTACK_CAPY_WRAPPER_REV:-}" ]; then
@@ -502,8 +562,12 @@ _dc_check_wrapper() {
     fi
   elif [ -n "$current" ]; then
     _dc_row PASS wrapper "Drive copy $current (minimum $min)${stale:+; stale copies: $stale}"
+  elif [ -n "$stale" ] && [ -z "$pre" ]; then
+    # Every copy is a bootstrapper below the minimum: it still works (a direct
+    # run has no provenance to say so), so the row is the owner action, not a FAIL.
+    _dc_row WARN wrapper "every Capy skill copy is below the minimum wrapper $min (it still works): $stale" "$owner" CAPY_WRAPPER_STALE
   elif [ -n "$stale" ]; then
-    _dc_row FAIL wrapper "every Capy skill copy is stale (minimum wrapper $min): $stale" "$workaround; owner: $owner" CAPY_WRAPPER_STALE
+    _dc_row FAIL wrapper "every Capy skill copy is stale (minimum wrapper $min): $stale" "$workaround; owner: ${owner#owner action: }" CAPY_WRAPPER_STALE
   else
     _dc_row SKIP wrapper "no Capy skill copy in ~/.capy/drive and no active wrapper (not a Capy machine)"
   fi
@@ -562,6 +626,7 @@ gstack_doctor_check() {
       privacy) _dc_check_privacy ;;
       cores) _dc_check_cores ;;
       revision) _dc_check_revision ;;
+      floor) _dc_check_floor ;;
       wrapper) _dc_check_wrapper ;;
       *) _dc_row FAIL "$id" "no check implemented for component '$id'" "report this gstack bug" COMPONENT_MISSING ;;
     esac
