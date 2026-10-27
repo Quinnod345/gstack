@@ -334,8 +334,9 @@ test('pack ships a linked worktree with a self-contained .git on the checked-out
       // The snapshot carries no hook path or other local config from the source checkout.
       expect(sh('git config --local --list', vm)).not.toContain('hooksPath');
       // A failed pack leaves no object copy behind in TMPDIR, and a branch's upstream rides along with its remote.
-      sh('mkdir tmpd && git checkout -q -b topic && git branch -q --set-upstream-to=origin/main topic', src);
+      sh('mkdir ../tmpd && git checkout -q -b topic && git branch -q --set-upstream-to=origin/main topic', src);
       const broken = Bun.spawnSync(['bash', '-c', `rm -f .git/index && TMPDIR=../tmpd ${pack} > ../pack-broken.tgz; echo rc=$?; ls ../tmpd`], { cwd: src, timeout: 60_000 });
+      expect(broken.stderr.toString()).toContain('.git/index');
       expect(broken.stdout.toString().trim()).toBe('rc=1');
       sh('git reset -q', src);
       sh('mkdir vm2 && ' + pack.replace('pack .', 'pack src') + ' | tar -xzf - -C vm2', d);

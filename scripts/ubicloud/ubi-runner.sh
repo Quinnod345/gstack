@@ -607,7 +607,8 @@ cmd_pack() {
     head=$(git -C "$src" rev-parse --verify -q HEAD) || die "pack: $src has no commits; the VM needs a HEAD to fingerprint"
     branch=$(git -C "$src" symbolic-ref -q --short HEAD || true)
     tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
+    # The path is baked in: a set -e failure unwinds the function before the trap runs, and a local $tmp is unset there.
+    trap "rm -rf $(printf %q "$tmp")" EXIT
     git init -q --bare "$tmp/.git"
     git -C "$tmp/.git" fetch -q --no-tags --update-shallow "$src" '+refs/*:refs/*' \
       || die "pack: could not snapshot the refs of $src"
