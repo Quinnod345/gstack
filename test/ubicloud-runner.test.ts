@@ -346,7 +346,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       '  *\'"create"\'*) if [ -n ' + JSON.stringify(opts.refuse ?? '') + ' ]; then printf \'%s\' ' + JSON.stringify(opts.refuse ?? '') + ' > "$out"; printf 400; else echo "$loc $name" >> "$listed"; : > "$out"; printf 200; fi ;;\n' +
       '  *destroy*) : > "$out"; grep -v " $name$" "$listed" > "$listed.tmp"; mv "$listed.tmp" "$listed"; printf 200 ;;\n' +
       '  *\'"list"\'*) cat "$listed" > "$out"; printf 200 ;;\n' +
-      '  *\'"show"\'*) if grep -q " $name$" "$listed"; then printf \'state: running\\nsize: standard-16\\nip4: 192.0.2.1\\n\' > "$out"; printf 200; else : > "$out"; printf 404; fi ;;\n' +
+      '  *\'"show"\'*) [ -z "${FAKE_SHOW_DELAY:-}" ] || sleep "$FAKE_SHOW_DELAY"; if grep -q " $name$" "$listed"; then printf \'state: running\\nsize: standard-16\\nip4: 192.0.2.1\\n\' > "$out"; printf 200; else : > "$out"; printf 404; fi ;;\n' +
       '  *) : > "$out"; printf 200 ;;\n' +
       'esac\n');
     writeFileSync(join(bin, 'ssh'), '#!/usr/bin/env bash\n' +
@@ -567,6 +567,38 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       expect(name).toMatch(/^ubirun-thrd1-\d{10}-[0-9a-f]{8}-t4$/);
       expect(run(f, ['down', name]).exitCode).toBe(0);
       expect(f.listed()).toBe('eu-central-h1 ubirun-peer-9999999999-cccc\n');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Value: protects=the quota wait budget counts seconds slept, not usage reads: a slow usage read keeps the printed budget, a wait above 30 s counts down in 30 s steps, and the wait releases when room appears; fails_when=the budget goes back to a wall-clock deadline taken before the first usage read (the first log line shrinks to 1s), the step cap or the decrement is lost, or room found mid-wait still refuses; why_new=the WAIT=3 case above passes under both the old deadline and the new countdown because its fake usage read is instant and it never sees a second step; seam=none (the fixture's bin/ is already first on PATH, so sleep and curl are stubbed there); no_claim=real elapsed time of the long wait (the 70 s case stubs sleep)
+  test('quota wait: a slow usage read does not shave the printed budget; a long wait counts down in 30s steps and releases when room appears', () => {
+    const slow = fakeVm({ listed: 'eu-central-h1 ubirun-peer-9999999999-cccc\n' });
+    try {
+      writeFileSync(join(slow.state, 'quota-max'), '31\n');
+      const started = Date.now();
+      const r = run(slow, ['up'], { UBI_QUOTA_WAIT: '2', FAKE_SHOW_DELAY: '1.2' });
+      const err = r.stderr.toString();
+      expect(r.exitCode, err).toBe(1);
+      expect(err).toMatch(/quota: 16 of 31 vCPUs in use and 16 needed; waiting up to 2s more for room/);
+      expect(err).toContain('create refused before any request: vCPU quota exhausted');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
+      expect(slow.calls()).not.toContain('"create"');
+    } finally { rmSync(slow.root, { recursive: true, force: true }); }
+
+    const f = fakeVm({ listed: 'eu-central-h1 ubirun-peer-9999999999-cccc\n' });
+    try {
+      writeFileSync(join(f.state, 'quota-max'), '31\n');
+      const sleepLog = join(f.root, 'sleep.log');
+      writeFileSync(join(f.root, 'bin/sleep'), '#!/usr/bin/env bash\necho "$1" >> ' + JSON.stringify(sleepLog) + '\n[ "$(wc -l < ' + JSON.stringify(sleepLog) + ')" -ne 2 ] || : > ' + JSON.stringify(join(f.root, 'listed')) + '\n');
+      chmodSync(join(f.root, 'bin/sleep'), 0o755);
+      const r = run(f, ['up'], { UBI_QUOTA_WAIT: '70' });
+      const err = r.stderr.toString();
+      expect(r.exitCode, err).toBe(0);
+      expect(err).toMatch(/waiting up to 70s more for room/);
+      expect(err).toMatch(/waiting up to 40s more for room/);
+      expect(err).not.toContain('quota preflight refused');
+      expect(readFileSync(sleepLog, 'utf8').split('\n').slice(0, 2)).toEqual(['30', '30']);
+      expect(f.calls()).toContain('"create"');
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   }, 90_000);
 
