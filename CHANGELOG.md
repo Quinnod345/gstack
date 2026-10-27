@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.268.0] - 2026-10-27
 
 **Two read-and-write helpers absorbed from pstack: a decision trail a reviewer reads without the transcript, and a worktree audit that tells you which Conductor worktrees are safe to remove.** Both are ports of Lauren Tan's MIT scripts (header credit in each file, `licenses/MIT-pstack.txt`, NOTICE.md), approved with the rest of the pstack absorb (Garry, 2026-10-26: "Do it, send").
 
