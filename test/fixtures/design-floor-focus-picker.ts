@@ -19,11 +19,13 @@ export function pickDesignFocusAll(q: NativePlanQuestionCall['questions'][number
   // The menu is identified by its structure, not one wording: a title or question about the
   // focus ("Review all 7 design dimensions, or focus?", census 36597762183; "Want me to focus on
   // specific areas instead?" and "Review focus for the landing page plan", GSTA-65 focused
-  // trials), one all-seven option, and only narrowing alternatives.
+  // trials) or about covering all seven dimensions ("Should the review cover all 7 dimensions?",
+  // GSTA-92 at a65d492 and 62c0fa1), one all-seven option, and only narrowing alternatives.
   const sentences = text.split(/(?<=[.!?])\s+|\r?\n/);
   const title = text.split(/\r?\n/, 1)[0]!.replace(/^D[1-9]\d*\s*[—–:-]\s*/i, '');
   const asks = sentences.filter(sentence => sentence.includes('?'));
-  if (![title, ...asks].some(line => /\bfocus\b/i.test(line)) ||
+  const coverAll = (ask: string) => /\b(?:cover|review|check|walk)\b.*\ball (?:7|seven)\b.*\b(?:dimensions|passes|areas)\b/i.test(ask);
+  if (!([title, ...asks].some(line => /\bfocus\b/i.test(line)) || asks.some(coverAll)) ||
       sources.length !== 1 || !/\b(?:PLAN\.md|Marketing landing page)\b/i.test(sources[0]!) ||
       /\b(?:historical|archived|quoted|example|foreign|other|another|previous)\b/i.test(sources[0]!) ||
       (text.match(/\?/g)?.length ?? 0) > 1 || /```|~~~|^\s*>/m.test(text) ||

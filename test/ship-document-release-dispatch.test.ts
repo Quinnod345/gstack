@@ -4,9 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runGeneration } from '../scripts/gen-skill-docs';
-import { docsDispatchIndex, extractDocsDispatch, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
+import { acceptedChangedPaths, docsDispatchIndex, docsDispatchIndices, extractDocsDispatch, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
 import { fixtureDocs, repoSnapshot, changedFiles, gitAt, DOC_PATH, preserveDocsEvidence } from './helpers/docsync-fixture';
-import type { SkillTestResult } from './helpers/session-runner';
+import { parseNDJSON, type SkillTestResult } from './helpers/session-runner';
 import { observeDocsWrites, docsWriteFailures, docsCommandAllowed, docsPreambleCommands, docsCompletedRead } from './helpers/docsync-observer';
 import { docsActorCommand, docsActorHook, installDocsActor, type DocsActorState, type DocsFault } from './helpers/docsync-fault-actor';
 import { docsActorVerdict } from './helpers/docsync-fault-eval';
@@ -579,5 +579,59 @@ describe('deterministic native-parent fault actor preflight', () => {
       const actions = x.state().events.map(e => e.action);
       expect(actions.indexOf('scheduled-input-edit')).toBeGreaterThan(actions.indexOf('completion'));
     } finally { x.fixture.clean(); }
+  });
+});
+
+// Gate 40465691803 slice 2 (ship-docsync-completion): the parent rejected attempt 1 for a false claim in its section
+// (options.ts "exports format"; the file holds only pretty), re-audited over attempt 1's retained edit, and wrote attempt
+// 2's section (current, no edit) into the report. The case compared the report with attempt 1's section and went red
+// although the document was updated and the report carried the accepted section. The accepted contract is the last
+// dispatch; an earlier attempt's retained edit is not an unreported edit of the accepted one.
+describe('two-attempt documentation audits', () => {
+  const captured = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/docsync-two-attempts-public.json'), 'utf8')) as { events: unknown[] };
+  const replay = (home: string) => parseNDJSON(captured.events.map(event => JSON.stringify(event).replaceAll('{home}', home).replaceAll('{shard}', path.dirname(path.dirname(home)))));
+  const contractAt = (calls: SkillTestResult['toolCalls'], index: number) =>
+    parseDocsCompletion(calls[index].output, JSON.parse(calls[index].output.trimEnd().split('\n').at(-1)!).audit_id);
+
+  test('the captured run selects attempt 2, whose section the report carries, and attempt 1 owns the retained edit', () => {
+    const { toolCalls: calls } = replay('/tmp/ds-replay');
+    const dispatches = docsDispatchIndices(calls);
+    expect(dispatches).toHaveLength(2);
+    expect(docsDispatchIndex(calls)).toBe(dispatches[0]);
+    const [first, accepted] = dispatches.map(index => contractAt(calls, index));
+    expect([first.status, accepted.status]).toEqual(['updated', 'current']);
+    expect(first.files_updated).toEqual([DOC_PATH]);
+    expect(first.documentation_section).toContain('(`pretty`, `format`)');
+    // The report is the parent's Write plus the saved section appended by command (`cat <section>.md >> <report>.md`).
+    const written = (file: RegExp) => String(calls.find(call => call.tool === 'Write' && file.test(String(call.input?.file_path)))!.input.content);
+    expect(calls.some(call => call.tool === 'Bash' && /^cat \S+-documentation\.md >> \S+ship-report\.md$/.test(String(call.input?.command).trim()))).toBe(true);
+    const report = written(/ship-report\.md$/) + written(/-documentation\.md$/);
+    expect(report).not.toContain(first.documentation_section);
+    expect(report).toContain(accepted.documentation_section);
+    const evidence = { settled: true, markerSeen: true, headUnchanged: true, indexUnchanged: true, candidateUnchanged: true, readOnly: false, allowedDocs: [DOC_PATH] };
+    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: [DOC_PATH] })).toThrow('unreported edits');
+    expect(acceptedChangedPaths([DOC_PATH], [first, accepted])).toEqual([]);
+    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH], [first, accepted]) })).not.toThrow();
+    expect(() => vetDocsCompletion(accepted, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH, 'README.md'], [first, accepted]) })).toThrow('unreported edits');
+    // The other honest shape: the re-audit edits the same document further and reports it. Its claim keeps the path in the
+    // accepted attempt's set; filtering on attempt 1's report alone would compare [] with [DOC_PATH] and red the re-audit.
+    const reaudit = { ...accepted, status: 'updated' as const, files_updated: [DOC_PATH] };
+    expect(acceptedChangedPaths([DOC_PATH], [first, reaudit])).toEqual([DOC_PATH]);
+    expect(() => vetDocsCompletion(reaudit, { ...evidence, changedPaths: acceptedChangedPaths([DOC_PATH], [first, reaudit]) })).not.toThrow();
+    expect(() => vetDocsCompletion(reaudit, { ...evidence, changedPaths: [DOC_PATH].filter(p => !first.files_updated.includes(p)) })).toThrow('unreported edits');
+    expect(acceptedChangedPaths([DOC_PATH], [accepted])).toEqual([DOC_PATH]);
+    const publish = calls.findIndex(call => call.tool === 'Bash' && /^bun .*fixture-publish\.ts/.test(String(call.input?.command)));
+    expect(publish).toBeGreaterThan(dispatches[1]);
+    for (const index of dispatches) expect(calls[index].input.run_in_background).toBe(false);
+  });
+
+  test('a third dispatch exceeds the attempt budget and a lone dispatch stays the accepted one', () => {
+    const { toolCalls: calls } = replay('/tmp/ds-replay');
+    const dispatches = docsDispatchIndices(calls);
+    const third = [...calls, calls[dispatches[1]]];
+    expect(docsDispatchIndices(third)).toHaveLength(3);
+    expect(docsDispatchIndices(calls.filter((_, index) => index !== dispatches[0]))).toHaveLength(1);
+    expect(docsDispatchIndices(calls.filter((_, index) => !dispatches.includes(index)))).toEqual([]);
+    expect(docsDispatchIndex(calls.filter((_, index) => !dispatches.includes(index)))).toBe(-1);
   });
 });

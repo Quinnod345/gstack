@@ -136,3 +136,26 @@ describe('pickDesignFocusAll: Step 0D in the template\'s own words (GSTA-65 focu
     const x = q(); mutate(x); expect(pickDesignFocusAll(x)).toBeNull();
   });
 });
+
+describe('pickDesignFocusAll: a menu that asks whether to cover all seven dimensions (GSTA-92, a65d492 and 62c0fa1)', () => {
+  const captured = require('./fixtures/design-floor-focus-cover-all.json');
+  const q = () => structuredClone(captured.question);
+  test('the pending cover-all menu, with focus only in its header and stakes line, selects the all-seven option', () => {
+    expect(captured.question.header).toBe('Focus');
+    expect(captured.question.question.split('\n')[0]).toBe('D1: Should the review cover all 7 dimensions?');
+    expect(captured.provenance.floorAssessment.kind).toBe('setup');
+    expect(pickDesignFocusAll(q())).toBe(1);
+  });
+  test.each([
+    ['a title about which areas to cover, not all seven', (x: any) => { x.question = x.question.replace('Should the review cover all 7 dimensions?', 'Which areas should the review cover?'); }],
+    ['a title about applying fixes', (x: any) => { x.question = x.question.replace('Should the review cover all 7 dimensions?', 'Should I apply all 7 fixes?'); }],
+    ['an alternative that does not narrow', (x: any) => { x.options[1].label = 'B) Hero hierarchy first'; }],
+    ['two all-seven options', (x: any) => { x.options[1].label = 'B) Review all seven dimensions'; }],
+    ['a bundled product approval', (x: any) => { x.question = x.question.replace('Net:', 'Also approve the CTA redesign.\nNet:'); }],
+    ['a foreign plan context', (x: any) => { x.question = x.question.replace('reviewing PLAN.md, the marketing landing page plan, on main.', 'reviewing OTHER.md, the pricing page plan, on main.'); }],
+    ['a second question', (x: any) => { x.question = x.question.replace('Net:', 'Ready?\nNet:'); }],
+    ['multi select', (x: any) => { x.multiSelect = true; }],
+  ])('%s is not answered', (_name, mutate) => {
+    const x = q(); mutate(x); expect(pickDesignFocusAll(x)).toBeNull();
+  });
+});

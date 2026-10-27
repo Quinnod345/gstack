@@ -55,6 +55,17 @@ export function vetDocsCompletion(result: DocsCompletion, evidence: {
   if (evidence.changedPaths.some(p => forbidden.test(p) || !evidence.allowedDocs.includes(p))) throw new Error('non-doc mutation');
 }
 
+/**
+ * The changed paths the accepted (last) attempt answers for. A rejected earlier attempt's reported edit stays in the tree
+ * (Blocked recovery preserves partial content), so it is not the accepted attempt's unreported edit; the accepted attempt
+ * answers for it again only when its own `files_updated` claims it (an honest re-audit that re-edited the same document).
+ */
+export function acceptedChangedPaths(changed: string[], contracts: DocsCompletion[]): string[] {
+  const accepted = contracts.at(-1)!;
+  const retained = contracts.slice(0, -1).flatMap(earlier => earlier.files_updated);
+  return changed.filter(p => !retained.includes(p) || accepted.files_updated.includes(p));
+}
+
 export function extractDocsDispatch(section: string): string {
   const begin = section.indexOf('**Subagent prompt:**');
   const end = section.indexOf('**Parent processing:**');
@@ -64,7 +75,16 @@ export function extractDocsDispatch(section: string): string {
 }
 
 export function docsDispatchIndex(calls: Array<{ tool: string; input: unknown }>): number {
-  return calls.findIndex(call => ['Agent', 'Task'].includes(call.tool) &&
+  return docsDispatchIndices(calls)[0] ?? -1;
+}
+
+/**
+ * Every /document-release dispatch, in order. The audit gate's attempt budget is an initial audit plus one repair/re-audit, so a
+ * run has one or two; the parent's accepted contract is the last (gate 40465691803: the parent rejected attempt 1 for a false
+ * claim in its section, re-audited over its retained edit, and reported attempt 2's section).
+ */
+export function docsDispatchIndices(calls: Array<{ tool: string; input: unknown }>): number[] {
+  return calls.flatMap((call, index) => ['Agent', 'Task'].includes(call.tool) &&
     /document-release\/SKILL\.md|executing the \/document-release workflow/i.test(JSON.stringify(call.input)) &&
-    !/Parent processing:|## Step 19: Create PR\/MR/.test(JSON.stringify(call.input)));
+    !/Parent processing:|## Step 19: Create PR\/MR/.test(JSON.stringify(call.input)) ? [index] : []);
 }

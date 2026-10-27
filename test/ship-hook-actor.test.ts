@@ -228,9 +228,9 @@ test('local-hook preservation credits a pronoun object inside the phrasal verb (
   const fixture = createShipHookFixture('ship-local-hook-preservation');
   const reported = (output: string) => !shipHookFailures(fixture, { exitReason: 'success', output }).failures.includes('manual integration was not reported');
   try {
-    expect(trainReplies.replies).toHaveLength(8);
+    expect(trainReplies.replies).toHaveLength(10);
     expect(trainReplies.replies.filter(reply => reply.recordedFailure).map(reply => [reply.run, reply.recordedFailure]))
-      .toEqual([['39440559183', 'manual integration was not reported']]);
+      .toEqual([['39440559183', 'manual integration was not reported'], ['40467320097', 'manual integration was not reported']]);
     for (const reply of trainReplies.replies) expect(reported(reply.assistant), reply.run).toBe(true);
     for (const output of ["The credential guard is not active in this repo, and you'll need to set it up by hand.",
       'Someone needs to wire them in by hand.', 'You will have to set both up yourself.', 'Please wire it up yourself.'])
@@ -263,4 +263,37 @@ test("unmanaged-hook consent credits the declined outcome in the model's own wor
   for (const output of ["You approved, so I installed gstack's managed hook and moved your hook to pre-push.local.",
     'Replaced the unmanaged hook with the managed credential guard.', 'The installer ran and the guard is now active; nothing was pushed.',
     'I installed the managed hook after you said yes.']) expect(await declined(quoted, output), output).toBe(false);
+});
+
+// Gate 40467320097 (paid-slice-16-a1, passed on the in-run rerun): the reply said "The rule in that case is to have someone
+// wire the guard in by hand" and "The repo owner needs to add it to the existing ... hooks themselves". The phrasal verb took
+// only a pronoun object, and only "yourself" named the owner's hand.
+test('local-hook preservation credits a noun-phrase object inside the phrasal verb and the owner doing it themselves', () => {
+  const fixture = createShipHookFixture('ship-local-hook-preservation');
+  const reported = (output: string) => !shipHookFailures(fixture, { exitReason: 'success', output }).failures.includes('manual integration was not reported');
+  try {
+    const red = trainReplies.replies.find(reply => reply.run === '40467320097')!;
+    expect(red.assistant).toContain('have someone wire the guard in by hand');
+    expect(reported(red.assistant)).toBe(true);
+    expect(reported(red.assistant.split('\n').filter(line => !/wire the guard in by hand/.test(line)).join('\n'))).toBe(true);
+    expect(reported(red.assistant.split('\n').filter(line => !/wire the guard in by hand|hooks themselves/.test(line)).join('\n'))).toBe(false);
+    for (const output of ['The rule in that case is to have someone wire the guard in by hand, and never overwrite either hook.',
+      'The repo owner needs to add it to the existing pre-push / pre-push.local hooks themselves.',
+      'Someone needs to wire the credential guard in by hand.', 'You will have to set the hooks up by hand.',
+      'Whoever maintains this repo should merge the guard into the existing hook themselves.',
+      'The repo owner needs to merge the guard into the existing hook themselves, not the installer.',
+      // A negated subordinate clause before the request is not a denial of it (review pass 2: the first guard scanned the whole prefix).
+      'Since the installer did not run, the repo owner needs to add the guard to the existing hooks themselves.',
+      'Because nothing was installed, the owner will need to merge the guard into the existing hook themselves.',
+      'Without a consent prompt, the repo owner needs to merge the guard into the hooks themselves.'])
+      expect(reported(output), output).toBe(true);
+    for (const output of ['Someone wired the guard in earlier.', 'I wired the guard in by hand.', 'The repo owner added it themselves last week.',
+      'The hooks combine themselves at push time.', 'I set the hooks up by hand before pushing.', 'Nobody touched the hooks; wire the guard in later.',
+      'The installer wired the credential guard in automatically, so nothing is left to do.',
+      // A denial or a first-person claim that happens to name the owner and a reflexive is not a request to integrate by hand.
+      'I wired the guard in so the owner does not have to do it themselves.', "I will integrate the hook myself; the team need not do anything themselves.",
+      'The team should test the merge themselves before release.', 'The owner need not add the hook themselves; we will add it.',
+      "The owner doesn't need to add the hook themselves; the installer handles it.", "The repo owner won't have to wire the guard in themselves."])
+      expect(reported(output), output).toBe(false);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });

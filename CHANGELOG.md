@@ -20,6 +20,23 @@
 - Correction to the 1.91.276.0 entry below: "shrinks and 89 size pins go down." should read "loses 3 characters from it and the 89 size pins go down by 3 (plan-ceo-review still grows overall, below).".
 - No threshold, timeout, trial count or case kind changed. No skill prose changed.
 
+## [1.91.281.0] - 2026-10-27
+
+**Four paid gate detectors stop judging honest transcripts red, and /review's Scope Check has one emission point.** The 2026-10-27 flaky pass (GSTA-128) read each red transcript and repaired the detector or the prose it judged, never the threshold.
+
+### Fixed
+- **Ship doc-sync gate** (`ship-docsync-store`, `ship-docsync-completion`): the read grammar accepts an orientation `git branch` listing with no operand (`--show-current`, `-a`, `-r`, `-v`, `--list`), and the declared interface names exactly that set. A /document-release re-audit after a rejected first attempt is judged on the attempt the parent accepted: the accepted contract is the last foreground dispatch, a rejected attempt's retained edit is not its unreported edit, and a re-audit that edits the same document again and says so passes.
+- **Local-hook preservation gate** (`ship-local-hook-preservation`): manual-integration wording is credited with a noun-phrase phrasal object ("wire the guard in by hand") or the owner's own hand ("the repo owner needs to add it to the existing hooks themselves"), while a denial ("the owner doesn't need to add the hook themselves"), a first-person claim or a sentence that names no hook is not. A negated clause before the request ("Since the installer did not run, the repo owner needs to ...") stays a request.
+- **Design-floor focus picker** (`plan-design-finding-floor`): a pending menu that asks to cover all 7 dimensions without the word "focus" is recognised.
+- **/review Scope Check**: emitted once, in Step 3 after the full diff read, on the first pass only; the plan-completion audit's with-plan and no-plan paths, the section's STOP trigger and the Step 1.5 notes all name that point, so `Diff read: full` exists when the check is written. The plan-review and doc-review run headers admit only the `CODEX_MODE` values their preflight prints, and the small-diff rule and the specialists record agree on State Machines.
+
+### Changed
+- Review, ship and plan-eng-review prose tightened to hold their parity caps; the generated-size pins that shrank were lowered.
+- **Ship parity cap** (`test/helpers/carve-guards.ts`): `maxSizeRatio` 1.7524 → 1.7525. The review-army section's small-diff clause now names State Machines as item 9's call and a State Machines-only specialist list (the ground text of the Scope Check repair above), +5 union bytes; main at v1.91.280.0 already measured 328,932 / 187,706 = 1.7524, four bytes under the cap after #3515 and #3517, and the merged tree measures 328,937 / 187,706 = 1.7524, so the pin moves one in the last place. No other cap or pin raised.
+
+### Tests
+- Three free fixtures (the two docsync captures and the design-floor menu) registered in `FREE_FIXTURES`; probe sets for the hook-actor arm, the two-attempt dispatch contract, the branch-listing grammar and the Scope Check owners; the pass-1 and pass-2 review fixes each carry a probe that fails on the previous helper.
+
 ## [1.91.280.0] - 2026-10-27
 
 **Three free-tier tests measured something other than what they assert, and the Ubicloud quota wait shaved its own budget.** The daily flaky pass (GSTA-128) traced the free tier's open timing reds to measurement defects, not product ones: `quota_preflight` in `scripts/ubicloud/ubi-runner.sh` pinned its deadline to the wall clock before the first usage call, so a slow CLI spawn on a loaded runner printed "waiting up to 2s more" where the test expects the full 3 s; the pregate-remote teardown test read the `.down` file as soon as it existed, before the stub's `echo` had written the line; and the design-lint linearity check timed one wall-clock run of the 8000-label lint against a 500 ms floor on a shared runner. Under eight busy loops on four cores the quota case went from 8 of 12 green to 12 of 12. No ms bound, threshold, trial count or retry changed.
