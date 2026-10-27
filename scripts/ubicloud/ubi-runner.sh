@@ -627,15 +627,16 @@ cmd_pack() {
     done < <(git -C "$gitdir" config --local --null --get-regexp '^(remote|branch)\.' 2>/dev/null || true)
     # The checkout's index rides along so the VM's status matches, except a
     # split index, whose shared half lives only in the original git dir. The
-    # blobs staged against HEAD are behind no ref, so they travel as a pack of
+    # index's blobs that HEAD's tree lacks (staged, intent-to-add, the stages
+    # of an unmerged entry) are behind no ref, so they travel as a pack of
     # their own; without them the VM's write-tree (gstack-wtree) cannot read a
     # staged file.
     if [ "$(git -C "$src" config --bool core.splitIndex 2>/dev/null)" != true ]; then
       cp "$(cd "$src" && cd "$(dirname "$(git rev-parse --git-path index)")" && pwd)/index" "$tmp/.git/index"
       # Read the copy, not the live index, so the pack matches it; a gitlink's
       # sha (mode 160000) is a submodule commit this object store lacks.
-      GIT_INDEX_FILE="$tmp/.git/index" git -C "$src" diff --cached --raw --no-abbrev HEAD \
-        | awk '$2 != "160000" && $4 !~ /^0+$/ {print $4}' \
+      GIT_INDEX_FILE="$tmp/.git/index" git -C "$src" ls-files -s | awk '$1 != "160000" {print $2}' | sort -u \
+        | comm -23 - <(git -C "$src" ls-tree -r HEAD | awk '{print $3}' | sort -u) \
         | git -C "$src" pack-objects -q --stdout \
         | git -C "$tmp/.git" unpack-objects -q \
         || die "pack: could not snapshot the staged blobs of $src"

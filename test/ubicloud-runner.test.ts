@@ -315,7 +315,7 @@ test('pack ships a linked worktree with a self-contained .git on the checked-out
     const d = mkdtempSync(join(tmpdir(), 'ubi-pack-live-'));
     try {
       const sh = (cmd: string, cwd: string) => { const r = Bun.spawnSync(['bash', '-c', cmd], { cwd, timeout: 60_000, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }); expect(r.exitCode, r.stderr.toString()).toBe(0); return r.stdout.toString(); };
-      sh('git init -q --bare origin.git && git clone -q origin.git src 2>/dev/null && cd src && echo a > a && git add a && git commit -qm one && git push -q origin HEAD:main && echo b > b && git add b && git commit -qm two && git push -q origin HEAD:main && git checkout -q --detach && echo c > c && echo s > staged && git add staged', d);
+      sh('git init -q --bare origin.git && git clone -q origin.git src 2>/dev/null && cd src && echo a > a && git add a && git commit -qm one && git push -q origin HEAD:main && echo b > b && git add b && git commit -qm two && git push -q origin HEAD:main && git checkout -q --detach && echo c > c && echo s > staged && git add staged && echo i > inta && git add -N inta', d);
       const src = join(d, 'src');
       const pack = `bash ${JSON.stringify(join(DIR, 'ubi-runner.sh'))} pack .`;
       // Twenty seconds of index.lock, worktree and ref churn in the checkout while pack runs three times.
@@ -328,8 +328,8 @@ test('pack ships a linked worktree with a self-contained .git on the checked-out
       expect(lstatSync(join(vm, '.git')).isDirectory()).toBe(true);
       const head = sh('git rev-parse HEAD', src).trim();
       expect(sh('git rev-parse HEAD && git rev-parse --abbrev-ref HEAD && git rev-parse origin/main && git config --get remote.origin.url && git status --short', vm).split('\n').filter(Boolean))
-        .toEqual([head, `detached-${head.slice(0, 12)}`, head, join(d, 'origin.git'), 'A  staged', '?? c']);
-      // The staged blob is behind no ref; the snapshot carries it, so the VM can read and write-tree it.
+        .toEqual([head, `detached-${head.slice(0, 12)}`, head, join(d, 'origin.git'), ' A inta', 'A  staged', '?? c']);
+      // The staged blob and the intent-to-add entry's empty blob are behind no ref; the snapshot carries them, so the VM can read and write-tree them.
       expect(sh('git fsck --no-progress 2>&1; git diff --cached --name-only', vm).trim()).toBe('staged');
       const wtree = (cwd: string) => sh(`bash ${JSON.stringify(join(ROOT, 'bin/gstack-wtree'))}`, cwd).trim();
       expect(wtree(vm)).toBe(wtree(src));
