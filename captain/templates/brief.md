@@ -37,6 +37,6 @@ Plan: exempt reason.
 ```
 
 A lane whose brief says `approved: <dir>` starts at step 2 with that run (restore it with
-`gstack-autoplan resume --out <new dir> --from <dir>` when it lives on another machine); a
+`gstack-autoplan resume --out <new dir> --from <its checkpoint dir>` when it lives on another machine); a
 lane whose brief says `exempt:` starts at step 3. A brief with no `Plan:` line reads as
 `Plan: required`.

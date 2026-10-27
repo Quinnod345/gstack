@@ -55,7 +55,7 @@ gstack/
 ├── deslop-shared-libs/ # Recommendations-only audit for worthwhile shared-code extractions
 ├── test-audit/      # Report-first sweep for low-value tests (test value bar, audit mode)
 ├── eval-plan/       # Preregistered paid evals: prereg, arms, $0 dry run, priced pilot (bin/gstack-eval-plan)
-├── captain/         # /captain (also /crew): one controller, many lanes; templates/ holds CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report, the READY block, slot call, asks and the daily automation prompt
+├── captain/         # /captain (also /crew): one controller, many lanes; templates/ holds CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report, the READY block, slot call, the lane brief, asks and the daily automation prompt
 ├── plan-ceo-review/ # /plan-ceo-review skill
 ├── plan-eng-review/ # /plan-eng-review skill
 ├── autoplan/        # /autoplan skill (auto-review pipeline: CEO → design → DX → eng, eng always last)
