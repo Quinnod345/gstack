@@ -26,8 +26,8 @@ const GITHUB_DIR = path.join(ROOT, '.github');
 
 /** Bash-only constructs POSIX sh (dash) rejects or misreads, by name. */
 export const BASHISMS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-  // ${x:0:12}, ${x: -3}, ${x:$a:$b}; ${x:-d} ${x:=d} ${x:?m} ${x:+a} are POSIX.
-  { name: 'substring expansion ${x:offset:length}', pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*:(?![-+?=])/ },
+  // ${x:0:12}, ${x: -3}, ${x:$a:$b}, ${@:2}, ${1:0:2}; ${x:-d} ${x:=d} ${x:?m} ${x:+a} are POSIX.
+  { name: 'substring expansion ${x:offset:length}', pattern: /\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*]):(?![-+?=])/ },
   // ${x/a/b}, ${x//a/b}, ${x^^}, ${x,,}, ${x@Q}, ${!x}; ${x#p} ${x%s} are POSIX.
   { name: 'pattern or case expansion ${x/…} ${x^^} ${x,,} ${x@…}', pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*[/^,@]/ },
   { name: 'indirect expansion ${!x}', pattern: /\$\{![A-Za-z_]/ },
@@ -111,6 +111,8 @@ describe('workflow run-step shells', () => {
     const cases: Array<[string, string]> = [
       ['echo "short=${PREFIX_SHA:0:12}" >> "$GITHUB_OUTPUT"', 'substring expansion'],
       ['x=${name: -3}', 'substring expansion'],
+      ['set -- "${@:2}"', 'substring expansion'],
+      ['echo "${1:0:2}"', 'substring expansion'],
       ['echo "${path//\\//_}"', 'pattern or case expansion'],
       ['echo "${name^^}"', 'pattern or case expansion'],
       ['echo "${!ref}"', 'indirect expansion'],
@@ -131,7 +133,7 @@ describe('workflow run-step shells', () => {
       expect(bashisms(script).join('; '), script).toContain(expected);
     }
     for (const posix of [
-      'echo "${HOME:-/tmp}" "${X:=d}" "${Y:?missing}" "${Z:+alt}"',
+      'echo "${HOME:-/tmp}" "${X:=d}" "${Y:?missing}" "${Z:+alt}" "${1:-x}" "${@}" "$*"',
       'echo "${file#*/}" "${file##*/}" "${file%.ts}" "${file%%.*}" "${#name}"',
       'out=$(git rev-parse HEAD); if [ "$out" != "$PREFIX_SHA" ]; then exit 1; fi',
       '. ./env.sh && printf "%s\\n" "$out" >> "$GITHUB_OUTPUT"',

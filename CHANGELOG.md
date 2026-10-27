@@ -11,7 +11,7 @@
 - `test/workflow-shell-lint.test.ts` (new, free, offline): parses every workflow under `.github/workflows/` and every composite action under `.github/actions/`, computes each run step's effective shell (step `shell` → job `defaults.run.shell` → workflow `defaults.run.shell` → GitHub's default: sh in a container job, pwsh on Windows, bash otherwise), and fails on a bash-only construct in a step whose effective shell is sh (`${x:0:n}`, `${x//…}`, `${!x}`, `[[`, arrays, `declare -a`/`mapfile`, `set -o pipefail`, `PIPESTATUS`, `<<<`, `<(…)`, `$'…'`, `source`, `function`). The detector has positive controls for each construct and negative controls for the POSIX forms (`${x:-d}`, `${x#p}`, `$(…)`, `$((…))`, comments). A fourth test pins the `train-bisect` job to bash by name; it was red at d9b0d60 and is green with the fix.
 
 ### Gate integrity
-- No threshold, trial count, case kind, budget or reservation changed; the bisect's cases, prefixes and spend path are untouched. The job's steps gain `pipefail` from bash's explicit-shell default; none of them pipes.
+- No threshold, trial count, case kind, budget or reservation changed; the bisect's cases, prefixes and spend path are untouched. The job's run steps gain `pipefail` from bash's explicit-shell default; the one that pipes (the Codex login) already ran under `shell: bash` with `set -euo pipefail`, and the others run single commands.
 
 ## [1.91.267.0] - 2026-10-27
 
