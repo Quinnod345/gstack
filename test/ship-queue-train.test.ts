@@ -1033,7 +1033,7 @@ describe('verify, freeze, repair and clear', () => {
     const smuggled = fx.repo.git('show', `${t.prefixes[0].commit}:CHANGELOG.md`).replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-18\n\n- #1 change\n- added after the gate\n') + '\n';
     const broken = publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: smuggled });
     // While GitHub's answer for #1 cannot be read, the verify neither freezes nor says "nothing merged": it refuses and asks to be rerun.
-    const row = fx.read().prs['1'];
+    const row = fx.read().prs['1'] as any;
     fx.write(d => { delete d.prs['1']; });
     const unreadable = v('1');
     expect(unreadable.status).toBe(EXIT.refused);
