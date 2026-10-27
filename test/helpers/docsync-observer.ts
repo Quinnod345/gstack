@@ -5,7 +5,7 @@ import { observeQAWrites, type QAWriteObservation } from './qa-functional-observ
 import { nativeCalls } from './qa-checkpoint-evidence';
 import type { SkillTestResult } from './session-runner';
 import { DOC_PATH, type DocsScenario, type fixtureDocs } from './docsync-fixture';
-import { docsNativeInterface, DOCS_AUDIT_RECORD, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } from './docsync-interface';
+import { docsNativeInterface, DOCS_AUDIT_RECORD, DOCS_AUDIT_RECORD_PATHS, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } from './docsync-interface';
 import { sliceBetween } from './skill-fixture';
 import { readOnlyCommandAllowed } from './read-only-commands';
 
@@ -137,7 +137,7 @@ export function docsWriteFailures(observation: QAWriteObservation, allowed: stri
   if (!observation.complete) failures.push('incomplete docs write observation');
   const atomicSources = docsAtomicSources(observation, allowed, context);
   for (const file of new Set([...observation.events.map(e => e.path), ...observation.changed])) {
-    if (file !== '.qa-state/.observer-check' && !allowed.includes(file) && !atomicSources.has(file))
+    if (file !== '.qa-state/.observer-check' && !allowed.includes(file) && !DOCS_AUDIT_RECORD_PATHS.includes(file) && !atomicSources.has(file))
       failures.push(`forbidden docs write: ${file}${atomicSources.deniedAt && path.dirname(file) === path.dirname(DOC_PATH) ? ` (atomic replacement unproven at ${atomicSources.deniedAt})` : ''}`);
     if (allowed.includes(file) && observation.before[file] && observation.after[file] &&
         observation.before[file].split(':')[0] !== observation.after[file].split(':')[0]) failures.push(`document mode changed: ${file}`);
@@ -458,9 +458,10 @@ export function docsToolFailures(result: SkillTestResult, fixture: ReturnType<ty
       const file = path.resolve(fixture.repo, call.input?.file_path ?? '');
       const actual = actualWritePath(file);
       const productWrite = within(file, fixture.repo) || (actual !== null && within(actual, repo));
-      if (readOnly && productWrite) failures.push('read-only docs write attempt');
-      const allowedDoc = (file === path.join(fixture.repo, DOC_PATH) && actual === authoredDoc) ||
-        (file === path.join(fixture.repo, DOCS_AUDIT_RECORD) && actual === path.join(repo, DOCS_AUDIT_RECORD));
+      // Step 14.5's receipt record is housekeeping every scenario may write, a read-only audit included; the document stays read-only.
+      const recordWrite = file === path.join(fixture.repo, DOCS_AUDIT_RECORD) && actual === path.join(repo, DOCS_AUDIT_RECORD);
+      if (readOnly && productWrite && !recordWrite) failures.push('read-only docs write attempt');
+      const allowedDoc = (file === path.join(fixture.repo, DOC_PATH) && actual === authoredDoc) || recordWrite;
       if (productWrite && !allowedDoc) {
         failures.push('non-document product write attempt');
       }

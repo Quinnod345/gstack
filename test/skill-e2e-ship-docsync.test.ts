@@ -8,7 +8,6 @@ import { describeE2ETier } from './helpers/e2e-gate';
 import { docsDispatchIndex, parseDocsCompletion, vetDocsCompletion } from './helpers/docsync-contract';
 import { fixtureDocs, repoSnapshot, changedFiles, DOC_PATH, preserveDocsEvidence, sawSpawnedMarker, childReportedSpawnedMarker, type DocsScenario } from './helpers/docsync-fixture';
 import { observeDocsWrites, docsWriteFailures, docsShipPhase, docsToolFailures, docsCompletedRead, docsSessionOptions } from './helpers/docsync-observer';
-import { DOCS_AUDIT_RECORD_PATHS } from './helpers/docsync-interface';
 import type { SkillTestResult } from './helpers/session-runner';
 import { runShipDocsFault } from './helpers/docsync-fault-eval';
 
@@ -60,7 +59,7 @@ async function runShipDocs(testName: string, scenario: DocsScenario) {
       expect(calls[dispatch].input.run_in_background).toBe(false);
       if (publishCall >= 0) expect(dispatch).toBeLessThan(publishCall);
       expect(result.exitReason).toBe('success');
-      expect(docsWriteFailures(observation!, scenario === 'store' ? [] : [...(scenario === 'current' ? [] : [DOC_PATH]), ...DOCS_AUDIT_RECORD_PATHS], {
+      expect(docsWriteFailures(observation!, scenario === 'current' || scenario === 'store' ? [] : [DOC_PATH], {
         result, fixture, scripts: [publish], readOnly: scenario === 'current' || scenario === 'store',
       })).toEqual([]);
       expect(docsToolFailures(result, fixture, [publish], scenario === 'current' || scenario === 'store')).toEqual([]);

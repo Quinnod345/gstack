@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DOC_PATH, fixtureDocs, gitAt, repoSnapshot } from './helpers/docsync-fixture';
-import { docsCommandAllowed, docsCompletedRead, docsNativeInterface, docsSessionOptions, docsToolFailures } from './helpers/docsync-observer';
+import { docsCommandAllowed, docsCompletedRead, docsNativeInterface, docsSessionOptions, docsToolFailures, docsWriteFailures } from './helpers/docsync-observer';
 import { parseNDJSON, type SkillTestResult } from './helpers/session-runner';
 
 let fixture: ReturnType<typeof fixtureDocs>;
@@ -507,7 +507,7 @@ test('the docs interface names the Claude config dir and private actor state as 
 // generated section, and nothing adjacent: a reworded exclude line, a bare rm, another receipt subcommand or another
 // write under .gstack/ stay outside it (gate: ship-docsync-completion/current red twice at 775d9804 before they were declared).
 test('Step 14.5 housekeeping commands and the docs record are declared exactly as the generated section writes them', () => {
-  const { DOCS_AUDIT_RECORD, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } = require('./helpers/docsync-interface') as typeof import('./helpers/docsync-interface');
+  const { DOCS_AUDIT_RECORD, DOCS_AUDIT_RECORD_PATHS, DOCS_AUDIT_RESET, DOCS_TMP_EXCLUDE, docsCapsCommand } = require('./helpers/docsync-interface') as typeof import('./helpers/docsync-interface');
   const section = fs.readFileSync(path.resolve(import.meta.dir, '..', 'ship/sections/documentation.md'), 'utf8');
   expect(section).toContain(DOCS_TMP_EXCLUDE);
   expect(section).toContain(DOCS_AUDIT_RESET);
@@ -532,7 +532,14 @@ test('Step 14.5 housekeeping commands and the docs record are declared exactly a
     return { ...parsed, exitReason: 'success' } as unknown as SkillTestResult;
   };
   expect(docsToolFailures(write(path.join(fixture.repo, DOCS_AUDIT_RECORD)), fixture, [], false)).toEqual([]);
-  expect(docsToolFailures(write(path.join(fixture.repo, DOCS_AUDIT_RECORD)), fixture, [], true)).toEqual(['read-only docs write attempt']);
+  expect(docsToolFailures(write(path.join(fixture.repo, DOCS_AUDIT_RECORD)), fixture, [], true)).toEqual([]);
+  expect(docsToolFailures(write(path.join(fixture.repo, DOC_PATH)), fixture, [], true)).toEqual(['read-only docs write attempt']);
+  // The kernel observer sees the exclude file and the record's directories in every scenario that runs the Entry, the fault cases'
+  // unseeded first attempts included, so the shared list is permitted without each caller naming it; anything else under .git or .gstack is not.
+  const observed = (paths: string[]) => ({ complete: true, failures: [], events: paths.map(p => ({ path: p, mask: 0x2, cookie: 0, at: 0 })), changed: paths, before: {}, after: {}, limits: [] });
+  expect(docsWriteFailures(observed(['.qa-state/.observer-check', ...DOCS_AUDIT_RECORD_PATHS]), [])).toEqual([]);
+  expect(docsWriteFailures(observed(['.git/info/attributes']), [])).toEqual(['forbidden docs write: .git/info/attributes']);
+  expect(docsWriteFailures(observed(['.gstack/tmp/review-loop.json']), [DOC_PATH])).toEqual(['forbidden docs write: .gstack/tmp/review-loop.json']);
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/tmp/review-loop.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(docsToolFailures(write(path.join(fixture.repo, '.gstack/ship-policy.json')), fixture, [], false)).toEqual(['non-document product write attempt', 'write outside docs fixture authority']);
   expect(gitAt(fixture.repo, 'rev-parse', '--verify', 'origin/main')).toBe(gitAt(fixture.repo, 'rev-parse', '--verify', 'main'));
