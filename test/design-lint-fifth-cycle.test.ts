@@ -36,6 +36,9 @@ const quiet = { warn: () => {} };
 const run = (html: string, files: Record<string, string> = {}): Finding[] => { const dir = tree({ 'index.html': html, ...files }); return lintStatic([dir], { cwd: dir, ...quiet }).findings; };
 const only = (f: Finding[], rule: string) => f.filter((x) => x.rule === rule);
 const timed = (fn: () => void): number => { const t = performance.now(); fn(); return performance.now() - t; };
+// A linearity check measures the lint's own CPU time, fastest of three runs: wall time on a loaded shard carries scheduling waits that are not the lint's cost.
+const cpuTimed = (fn: () => void): number => { const c = process.cpuUsage(); fn(); const d = process.cpuUsage(c); return (d.user + d.system) / 1000; };
+const fastest = (fn: () => void, trials = 3): number => Math.min(...Array.from({ length: trials }, () => cpuTimed(fn)));
 
 describe('design-lint fifth cycle: dead markup and hostile inputs', () => {
   test('an emoji placeholder inside an HTML comment is dead', () => {
@@ -63,7 +66,7 @@ describe('design-lint fifth cycle: dead markup and hostile inputs', () => {
   });
 
   test('a page of many tracked-caps labels lints in linear time and a well-formed JSX file still yields its classes', () => {
-    const times = [4000, 8000].map((n) => { const dir = tree({ 'index.html': page('', '<main><h1>Hello world</h1>' + '<span class="text-xs uppercase tracking-widest">Label one</span>\n'.repeat(n) + '</main>') }); return timed(() => lintStatic([dir], { cwd: dir, ...quiet })); });
+    const times = [4000, 8000].map((n) => { const dir = tree({ 'index.html': page('', '<main><h1>Hello world</h1>' + '<span class="text-xs uppercase tracking-widest">Label one</span>\n'.repeat(n) + '</main>') }); return fastest(() => lintStatic([dir], { cwd: dir, ...quiet })); });
     expect(times[1]).toBeLessThan(Math.max(times[0] * 2.5, 500));
     const doc = parseDoc('Page.tsx', 'export default function P(){ return (<div className="p-4"><Card className="rounded-xl">x</Card></div>); }');
     expect(doc.classAt.size + doc.virtuals.length).toBeGreaterThan(0);

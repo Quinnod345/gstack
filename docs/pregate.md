@@ -566,7 +566,10 @@ that reads them ships. The worked gbrain configuration is in
 
 The `secrets` check cannot be downgraded, and that is right for a key. It also
 refused 1,800 per-trial dummy tokens in eval receipts (`"key": "sk-trial-<id>"`
-reads as `env.kv`), an 11-digit Actions run id read as a phone number, and
+reads as `env.kv`), an 11-digit Actions run id read as a phone number (one
+after a run word such as `run`, `screen` or `gate` is exempt in the scanner
+since the GSTA-121 follow-up; the allowlist still covers one after any other
+word), and
 excalidraw.com's public Firebase key that every rebuild of a bundle re-adds
 (harness-evals #81/#83, GSTA-102, GSTA-106). `allowlist` in the policy names
 those, each with its scope and its reason:

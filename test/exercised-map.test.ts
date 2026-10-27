@@ -161,7 +161,7 @@ describe('the five recorded variant-c misses on this checkout', () => {
 
 describe('shadow output never changes the real selection', () => {
   test('mode, cases, judges and reasons equal the selection without a shadow', () => {
-    for (const files of [['bin/gstack-config'], ['design/src/evolve.ts'], ['review/SKILL.md.tmpl'], ['lib/fs-utils.ts', 'docs/x.md'], ['ETHOS.md']]) {
+    for (const files of [['bin/gstack-config'], ['design/src/evolve.ts'], ['review/SKILL.md.tmpl'], ['lib/fs-utils.ts', 'docs/x.md'], ['SECURITY.md']]) {
       const withShadow = selectPrProfile({ selectedE2E: [], selectedJudges: [], changedFiles: files });
       const without = selectPrProfile({ selectedE2E: [], selectedJudges: [], changedFiles: files, exercised: null });
       expect(withShadow.shadow, files.join()).toBeDefined();

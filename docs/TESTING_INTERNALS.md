@@ -1097,8 +1097,10 @@ PR selection (`scripts/test-pr-profile.ts`) classifies every changed file. A fil
 mapped by a paid case's touchfiles selects that case. These files are exempt and
 select nothing: docs, any non-paid `*.test.ts(x)`, `FREE_ONLY_PR_FILES` (the
 free and paid duration seeds, `scripts/ubicloud/**`, every workflow that runs no
-paid evals, and free-only tools), and the fixtures in `FREE_FIXTURES`
-(`test/helpers/free-fixtures-data.ts`, each fixture with its free consumers).
+paid evals, `captain/templates/**`, and free-only tools), the release metadata
+in `RELEASE_METADATA_FILES` (`NOTICE.md`, `LICENSE`, `licenses/**`), and the
+fixtures in `FREE_FIXTURES` (`test/helpers/free-fixtures-data.ts`, each fixture
+with its free consumers).
 Unmapped files under `DERIVABLE_PREFIXES` (bin/, lib/, scripts/, browse/,
 design/, make-pdf/, hosts/, extension/, model-overlays/, agents/, test/helpers/,
 capy/) are not unknown: `scripts/pr-dependencies.ts` derives the cases whose
@@ -1505,6 +1507,20 @@ summary). Files a probe proved safe despite a `/tmp` literal are force-included
 (`WINDOWS_PROBE_SAFE`). `test/windows-native-workflows.test.ts` holds
 `WINDOWS_CURATED_FLOOR`; when Windows-safe tests are deleted on purpose, lower it
 in the same PR with a reason.
+
+To see whether one test is in the subset, and why not when it is excluded:
+
+```bash
+bun run scripts/test-free-shards.ts --windows-only --list | grep test/<name>.test.ts
+```
+
+A test a content pattern excludes wrongly joins the subset through
+`KNOWN_WINDOWS_SAFE` (with its reason) or, for a `/tmp` literal a probe proved
+safe, `WINDOWS_PROBE_SAFE`. A test that fails on `windows-latest` for a reason
+the patterns cannot see (it expects the Linux-host lanes verdict, skips itself
+on win32, drives a POSIX signal path) leaves it through a
+`KNOWN_WINDOWS_INCOMPATIBLE` entry naming the reason; rerun `--list` to confirm
+the file moved.
 
 Native qualification campaigns (Windows cookie extraction, Windows launch
 diagnostics, Dia on macOS) run only on dispatch of `native-qualification.yml`:
