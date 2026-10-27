@@ -150,6 +150,7 @@ export const SKILL_REQUIREMENTS: Readonly<Record<string, SkillRequirement>> = {
   'design-review': BROWSER,
   'design-consultation': BROWSER,
   'design-html': BROWSER,
+  'design-motion': BROWSER,
   'devex-review': BROWSER,
   scrape: BROWSER,
   skillify: BROWSER,

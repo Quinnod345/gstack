@@ -62,8 +62,17 @@ import { skillCensus } from './helpers/skill-census';
  * New-skill ratchet: previous ceiling 1,251 + ceil(150 / 4) = 1,289
  * token-equivalents (5,156 bytes), leaving 6 bytes. Existing descriptions
  * are unchanged.
+ *   ref     design-motion addition on base 6c5b2d46 (2026-10-27), Garry
+ *           2026-10-25 'Do it' (GSTA-92 plan item 15)
+ *   result  pre-addition aggregate 5,150 bytes; design-motion adds 99 bytes
+ *           (name + the trimmed lead "animate an approved design into a
+ *           seamless MP4 and GIF loop"), yielding 5,249 bytes = 1,313
+ *           token-equivalents including the root router alias.
+ * New-skill ratchet: previous ceiling 1,289 + ceil(99 / 4) = 1,314
+ * token-equivalents (5,256 bytes), leaving 7 bytes. Existing descriptions
+ * are unchanged.
  */
-const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_289;
+const CATALOG_BUDGET_TOKEN_EQUIVALENTS = 1_314;
 
 // Largest today: design-consultation at 229 bytes. A description that needs
 // more than 260 bytes is a body paragraph, not a catalog entry.

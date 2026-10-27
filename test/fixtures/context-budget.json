@@ -1,6 +1,6 @@
 {
   "_comment": "Context-budget ratchet ceilings (~tokens). Regenerate: bun test/helpers/capture-context-budget.ts. Headroom: alwaysOnTotal x1.05, eagerPerInvocation x1.1. Graded by test/context-budget-ratchet.test.ts via lib/context-bill.ts checkBudget.",
-  "alwaysOnTotal": 7546,
+  "alwaysOnTotal": 7542,
   "eagerPerInvocation": {
     "autoplan": 11289,
     "benchmark": 7813,
@@ -17,6 +17,7 @@
     "cso": 4902,
     "design-consultation": 10513,
     "design-html": 8926,
+    "design-motion": 10409,
     "design-review": 30295,
     "design-shotgun": 9318,
     "deslop-shared-libs": 3411,
@@ -24,9 +25,9 @@
     "diagram": 4268,
     "document-generate": 6013,
     "document-release": 4454,
-    "eval-plan": 4396,
+    "eval-plan": 4842,
     "freeze": 1115,
-    "gstack": 5346,
+    "gstack": 5326,
     "gstack-upgrade": 6212,
     "guard": 1000,
     "health": 5816,
