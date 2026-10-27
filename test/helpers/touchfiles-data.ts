@@ -35,6 +35,20 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
     'test/helpers/agent-sdk-runner.ts', 'test/helpers/hermetic-env.ts',
     'test/helpers/e2e-gate.ts', 'test/helpers/eval-budgets.ts'
   ],
+  // The frozen review scope's two-pass convergence: the generated Step 9.4 + repeat decision, the real
+  // gstack-review-scope / gstack-review-log binaries and the ship-policy review_scope key it reads.
+  'ship-frozen-scope-convergence': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'package.json', 'bun.lock', '.github/docker/Dockerfile.ci',
+    'scripts/resolvers/review-scope.ts', 'scripts/resolvers/review-army.ts', 'scripts/resolvers/sections.ts', 'scripts/resolvers/index.ts',
+    'scripts/resolvers/types.ts', 'scripts/gen-skill-docs.ts', 'scripts/host-config.ts', 'scripts/discover-skills.ts', 'hosts/claude.ts', 'hosts/index.ts', 'hosts/define-host.ts',
+    'ship/sections/review-army.md*', 'ship/sections/manifest.json', 'review/checklist.md',
+    'bin/gstack-review-scope', 'lib/review-scope.ts', 'lib/ship-policy.ts', 'lib/result-codes-release.ts',
+    'bin/gstack-review-log', 'bin/gstack-review-read', 'bin/gstack-wtree', 'bin/gstack-slug', 'bin/gstack-remote-identity.sh',
+    'lib/review-evidence.ts', 'lib/claude-bin.ts', 'lib/eval-model.ts',
+    'test/helpers/ship-frozen-scope-actor.ts', 'test/helpers/scratch-repo.ts',
+    'test/skill-e2e-ship-frozen-scope.test.ts', 'test/helpers/shared-libs-eval-fixture.ts',
+    'test/helpers/agent-sdk-runner.ts', 'test/helpers/hermetic-env.ts',
+    'test/helpers/e2e-gate.ts', 'test/helpers/eval-budgets.ts'
+  ],
   'investigate-owned-completion': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'investigate/**', 'freeze/**', 'guard/**', 'unfreeze/**', 'careful/bin/hook-extract.sh', 'scripts/gen-skill-docs.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/hermetic-env.ts', 'test/helpers/workflow-boundaries-fixture.ts',  'test/skill-e2e-investigate-owned-completion.test.ts', 'test/helpers/e2e-gate.ts'],
   'investigate-owned-abort': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'investigate/**', 'freeze/**', 'guard/**', 'unfreeze/**', 'careful/bin/hook-extract.sh', 'scripts/gen-skill-docs.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/hermetic-env.ts', 'test/helpers/workflow-boundaries-fixture.ts',  'test/skill-e2e-investigate-owned-termination.test.ts', 'test/helpers/e2e-gate.ts'],
   'investigate-owned-ending-error': ['bin/gstack-state-root.sh', 'lib/state-root.ts', 'investigate/**', 'freeze/**', 'guard/**', 'unfreeze/**', 'careful/bin/hook-extract.sh', 'scripts/gen-skill-docs.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/hermetic-env.ts', 'test/helpers/workflow-boundaries-fixture.ts',  'test/skill-e2e-investigate-owned-termination.test.ts', 'test/helpers/e2e-gate.ts'],
@@ -1139,6 +1153,7 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
  */
 export const E2E_TIERS: Record<string, 'gate' | 'periodic' | 'marathon'> = {
   'ship-skipped-queued-finding': 'gate',
+  'ship-frozen-scope-convergence': 'gate',
   'investigate-owned-completion': 'gate',
   'investigate-owned-abort': 'gate',
   'investigate-owned-ending-error': 'gate',
@@ -1653,6 +1668,7 @@ export const GLOBAL_TOUCHFILES = [
  */
 export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
   'ship-skipped-queued-finding': 'rule',
+  'ship-frozen-scope-convergence': 'behavior',
   'investigate-owned-completion': 'rule',
   'investigate-owned-abort': 'rule',
   'investigate-owned-ending-error': 'rule',
@@ -1937,6 +1953,8 @@ export const E2E_KINDS: Record<string, 'rule' | 'behavior' | 'judge'> = {
  * E2E_KINDS; values are non-empty.
  */
 export const BEHAVIOR_WHY: Record<string, string> = {
+  'ship-frozen-scope-convergence':
+    "How the live model words its fix of the in-diff defect and its review rows can vary run to run; never editing the pre-existing file, deferring its blocking finding, reviewing only the range on pass 2 and exiting through decision 4 stay the contract the verdict checks.",
   'ship-measure-seeded-flake':
     "How the live model words its classification and fix can vary run to run; measuring before fixing, re-measuring at target and running the gate once after stay assertions, and answering only the spend question is a contract.",
   'shared-libs-opportunity-judgment':

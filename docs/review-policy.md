@@ -88,7 +88,7 @@ puts in the receipt:
 |---|---|
 | `review_loop.passes` | review passes this ship ran (1 to 3) |
 | `review_loop.blocking_found` | distinct blocking findings across the passes |
-| `review_loop.deferred` | blocking findings in unchanged code filed as issues |
+| `review_loop.deferred` | blocking findings in unchanged code filed as issues (a Step 11 late defer, logged as a `review-late-defer` row so it never displaces the newest `review` pass, counts here and is not a pass) |
 | `review_loop.noted` | below-floor findings listed in the PR body |
 | `review_loop.fixed` | findings fixed in this PR |
 | `review_loop.scope` | the `review_scope` the loop ran under |
@@ -115,10 +115,66 @@ up; `all` is the loop as it ran before the key existed. A value other than
 (`REVIEW_SCOPE_KEY_VERSION` in `lib/ship-policy.ts`) so an older gstack refuses
 the file by name instead of ignoring the key.
 
+## Reviewer fan-out
+
+The review army launches every selected specialist in one message so they run
+in parallel; a host that caps running subagents makes that impossible past the
+cap. In `/ship` the knob is a prompt flag, `--review-fanout auto|serial|parallel`
+(default `auto`), read where the force flags (`--all-specialists`) are (`/review`
+on its own keeps the single parallel batch: its generated SKILL.md sits at its
+size pin, and a refused launch there is a failed reader, never dropped coverage):
+
+| Value | Batches |
+|---|---|
+| `auto` | when the host reports fewer free subagent slots than selected specialists, batches of the free-slot count (at least one), each launched in one message, the next only after every reader of the previous one finished or is confirmed stopped; a host that reports no slot count runs one parallel batch |
+| `serial` | batches of one |
+| `parallel` | one batch regardless of slots; a refused launch is a failed reader, never silently dropped coverage |
+
+Capy caps a thread at 8 running subagents, and waiting or idle ones hold a
+slot, so under `auto` a nine-specialist review on an otherwise idle Capy
+thread runs as one batch of 8 and one of 1 (`Fan-out: 9 specialists in 2
+batches of 8`). Batching changes the order, never the set: every selected
+specialist runs before the merge stage, and the Red Team's activation reads
+the merged result as before.
+
+## Two checklist rules with ids
+
+Two findings `review/checklist.md` names by rule id so a PR body, a review log
+and a later reader agree on what was flagged:
+
+- `prereg-with-results` (Pass 1, Gate Integrity, ASK): one diff adds or changes
+  an eval's preregistration (bars, arms, decoys, stop rules, a plan file) and
+  also adds that eval's results, scores or verdict. The bar could have been set
+  after the outcome, so the pairing is the finding. The repair is a split: the
+  preregistration lands first and the results PR cites its merged commit.
+- `test-keyboard-count-loop` (Pass 2, informational): a browser-driver test
+  reaches an element by a counted loop of key presses and asserts on whatever
+  has focus, so the count encodes today's DOM order. Locate the target by role,
+  label or test id; a counted loop stays only when the count is the behavior
+  under test.
+
+<a id="porting-a-contributors-work"></a>
+## Porting a contributor's work
+
+A ported branch keeps the contributor's commits as theirs and adds the
+porter's fixes on top, each crediting the original authors.
+`gstack-coauthor-trailers [<range> | --base <ref>] [--message <file>]
+[--exclude <email>]...` lists every distinct author of the range's commits
+(default `origin/<base>..HEAD`) other than the checkout's own committer
+identity, in first-appearance order, as `Co-authored-by: Name <email>` lines;
+`--message <file>` adds the ones the commit message file lacks to its trailer
+block (`git interpret-trailers`, pinned placement, so an existing co-author
+keeps attribution), matched by
+email case-folded, so running it twice changes nothing. The `COAUTHORS: <n> in
+<range>` line on stderr is the receipt; `--json` prints `{ range, authors,
+trailers, appended }`.
+
 ## Where this is enforced
 
-- `scripts/resolvers/review-army.ts`: the floor and `NO FINDINGS` in every specialist and Red Team prompt (rendered into `review/sections/review-army.md` and `ship/sections/review-army.md`).
-- `ship/sections/review-army.md` Step 9: passes, `RANGE_BASE`, classify, defer, render, the cap decisions; `ship/sections/adversarial.md` Step 11: the outside voice reads the same range and scopes queued fixes the same way.
+- `scripts/resolvers/review-army.ts`: the floor and `NO FINDINGS` in every specialist and Red Team prompt (rendered into `review/sections/review-army.md` and `ship/sections/review-army.md`); in `/ship` every specialist and Red Team prompt it renders carries its diff base as a literal sha the parent writes in (`DIFF_BASE=<diff-base>`: the merge base on pass 1, `RANGE_BASE` from pass 2 on), because a reviewer is its own process and never sees the parent's shell variables; the fan-out batches above.
+- `ship/sections/review-army.md` Step 9: passes, `RANGE_BASE`, classify, defer, render, the cap check before any edit, the Step 11 late-defer row, scratch files under `.gstack/tmp/`, the cap decisions; `ship/sections/adversarial.md` Step 11: the outside voice reads the same range and scopes queued fixes the same way.
 - `lib/review-scope.ts`, `bin/gstack-review-scope`: `classify`, `defer`, `render`, `summary`; refusals are `REVIEW_SCOPE_INPUT` and `REVIEW_SCOPE_RANGE` ([troubleshooting.md](troubleshooting.md#review-scope-input)).
 - `lib/ship-policy.ts`: the `review_scope` key and its `ship: review_scope …` consequence line.
+- `review/checklist.md`: `prereg-with-results` under Gate Integrity and `test-keyboard-count-loop` under Pass 2; `bin/gstack-coauthor-trailers` for the contributor-credit trailers of a port.
+- `lib/ship-receipt-prose.ts`, `gstack-ship-receipt read --check-prose`: the body's quoted counters against the receipt (`RECEIPT_PROSE_MISMATCH`, [ship-policy.md](ship-policy.md#ship-receipt)).
 - `lib/ship-receipt.ts`, `lib/headless-artifacts.ts`: the `review_loop` receipt object, its schema and the summary line.

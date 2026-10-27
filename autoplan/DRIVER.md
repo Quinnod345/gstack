@@ -27,11 +27,9 @@ line yourself; gstack never writes the plan.
    per voice. Dispatch the native prompt to a subagent on your model and the outside prompt to
    a subagent on another model family (or `gstack-outside-voice run`). Each writes `result=`.
 2. Submit each voice exactly once (`BOUND:`). Both voices in closes the phase (`PHASE_CLOSED:`).
-3. Repeat `next` until `status=gate_pending` (`GATE: gate_rev=<n>`); render it with
-   `gstack-gate render <dir>/gate.json --all` and relay every page. You never approve the
-   gate for the owner. Offer `rec` (every recommendation, plan changes included) as the default.
-4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or
-   `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an
+3. Repeat `next` until `status=gate_pending` (`GATE: gate_rev=<n>`); render it with `gstack-gate render <dir>/gate.json --all` and relay every page with the two cost lines printed under `GATE:`: `GATE_SPEND:` (spent, worst case, cap, headroom, attempts; host-subagent attempts are priced unknown and counted at their reservation, so quote their real figure from the host's cost view) and `GATE_REC_COST:` (the phases `rec` can reopen and the estimate for them, an upper bound; `gate_cost` in `--json`).
+   You never approve the gate for the owner. Offer `rec` (every recommendation, plan changes included) as the default.
+4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an
    unattended run refuses (`ANSWER_BY_REQUIRED`). `APPLY: <id> <title> -> <change>` lines are
    accepted plan changes (status `amend_pending`): edit the plan, then `revise` (the printed
    `NEXT:` names it), or `revise --settle <id>` when the line says no plan edit is needed. Until
@@ -157,3 +155,5 @@ Spend caps. Each lane runs under the `--spend-cap` the coordinator names; a lane
 Before done. A lane pushes a WIP commit to its branch after each step and gates a pushed SHA. It is done only when `gstack-pregate run --allow-repo-commands` passes; `requires-remote` needs `--stage tests --remote --spend-cap <cap>`. Where `.gstack/pregate.json` has a `sealed` key, it runs `gstack-pregate sealed` before any push or PR creation; a refusal stops the push.
 
 Handoff format. A lane reports in this order, identifiers first: PR URL (or `no PR` with branch and SHA), `GSTACK_RESULT` line, the `gstack: ok|fail <rev>` line, the `PREGATE:` line, gate summary (lanes passed/failed/skipped), behavior changes (or `none`), spend (spent/reserved/unknown), then what it could not verify. Full thread ids (`jam_…`), never short codes, in every cross-thread message. Prose after the identifiers may be truncated; nothing before them may be.
+
+Decision trail. A lane keeps `<run dir>/decisions.tsv` through `gstack-decision-trail <file> <phase> <decision> <why> <evidence> <result>` (one row per fork, unit, revert or blocker; evidence a pointer that resolves) and opens it with `gstack-decision-trail start <file> <run id>` when another run wrote it first. Before done it audits the trail against the transcript, superseding a wrong row with a new one rather than editing it, has a reviewer on another model family read the trail, and ends its report with an `Attention` section (`reviewed by <model>`, then the flags, or `No flags`). The full rule is [docs/unattended.md](../docs/unattended.md#the-decision-trail).
