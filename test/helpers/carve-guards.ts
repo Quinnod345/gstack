@@ -449,7 +449,7 @@ do not launch the downstream skill or open a browser.`,
     // The full-audit E2E asserts actual section loading alongside report/proof behavior.
     behavioral: 'external',
     externalTest: 'test/skill-e2e-cso.test.ts',
-    maxSkeletonBytes: 18_100, // + Oct 10 multi-agent wave PR D2 (sideways review): Phase 12's root-cause-variants sentence becomes the sibling sweep (severity follows the worst sibling), two neighbouring phrases tightened to offset most of it; measured skeleton 18,044 (2026-10-10).
+    maxSkeletonBytes: 18_900, // + Oct 10 multi-agent wave PR D2 (sideways review): Phase 12's root-cause-variants sentence becomes the sibling sweep (severity follows the worst sibling), two neighbouring phrases tightened to offset most of it; measured skeleton 18,044 (2026-10-10). + Oct 26 harness lane F (TRUT 5/6, FOUN 13): the environment-hygiene paragraph (set/unset checks only; no env, printenv, set -x, bare set/export, export $(...) in a fence) and the tooling-error paragraph (bounded retries, then not assessed with the command, exit code and stderr tail; never a quiet partial), both in the always-loaded startup block because they govern every helper call; measured skeleton 18,843 (2026-10-26).
     minUnionBytes: 30_000, // v3 deliberately removes the shared export/startup preamble.
     mustContain: ['OWASP', 'STRIDE', 'daily', 'comprehensive', 'verif'],
     // Existing baseline comparison remains an upper bound; absolute limits above

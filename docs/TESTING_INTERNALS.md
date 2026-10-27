@@ -970,20 +970,47 @@ the CSO private-state checks), AppArmor blocks the unprivileged user
 namespaces Chromium's sandbox needs, and `clang` and `python3-venv` are absent
 (required by the Dia readiness and Python runner tests).
 
-VMs are named `ubirun-<owner>-<epoch>-<hex>`; `<owner>` is `UBI_OWNER` (set it
-to the thread id on a Capy machine), else a stable per-machine id. Every exit
+VMs are named `ubirun-<owner>-<epoch>-<hex>`, plus a `-t<hours>` TTL suffix
+(below); `<owner>` is `UBI_OWNER` (set it to the thread id on a Capy machine;
+lowercase letters and digits, at most 12), else a stable per-machine id. Every exit
 path destroys the client's own VM (`trap` on EXIT, INT, TERM, HUP and QUIT), and
 `down` fails loudly (`FAILED to destroy <location>/<name> (HTTP <code>)`) unless
 the VM is confirmed gone. `list --mine` shows this owner's VMs, `usage` the
 project's, and `records` the VM-id scratch file (`UBI_VM_RECORD`, default
 `~/.capy/work/ubi-runner/vms.tsv`, else `<state root>/vms.tsv`): every VM is
 recorded there before the create call and forgotten only after a confirmed
-destroy, so a killed runner leaves a name to clean up. Nothing sweeps stale VMs
-by default, because the project quota is shared with other agents' runners; set
+destroy, so a killed runner leaves a name to clean up. No age-based sweep runs
+by default, because the project quota is shared with other agents' runners (the
+TTL reaper below destroys only a VM whose own `-t<hours>` TTL has ended); set
 `UBI_GC_HOURS` to a positive number (or run `gc HOURS`; `gc 0` is a no-op) to
 sweep only this owner's VMs older than that. For other commands, use the runner
 directly: `scripts/ubicloud/ubi-runner.sh run --setup <script> -- '<command>'`,
 or its `up` / `ssh` / `sync` / `pull` / `down` steps (`--help` lists them).
+
+The runner is also the `/ubicloud` skill's engine (`bin/gstack-ubi` execs it).
+A generated name ends in `-t<hours>` (`UBI_TTL_HOURS`, default 4; 0 omits it),
+the creator's own statement of how long the VM may live: `reap` destroys every
+VM in the project whose TTL ended more than ten minutes ago, whichever owner
+made it, and every `up` runs it first (`UBI_REAP=0` skips it); names without a
+TTL, such as the ones pregate-remote.sh builds itself, are never reaped. The
+quota preflight adds the size's vCPUs to the project's running VMs and refuses
+before the create request when that exceeds the known ceiling
+(`UBI_QUOTA_VCPUS`, or the maximum the last refusal printed, remembered in the
+state root; `UBI_QUOTA_WAIT=<seconds>` waits for room instead). `run`, `verify`
+and `ssh NAME COMMAND` stream the remote output through a watchdog: a heartbeat
+line every `UBI_HEARTBEAT` seconds (300), and a command silent for
+`UBI_IDLE_TIMEOUT` seconds (1800) or older than `UBI_RUN_TIMEOUT` (0, unlimited)
+is killed with exit 124 and its last 40 lines on stderr, so a hung verify fails
+fast instead of holding the VM until its TTL. `verify` runs a repository's
+committed `.gstack/ubicloud.json` (setup, command, size, location, storage,
+image, env, pass, pull; flags and a trailing `-- COMMAND` override it) and
+refuses without the file, so every lane runs one definition. The file is
+repository content: its setup script and pull destinations must resolve inside
+`--src`, and a name it lists under `pass` is forwarded only when the command
+line grants it (`--pass NAME`, or all of them with `--trust-config`); `--pass`
+never forwards `UBICLOUD_*`. All of this is pinned offline in
+`test/ubicloud-runner.test.ts` against a fake API and a fake `ssh`, including
+a fixture whose fake API creates, so `run` and `verify` execute end to end.
 
 Under 8 cores (`gstack-doctor`'s `cores` row says so), run the full unit and
 E2E tiers on a remote gate: `gstack-config set test_backend ubicloud` records
@@ -1000,9 +1027,10 @@ machine swap, in this order:
    on the base and on the candidate from the same VM size and location, never
    one side local and the other remote.
 4. Profiling very large imports (a whole-repo ingest, the full free suite under
-   a profiler) is warned about before it starts: it holds the VM past
-   `UBI_GC_HOURS` and the sentinel arrives hours later; name the expected
-   duration in the thread before launching.
+   a profiler) is warned about before it starts: it holds the VM for hours, and
+   any other lane's `up` reaps it once its TTL (`UBI_TTL_HOURS`, default 4)
+   plus ten minutes has passed, so set `UBI_TTL_HOURS` above the expected
+   duration and name that duration in the thread before launching.
 
 ## Cloud sandboxes (Vercel / Conductor cloud workspaces)
 
