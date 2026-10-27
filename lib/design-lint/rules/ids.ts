@@ -21,7 +21,7 @@ export type Tier = 'blocks' | 'ask' | 'polish';
 
 export interface RuleMeta {
   tier: Tier;
-  /** The sloplint gate (or gstack-design-craft id) this rule was ported from. */
+  /** The sloplint gate this rule was ported from, or `craft` for the copy tier (rules/copy.ts). */
   gate: string;
   /** One line naming the tell. */
   title: string;
@@ -151,13 +151,14 @@ export const RULES: Record<string, RuleMeta> = {
   'justified-text': { tier: 'polish', gate: 'F22', title: 'justified text without hyphens: auto', fix: 'hyphens: auto, or left-aligned' },
   'missing-lang': { tier: 'polish', gate: 'F23', title: 'a document without lang', fix: 'lang on <html>' },
   'hairline-under-shadow': { tier: 'polish', gate: 'F24', title: 'a hairline border under a wide soft shadow on one surface', fix: 'the shadow or the border, not both' },
-  // ── Copy tier (gstack-design-craft, Elaya-derived; same ids) ──
-  'placeholder-name': { tier: 'blocks', gate: 'craft', title: 'a placeholder name (John Doe)', fix: 'use a supplied name, or one that fits the product in sample data' },
-  'placeholder-brand': { tier: 'blocks', gate: 'craft', title: 'a placeholder brand (Acme, Nexus)', fix: 'use a supplied customer, or a fitting name in sample data' },
-  'lorem': { tier: 'blocks', gate: 'craft', title: 'lorem ipsum placeholder text', fix: 'write real copy' },
+  // ── Copy tier (rules/copy.ts, Elaya-derived). The content-realism ids sit at ask: a real customer named
+  // Nexus or a supplied 50% figure is answered by a waiver that names the page (Garry, 2026-10-26, option a). ──
+  'placeholder-name': { tier: 'ask', gate: 'craft', title: 'a placeholder name (John Doe)', fix: 'use a supplied name, or one that fits the product in sample data' },
+  'placeholder-brand': { tier: 'ask', gate: 'craft', title: 'a placeholder brand (Acme, Nexus)', fix: 'use a supplied customer, or a fitting name in sample data' },
+  'lorem': { tier: 'ask', gate: 'craft', title: 'lorem ipsum placeholder text', fix: 'write real copy' },
   'marketing-buzzword': { tier: 'ask', gate: 'craft', title: 'a marketing buzzword', fix: 'say the specific thing' },
-  'round-number': { tier: 'blocks', gate: 'craft', title: 'a round invented number', fix: 'use the supplied figure, or drop the claim' },
-  'needs-proof': { tier: 'blocks', gate: 'craft', title: 'a [Needs proof] marker left in the page', fix: 'supply the proof or remove the claim before publishing' },
+  'round-number': { tier: 'ask', gate: 'craft', title: 'a round invented number', fix: 'use the supplied figure, or drop the claim' },
+  'needs-proof': { tier: 'ask', gate: 'craft', title: 'a [Needs proof] marker left in the page', fix: 'supply the proof or remove the claim before publishing' },
   'oops': { tier: 'ask', gate: 'craft', title: '"oops" as an error message', fix: 'say what happened and what to do' },
   'scroll-listener': { tier: 'ask', gate: 'craft', title: 'a scroll event listener', fix: 'use IntersectionObserver; read scroll inside requestAnimationFrame for a scroll-linked effect' },
   'dead-link': { tier: 'ask', gate: 'craft', title: 'a dead link (href="#")', fix: 'link it, or render the control disabled' },
@@ -168,6 +169,7 @@ export const RULES: Record<string, RuleMeta> = {
   'missing-favicon': { tier: 'polish', gate: 'craft', title: 'a document without a favicon', fix: 'add a favicon <link rel="icon">', pageOnly: true },
   'missing-skip-link': { tier: 'ask', gate: 'craft', title: 'no skip link reaching <main>', fix: 'add a "Skip to content" link first in <body> whose #id exists on <main>', pageOnly: true },
   'missing-aria-current': { tier: 'ask', gate: 'craft', title: 'route navigation without aria-current', fix: 'mark the current nav link aria-current="page"', pageOnly: true },
+  'empty-mount-node': { tier: 'ask', gate: 'craft', title: 'an empty mount node: the body has no text and a script renders it, so the lint read none of its content', fix: 'lint the rendered page: save document.documentElement.outerHTML to a file and lint that', pageOnly: true },
   // ── The lint's own bookkeeping ──
   'waiver': { tier: 'ask', gate: 'waiver', title: 'a waiver the lint refused', fix: 'fix the finding, or waive it with the rule id and a reason about this page' },
   'house-style': { tier: 'polish', gate: 'waiver', title: 'more than three rules waived on one page', fix: 'lock the choices into DESIGN.md so later pages inherit them instead of re-arguing them' },

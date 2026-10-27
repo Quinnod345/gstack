@@ -1316,8 +1316,8 @@ describeIfSelected('Design HTML slop gate E2E', ['design-html-slop-gate'], () =>
   testConcurrentIfSelected('design-html-slop-gate', async () => {
     const result = await runSkillTest({
       prompt: `Read design-html-gate.md: the /design-html detector probe block and its "Slop Gate (bounded, never a loop)" step.
-finalized.html in this directory is the finished page. Run the probe (--host claude), then the slop gate on finalized.html exactly as written: one surgical fix pass over the non-advisory findings, one rescan. Then the craft check line that follows it, the same way, then stop.
-Write ${workDir}/gate-output.md listing what you fixed and every remaining finding as accepted-with-reason, each tagged with its [rule-id] or craft id. Do not take screenshots, do not run npx, do not run either check more than twice.`,
+finalized.html in this directory is the finished page. Run the probe (--host claude), then the slop gate on finalized.html exactly as written: one surgical fix pass over the non-advisory findings, one rescan. Then the design lint line that follows it, the same way, then stop.
+Write ${workDir}/gate-output.md listing what you fixed and every remaining finding as accepted-with-reason, each tagged with its [rule-id] or lint rule id. Do not take screenshots, do not run npx, do not run either check more than twice.`,
       workingDirectory: workDir,
       maxTurns: 20,
       timeout: CAPTURE_MS,
@@ -1332,9 +1332,9 @@ Write ${workDir}/gate-output.md listing what you fixed and every remaining findi
     const scans = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-detect\.ts scan /.test(String(c.input?.command ?? '')));
     expect(scans.length).toBeGreaterThanOrEqual(1);
     expect(scans.length).toBeLessThanOrEqual(2);
-    const craftRuns = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-craft['"]?\s+[^\s;|&]*\.html\b/.test(String(c.input?.command ?? '')));
-    expect(craftRuns.length).toBeGreaterThanOrEqual(1);
-    expect(craftRuns.length).toBeLessThanOrEqual(2);
+    const lintRuns = result.toolCalls.filter(c => c.tool === 'Bash' && /gstack-design-lint['"]?\s+[^\s;|&]*\.html\b/.test(String(c.input?.command ?? '')));
+    expect(lintRuns.length).toBeGreaterThanOrEqual(1);
+    expect(lintRuns.length).toBeLessThanOrEqual(2);
     const outPath = path.join(workDir, 'gate-output.md');
     expect(fs.existsSync(outPath)).toBe(true);
     const out = fs.readFileSync(outPath, 'utf-8').toLowerCase();

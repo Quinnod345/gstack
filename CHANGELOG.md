@@ -30,6 +30,7 @@
 - After main's v1.91.265.0 merge (#3430 /design-motion, #3493 ETHOS principles): `context-budget.json` keeps main's new `design-motion` row at main's value (10,409), raises `eval-plan` by the growth #3493 measured (3,996 → 4,442 tokens; ceiling 4,396 → 4,842, main's own 9,811), and lowers `gstack` back to main's 5,326 (measured 4,863) and `alwaysOnTotal` to 7,542 (measured 7,542).
 - After main's v1.91.270.0 merge (#3494, #3496, #3487): ship's parity cap goes from main's 1.7400 to 1.7432 (327,203 / 187,706), the hoist's raise plus #3487's with no trim. `context-budget.json` is recaptured whole with `bun test/helpers/capture-context-budget.ts`, which replaces the hand-kept rows in the bullet above. Every row that rises matches main's own recapture at v1.91.270.0 (`alwaysOnTotal` 7,769, `eval-plan` 4,887, `gstack` 5,350), and `design-motion` drops to 4,724 now that it loads the shared file.
 - After main's v1.91.273.0 merge (#3509, #3500, #3501): every cap the hoist touches is re-measured on the merged tree. Parity caps: ship 1.7500 → 1.7524 (328,918 / 187,706) and plan-eng-review 1.2400 → 1.3532 (168,601 / 124,597), main's raises plus the hoist's with no trim. Skeleton caps for skills main carved or raised drop to the hoisted skeleton plus main's headroom: investigate 52,000 → 30,210, context-restore 46,300 → 24,514, design-motion 39,900 → 18,112. Every other cap holds at its measurement. The size allowlist keeps the same 63 pins re-measured (11 plan-eng-review pins rise by #3500's 2,896 characters), and `context-budget.json` is recaptured: the non-hoisted rows that rise (`benchmark` 8,043, `capy/skill/gstack` 4,120) equal main's own recapture, and the hoisted `context-restore` (6,287) and `investigate` (7,795) sit below it.
+- After main's v1.91.274.0 merge (#3507): design-review's parity cap goes from main's 1.3681 to 1.3739 (145,410 / 105,842, the union with the shared file), and its skeleton cap drops from 137,735 to the hoisted 115,947 with main's zero headroom kept. design-html's skeleton cap drops from 56,200 to 34,410 (hoisted 34,044 plus main's 366 bytes of headroom), and its `context-budget.json` row from 8,926 to 8,896. Every other cap and pin holds at its measurement.
 
 **The Completeness Principle now asks for complete coverage with minimal code.** Every tier-2+ skill's preamble said "the complete thing is the goal", and ETHOS.md told models to "always prefer A" because "the 70-line delta costs seconds". Models read that as permission to write more code, which is the "50-line job arriving as 400" complaint (GSTA-93). Coverage of the requirement is still non-negotiable; code beyond it is no longer a virtue.
 
@@ -48,6 +49,27 @@
 
 ### Gate integrity
 - No threshold, budget, timeout, trial count, case kind or assertion weakened. The section heading "Completeness Principle — Boil the Ocean" is unchanged.
+
+## [1.91.274.0] - 2026-10-27
+
+**/design-html and /design-review now run the design lint, and its copy tier reports every content and ship-floor tell at its line (hallmark phase 2, GSTA-92; Garry 2026-10-26 "Do it", option a).** The two design skills still called `gstack-design-craft`, which counted tells without positions and kept accepted exceptions in finalized.json. The lint already carried the same ids, so the skills now call it, the copy tier has its own patterns with line numbers, and a page answers a tell with a waiver comment beside it instead of a side record.
+
+### Changed
+- **/design-html** Step 4 runs `gstack-design-lint <page> --render` after the Slop Gate and reads its exit code: 2 fixes every `blocks` line, 1 fixes or waives each `ask` line, 0 lists `polish` as notes. A missing `LINT_SUMMARY`, a `render` line or `render=skipped` is said plainly and the static lines stand.
+- **Waivers live in the page.** A real customer named Nexus or a supplied 50% figure gets `<!-- gstack-lint-disable <rule-id>: <reason about this page, 24+ chars> -->`, written only for what the user supplied or confirmed. This supersedes #3422's persisted craft exceptions: `--accepted` and finalized.json's `craft_exceptions` are gone, and the hand-off lists every waiver.
+- **Copy-tier tiers**: `placeholder-name`, `placeholder-brand`, `lorem`, `round-number` and `needs-proof` move from blocks to ask, so the waiver above can answer them. /design-review still files a waived `needs-proof` or `lorem`, which a live page cannot carry.
+- **/design-review's craft audit** runs the lint on each saved page: `blocks` and `ask` lines are category 9 findings at their line, `waived` lines are listed with their reason, `empty-mount-node` sends the audit to the saved DOM. A saved live page has lost its linked CSS, so the audit files only its copy-tier (`craft`) lines there and judges the CSS rules by eye.
+- **`lib/design-lint/rules/copy.ts`** holds the copy tier's own patterns (moved from `lib/design-craft.ts`), reporting each tell at its line with what matched. It reads visible text, script bodies and inline handlers (single-quoted included) and the parsed tags, so a hydration payload, commented-out markup or a `<title>` string inside a script no longer counts.
+
+### Added
+- **`empty-mount-node`** (ask, page only): a body with no text, a `<noscript>` notice aside, that loads a script is a client-rendered shell; the lint says it read none of its content instead of passing it.
+
+### Removed
+- `bin/gstack-design-craft`, `lib/design-craft.ts` and `test/design-craft.test.ts`. Their checks are in the lint's copy tier and its tests; the archetype handoff tests moved to `test/design-craft-resolvers.test.ts`.
+
+### Tests
+- `test/design-lint.test.ts`: the copy tier at its lines with the catalog's fixes, the clean page with inlined Pretext, the skip link and `aria-current`, visible-text reading, the four checker limits #3433 documented, and the shell check (noscript, image-only page, component scope). `test/design-lint-recorded.test.ts` reads the recorded page's buzzwords at lines 32 and 37.
+- The `design-html-slop-gate` paid case looks for a `gstack-design-lint` call, and its touchfiles select on `lib/design-lint/**` and `bin/gstack-design-lint`.
 
 ## [1.91.273.0] - 2026-10-27
 
