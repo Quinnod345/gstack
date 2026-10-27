@@ -1051,6 +1051,24 @@ describe('verify, freeze, repair and clear', () => {
     expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [{ pr: '2', head: h2 }] });
   }, 300_000);
 
+  // Value: protects=the freeze record is built from the same GitHub read that decided to freeze, so a slot that read MERGED stays merged even when GitHub stops answering a moment later; fails_when=freezeQueue reads GitHub again and files anything but an exact MERGED under unmerged (the misfile that listed train 24's merged #3453 as unmerged, GSTA-129 defect 1); why_new=the test above holds GitHub's answer fixed across the verify; seam=the fixture's gh pr view vanishing after one answer; no_claim=the backstop's outcome
+  test("a slot that read MERGED when the verify decided to freeze is recorded as merged even when GitHub stops answering before the record is written", () => {
+    const fx = make();
+    const { h2, nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    const coord = coordinatorClone(fx.repo);
+    const smuggled = fx.repo.git('show', `${t.prefixes[0].commit}:CHANGELOG.md`).replace('# Changelog\n', '# Changelog\n\n## [1.2.4.0] - 2026-10-18\n\n- #1 change\n- added after the gate\n') + '\n';
+    publishMain(fx, t.prefixes[1].commit, '1.2.4.0', { file: 'CHANGELOG.md', text: smuggled });
+    fx.write(d => { (d.prs['1'] as any).state = 'MERGED'; d.vanish = { '1': 1 }; });
+    const frozen = queue(fx, ['verify', '--pr', '1', '--train', nonce], {}, coord);
+    expect(frozen.status).toBe(EXIT.fail);
+    expect(frozen.err).toContain('"- added after the gate"); the queue is frozen;');
+    expect(fx.read().vanish).toEqual({ '1': 0 });
+    expect(line(frozen.out, 'freeze:')).toMatch(/; #1 merged on GitHub without a verified tree; unmerged #2; repair none admitted$/);
+    expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [{ pr: '2', head: h2 }] });
+  }, 300_000);
+
   // Value: protects=a post-merge CHANGELOG difference is excused only when main's parent is T<i-1> modulo stamps, so a foreign commit between the verified head and the squash freezes; fails_when=published() skips or inverts the parent check; why_new=the two tests above reach the CHANGELOG rule only with a parent that is T1 modulo stamps; seam=none; no_claim=a parent differing from T1 in the CHANGELOG alone
   test("a post-merge CHANGELOG difference is not excused when main's parent is not the verified prefix modulo stamps: the queue freezes naming the parent", () => {
     const fx = make();

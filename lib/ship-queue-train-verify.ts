@@ -112,17 +112,23 @@ function published(env: TrainEnv, t: TrainRecord, i: number, main: string): { sa
 /**
  * Freeze the queue: the record goes to local state and the notes ref before
  * anything remote, then the backstop gate is dispatched on main's sha.
+ * `states` is the one GitHub read of every unverified slot, made by the
+ * caller: a slot that read MERGED is merged, verified tree or not, and a slot
+ * that could not be read is left out of `unmerged` and named in the reason,
+ * so the rebuild after the repair never seats a PR that may already be in.
  */
-async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string): Promise<FreezeRecord> {
+async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string, states: ReadonlyMap<string, string>): Promise<FreezeRecord> {
   const now = nowIso();
-  // A slot GitHub reports MERGED is merged, verified or not: the freeze must not list it as unmerged, or the rebuild after the repair would seat it again.
   const unverified = t.slots.filter(s => !t.merged.some(m => m.pr === s.pr));
-  const landed = unverified.filter(s => prState(env.ctx, s.pr) === 'MERGED').map(s => s.pr);
+  const landed = unverified.filter(s => states.get(s.pr) === 'MERGED').map(s => s.pr);
+  const unreadable = unverified.filter(s => states.get(s.pr) === 'unreadable').map(s => s.pr);
+  const prs = (list: string[]) => list.map(p => '#' + p).join(', ');
   const f: FreezeRecord = {
     schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: [...t.merged.map(m => m.pr), ...landed],
-    unmerged: unverified.filter(s => !landed.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
+    unmerged: unverified.filter(s => !landed.includes(s.pr) && !unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
     main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out },
-    reason: landed.length ? `${reason}; ${landed.map(p => '#' + p).join(', ')} merged on GitHub without a verified tree` : reason, backstop: null, repair: null,
+    reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, kept out of unmerged until read` : ''].filter(Boolean).join('; '),
+    backstop: null, repair: null,
     created_at: now, cleared_at: null, cleared_by: null, updated_at: now,
   };
   persist(env.ctx.repoRoot, [f], { remote: env.remote });
@@ -148,12 +154,13 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
  */
 async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[]): Promise<TrainOut> {
   const run = trainFile(t.nonce);
-  const states = t.merged.length ? [] : t.slots.map(s => ({ pr: s.pr, state: prState(env.ctx, s.pr) }));
-  const landed = t.merged.length > 0 || states.some(s => s.state === 'MERGED');
-  const unreadable = landed ? [] : states.filter(s => s.state === 'unreadable').map(s => `#${s.pr}`);
+  // One GitHub read per unverified slot decides both the freeze and its record.
+  const states = new Map(t.slots.filter(s => !t.merged.some(m => m.pr === s.pr)).map(s => [s.pr, prState(env.ctx, s.pr)] as const));
+  const landed = t.merged.length > 0 || [...states.values()].includes('MERGED');
+  const unreadable = landed ? [] : [...states].filter(([, state]) => state === 'unreadable').map(([pr]) => `#${pr}`);
   if (unreadable.length) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `${message}; whether ${unreadable.join(', ')} merged on GitHub could not be read, so whether the queue must freeze is unknown` }, lines, `${Q} verify --pr ${t.slots[0]!.pr} --train ${t.nonce} (once gh pr view answers)`, run);
   if (!landed) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
-  const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha);
+  const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha, states);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
 }
 

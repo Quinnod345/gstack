@@ -620,7 +620,11 @@ backstop run. A slot GitHub reports MERGED counts as merged in that record,
 verified tree or not, so the rebuild after the repair never seats it again
 (the reason says "merged on GitHub without a verified tree"); a first slot
 whose squash GitHub reports MERGED but whose tree fails the post-merge check
-freezes the same way, since main already holds the unverified squash. When
+freezes the same way, since main already holds the unverified squash. The
+record comes from the one GitHub read that decided to freeze, never a second
+one: a slot that read MERGED stays merged even when GitHub stops answering
+before the record is written, and a slot unreadable beside a merged one is
+kept out of `unmerged` and named in the reason until it can be read. When
 whether a slot merged on GitHub cannot be read, verify refuses
 (`QUEUE_PROOF_MISSING`, "whether #<n> merged on GitHub could not be read")
 and asks to be rerun once `gh pr view` answers; an unreadable state is never

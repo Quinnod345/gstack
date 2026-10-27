@@ -4349,7 +4349,12 @@ prefix no gate covered on its own. The `QUEUE_TRAIN_FROZEN:` line lists the
 merged PRs (a slot GitHub reports MERGED counts as merged, verified tree or
 not, and the reason then says `merged on GitHub without a verified tree`, so
 the repair's rebuild never seats it again), main's tree and the backstop run
-dispatched on main's SHA. The
+dispatched on main's SHA. The record is built from the one GitHub read that
+decided to freeze: a slot that read MERGED stays merged even when `gh pr view`
+stops answering a moment later, and a slot whose state could not be read when
+another slot had merged is kept out of `unmerged` and named in the reason
+(`#<n> unreadable on GitHub, kept out of unmerged until read`), so the
+rebuild after the repair never seats a PR that may already be in. The
 freeze lives in local state and on `refs/notes/gstack-trains`. Ordinary
 trains and other trains' merges are refused until a repair lands.
 
