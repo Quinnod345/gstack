@@ -11,7 +11,8 @@
 - **/review Scope Check**: emitted once, in Step 3 after the full diff read, on the first pass only; the plan-completion audit's with-plan and no-plan paths, the section's STOP trigger and the Step 1.5 notes all name that point, so `Diff read: full` exists when the check is written. The plan-review and doc-review run headers admit only the `CODEX_MODE` values their preflight prints, and the small-diff rule and the specialists record agree on State Machines.
 
 ### Changed
-- Review, ship and plan-eng-review prose tightened to hold their parity caps; the generated-size pins that shrank were lowered, none raised.
+- Review, ship and plan-eng-review prose tightened to hold their parity caps; the generated-size pins that shrank were lowered.
+- **Ship parity cap** (`test/helpers/carve-guards.ts`): `maxSizeRatio` 1.7524 → 1.7525. The review-army section's small-diff clause now names State Machines as item 9's call and a State Machines-only specialist list (the ground text of the Scope Check repair above), +5 union bytes; main at v1.91.280.0 already measured 328,932 / 187,706 = 1.7524, four bytes under the cap after #3515 and #3517, and the merged tree measures 328,937 / 187,706 = 1.7524, so the pin moves one in the last place. No other cap or pin raised.
 
 ### Tests
 - Three free fixtures (the two docsync captures and the design-floor menu) registered in `FREE_FIXTURES`; probe sets for the hook-actor arm, the two-attempt dispatch contract, the branch-listing grammar and the Scope Check owners; the pass-1 and pass-2 review fixes each carry a probe that fails on the previous helper.
