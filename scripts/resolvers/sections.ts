@@ -25,9 +25,10 @@ const ROOT = path.resolve(import.meta.dir, '..', '..');
 
 export const QA_ASSET_BLOCKER = 'If missing or unreadable, report a QA setup blocker and its affected probes as blocked; continue other safe probes (independent functional/static checks). Missing/unreadable assets block required QA.';
 
-/** Skills carved on every host: QA (portable assets) and those whose external
- * render would exceed SKILL_BYTE_CEILING inlined (C4, #2777). */
-const CARVED_ON_EVERY_HOST = ['qa', 'qa-only', 'ship', 'plan-ceo-review', 'office-hours'];
+/** Skills carved on every host: QA (portable assets), those whose external
+ * render would exceed SKILL_BYTE_CEILING inlined (C4, #2777), and design-review,
+ * whose on-demand craft audit stays out of every skeleton (GSTA-92). */
+const CARVED_ON_EVERY_HOST = ['qa', 'qa-only', 'ship', 'plan-ceo-review', 'office-hours', 'design-review'];
 
 /** Hosts read at most this many UTF-8 bytes of one SKILL.md (~40K tokens). */
 export const SKILL_BYTE_CEILING = 160_000;

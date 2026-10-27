@@ -31,13 +31,22 @@ export interface Rule {
   plan?: { planned: number } | { manifest: unknown } | null;
   /** Marks every artifact of runs dispatched under this rule expired in the artifacts listing. */
   expired?: boolean;
+  /** A screen run's gate binding (gate-binding-a1/gate-binding.json, scripts/gate-reuse.ts) and its report's collector-outcomes.json (report-verdict-a1). */
+  binding?: { verdict: 'GREEN' | 'RED'; reconcile_exit?: number; flaky?: string[] };
+  outcomes?: { red?: string[]; flakyLines?: string[] };
+  /** The run confirmed a verdict reuse (R2a/R2): paid-plan carries a valid gate-reuse.json naming this run and no binding is uploaded. */
+  reuse?: { run: number; flaky?: string[] };
   check?: string | null;
+  /** The check-run name a run dispatched under this rule attaches to its head (a push or workflow_dispatch run's job), with the run's status and conclusion. */
+  ci?: string;
   bisect?: { prefixes: string[]; patterns: Record<string, string>; costUsd?: number };
 }
 export interface ShimData {
   repo: string; origin: string; nextId: number; prs: Record<string, unknown>; runs: Array<Record<string, unknown>>;
   artifacts: Record<string, Record<string, unknown>>; checks: Record<string, Array<{ name: string; status: string; conclusion: string | null }>>;
   ci: Record<string, unknown[]>; rules: Record<string, Rule>; artifact: string; log: Array<Record<string, unknown>>;
+  /** Commit statuses (the legacy status API) at a sha, beside the check runs in `ci`. */
+  statuses?: Record<string, Array<{ state: string; context: string }>>;
 }
 
 export interface TrainFixture { repo: FixtureRepo; state: string; dataFile: string; env: Record<string, string>; read: () => ShimData; write: (fn: (d: ShimData) => void) => void }
@@ -163,6 +172,13 @@ function shimSource(): string {
     "  if (rule.record && !inputs.prefix_shas) d.artifacts[id][d.artifact] = { schema: 1, kind: 'train-gate', nonce: rule.record.nonce || inputs.nonce, head_sha: head, tree: rev(head + '^{tree}'),",
     "    verdict: rule.record.verdict || 'GREEN', census: rule.record.census, panels: rule.record.panels };",
     "  if (rule.check && !inputs.prefix_shas) (d.checks[head] = d.checks[head] || []).push({ name: 'gstack/full-gate', status: 'completed', conclusion: rule.check });",
+    "  if (rule.ci) (d.ci[head] = d.ci[head] || []).push({ name: rule.ci, status: run.status, conclusion: run.conclusion, id: id, completed_at: '2026-10-26T00:00:00Z' });",
+    "  if (rule.binding) d.artifacts[id]['gate-binding-a1'] = { schema: 1, repository: d.repo, pr: Number(inputs.screen_pr) || 0, run_id: id, run_attempt: 1, head_sha: rev(head + '^2') || head, base_sha: rev(head + '^1') || head,",
+    "    profile: 'pr', reconcile_exit: rule.binding.reconcile_exit === undefined ? (rule.binding.verdict === 'GREEN' ? 0 : 1) : rule.binding.reconcile_exit, verdict: rule.binding.verdict, manual_accepted: 0, selection_sha256: 'a'.repeat(64),",
+    "    flaky_cases: rule.binding.flaky || [], purpose: 'screen', tested_sha: head, screen_policy: inputs.screen_policy || 'narrow' };",
+    "  if (rule.reuse && d.artifacts[id]['paid-plan']) d.artifacts[id]['paid-plan'].__reuse = { schema: 1, kind: 'main-moved', pr: Number(inputs.screen_pr) || 0, reused_run_id: rule.reuse.run, reused_run_attempt: 1, gated_head: 'b'.repeat(40), current_head: 'c'.repeat(40),",
+    "    gated_base: 'd'.repeat(40), base_sha: 'e'.repeat(40), selection_sha256: 'a'.repeat(64), why: 'same own diff on a moved main', gated_merge_base: 'f'.repeat(40), merge_base: '1'.repeat(40), own_diff_sha256: 'b'.repeat(64), reused_screen_policy: 'narrow', reused_flaky: rule.reuse.flaky || [] };",
+    "  if (rule.outcomes) d.artifacts[id]['report-verdict-a1'] = { version: 2, panels: (rule.outcomes.red || []).map(c => ({ case: c, kind: 'judge', status: 'FAIL', failsLane: true, redClass: 'VERDICT' })), flakyLines: rule.outcomes.flakyLines || [] };",
     "  if (rule.bisect && inputs.prefix_shas) for (const sha of inputs.prefix_shas.split(',')) {",
     "    const at = rule.bisect.prefixes.indexOf(sha);",
     "    d.artifacts[id][d.artifact + '-bisect-' + sha.slice(0, 12)] = { schema: 1, kind: 'train-bisect-prefix', nonce: inputs.nonce, prefix_sha: sha, checked_out_sha: sha,",
@@ -178,8 +194,9 @@ function shimSource(): string {
     "if (a[0] === 'run' && a[1] === 'view') { const r = d.runs.find(x => String(x.databaseId) === a[2]); if (!r) fail('run not found'); out(r); }",
     "if (a[0] === 'run' && a[1] === 'download') {",
     "  const art = (d.artifacts[a[2]] || {})[opt('-n')]; if (!art) fail('no artifact matches');",
-    "  fs.mkdirSync(opt('-D'), { recursive: true }); fs.writeFileSync(path.join(opt('-D'), opt('-n') === 'paid-plan' ? 'manifest.json' : 'record.json'), JSON.stringify(art));",
-    "  if (opt('-n') === 'paid-plan') fs.writeFileSync(path.join(opt('-D'), 'gate-reuse.json'), '{\"reuse\":\"confirmed\"}'); save(); process.exit(0);",
+    "  const fileFor = n => n === 'paid-plan' ? 'manifest.json' : n.startsWith('gate-binding-') ? 'gate-binding.json' : n.startsWith('report-verdict-') ? 'paid-report/collector-outcomes.json' : 'record.json';",
+    "  fs.mkdirSync(path.dirname(path.join(opt('-D'), fileFor(opt('-n')))), { recursive: true }); fs.writeFileSync(path.join(opt('-D'), fileFor(opt('-n'))), JSON.stringify(art));",
+    "  if (opt('-n') === 'paid-plan') fs.writeFileSync(path.join(opt('-D'), 'gate-reuse.json'), art.__reuse ? JSON.stringify(art.__reuse) : '{\"reuse\":\"confirmed\"}'); save(); process.exit(0);",
     "}",
     "if (a[0] === 'api') {",
     "  const arts = /actions\\/runs\\/(\\d+)\\/artifacts(?:\\?name=([^&]+))?/.exec(a[1] || '');",
@@ -187,7 +204,7 @@ function shimSource(): string {
     "  const named = /commits\\/([0-9a-f]+)\\/check-runs\\?check_name=([^&]+)/.exec(a[1] || '');",
     "  if (named) { const list = (d.checks[named[1]] || []).filter(c => c.name === decodeURIComponent(named[2])); out({ total_count: list.length, check_runs: list }); }",
     "  const paged = /commits\\/([0-9a-f]+)\\/(check-runs|status)\\?.*page=(\\d+)/.exec(a[1] || '');",
-    "  if (paged) { const list = paged[2] === 'check-runs' ? (d.ci[paged[1]] || []) : []; const key = paged[2] === 'check-runs' ? 'check_runs' : 'statuses';",
+    "  if (paged) { const list = paged[2] === 'check-runs' ? (d.ci[paged[1]] || []) : ((d.statuses || {})[paged[1]] || []); const key = paged[2] === 'check-runs' ? 'check_runs' : 'statuses';",
     "    out(paged[3] === '1' ? { total_count: list.length, state: 'success', [key]: list } : { total_count: list.length, [key]: [] }); }",
     "}",
     "fail('gh shim: unsupported ' + a.join(' '));",

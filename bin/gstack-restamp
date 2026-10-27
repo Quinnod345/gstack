@@ -31,7 +31,7 @@ const HELP = `gstack-restamp — stamp the version, release tool, CHANGELOG and 
   --bump <level>             micro|patch|minor|major (default: policy bump, else micro)
   --queue-mode <mode>        stamp-at-merge | claim-at-open (default: policy queue_mode, else claim-at-open)
   --pr <n>                   this PR, for --expect-order and the gate-ahead record
-  --was <X>                  the version the branch's docs mention today (default: the branch's own stamp, else base + bump)
+  --was <X>                  rewrite X on every line of every stamp file, the base's own lines included, and re-head the CHANGELOG section [X] (default: the branch's own stamp everywhere plus the stale mentions on lines the branch added)
   --expect-base <sha>        refuse with QUEUE_STALE when origin/<base> moved
   --expect-order <pr,...>    refuse with QUEUE_STALE when a predecessor is unmerged or a successor merged
   --policy-from base|head    base (default, reviewed) or head (unreviewed; needs --allow-repo-commands)

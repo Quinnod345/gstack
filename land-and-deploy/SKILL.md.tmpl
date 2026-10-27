@@ -177,15 +177,16 @@ readiness is not established.
 
 ## Step 3: Wait for CI (if pending)
 
-Poll in 4-minute rounds (300 s shell timeout), 15 minutes max; record the wait:
+One watcher call, never your own poll loop; a line per real event, else
+silence:
 
 ```bash
-~/.claude/skills/gstack/bin/gstack-ci-gate --repo "$REPO" --pr "$PR_NUMBER" --expect-head "$PR_HEAD" --wait 240
+~/.claude/skills/gstack/bin/gstack-pr-wait "$PR_NUMBER" --repo "$REPO" --until green
 ```
 
-Other verdicts follow Step 2. PENDING at 15 minutes: list the still-pending checks;
-ask A) wait 15 more minutes, B) exclude named `required=n` checks (Step 3.5
-approves each), or C) stop.
+Exit 0: green; rerun Step 2's gate (a moved head is a new push: restart at
+Step 1), then Step 3.4. Exit 1 (`PR_WAIT_BLOCKED`): **STOP**, show its lines;
+only a red `required=n` check can pass Step 3.5. Exit 2 (`PR_WAIT_REFUSED`): show it.
 
 ---
 
@@ -513,7 +514,7 @@ Recheck read-only evidence; never redo a merge/deploy because a section was miss
 
 - Never force-push, bypass CI, replay a confirmed merge, or hide missing evidence.
 - Auto-detect facts; ask when unknown or when an explicit approval gate applies.
-- Poll at each step's stated interval and deadline (4-minute CI rounds in Step 3; 30 seconds for merge readback and deploy status), with its progress messages.
+- Step 3 is one `gstack-pr-wait` call; elsewhere poll at the stated interval (30 s for merge readback and deploy) with progress lines.
 - After merge failures, offer approved rollback when appropriate; never revert a rollback automatically.
 - Verify once; `/canary` provides extended monitoring. Rechecks require the user's choice.
 - Use `--delete-branch`; reconcile failed cleanup non-destructively with confirmation.

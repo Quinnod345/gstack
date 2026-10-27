@@ -2087,6 +2087,29 @@ override is never cached.
 `gstack-gate-diff` records a candidate ending in a tree id instead of
 `+nowtree`.
 
+<a id="gate-error-no-base"></a>
+### `GATE_ERROR=no_base`
+
+**Meaning.** `gstack-gate-diff` could not resolve the base it diffs against
+(`GATE_ERROR=no_base ref=<ref> fix=<git command>` is its only stdout line,
+exit 2). The ref is not a commit in this checkout: a shallow clone (CI's
+default `fetch-depth: 1`), a remote branch never fetched
+(`origin/main` with no `refs/remotes/origin/main`), or a `--commit` whose
+first parent is missing from a shallow history. The tool never guesses a
+base, because an empty diff against a wrong or absent base would read as "no
+gate edits" and pass review. `gstack-diff-scope` prints `SCOPE_ERROR=no_base`
+(all flags false, exit 2) for the same cause.
+
+**Fix.** Run the command the line prints. It is built for this checkout:
+`git fetch origin +<branch>:refs/remotes/origin/<branch>` for an unfetched
+branch, `git fetch --unshallow origin <refspec>` or
+`git fetch --deepen=50 origin` when the clone is shallow. In a workflow, check
+out with `fetch-depth: 0` (or fetch the base explicitly) before the step that
+runs `gstack-gate-diff` or `gstack-diff-scope`.
+
+**Expected result.** `gstack-gate-diff <base>` prints `GATE_SUMMARY:` and
+`gstack-diff-scope` prints its `SCOPE_*` flags without an error line.
+
 ---
 
 ## Memory and gbrain
@@ -2330,6 +2353,60 @@ release of this repository (or the post ran outside the checkout).
 **Fix.** Write it as `version: 1.2.3.4`, `"version": "..."` or `v1.2.3.4`.
 MEDIUM findings do not block pushes.
 
+<a id="redact-run-id-as-phone"></a>
+### `pii.phone.e164` MEDIUM on a receipt token or a GitHub Actions run id
+
+**Meaning.** An all-digit identifier reads as a phone number: a 12-hex receipt
+sha that happens to be all digits (a `tree`, `head`, `gated_tree` or
+`predecessor` value), or an 11-digit GitHub Actions run id written somewhere
+`gstack-post` cannot tell from a number. `gstack-post` allowlists only the
+exact tokens it finds in these positions:
+
+- a 12-digit value right after `tree`, `gated_tree`, `head` or `predecessor`
+  with `=` or a space (`tree=704992822996`, `tree 704992822996`);
+- an 11-digit id inside an `/actions/runs/<id>` URL or as that link's text;
+- an 11-digit id right after a run word on the same line, with an optional
+  `:`, `#` or `=` between: `run`, `runs`, `screen`, `screens`, `gate`,
+  `gates`, `backstop`, `bisect`, `rerun`, `dispatched`, `dispatch`,
+  `failed`, `passed` (`failed 40269992077 | rerun passed 40287239206`,
+  `gate 40323989742`, `run #19368712345`); a generic word such as `id`,
+  `job`, `attempt` or `workflow` exempts nothing;
+- every 11-digit id chained after an allowlisted one through `, `, ` and `,
+  ` & `, ` or ` or ` / `, optionally with a `(#1234)` between
+  (`screen 40269992077 (#3434) and 40275443393 (#3453)`).
+
+A bare 11-digit number with none of that context, a 10-digit national number
+and an E.164 `+14155551234` still report, so the finding means the id stands
+without a run word (`the id is 40269992077`, `40269992077 failed`) or follows
+a word that is not one (`see 40323989742`).
+
+**Fix.** Write the id next to a run word (`run 40269992077`) or as an
+`/actions/runs/` link. For anything else, rerun with `--confirm <token>`
+using the `TOKEN:` line the refusal printed; MEDIUM findings do not block
+pushes.
+
+<a id="gstack-post-pr-body-merge"></a>
+### `gstack-post pr-body` kept sections the body file did not contain
+
+**Meaning.** `pr-body` merges the file into the PR's current body by `## `
+section instead of overwriting it: a section in the file replaces the
+same-titled section (title compared case-insensitively), the
+````gstack-ship-receipt```` block is a section of its own so a receipt
+rewrite replaces only the receipt, sections the file does not rewrite stay in
+place, new sections are appended after them, and a current body with no
+`## ` headings is kept as the leading text. One stderr line names what was
+replaced, kept and added (`gstack-post: pr-body merged by section: replaced
+What changed; kept ship receipt, Why, Approvals; added Tests`). A body file
+holding only its first section therefore no longer wipes the rest of the PR.
+The redaction scan runs on the merged bytes, so a MEDIUM or HIGH finding can
+come from a kept section; the `RULE:` line's `LINE:` is in the merged text.
+When the current body cannot be read (`gh pr view --json body` fails) nothing
+is posted, exit 3.
+
+**Fix.** Nothing, when the kept sections are wanted. To overwrite the whole
+body with the file, rerun with `--replace`. To drop a section, post the body
+with `--replace` or edit it on the host.
+
 <a id="redact-prepush-email"></a>
 ### `MEDIUM  pii.email  <file>:<line>` from the pre-push hook
 
@@ -2566,7 +2643,9 @@ or corrupt object) that `git ls-tree` cannot confirm is absent; it never falls
 through to the user-owned file. It also refuses when Bun loaded a `.env` file
 from the working directory (a bare `bun gstack-pregate`), since a branch could
 then pick the user policy: run `gstack-pregate` directly or as
-`bun --no-env-file`.
+`bun --no-env-file`. `gstack-ship-queue ready` under a train policy fetches
+`origin/<base>` first and refuses with this code, quoting git's error, when
+that fetch fails.
 
 **Fix.** `git fetch origin <base> --depth=1`, then rerun. To run against the
 branch's own file deliberately, pass `--policy-from head --allow-repo-commands`;
@@ -3974,7 +4053,9 @@ time; `gstack-ship-policy validate` prints `MIN_READER:` for exactly that.
 coordinator could misread: the working tree has uncommitted tracked changes,
 HEAD is not the PR's pushed head (read through `gh pr view`), CI at that
 exact head is not green (failed, pending or unreadable), or the pregate result
-is missing, failed or recorded on another tree (`PREGATE_STALE`).
+is missing, failed or recorded on another tree (`PREGATE_STALE`). Under
+`--dispatch-ci` it is also a dispatched workflow run that concluded red (a red
+run clears no pregate lane) or a `gh workflow run` that failed.
 
 **Fix.** Commit and push, wait for CI on that head, rerun
 `gstack-pregate run --allow-repo-commands` when the tree changed, then rerun
@@ -3988,8 +4069,13 @@ which line is not yet true.
 input does not match: the gated head is not a commit here, HEAD differs from
 the gated head beyond stamps (the gate never covered this tree), an earlier
 stamp with other inputs is unfinished, the stamp journal's head moved, or a
-gate-ahead merge could not be recomputed with `git merge-tree`. Nothing was
-written unless the `QUEUE_STAMP_REFUSED:` line says `committed=yes`.
+gate-ahead merge could not be recomputed with `git merge-tree`. The train
+commands use it too: `train forget` on a record that does not exist or on a
+train still building, running or merging, `train watch` on an unknown record,
+`verify --pr <n> --screen` on a run with no verdict to read (an INCOMPLETE or
+unreadable run), and `ready --screen` when the scratch merge branch cannot be
+pushed. Nothing was written unless the `QUEUE_STAMP_REFUSED:` line says
+`committed=yes`.
 
 **Fix.** Supply the named input (fetch the gated head, pass the current base
 sha), or regate the tree you mean to stamp. For an unfinished stamp, rerun the
@@ -4064,7 +4150,8 @@ a `train` block with `min_gstack_version` on the base branch first
 
 **Meaning.** A pinned PR's head repository is not the base repository. The
 train branch and its dispatches run with repository secrets, so fork work
-never rides a train.
+never rides a train. `ready --dispatch-ci` refuses a fork head for the same
+reason and dispatches nothing.
 
 **Fix.** Run the printed `train build --prs <list without it>`; the fork PR
 stays on the trusted-branch path.
@@ -4128,7 +4215,11 @@ one-PR train.
 ### `QUEUE_TRAIN_PENDING`
 
 **Meaning.** The train's run (free tests, the full gate or the bisect) has
-not finished, so there is no verdict yet.
+not finished, so there is no verdict yet. The same code covers a `train watch`
+that reached its timeout, `verify --pr <n> --screen` on a screen run still
+going, `verify --post-merge` on checks that have not settled, and a
+`ready --dispatch-ci` workflow run still going at its `--timeout`; each prints
+the command to rerun as `NEXT:`.
 
 **Fix.** Rerun the printed `NEXT:` command later. Nothing is dispatched again
 while a run is pending.
@@ -4266,10 +4357,14 @@ to fix this: the stamp comes only when the slot is called.
 <a id="queue-screen-stale-ref"></a>
 ### `QUEUE_SCREEN_STALE_REF`
 
-**Meaning.** `gstack-ship-queue ready --screen` dispatches the screen against
-GitHub's `refs/pull/<n>/merge`, and that ref is missing or still merges an
-older head than the PR's pushed head. GitHub stops recomputing the merge ref
-while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
+**Meaning.** `ready --screen` refuses with this code when the PR conflicts with
+the base beyond the CHANGELOG and the stamp files (the message lists the
+conflicting paths) or when it cannot list the remote's refs. A missing or
+lagging merge ref alone no longer refuses (see Fix). The rest of this
+paragraph is why such a ref cannot be screened directly: `ready --screen`
+dispatches the screen against GitHub's `refs/pull/<n>/merge`, and that ref can
+be missing or still merge an older head than the PR's pushed head. GitHub
+stops recomputing the merge ref while the PR conflicts with the base (a CHANGELOG-only conflict after a stamp
 counts), so a screen dispatched there checks out the old merge, sees itself
 superseded, plans 0 cases and reports success. GSTA-95 hit this on #3431:
 `ready` printed `SCREEN_DISPATCH:` as if a screen ran. `ready` now compares
@@ -4285,16 +4380,113 @@ read (`… paid-plan artifact has expired`, `… manifest.json is unreadable`, a
 unreadable run or artifact list, an unreadable repository slug, or a READY
 whose run id is not a number) keeps the slot screened and prints
 `SCREEN: #<n> <reason>; counted as screened, unverified`; `ready --screen`
-follows such a run. When `ready` cannot list the remote's refs or fetch the
-merge ref at all, it refuses with the same code and a `could not list …` or
-`could not fetch …` message whose NEXT line says to check the remote, not to
-resolve a conflict.
+follows such a run. When `ready` cannot list the remote's refs, it refuses with
+the same code and a `could not list …` message whose NEXT line says to check
+the remote, not to resolve a conflict; a merge ref that lists but cannot be
+fetched is replaced by the scratch merge described under Fix.
 
-**Fix.** Resolve the conflict with the base branch (or wait for GitHub to
-recompute the merge ref), push, and run `gstack-ship-queue ready --pr <n>
---screen` again. Under crew rule 14 a CHANGELOG-only conflict is left to the
-train, so a lane that cannot get a fresh merge ref READYs `--no-screen` only
-after its own focused paid cases passed (rule 6).
+**Fix.** Since the scratch-merge screen landed, a lagging merge ref is no
+longer a refusal: `ready --screen` builds the merge of the PR head onto
+`origin/<base>` itself with the train's merge rules (version files take the
+base's side, the CHANGELOG merges by section), pushes it as
+`screen/<pr>-<head12>` and dispatches the screen on that commit, printing
+`SCREEN_MERGE: scratch merge …`. The code now means a real conflict: the
+message lists the conflicting paths. Resolve those with the base branch,
+push, and run `gstack-ship-queue ready --pr <n> --screen` again. A
+CHANGELOG-only or stamp-file-only conflict does not refuse, unless the PR's
+CHANGELOG drops or renames a released heading (the message then names the
+CHANGELOG). `train prune --stale` deletes the scratch branches of merged or
+closed PRs.
+
+<a id="queue-screen-red"></a>
+### `QUEUE_SCREEN_RED`
+
+**Meaning.** The screen run dispatched for this PR head finished RED. The
+verdict is read from the run itself, never from a lane's report: the
+`gate-binding-a<attempt>` artifact evals.yml's report job uploads (verdict,
+reconcile exit, flaky cases) and the `report-verdict-a<attempt>` artifact's
+`collector-outcomes.json` (the panels that failed the lane and the rule-16
+flaky lines). A case the binding calls red already failed twice inside the
+run (rule 16 reruns a first failure once), so the red is real. `ready`
+refuses with this code when the head's recorded screen run is red, whichever
+of `--screen` or `--no-screen` it is given, and never dispatches another
+screen at the same merge SHA; `train build` refuses to seat the pin and its
+`NEXT:` names the build without it; `verify --pr <n> --screen` prints
+`SCREEN_VERDICT: #<n> run <id> RED red=<cases> flaky=<cases>` and one
+`FLAKY:` line per flaky case. The verdict is recorded in the READY receipt
+(`screen.verdict`), locally and in `refs/notes/gstack-trains`.
+
+**Fix.** Read the red cases from the `SCREEN_VERDICT:` line, repair, push a
+new head, run /ship and `gstack-ship-queue ready --pr <n> --screen` again
+(the new head gets its own screen). A GREEN screen with flaky cases is green:
+the flaky cases are listed for the ledger and need no rerun.
+
+<a id="queue-train-stack-red"></a>
+### `QUEUE_TRAIN_STACK_RED`
+
+**Meaning.** `gstack-ship-queue train build --dry-run --stack-tests` ran a PR's
+new test files (files the PR adds relative to the base whose name ends in
+`.test`, `_test`, `.spec` or `_spec` plus a JS or TS extension, bun's own
+rule; a helper or fixture under `test/` is not one) on the integrated prefix that includes it,
+T<k> (the base plus every slot up to and including that PR), in a scratch
+worktree, and they failed. The `STACK_TESTS: #<pr> T<k> <n> new test file(s)
+FAIL (<files>): <failing assertion>` line names the files and the runner's
+failing lines. Those tests pass on the PR head alone only because nothing
+before it in the train had changed what they read (a PR stacked on another
+PR's test files or fixtures hit this on 2026-10-26). Nothing was written,
+pushed or dispatched; the ordinary dry run (without `--stack-tests`) does not
+run them.
+
+**Fix.** Fix the PR's tests against that prefix, or reorder the train with
+`--order` so the PR they depend on comes first, then rerun the dry run. Pass
+`--stack-tests-command "<cmd>"` when the repo's tests run under something
+other than `bun test`; the files are appended to the command.
+
+<a id="queue-post-merge-red"></a>
+### `QUEUE_POST_MERGE_RED`
+
+**Meaning.** `gstack-ship-queue verify --post-merge <sha>` (the full 40-character
+SHA) watched the check runs attached to a commit the train merged onto the
+base branch (the push workflows: free tests, the Windows subset, the main
+backstop) and its commit statuses until none was still running, and at least
+one check concluded `failure`, `timed_out`, `cancelled` or another non-success,
+or a commit status failed (the message then says a commit status, not a check
+run). A `neutral` or `skipped` check (the
+backstop superseding itself when main moved on) is counted as skipped, never
+red. The command keeps no process state: it polls gh until the checks settle
+or `--timeout` (default 2700 s) passes, prints `POST_MERGE: <sha12>
+green|red|pending|none (passed= failed= pending= skipped=)` and one
+`CHECK: <name> <conclusion|status>` line per check, and a timeout is
+`QUEUE_TRAIN_PENDING` with the same command as `NEXT:`, so rerunning it after
+an interruption continues the watch.
+
+**Fix.** Read the red run named on its `CHECK:` line. Repair on a new PR or
+roll back the merge; `gstack-ship-queue train status` names the freeze if the
+backstop filed one.
+
+<a id="queue-screen-not-run"></a>
+### `QUEUE_SCREEN_NOT_RUN`
+
+**Meaning.** The screen run dispatched for this PR concluded `success` but
+ran no slice. evals.yml's `route` job plans nothing when
+`scripts/eval-readiness.ts wait` finds the PR head superseded (a push landed
+between `ready --screen` and the plan) or when the plan selects no case; the
+run then uploads no `paid-plan` artifact (or an empty manifest), every slice
+job is skipped and GitHub shows a green check. On 2026-10-26, 18 of 41 PR
+screens ended this way. The verdict is read from the run (`lib/ship-queue-screen.ts`),
+so such a run is `NOT-RUN`: `verify --pr <n> --screen` prints
+`SCREEN_VERDICT: #<n> run <id> NOT-RUN (<why>)` and refuses with this code, the
+READY receipt records `screen.verdict.outcome: NOT_RUN`, `ready --screen` never
+follows the run (its `SCREEN_DISPATCH:` line says `not following … a screen
+that planned nothing is not a screen`) and `train build` seats the pin unscreened
+with `SCREEN: #<n> run <id> planned no cases …; counted as not-run, the slot
+rides unscreened`.
+
+**Fix.** `gstack-ship-queue ready --pr <n> --screen` at the current head
+dispatches a fresh screen. A head that moved since the dispatch needs a fresh
+READY anyway (`QUEUE_TRAIN_MOVED`); a head that did not move and still plans
+nothing has nothing diff-relevant to screen, and `--no-screen` with the
+focused cases named in the READY block is the honest choice.
 
 <a id="ready-screen-choice-required"></a>
 ### `READY_SCREEN_CHOICE_REQUIRED`
@@ -4447,6 +4639,67 @@ refusal names the changed product paths.
 conflict-only base merge, a test-only change or release metadata, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
+
+<a id="gstack-pr-wait"></a>
+## gstack-pr-wait
+
+`gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change]
+[--interval SECONDS] [--timeout MINUTES]` watches one pull request and prints
+one stdout line per real event, prefixed `#<pr>`; progress and recoverable
+errors go to stderr. `/land-and-deploy` Step 3 runs it with `--until green`.
+Exit 0 means the `--until` condition is met or the PR merged; exit 1 and 2
+end with one of the two codes below. `green` gates on every check on the
+head, as `gstack-ci-gate` does, so the two never disagree; a check the base
+branch requires (rulesets and classic branch protection) counts as pending
+until it appears. A 403 on the classic
+protection read (a token without admin scope) is logged and skipped, and the
+rulesets read still names the required checks. The review-bot lists are
+configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`
+and `pr_wait_advisory_bots coderabbit` (`none` empties a list); a bot owns
+the logins that start with its name and the checks that mention it, and an
+advisory bot's review is never waited for while its checks gate like any
+other. The loop
+is synchronous, so Ctrl-C and `kill` stop it at once; the lock it leaves is
+taken over by the next watcher for that PR once the pid is gone.
+
+<a id="pr-wait-blocked"></a>
+### `#<pr> stopped: action needed (PR_WAIT_BLOCKED)`
+
+**Meaning.** Exit 1. The condition cannot be met without a change to the PR:
+the lines above it say which. A check failed (name and link; `required check
+failed` when the base branch requires it); the merge state is DIRTY (the branch
+conflicts with its base); the PR was closed without merging; `--until ready` is
+blocked by unresolved review threads or a BEHIND branch; GitHub stayed
+unreachable for ten polls, or answered with a non-transient error
+(`gstack-pr-wait stopped: <gh message>`); or `--timeout` passed (default 60
+minutes) with the condition unmet (`gstack-pr-wait stopped: no green after 60
+minutes; still pending: <checks>`).
+
+**Fix.** Act on the named line: fix the failing check and push, rebase or
+update the branch, resolve the threads, or read the gh message. After a
+timeout, decide whether the pending checks are worth waiting for and start
+again, with `--timeout 0` to wait without limit. Then start `gstack-pr-wait`
+again; its state file remembers what it already reported, so only new events
+print. A watcher that stopped on a gh error restarts cleanly once `gh auth
+status` passes.
+
+<a id="pr-wait-refused"></a>
+### `gstack-pr-wait: the watcher did not start, or a local error stopped it before a verdict — ... (PR_WAIT_REFUSED)`
+
+**Meaning.** Exit 2, never a verdict on the PR. The target is not a PR number
+or URL, `--repo` is not `owner/name`, no repository could be read from the
+checkout, the PR cannot be read with the current `gh` login, an option is
+unknown, another `gstack-pr-wait` process (the line names its pid) already
+watches this PR from the same state root, so a second one would print
+duplicate events, or a local error (`a local error stopped the watch before a
+verdict: <message>`, an unwritable state root for example) ended the process.
+Exit 1 is reserved for `PR_WAIT_BLOCKED`, so a local fault never reads as a
+PR that needs action.
+
+**Fix.** Pass the number or URL and `--repo owner/name`, check `gh auth
+status`, fix the named local error, or let the running watcher finish. If no
+events reach you from the named pid, `kill <pid>` and start again; a lock
+whose pid is no longer alive is taken over without that step.
 
 ## gstack-error-capture
 

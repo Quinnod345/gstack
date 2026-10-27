@@ -17,6 +17,7 @@
     "cso": 4924,
     "design-consultation": 16188,
     "design-html": 14380,
+    "design-motion": 10409,
     "design-review": 35808,
     "design-shotgun": 14901,
     "deslop-shared-libs": 3411,
@@ -65,6 +66,7 @@
     "spec": 14840,
     "sync-gbrain": 15399,
     "test-audit": 10324,
+    "ubicloud": 9033,
     "unfreeze": 409
   }
 }

@@ -150,6 +150,7 @@ export const SKILL_REQUIREMENTS: Readonly<Record<string, SkillRequirement>> = {
   'design-review': BROWSER,
   'design-consultation': BROWSER,
   'design-html': BROWSER,
+  'design-motion': BROWSER,
   'devex-review': BROWSER,
   scrape: BROWSER,
   skillify: BROWSER,
@@ -189,6 +190,7 @@ export const SKILL_REQUIREMENTS: Readonly<Record<string, SkillRequirement>> = {
   'setup-gbrain': CLAUDE_ONLY,
   'sync-gbrain': CLAUDE_ONLY,
   'test-audit': CLAUDE_ONLY,
+  ubicloud: CLAUDE_ONLY,
   unfreeze: CLAUDE_ONLY,
   'review-voice': REVIEW_VOICE,
 };
