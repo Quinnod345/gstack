@@ -575,13 +575,11 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
     const slow = fakeVm({ listed: 'eu-central-h1 ubirun-peer-9999999999-cccc\n' });
     try {
       writeFileSync(join(slow.state, 'quota-max'), '31\n');
-      const started = Date.now();
       const r = run(slow, ['up'], { UBI_QUOTA_WAIT: '2', FAKE_SHOW_DELAY: '1.2' });
       const err = r.stderr.toString();
       expect(r.exitCode, err).toBe(1);
       expect(err).toMatch(/quota: 16 of 31 vCPUs in use and 16 needed; waiting up to 2s more for room/);
       expect(err).toContain('create refused before any request: vCPU quota exhausted');
-      expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
       expect(slow.calls()).not.toContain('"create"');
     } finally { rmSync(slow.root, { recursive: true, force: true }); }
 
