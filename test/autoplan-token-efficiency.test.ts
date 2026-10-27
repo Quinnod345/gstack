@@ -64,10 +64,10 @@ describe('round budget', () => {
 
   test('a resumed run keeps the max_rounds it persisted', () => {
     const s = start();
-    fs.writeFileSync(path.join(s.out, 'run.json'), JSON.stringify({ ...readRunJson(s.out), max_rounds: 3 }, null, 2) + '\n');
+    fs.writeFileSync(path.join(s.out, 'run.json'), JSON.stringify({ ...readRunJson(s.out), max_rounds: 1 }, null, 2) + '\n');
     expect(r.ap(['resume', '--out', s.out]).status).toBe(0);
-    expect(readRunJson(s.out).max_rounds).toBe(3);
-    expect(r.ap(['status', '--out', s.out]).stdout).toMatch(/^ROUNDS: ceo=1\/3 eng=1\/3 max_rounds=3 /m);
+    expect(readRunJson(s.out).max_rounds).toBe(1);
+    expect(r.ap(['status', '--out', s.out]).stdout).toMatch(/^ROUNDS: ceo=1\/1 eng=1\/1 max_rounds=1 /m);
   });
 });
 
