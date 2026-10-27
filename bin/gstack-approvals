@@ -11,8 +11,10 @@
  *   gstack-approvals sync [--branch <name>]
  *   gstack-approvals path [--branch <name>]
  *
- * Rows are kept per branch under the state root and, on Capy, mirrored to the
- * private Drive folder. Every field is secret-scanned before it is written.
+ * Rows are kept per branch under the state root and, on Capy, mirrored to
+ * GSTACK_APPROVALS_DIR, else the `approvals/` directory a Captain created in
+ * its drive (readable by the whole crew), else the private project-user Drive
+ * folder. Every field is secret-scanned before it is written. A row with
  * `render` prints the `## Approvals` section /ship puts in the PR body. Logic:
  * lib/approval-record.ts.
  */
@@ -28,8 +30,8 @@ const HELP = `gstack-approvals — the per-thread approval record (capy/skill/gs
   import  --autoplan <run dir> [--by <whose words, e.g. Garry>]
   render  [--no-heading]          the ## Approvals section for a PR body or report
   list    [--json]
-  sync                            re-mirror the record (Capy Drive or GSTACK_APPROVALS_DIR)
-  path                            print the record and mirror paths
+  sync                            re-mirror the record (GSTACK_APPROVALS_DIR, the Captain's drive approvals/, or the project-user Drive)
+  path                            print the record and mirror paths, and which rule chose the mirror
   Every command takes [--branch <name>] (default: the checked-out branch).
 
 Example:
@@ -107,7 +109,7 @@ function main(argv: string[]): number {
     return s.error ? fail(cmd, s.error) : EXIT.ok;
   }
   if (cmd === 'path') {
-    process.stdout.write(`RECORD: ${loc.file}\nMIRROR: ${loc.mirror ?? 'none'}\nBRANCH: ${loc.branch}\n`);
+    process.stdout.write(`RECORD: ${loc.file}\nMIRROR: ${loc.mirror ? `${loc.mirror} (${loc.mirror_source})` : 'none'}\n${(loc.read_also ?? []).map(f => `READ_ALSO: ${f}\n`).join('')}BRANCH: ${loc.branch}\n`);
     return EXIT.ok;
   }
   process.stderr.write(`gstack-approvals: unknown command ${cmd}\n${HELP}\n`);

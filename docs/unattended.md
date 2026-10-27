@@ -358,7 +358,9 @@ the plan.
    so a gate an agent closed is distinguishable from one the owner closed.
    `gstack-autoplan recommend` changes one recommendation before relay; it
    bumps the gate's `rec_rev`, and a later `rec` needs the `--rec-hash` from
-   the render the owner saw (`GATE_REC_STALE`).
+   the render the owner saw (`GATE_REC_STALE`). Every `GATE:` line is followed
+   by `GATE_SPEND:` and `GATE_REC_COST:` (also `gate_cost` in `--json`; see
+   `autoplan/DRIVER.md`).
    A user challenge both voices raised on a confirmed finding (a title match,
    not file:line proximity alone, which is `unverified`) with the same
    `changes` value is recommended as `b` only with one shared proposal: a
@@ -490,7 +492,9 @@ replaces the generated sentence with the run's own), then the numbered
 decisions through the gate list: seven per page (`--page N`), stable ids,
 each `auto` item annotated with the default taken if unanswered, each
 `approval` item `pending until you answer` or `decided <id><letter> on <date>`.
-The last line names `review-record.md`, where the full review lives, and the
+It carries a `Cost so far:` sentence (spent, worst case, cap, and the estimate for
+the phases `rec` can reopen); `render --captain` puts it in a `### Cost` section above
+the relaying-agent trailer. The last line names `review-record.md`, where the full review lives, and the
 `gstack-autoplan answer` call that answers the page. `--write` also saves
 `brief.md` in the run directory. `/autoplan` Phase 4 presents this output
 verbatim and writes the former long report to `review-record.md`.
@@ -543,3 +547,41 @@ fix. `GSTACK_ALLOW_UNSUPPORTED_RUNTIME=1` admits anyway (`INSTALL_VERDICT:
 overridden`), recorded as a deviation. TypeScript entrypoints use
 `checkInstallAdmission` from `lib/install-verdict.ts`; the Bash side is
 `bin/gstack-install-verdict.sh`. See [capy-install.md](capy-install.md#the-launch-line).
+
+## The decision trail
+
+A long or unattended run keeps one tab-separated trail of its decisions at
+`<run dir>/decisions.tsv`, written through `gstack-decision-trail <file>
+<phase> <decision> <why> <evidence> <result>`, so the parent reads what the run
+chose and why without the transcript. The helper stamps the time, writes the
+header once, flattens each cell to one line and quotes a cell that starts
+with `=`, `+`, `-` or `@`, so evidence lifted from a PR title or a filename
+cannot run as a formula when a reviewer opens the file in a spreadsheet.
+Log the forks, not the keystrokes: an approach chosen or dropped, a unit done
+with its verification result, a revert and what triggered it, a blocker, one
+row per iteration of a loop. Evidence is a pointer that resolves (a commit, a
+PR, `file:line`, an artifact path), never prose. A run that joins a trail
+other runs wrote (a pickup after a crash, a replacement machine, a later turn
+of the same thread) first runs `gstack-decision-trail start <file> <run id>`,
+which appends a `start` row naming the earlier rows and the run; appends with
+`--run <id>` refuse (`DECISION_TRAIL_START_REQUIRED`) until that row is the
+newest start row, and `start` is a no-op when it already is, so a rerun of the
+same step writes nothing twice.
+
+Before it hands back, the run audits the trail against what it did: every row
+of its own stretch (from its `start` row to the next run's) maps to a real
+decision or action, every evidence pointer resolves and shows what the row
+claims, and a fork or abandoned approach that shaped the result but is not
+logged gets a row. The audit corrects the log, never the story: no row is
+edited or removed, an invented or wrong row stays and a new row supersedes it
+with what actually happened. Then a reviewer on a different model family from
+the one that did the work (a Capy subagent on another family, or the outside
+voice) reads the trail and the transcript and flags what the owner should look
+at: decisions with weak or missing evidence, verification claimed without
+proof, choices that look risky in hindsight, gaps a skim would miss. The run's
+final report ends with an `Attention` section that opens with `reviewed by
+<model>` on its own line and lists each flag against its rows; `No flags` is a
+valid body, a missing model line is not. Self-review does not stand in for
+this. `decisions.jsonl` stays the typed record `gstack-artifact` validates; the
+trail is the plain one a person reads, and `column -s$'\t' -t decisions.tsv`
+renders it in a terminal.

@@ -148,6 +148,8 @@ const SCANNER_EXEMPT: Record<string, string> = {
     'fetches the user\'s own repo\'s base branch for version-claim freshness — a user-repo dev-workflow op, not gstack-state egress',
   'bin/gstack-version-bump':
     'git fetch appears only in an error-message string',
+  'bin/gstack-worktree-audit':
+    'read-only audit: best-effort fetch of the user\'s own repo\'s base branch so the MERGED column is current (skipped with --no-fetch) — a user-repo dev-workflow op like gstack-next-version\'s, not gstack-state egress',
   'bin/gstack-state-matrix':
     'git fetch appears only in an error-message string (the fix the user runs when origin/<base> has no merge base)',
   'bin/gstack-redact-prepush':

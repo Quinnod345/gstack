@@ -488,8 +488,11 @@ In a Capy session (`GSTACK_CAPY=1`, set by the launch line) every workflow
 prints `CAPY: on` and a `capy-asks` block: decisions go through Capy (a crew
 thread asks its Captain, otherwise the person), plan approvals are rendered
 with `gstack-owner-brief render --captain`, answers are recorded with
-`gstack-approvals`, and /ship's PR body opens with before/after images
-(`gstack-pr-shots`), Why and Approvals. The guide is
+`gstack-approvals` (mirrored to the Captain's drive `approvals/` directory when the
+Captain created one, so the crew can read every lane's record), and /ship's PR body opens
+with before/after images (`gstack-pr-shots`), Why and Approvals. Every autoplan gate
+prints its cost (`GATE_SPEND:`, `GATE_REC_COST:`; `autoplan/DRIVER.md` says how to relay
+them). The guide is
 [`capy/skill/gstack/captain.md`](../capy/skill/gstack/captain.md);
 `GSTACK_CAPY_ASKS=0` drops the block for one session. The controller's side (the
 READY contract, merge trains, the digest, the daily flaky pass, with templates for the

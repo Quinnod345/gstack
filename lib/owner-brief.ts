@@ -12,6 +12,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { gateCost, gateCostSentence } from './autoplan-gate-cost';
 import { decisionId, PAGE_SIZE, renderGate, type GateList } from './gate-list';
 import { readJsonl, renderUrgentBlock, type DecisionRow } from './headless-artifacts';
 import type { ResultCodeName } from './result-codes';
@@ -85,6 +86,7 @@ export function renderBrief(inputs: BriefInputs, o: { page?: number; summary?: s
     '### Summary',
     '',
     plainSummary(inputs, o.summary),
+    ...(o.outDir && inputs.run ? ['', gateCostSentence(gateCost(o.outDir, inputs.gate, { phase_order: inputs.run.phase_order ?? [], outside_enabled: inputs.run.outside_enabled !== false, spend_cap_usd: inputs.run.spend_cap_usd ?? null, scope_flags: inputs.run.scope_flags }))] : []),
     '',
     '### Decisions',
     '',

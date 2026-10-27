@@ -31,7 +31,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { amendmentSteps, answerGate, closeDeferred, finishGate, recommendGate } from '../lib/autoplan-gate';
-import { changeBudget, liftStop } from '../lib/autoplan-budget';
+import { gateCost, gateCostPayload, renderGateCost, type GateCost } from '../lib/autoplan-gate-cost';
+import { attemptEstimate, changeBudget, liftStop } from '../lib/autoplan-budget';
 import { ANSWERED_BY_RE } from '../lib/gate-list';
 import { checkpointLines, checkpointRun, restoreCheckpoint, type CheckpointMoment } from '../lib/autoplan-checkpoint';
 import { admit, touchInstallLease } from '../lib/autoplan-admission';
@@ -185,17 +186,28 @@ function doNext(out: string, rest: string[], json: boolean): number {
   moment = fresh ? 'init' : r.attempts.some(a => a.new) || r.lines.some(l => l.startsWith('PHASE_DEFERRED: ')) ? 'transition' : undefined;
   const status = r.state.status;
   const lines = [...initLines, ...r.lines];
-  if (status === 'gate_pending') lines.push(...gateLines(r.state.gate_rev, out));
+  if (status === 'gate_pending') lines.push(...gateLines(r.state, out));
   if (status === 'running') lines.push(`NEXT: gstack-autoplan next --out ${out}`);
   lines.push(resultLineFor(status, out));
-  emit(json, lines, { run: r.state.run, status, phase: r.phase ?? null, attempts: r.attempts, gate_rev: r.state.gate_rev ?? null, out });
+  emit(json, lines, { run: r.state.run, status, phase: r.phase ?? null, attempts: r.attempts, gate_rev: r.state.gate_rev ?? null, ...gateCostField(r.state, out), out });
   return EXIT.ok;
 }
 
-/** The gate pointer, plus the owner-facing render to relay under Capy (lib/captain-brief.ts). */
-function gateLines(gateRev: number | undefined, out: string): string[] {
+/** The gate pointer, its cost so far and the price of `rec` (lib/autoplan-gate-cost.ts), plus the owner-facing render to relay under Capy (lib/captain-brief.ts). */
+function gateLines(state: RunState, out: string): string[] {
   const relay = capyRelayLine(out);
-  return [`GATE: gate_rev=${gateRev} render with: gstack-gate render ${path.join(out, 'gate.json')}`, ...(relay ? [relay] : [])];
+  const cost = gateCostOf(state, out);
+  return [`GATE: gate_rev=${state.gate_rev} render with: gstack-gate render ${path.join(out, 'gate.json')}`, ...(cost ? renderGateCost(cost) : []), ...(relay ? [relay] : [])];
+}
+function gateCostOf(state: RunState, out: string): GateCost | undefined {
+  const gateFile = path.join(out, 'gate.json');
+  if (state.status !== 'gate_pending' || !fs.existsSync(gateFile)) return undefined;
+  return gateCost(out, JSON.parse(fs.readFileSync(gateFile, 'utf8')), state, { defaultPerVoiceUsd: attemptEstimate(state, undefined, process.env).usd });
+}
+/** `gate_cost` for a JSON payload when the run sits at a gate. */
+function gateCostField(state: RunState, out: string): Record<string, unknown> {
+  const cost = gateCostOf(state, out);
+  return cost ? { gate_cost: gateCostPayload(cost) } : {};
 }
 
 function doSubmit(out: string, rest: string[], json: boolean): number {
@@ -211,10 +223,10 @@ function doSubmit(out: string, rest: string[], json: boolean): number {
     unavailable, failed, runner: flag(rest, '--runner'), usageUsd: num(rest, '--usage-usd'), reconcile: flag(rest, '--reconcile'), cwd: process.cwd() });
   const status = r.state.status;
   const lines = [...r.lines];
-  if (status === 'gate_pending') lines.push(...gateLines(r.state.gate_rev, out));
+  if (status === 'gate_pending') lines.push(...gateLines(r.state, out));
   if (status === 'running') lines.push(`NEXT: gstack-autoplan next --out ${out}`);
   lines.push(resultLineFor(status, out));
-  emit(json, lines, { run: r.state.run, status, phase, voice, attempt: r.state.phases[phase]?.[voice]?.attempt ?? attempt ?? null, closed: r.closed, findings: r.findings, gate_rev: r.state.gate_rev ?? null, out });
+  emit(json, lines, { run: r.state.run, status, phase, voice, attempt: r.state.phases[phase]?.[voice]?.attempt ?? attempt ?? null, closed: r.closed, findings: r.findings, gate_rev: r.state.gate_rev ?? null, ...gateCostField(r.state, out), out });
   return EXIT.ok;
 }
 
@@ -242,11 +254,11 @@ function doClose(out: string, rest: string[], json: boolean): number {
   const r = closeDeferred(state, phase as Phase, { reason: reason.trim(), by, cause: 'owner' });
   moment = 'transition';
   const lines = [...r.lines, ...(stopped ? liftStop(state, `${phase} closed deferred by ${by}`) : [])];
-  if (!currentPhase(state)) { finishGate(state); lines.push(...gateLines(state.gate_rev, out)); }
+  if (!currentPhase(state)) { finishGate(state); lines.push(...gateLines(state, out)); }
   else { state.status = 'running'; lines.push(`NEXT: gstack-autoplan next --out ${out}`); }
   writeState(state);
   lines.push(resultLineFor(state.status, out));
-  emit(json, lines, { run: state.run, status: state.status, phase, blockers: r.blockers, gate_rev: state.gate_rev ?? null, out });
+  emit(json, lines, { run: state.run, status: state.status, phase, blockers: r.blockers, gate_rev: state.gate_rev ?? null, ...gateCostField(state, out), out });
   return EXIT.ok;
 }
 
@@ -272,7 +284,10 @@ async function doRun(out: string, rest: string[], json: boolean): Promise<number
     const code = withRunLock(out, () => doNext(out, rest, true));
     if (code !== EXIT.ok) return code;
     const state = readState(out);
-    if (state.status !== 'awaiting_result') { if (!json) process.stdout.write(statusLines(state).join('\n') + '\n'); process.stdout.write(resultLineFor(state.status, out) + '\n'); return EXIT.ok; }
+    if (state.status !== 'awaiting_result') {
+      if (!json) process.stdout.write([...statusLines(state), ...(state.status === 'gate_pending' ? gateLines(state, out) : [])].join('\n') + '\n');
+      process.stdout.write(resultLineFor(state.status, out) + '\n'); return EXIT.ok;
+    }
     const phase = state.phase_order.find(p => state.phases[p]?.snapshot && !state.phases[p]?.closed_at)!;
     for (const voice of ['native', 'outside'] as const) {
       const v = state.phases[phase]![voice]!;
