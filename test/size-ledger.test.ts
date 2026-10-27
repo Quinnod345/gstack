@@ -13,6 +13,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { bunIsolationArgs } from '../lib/bun-isolation';
 import { buildChain } from '../lib/ship-queue-train';
 import { DEFAULT_POLICY } from '../lib/ship-policy';
 import { CARVE_GUARDS } from './helpers/carve-guards';
@@ -205,7 +206,7 @@ describe('ship is on the ledger', () => {
   });
   // Value: protects=the scripts/size-ledger.ts CLI contract lanes run (check exits 0 with SIZE_LEDGER: ok on a tree the ledger accounts for; record refuses on main or without --why, fold without --measured-at, a skill with no ledger; none of them writes); fails_when=a refusal is dropped, an exit code changes or a refused call writes an entry; why_new=the tests above call the helpers, never the script; seam=none; no_claim=the exit-1 mismatch path (needs a ship tree off the ledger)
   test('scripts/size-ledger.ts checks this tree and refuses unsafe calls without writing', () => {
-    const run = (...args: string[]) => spawnSync(process.execPath, ['--no-env-file', '--config=/dev/null', path.join(repo, 'scripts/size-ledger.ts'), ...args], { cwd: repo, encoding: 'utf-8', timeout: 60_000 });
+    const run = (...args: string[]) => spawnSync(process.execPath, [...bunIsolationArgs(), path.join(repo, 'scripts/size-ledger.ts'), ...args], { cwd: repo, encoding: 'utf-8', timeout: 60_000 });
     const dir = path.join(repo, 'test/size-ledger/ship');
     const before = fs.readdirSync(dir).sort();
     const check = run('check', 'ship');
