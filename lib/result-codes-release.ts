@@ -249,6 +249,21 @@ export const RELEASE_RESULT_CODES = {
     summary: 'the product diff against the base changed between the receipt\'s head and HEAD (a product file differs beyond a base merge, a test-only fix or release metadata), so the reviewed verdict does not cover HEAD',
     fix: 'run /ship on the new head; the receipt carries only when every changed path is a test, release metadata or the base merge and the product patch-id is unchanged',
   },
+  DOCS_AUDIT_BLOCKED: {
+    anchor: 'docs-audit-blocked',
+    summary: 'the documentation audit (/ship Step 14.5) is blocked: gstack-ship-receipt docs-caps found a declared doc cap over, or gstack-ship-receipt write was given a blocked audit with no owner exception and refused to record the ship as audited',
+    fix: 'repair the audit (or trim the doc named by the DOCS_CAP: over line) and rerun Step 14.5; when the owner accepts the named risk, record it as docs.exception { accepted_by, date, via, reason } and carry the same line in the PR body\'s Documentation section',
+  },
+  RECEIPT_PROSE_MISMATCH: {
+    anchor: 'receipt-prose-mismatch',
+    summary: 'the PR body quotes a counter the ship receipt also records (review passes, deferred findings, gate case counts) with a different number, so the prose and the receipt disagree about the same run',
+    fix: 'correct the body to the receipt\'s number (the PROSE: line names each field with both values); when the receipt is the stale one, rerun /ship so the receipt is rewritten from the run',
+  },
+  RECEIPT_GIT_TOO_OLD: {
+    anchor: 'receipt-git-too-old',
+    summary: 'gstack-ship-receipt carry needs git 2.39 or later for `git patch-id --verbatim`; the installed git is older, so the product diff could not be compared',
+    fix: 'upgrade git to 2.39 or later (the refusal names the installed version), then rerun carry; otherwise run /ship on the new head',
+  },
   // gstack-pr-wait (lib/pr-wait.ts): the landing-path PR watcher's two terminal codes.
   PR_WAIT_BLOCKED: {
     anchor: 'pr-wait-blocked',

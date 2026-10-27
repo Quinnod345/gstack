@@ -59,6 +59,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `full_e2e` | `true` \| `false` | `false` | `true`: every merge needs a passing full-gate result bound to a tree equal to the merging one modulo stamps; `gstack-ship-queue ready`, `stamp` and `verify` refuse without one (`QUEUE_GATE_MISSING`): a gate-ahead record, or the lane's `--gate-exit 0 --gate-log <file>` from its run on the gated head. Needs `min_gstack_version`. |
 | `review_scope` | `frozen` \| `diff-plus-blocking` \| `all` | `frozen` | The finding scope of `/ship`'s review loop; see [review_scope](#review-scope). `frozen` fixes the diff on pass 1, files blocking findings in unchanged code as issues, and later passes read only the range since the previous pass. `diff-plus-blocking` is the same but fixes a blocking finding in unchanged code in this PR instead of filing it. `all` is the earlier loop: every finding is fixed on every pass. Needs `min_gstack_version` when not `frozen`. |
 | `min_gstack_version` | version or `null` | `null` | The oldest gstack that may read the file; see the compatibility rule above. |
+| `docs` | `{ caps: [{ path, max_bytes }] }` or `null` | `null` | Documentation files with a byte cap. `/ship` Step 14.5 runs `gstack-ship-receipt docs-caps --base <base>` (the caps come from `origin/<base>`'s policy, never the branch's copy; `--policy <file>` is for a repository bootstrapping its policy) before the verification gate and prints one `DOCS_CAP: <path> <bytes>/<max> ok\|over` line per cap; any `over` (an absent file counts) exits 1 and blocks the ship until the file is trimmed or the cap raised on the base branch (`DOCS_AUDIT_BLOCKED`). At most 64 caps, each path contained. See [the ship receipt](#ship-receipt). Needs `min_gstack_version`. |
 | `train` | `{ gate_workflow, free_workflow, full_gate_check, record_artifact, max_size, fill_hours, screen_selection, trial_reservation_usd }` or `null` | `null` | Turns on [merge trains](#run-a-merge-train), read from the base revision only. Every field is required and an unknown field is `POLICY_INVALID`: `max_size` 1 to 6, `fill_hours` above 0 and at most 24, `screen_selection` `gstack-paid` \| `none`, `trial_reservation_usd` above 0 and at most 100. `null` keeps the per-PR queue exactly as it is. Needs `min_gstack_version`. |
 
 Containment, checked by `validate` and again at write time: paths and globs are
@@ -658,6 +659,59 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 The PR body's first section is the ship receipt (`gstack-ship-receipt write … --body`),
 written by the pr-body section of `/ship` after the body is composed.
 
+<a id="ship-receipt"></a>
+## The ship receipt
+
+The ```` ```gstack-ship-receipt ```` block is the handoff record: identifiers
+first (`pr`, `head`, `version`, `base`), then the evidence (`gate`, `ci`,
+`pregate`, `issues`, `approval`, `docs`, `review_loop`, `carry`), validated
+against the `ship-receipt` schema (`gstack-artifact schema ship-receipt`) and
+read back by `gstack-ship-receipt read`, `result`, `carry` and the queue.
+
+**`version`.** The version source at HEAD: the path `.gstack/version-path`
+pins, else `VERSION`, else `package.json#version`. A repository with none of
+those, none of the policy's `stamp_files` and no CHANGELOG (the policy's
+`changelog`, or `CHANGELOG.md`) at HEAD has no release version to record, and
+the receipt says so with `"version": "none"`: `/ship` Step 12 printed
+`Version bump: skipped (no version source: <what was looked for>)` and Step 13
+`CHANGELOG: skipped (none at <path>)`, the PR title carries no version prefix,
+and `read`, `result`, `gstack-ship-queue ready`, `train build` and `verify
+--train` accept the receipt like any other. A repository that has a CHANGELOG
+but no version source records no `version` at all (the audit still says what
+it looked for); pass `--version` to name one.
+
+**`docs`.** Step 14.5's outcome, from `gstack-ship-receipt write --docs
+<json|@file>`: `{ status: updated | current | blocked, scope, exception? }`,
+where `scope` names the docs roots the audit covered and `exception` is
+`{ accepted_by, date, via, reason }`, the owner's acceptance of a risk the
+audit could not clear. A `blocked` status with no exception is
+[`DOCS_AUDIT_BLOCKED`](troubleshooting.md#docs-audit-blocked) and nothing is
+written: only the owner accepts a documentation risk, so an unattended run
+stops there. With `--body`, the body's `## Documentation` section must carry
+the exception word for word (`Documentation exception: accepted by <owner>
+<date> via <ref>: <reason>`), or the write refuses with the same code. Doc
+caps: a repository declares `docs.caps: [{ path, max_bytes }]` in its policy,
+and Step 14.5 runs `gstack-ship-receipt docs-caps --base <base>` before the
+verification gate, reading the caps from `origin/<base>`'s policy so the branch
+cannot raise its own (`--policy <file>` only while bootstrapping a policy; an
+unreadable base policy is `POLICY_SOURCE_UNAVAILABLE`); one
+`DOCS_CAP: <path> <bytes>/<max> ok|over` line per cap
+(`absent/<max> over` for a path the tree lacks), exit 1 on any `over`, whose
+repair is trimming the file, never raising the cap in the same PR.
+
+**Prose against the receipt.** `gstack-ship-receipt read --pr <n> --check-prose`
+(or `--body <file>`) compares every counter the body quotes with the receipt's
+integers under `review_loop`, `gate` and `ci`: `passes=2`, `passes: 2` and
+`2 passes` are claims about `review_loop.passes`, `1 deferred` about
+`review_loop.deferred`, `passed: 41` about `gate.passed` (a leaf key shared by
+several counters, `passed` under `gate` and `ci` or `pass` under every gate
+lane, matches when the number equals any of them; an underscore in a key
+matches `_`, a space or `-`; a name inside a longer word, `3 pass-through`, is
+not a claim). A body that quotes a different number is
+`RECEIPT_PROSE_MISMATCH` (exit 1) and the `PROSE:` line names each field with
+both values; prose that quotes no counter is not a claim. Data PRs (evals,
+measurements, sweeps) run it before READY so the body's numbers are the run's.
+
 <a id="review-scope"></a>
 ## `review_scope`: how the review loop converges
 
@@ -726,7 +780,15 @@ invalidate it and cost a full re-run on identical product code.
 the receipt to HEAD when the working tree is clean, the receipt's head is an
 ancestor of HEAD and `git patch-id --verbatim` of the product diff against the
 base is the same at both heads (verbatim: whitespace counts, hunk line numbers
-do not). Product means every changed path that is not test code (`test/**`,
+do not). `--verbatim` needs git 2.39 or later: the carry probes `git --version`
+first and refuses an older git by name
+([`RECEIPT_GIT_TOO_OLD`](troubleshooting.md#receipt-git-too-old)) instead of
+falling back to the whitespace-stripping default, and a `git diff` or
+`patch-id` failure is reported with git's own first stderr line. When the
+patch-ids differ, the refusal names up to `CARRY_NAMED_PATHS` (20) product
+paths whose patch against the base changed, walking only the paths the branch
+itself touched at either head (a base merge brings in every path the base
+changed, none of which can differ between the two base diffs). Product means every changed path that is not test code (`test/**`,
 `spec/**`, `e2e/**`, `**/*.test.<code ext>`, `**/*.spec.<code ext>` and the
 other `CARRY_TEST_GLOBS` in `lib/ship-receipt.ts`; an `openapi.spec.yaml` is
 product) or release metadata (`CHANGELOG.md`, `agents-digest/**`, and `VERSION`

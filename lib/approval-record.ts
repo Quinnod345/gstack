@@ -15,14 +15,18 @@
  * branch key being a readable prefix plus a hash of the exact ref (no two
  * branches share a file, and the key is always one contained path segment).
  * On Capy (GSTACK_CAPY=1) the state root is thrown away with the machine, so
- * every write is mirrored to the private project-user Drive folder
- * (`<drive>/approvals/<slug>/<branch key>.jsonl`) or to GSTACK_APPROVALS_DIR;
- * GSTACK_APPROVALS_MIRROR=0 turns the mirror off. Reads take the union of both.
- * Every field passes the secret scanner before anything is written.
+ * every write is mirrored: to GSTACK_APPROVALS_DIR when set, else to the
+ * directory the Captain named by creating `approvals/` in its drive
+ * (`~/.capy/drive/captain-<name>/approvals/<slug>/<branch key>.jsonl`, which every
+ * crew thread can read), else to the private project-user Drive folder
+ * (`<drive>/approvals/<slug>/<branch key>.jsonl`). GSTACK_APPROVALS_MIRROR=0
+ * turns the mirror off. Reads take the union of both. Every field passes the
+ * secret scanner before anything is written.
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { capyDriveFolder } from './autoplan-checkpoint';
 import { reviewedPlan } from './captain-brief';
@@ -40,7 +44,9 @@ export interface ApprovalRow {
   schema_version: 1; id: string; date: string; ask: string; words: string; by: string;
   scope: string; pending: string; outcome: Outcome; source: string; branch: string; recorded_at: string;
 }
-export interface StoreLocation { file: string; mirror?: string; branch: string; slug: string; ephemeral: boolean }
+export type MirrorSource = 'GSTACK_APPROVALS_DIR' | 'captain drive' | 'project-user drive';
+/** `mirror` is written and read; `read_also` are the other mirror roots' copies, read so a row mirrored under an earlier rule stays visible. */
+export interface StoreLocation { file: string; mirror?: string; mirror_source?: MirrorSource; read_also?: string[]; branch: string; slug: string; ephemeral: boolean }
 export interface RecordError { code: ResultCodeName; message: string }
 export type Env = NodeJS.ProcessEnv;
 
@@ -70,16 +76,39 @@ export function locate(o: { cwd: string; env: Env; branch?: string }): StoreLoca
   const dir = path.join(stateRoot, 'projects', slug, 'approvals');
   const file = path.join(dir, `${branchKey(branch)}.jsonl`);
   if (!contained(stateRoot, file)) return { code: 'APPROVAL_RECORD_INVALID', message: `record path escapes the state root: ${file}` };
-  let mirrorRoot: string | undefined;
-  if (o.env.GSTACK_APPROVALS_DIR) mirrorRoot = o.env.GSTACK_APPROVALS_DIR;
-  else if (o.env.GSTACK_CAPY === '1' && o.env.GSTACK_APPROVALS_MIRROR !== '0') {
+  // Every mirror root this machine can see, best first; the first is written, the rest are read so a
+  // row mirrored before the Captain created approvals/ (or under an explicit directory) stays visible.
+  const roots: Array<[MirrorSource, string]> = [];
+  if (o.env.GSTACK_APPROVALS_DIR) roots.push(['GSTACK_APPROVALS_DIR', o.env.GSTACK_APPROVALS_DIR]);
+  if (o.env.GSTACK_CAPY === '1' && o.env.GSTACK_APPROVALS_MIRROR !== '0') {
+    const captain = captainApprovalsDir(o.env);
+    if (captain) roots.push(['captain drive', captain]);
     const top = git(o.cwd, ['rev-parse', '--show-toplevel']);
     const folder = capyDriveFolder(o.env, top.status === 0 ? path.basename(top.stdout.trim()) : undefined);
-    if (folder) mirrorRoot = path.join(path.dirname(folder), 'approvals');
+    if (folder) roots.push(['project-user drive', path.join(path.dirname(folder), 'approvals')]);
   }
-  const mirror = mirrorRoot ? path.join(mirrorRoot, slug, `${branchKey(branch)}.jsonl`) : undefined;
-  if (mirror && !contained(mirrorRoot!, mirror)) return { code: 'APPROVAL_RECORD_INVALID', message: `mirror path escapes ${mirrorRoot}` };
-  return { file, mirror, branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1' };
+  const rel = path.join(slug, `${branchKey(branch)}.jsonl`);
+  for (const [, root] of roots) if (!contained(root, path.join(root, rel))) return { code: 'APPROVAL_RECORD_INVALID', message: `mirror path escapes ${root}` };
+  const [chosen, ...rest] = roots;
+  return {
+    file, mirror: chosen ? path.join(chosen[1], rel) : undefined, mirror_source: chosen?.[0], read_also: rest.map(([, root]) => path.join(root, rel)),
+    branch, slug, ephemeral: o.env.GSTACK_EPHEMERAL === '1',
+  };
+}
+
+/**
+ * The approvals directory a Captain named for its crew: exactly one mounted Captain drive
+ * (`~/.capy/drive/captain-*`) holding an `approvals/` directory. Two Captains with one each
+ * is ambiguous, so neither is taken and the private project-user folder stays the mirror.
+ */
+export function captainApprovalsDir(env: Env): string | undefined {
+  if (env.GSTACK_CAPY !== '1') return undefined;
+  const drive = path.join(env.HOME || os.homedir(), '.capy', 'drive');
+  let found: string[];
+  try {
+    found = fs.readdirSync(drive).filter(d => d.startsWith('captain-')).map(d => path.join(drive, d, 'approvals')).filter(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+  } catch { return undefined; }
+  return found.length === 1 ? found[0] : undefined;
 }
 
 function readRows(file: string | undefined): ApprovalRow[] {
@@ -99,7 +128,7 @@ export function readRecord(loc: StoreLocation): ReadResult {
   const local = readRows(loc.file);
   const mirrored = readRows(loc.mirror);
   const byId = new Map<string, ApprovalRow>();
-  for (const r of [...mirrored, ...local]) byId.set(r.id, r);
+  for (const r of [...(loc.read_also ?? []).flatMap(readRows), ...mirrored, ...local]) byId.set(r.id, r);
   const rows = [...byId.values()].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
   const known = fs.existsSync(loc.file) || (loc.mirror !== undefined && fs.existsSync(loc.mirror));
   const state = rows.length ? 'present' : known || !loc.ephemeral || loc.mirror ? 'empty' : 'unavailable';

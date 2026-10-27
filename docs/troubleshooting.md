@@ -1741,8 +1741,11 @@ from "the record was lost with the old machine". `render` still prints the secti
 "Record unavailable on this machine" instead of "No approvals recorded". Exit 1.
 
 **Fix.** Run where the record lives, copy the rows back from the thread's report, or make
-the private Drive mirror resolvable (one `~/.capy/drive/project-user-*` folder, or
-`GSTACK_APPROVALS_DIR`).
+a Drive mirror resolvable: `GSTACK_APPROVALS_DIR`, an `approvals/` directory in the one
+mounted Captain drive (`~/.capy/drive/captain-*/approvals`, readable by the whole crew), or one
+`~/.capy/drive/project-user-*` folder. `gstack-approvals path` prints which rule chose the mirror
+and, as `READ_ALSO:`, the other roots it still reads (a row mirrored before the Captain created
+`approvals/` stays visible).
 
 <a id="approval-record-write-failed"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_WRITE_FAILED)`
@@ -4640,6 +4643,47 @@ conflict-only base merge, a test-only change or release metadata, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
+<a id="receipt-prose-mismatch"></a>
+### `RECEIPT_PROSE_MISMATCH`
+
+**Meaning.** `gstack-ship-receipt read --check-prose` found a number in the PR
+body that names a counter the receipt records (`passes=3` against
+`review_loop.passes: 2`, `1 deferred` against `deferred: 2`, `passed: 40`
+against `gate.passed: 41`) with a different value. The receipt is written from
+the run; the prose was typed, so a reader of the body would learn a number the
+run did not produce. The `PROSE:` line names each field with both values.
+
+**Fix.** Correct the body to the receipt's number. When the receipt is the
+stale one (the run was repeated), rerun `/ship` so the receipt is rewritten
+([ship-policy.md](ship-policy.md#ship-receipt)).
+
+<a id="receipt-git-too-old"></a>
+### `RECEIPT_GIT_TOO_OLD`
+
+**Meaning.** `gstack-ship-receipt carry` compares the product diff at the two
+heads with `git patch-id --verbatim`, which git added in 2.39. The installed git
+is older (the refusal names its version), so the comparison could not run and
+nothing was rewritten.
+
+**Fix.** Upgrade git to 2.39 or later and rerun `carry`; without an upgrade, run
+`/ship` on the new head ([ship-policy.md](ship-policy.md#receipt-carry)).
+
+<a id="docs-audit-blocked"></a>
+### `DOCS_AUDIT_BLOCKED`
+
+**Meaning.** `gstack-ship-receipt write --docs` was given a documentation audit
+whose `status` is `blocked` with no `exception`, or `--body` lacks the exception
+line the record implies, or `gstack-ship-receipt docs-caps` found a declared
+documentation file over its `docs.caps` byte cap (or absent). /ship Step 14.5
+ends blocked only when nobody has accepted the named risk, so a receipt written
+then would publish an unaudited release as audited; nothing was written.
+
+**Fix.** Repair the audit and rerun Step 14.5, or trim the file the `DOCS_CAP: …
+over` line names (or raise its cap on the base branch). When the owner accepts
+the named risk instead, record it as `docs.exception: { accepted_by, date, via,
+reason }` and carry the `Documentation exception: accepted by <owner> <date> via
+<ref>: <reason>` line in the PR body's `## Documentation` section, word for word
+([ship-policy.md](ship-policy.md#ship-receipt)).
 <a id="gstack-pr-wait"></a>
 ## gstack-pr-wait
 

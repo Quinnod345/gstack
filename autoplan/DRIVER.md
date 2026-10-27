@@ -27,11 +27,9 @@ line yourself; gstack never writes the plan.
    per voice. Dispatch the native prompt to a subagent on your model and the outside prompt to
    a subagent on another model family (or `gstack-outside-voice run`). Each writes `result=`.
 2. Submit each voice exactly once (`BOUND:`). Both voices in closes the phase (`PHASE_CLOSED:`).
-3. Repeat `next` until `status=gate_pending` (`GATE: gate_rev=<n>`); render it with
-   `gstack-gate render <dir>/gate.json --all` and relay every page. You never approve the
-   gate for the owner. Offer `rec` (every recommendation, plan changes included) as the default.
-4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or
-   `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an
+3. Repeat `next` until `status=gate_pending` (`GATE: gate_rev=<n>`); render it with `gstack-gate render <dir>/gate.json --all` and relay every page with the two cost lines printed under `GATE:`: `GATE_SPEND:` (spent, worst case, cap, headroom, attempts; host-subagent attempts are priced unknown and counted at their reservation, so quote their real figure from the host's cost view) and `GATE_REC_COST:` (the phases `rec` can reopen and the estimate for them, an upper bound; `gate_cost` in `--json`).
+   You never approve the gate for the owner. Offer `rec` (every recommendation, plan changes included) as the default.
+4. `answer` with the owner's reply and `--by human` (the owner typed the tokens) or `--by agent:<id> --owner-reply "<their words>"` (you relayed them); without `--by` an
    unattended run refuses (`ANSWER_BY_REQUIRED`). `APPLY: <id> <title> -> <change>` lines are
    accepted plan changes (status `amend_pending`): edit the plan, then `revise` (the printed
    `NEXT:` names it), or `revise --settle <id>` when the line says no plan edit is needed. Until
