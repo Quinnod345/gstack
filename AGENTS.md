@@ -49,6 +49,7 @@ Invoke them by name (e.g., `/office-hours`).
 |-------|-------------|
 | `/ship` | Run tests, review, gate integrity, push, open PR. Workspace-aware version queue. |
 | `/land-and-deploy` | Merge the PR, wait for CI and deploy, verify production health. |
+| `/modernize` | Bring an aging PR onto its current base and decide MODERNIZE, REWORK or CLOSE, with `git range-diff` proof before a pinned-lease push. Never closes a PR itself. |
 | `/canary` | Post-deploy monitoring loop in your Aside browser (or gstack's own when Aside is absent). |
 | `/landing-report` | Read-only dashboard for the workspace-aware ship queue. |
 | `/document-release` | Audit relevant docs before final verification on every ship; also supports standalone documentation updates. |
