@@ -33,7 +33,7 @@ const HELP = `gstack-pr-shots — before/after image of a change for a PR body (
   [--title <text>] [--name <slug>] [--out <dir>] [--json]
 
 Example:
-  gstack-pr-shots --path ship/SKILL.md --heading "Step 19: Create PR/MR" --caption "PR body opens with What changed, Why and Approvals under Capy"
+  gstack-pr-shots --path ship/SKILL.md --heading "Step 19: Create PR/MR" --caption "PR body opens with What changed, Why, Blast radius and Approvals under Capy"
 
 ${exitTableHelp()}`;
 

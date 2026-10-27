@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import type { GhResult } from '../lib/ci-gate';
-import { DEFAULT_ADVISORY_BOTS, DEFAULT_GATING_BOTS, PR_WAIT_EXIT, Watcher, botLists, parsePrTarget, parsePrWaitArgs, prWaitMain, stateDir, type PrWaitEnv, type PrWaitOptions } from '../lib/pr-wait';
+import { DEFAULT_ADVISORY_BOTS, DEFAULT_GATING_BOTS, DEFAULT_TIMEOUT_MINUTES, PR_WAIT_EXIT, Watcher, botLists, parsePrTarget, parsePrWaitArgs, prWaitMain, stateDir, type PrWaitEnv, type PrWaitOptions } from '../lib/pr-wait';
 import { GhError, runGh } from '../lib/pr-wait-github';
 import { RESULT_CODES } from '../lib/result-codes';
 
@@ -360,7 +360,9 @@ describe('arguments and the gh layer', () => {
     expect(parsePrTarget('abc')).toMatchObject({ error: "'abc' is not a PR number or PR URL" });
     expect(parsePrTarget('0')).toMatchObject({ error: "'0' is not a valid PR number" });
     expect(parsePrTarget('42', 'nope')).toMatchObject({ error: "'nope' is not owner/name" });
-    expect(parsePrWaitArgs(['42', '--until', 'green', '--interval', '2'])).toEqual({ target: '42', until: 'green', interval: 5, timeout: 60 });
+    expect(parsePrWaitArgs(['42', '--until', 'green', '--interval', '2'])).toEqual({ target: '42', until: 'green', interval: 5, timeout: 60, excludes: [] });
+    expect(parsePrWaitArgs(['42', '--exclude', 'quality-gate, canary', '--exclude', 'canary'])).toMatchObject({ excludes: ['quality-gate', 'canary'] });
+    expect(parsePrWaitArgs(['42', '--exclude', ' , '])).toMatchObject({ error: expect.stringContaining('--exclude needs') });
     expect(parsePrWaitArgs(['42', '--timeout', '0'])).toMatchObject({ timeout: 0 });
     expect(parsePrWaitArgs(['42', '--timeout', 'soon'])).toMatchObject({ error: expect.stringContaining('--timeout needs') });
     expect(parsePrWaitArgs(['--until', 'soon'])).toMatchObject({ error: expect.stringContaining('--until needs') });
@@ -419,6 +421,44 @@ describe('pass-1 review fixes: gates agree, bounded waits, bot identity, local f
     const red = watcher({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'fail'])) }, 'green');
     expect(red.poll()).toBe(PR_WAIT_EXIT.blocked);
     expect(lines()).toEqual(['#42 check failed: quality-gate https://ci.example/quality-gate', expect.stringContaining('(PR_WAIT_BLOCKED;')]);
+  });
+
+  // #3495 follow-up (ruled by GStack Minder, 2026-10-26): gstack-ci-gate --exclude has a watcher equivalent, so a non-required
+  // check stuck in pending (a canary, a deploy preview) no longer holds --until green for the whole timeout.
+  test('--exclude leaves a named non-required check out of the verdict: pending does not hold green, failed does not block; a required name is refused and gates', () => {
+    const excluded = (script: Script, ...names: string[]) => {
+      const e = env(fakeGh(script));
+      return new Watcher(e, REPO, 42, 'green', 20, botLists(e.vars), DEFAULT_TIMEOUT_MINUTES, names);
+    };
+    const checks = ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'pending']));
+    const held = excluded({ rulesets: RULESETS, checks }, 'other-check');
+    expect(pollUntilDone(held, 4)).toBeNull();
+    expect(lines()).toEqual([]);
+    const w = excluded({ rulesets: RULESETS, checks }, 'quality-gate');
+    expect(pollUntilDone(w)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual(['#42 green on aaaaaaa: 2 pass; required 2/2 green; no greptile or macroscope yet; 0 unresolved threads; merge state CLEAN; 0 commits behind main']);
+    expect(stderr.join('')).toContain('excluded from the verdict: quality-gate');
+    stdout = []; stderr = [];
+    const red = excluded({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'fail'])) }, 'quality-gate');
+    expect(pollUntilDone(red)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual([expect.stringMatching(/^#42 green on aaaaaaa: 2 pass;/)]);
+    stdout = []; stderr = [];
+    const refused = excluded({ rulesets: RULESETS, checks: ok(checksJson(['free-tests', 'fail'], ['windows-free-tests', 'pass'])) }, 'free-tests');
+    expect(refused.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 required check failed: free-tests https://ci.example/free-tests');
+    expect(stderr.join('')).toContain('exclude refused for required check free-tests: a required check gates');
+    stdout = []; stderr = [];
+    // When a required-check source cannot be read the set may be short, so nothing is excluded (gstack-ci-gate refuses its
+    // overrides the same way): the excluded failure gates and the first poll says why.
+    const unknown = excluded({ rulesets: err('gh: HTTP 403: rate limited', 1), checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'fail'])) }, 'quality-gate');
+    expect(unknown.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 check failed: quality-gate https://ci.example/quality-gate');
+    expect(stderr.join('')).toContain('exclude refused for quality-gate: the required checks could not be read, so every check gates');
+    stdout = []; stderr = [];
+    // Through main: the flag reaches the watcher.
+    const e = env(fakeGh({ rulesets: RULESETS, checks }));
+    expect(prWaitMain(['42', '--repo', REPO, '--until', 'green', '--exclude', 'quality-gate'], e)).toBe(PR_WAIT_EXIT.met);
+    expect(lines()).toEqual([expect.stringMatching(/^#42 green on aaaaaaa: 2 pass;/)]);
   });
 
   test('a failed bot check is a failed check, gating or advisory, as gstack-ci-gate counts it; never a completed review', () => {

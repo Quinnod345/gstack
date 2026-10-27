@@ -46,12 +46,22 @@ export interface PrWaitEnv {
   pidAlive(pid: number): boolean;
 }
 
-export interface PrWaitOptions { target?: string; repo?: string; until: Until; interval: number; timeout: number }
+export interface PrWaitOptions { target?: string; repo?: string; until: Until; interval: number; timeout: number; excludes: string[] }
 export interface BotLists { gating: string[]; advisory: string[] }
 
 interface State { reported: string[]; summaries: Record<string, string>; base_oid: string | null; merge_state: string | null }
 
-export const PR_WAIT_USAGE = `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS] [--timeout MINUTES]
+/**
+ * The base-overlap event, one shape for the watcher and for `gstack-ship-queue
+ * ready` / `train build`, which read the same fact from git (handoff
+ * GSTA-119): the base moved and its new commits touch files this PR changes.
+ */
+export function baseOverlapLine(base: string, baseOid: string, touched: readonly string[]): string {
+  const more = touched.length > 5 ? ` and ${touched.length - 5} more` : '';
+  return `${base} moved to ${baseOid.slice(0, 7)} and touches files in this PR: ${touched.slice(0, 5).join(', ')}${more}`;
+}
+
+export const PR_WAIT_USAGE = `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change] [--interval SECONDS] [--timeout MINUTES] [--exclude CHECK,...]
 
 Watches one pull request and prints one line per real event on stdout (prefixed
 #<pr>), so a monitor wakes the agent once per event. Progress and recoverable
@@ -69,6 +79,10 @@ comes from the URL or the current checkout.
 
 --timeout   minutes before a watch that met nothing ends as PR_WAIT_BLOCKED,
             naming what is still pending (default 60; 0 waits without limit)
+--exclude   check names (comma-separated, repeatable) left out of the verdict,
+            as gstack-ci-gate --exclude does: a named check neither holds green
+            while pending nor blocks when it fails. A check the base branch
+            requires cannot be excluded; the name is logged as refused and gates
 
 Events: a check failed (name and link); all checks finished on the
 head (one summary line); a comment, review, thread or thread reply from someone
@@ -101,7 +115,7 @@ lock, which the next watcher for the PR takes over once the pid is gone.
 Docs: docs/troubleshooting.md#gstack-pr-wait`;
 
 export function parsePrWaitArgs(argv: string[]): PrWaitOptions | { help: true } | { error: string } {
-  const opts: PrWaitOptions = { until: 'ready', interval: 20, timeout: DEFAULT_TIMEOUT_MINUTES };
+  const opts: PrWaitOptions = { until: 'ready', interval: 20, timeout: DEFAULT_TIMEOUT_MINUTES, excludes: [] };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--help' || flag === '-h') return { help: true };
@@ -122,6 +136,12 @@ export function parsePrWaitArgs(argv: string[]): PrWaitOptions | { help: true } 
       const value = argv[++i] ?? '';
       if (!/^[0-9]+$/.test(value)) return { error: `--timeout needs a whole number of minutes, not '${value}'` };
       opts.timeout = Number(value);
+      continue;
+    }
+    if (flag === '--exclude') {
+      const names = (argv[++i] ?? '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!names.length) return { error: '--exclude needs one or more check names, comma-separated' };
+      for (const name of names) if (!opts.excludes.includes(name)) opts.excludes.push(name);
       continue;
     }
     if (flag.startsWith('-') && !/^-?\d+$/.test(flag)) return { error: `unknown argument ${flag}` };
@@ -185,12 +205,14 @@ export class Watcher {
   /** First run for this PR: record what exists and report nothing. */
   baseline: boolean;
   private required: Set<string> | null = null;
+  /** False when a required-check source could not be read: the set may be short, so no --exclude name is excluded. */
+  private requiredKnown = true;
   private prevSnapshot: string | null = null;
   private prFiles = new Map<string, Set<string>>();
   private pending: string[] = [];
   private readonly gh: GhEnv;
 
-  constructor(readonly env: PrWaitEnv, readonly repo: string, readonly pr: number, readonly until: Until, readonly interval: number, readonly bots: BotLists, readonly timeoutMinutes = DEFAULT_TIMEOUT_MINUTES) {
+  constructor(readonly env: PrWaitEnv, readonly repo: string, readonly pr: number, readonly until: Until, readonly interval: number, readonly bots: BotLists, readonly timeoutMinutes = DEFAULT_TIMEOUT_MINUTES, readonly excludes: readonly string[] = []) {
     const stem = path.join(stateDir(env.vars), `${repo.replace('/', '__')}__${pr}`);
     this.stateFile = `${stem}.json`;
     this.lockFile = `${stem}.lock`;
@@ -295,11 +317,22 @@ export class Watcher {
     return count === null ? '' : `; ${count} commit${count === '1' ? '' : 's'} behind ${base}`;
   }
 
-  private evaluateChecks(checks: Map<string, Check>, head: string) {
+  /**
+   * `--exclude` names that are not required checks: the ones the verdict leaves out, as gstack-ci-gate does. While the
+   * required set is unknown (a source could not be read) nothing is excluded, as gstack-ci-gate refuses its overrides.
+   */
+  private excluded(): Set<string> {
+    return new Set(this.requiredKnown ? this.excludes.filter(name => !this.required?.has(name)) : []);
+  }
+
+  private evaluateChecks(all: Map<string, Check>, head: string) {
     const required = this.required ?? new Set<string>();
     // Every check on the head gates, as gstack-ci-gate does, so land-and-deploy's two gates never
     // disagree; a required check gates even before it appears. An advisory bot's review is never
-    // waited for, but its check is a check like any other.
+    // waited for, but its check is a check like any other. A --exclude name that is not required
+    // is left out of the verdict; a required one cannot be excluded and gates.
+    const excluded = this.excluded();
+    const checks = new Map([...all].filter(([name]) => !excluded.has(name)));
     const watched = checks;
     const gate = new Set([...required, ...watched.keys()]);
     const bucketOf = (name: string) => checks.get(name)?.bucket ?? 'pending';
@@ -392,10 +425,7 @@ export class Watcher {
     const oldBase = this.state.base_oid;
     if (pr.baseOid && oldBase && pr.baseOid !== oldBase && !this.baseline) {
       const touched = this.baseOverlap(head, oldBase, pr.baseOid);
-      if (touched.length > 0) {
-        const more = touched.length > 5 ? ` and ${touched.length - 5} more` : '';
-        this.emit(`base:${pr.baseOid}`, `${base} moved to ${pr.baseOid.slice(0, 7)} and touches files in this PR: ${touched.slice(0, 5).join(', ')}${more}`);
-      }
+      if (touched.length > 0) this.emit(`base:${pr.baseOid}`, baseOverlapLine(base, pr.baseOid, touched));
     }
     if (pr.baseOid) this.state.base_oid = pr.baseOid;
     const mergeState = pr.mergeStateStatus;
@@ -418,9 +448,19 @@ export class Watcher {
     if (pr.state === 'CLOSED') return this.finish(PR_WAIT_EXIT.blocked, [`closed without merging: ${pr.url}`]);
     const base = pr.baseRefName;
     if (this.required === null) {
-      this.required = requiredChecks(this.gh, this.repo, base);
+      const read = requiredChecks(this.gh, this.repo, base);
+      this.required = read.names;
+      this.requiredKnown = read.known;
       const gate = [...this.required].sort().join(', ') || 'none set';
       this.log(`watching ${this.repo}#${this.pr} until ${this.until}; required checks: ${gate}; every check on the head gates`);
+      if (this.excludes.length && !this.requiredKnown) {
+        this.log(`exclude refused for ${this.excludes.join(', ')}: the required checks could not be read, so every check gates`);
+      } else if (this.excludes.length) {
+        const refused = this.excludes.filter(name => this.required!.has(name));
+        const dropped = this.excludes.filter(name => !this.required!.has(name));
+        if (dropped.length) this.log(`excluded from the verdict: ${dropped.join(', ')}`);
+        if (refused.length) this.log(`exclude refused for required check${refused.length === 1 ? '' : 's'} ${refused.join(', ')}: a required check gates`);
+      }
     }
     const checks = fetchChecks(this.gh, this.repo, this.pr);
     const head = pr.headRefOid;
@@ -530,7 +570,7 @@ export function prWaitMain(argv: string[], env: PrWaitEnv): number {
   if ('error' in parsed) return refuse(env, parsed.error);
   const target = resolveTarget(env, parsed);
   if ('error' in target) return refuse(env, target.error);
-  const watcher = new Watcher(env, target.repo, target.pr, parsed.until, parsed.interval, botLists(env.vars), parsed.timeout);
+  const watcher = new Watcher(env, target.repo, target.pr, parsed.until, parsed.interval, botLists(env.vars), parsed.timeout, parsed.excludes);
   // Exit 1 always carries a PR_WAIT_BLOCKED line, so a local fault (an unwritable state root, a full disk) is a refusal, never a verdict.
   try {
     const lock = watcher.lock();

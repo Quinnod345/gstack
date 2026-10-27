@@ -328,16 +328,28 @@ export function isNumericMetadataValue(span: string, match: RegExpExecArray): bo
  * command. Only the position decides: a run/job flag (`--run 37235771700`,
  * `--job=111534615007`), a `gh run view|watch|rerun|download|cancel`
  * argument, an `actions/runs/<id>` or `/job/<id>` URL segment, or a
- * `run_id` / `job_id` key. The same digits anywhere else still report.
+ * `run_id` / `job_id` key. An 11-digit id (every GitHub Actions run id since
+ * 2025) also counts right after a run word on the same line, the way a ship
+ * receipt, a READY block or an approval record names one (`screen 40477638211
+ * GREEN`, `gate=40323989742`, `rerun passed 40287239206`, `run #19368712345`);
+ * generic words (id, job, attempt, workflow) exempt nothing, since `customer id
+ * 14155551234` is a number. A national number written without its `+` right
+ * after a run word (`failed 14155551234`) is the accepted residual of the
+ * owner's ruling that a run id is not a phone number; gstack-post's chained-id
+ * allowlist reads the same position the same way. The same digits anywhere
+ * else still report.
  */
 const CI_ID_POSITION_BEFORE =
   /(?:--(?:run|job)(?:-id)?(?:[ \t]+|[ \t]*=[ \t]*)|\bgh[ \t]+run[ \t]+(?:view|watch|rerun|download|cancel)[ \t]+|\/actions\/runs\/|\/jobs?\/|(?:run|job)_id["']?[ \t]*[:=][ \t]*["']?)$/i;
+/** A run word with an optional ':' '#' '=' right before an 11-digit token; shared with gstack-post's chained-id allowlist. */
+export const CI_RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed)\s*[:#=]?\s*$/i;
 export function isCiRunIdentifier(span: string, match: RegExpExecArray): boolean {
   if (!/^\d+$/.test(span)) return false;
   const input = match.input ?? "";
   const { start } = spanBounds(match);
   const lineStart = input.lastIndexOf("\n", start - 1) + 1;
-  return CI_ID_POSITION_BEFORE.test(input.slice(Math.max(lineStart, start - 80), start));
+  const before = input.slice(Math.max(lineStart, start - 80), start);
+  return CI_ID_POSITION_BEFORE.test(before) || (span.length === 11 && CI_RUN_WORD_BEFORE.test(before));
 }
 
 /**

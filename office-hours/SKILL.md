@@ -82,38 +82,11 @@ If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `~/.claude/skills/
 
 ## AskUserQuestion Format
 
-Only these subsections replace the shared ones; the rest of this section is shared.
+Only these subsections replace the shared ones or, under a new heading, add to its end; the rest of this section is shared.
 
-### When AskUserQuestion is unavailable or a call fails
+### Open-ended questions
 
-Tell these apart:
-
-1. **Auto-decide denial (NOT a failure).** The result contains `[plan-tune auto-decide] <id> → <option>` — the preference hook as designed. Proceed with that option. Do NOT retry, do NOT fall back to prose.
-2. **Genuine failure** — no variant in your tool list, OR the variant is present but the call returns an error / missing result (MCP transport error, empty result, host bug such as Conductor's flaky MCP variant above).
-   - If it was present and **errored** (not absent), retry the SAME call **once** — only if no answer could have surfaced (a missing-result error can arrive after the user saw the question; retrying would double-prompt, so if it may have reached them, treat it as pending and don't retry).
-   - Then branch on `SESSION_KIND` (echoed by the preamble; empty/absent ⇒ `interactive`):
-     - `spawned` → defer to the **Spawned session** block: auto-choose the recommended option. Never prose, never BLOCKED.
-     - `unattended` → auto-choose the recommended option; a consent, destructive or irreversible option, unrecommended question or approval gate stays pending.
-     - `headless` → `BLOCKED — AskUserQuestion unavailable`; stop and wait (no human can answer).
-     - `interactive` → **prose fallback** (below).
-
-**Prose fallback — render the decision brief as a markdown message, not a tool call.** Same information as the tool format below in paragraphs, not ✅/❌ bullets. It MUST surface this triad:
-
-1. **A clear ELI10 of the issue itself** — plain English on what's being decided and why it matters (the question, not per-choice), naming the stakes. Lead with it.
-2. **Completeness scores per choice** — explicit on EACH choice, per the Completeness rule in the Format section below; never drop the score.
-3. **The recommendation and why** — the `Recommendation: <choice> because <reason>` line plus the `(recommended)` marker on that choice.
-
-Layout: a `D<N>` title; an explicit reply line listing the offered selectors; the issue ELI10; the Recommendation line; ONE paragraph per choice with its `(recommended)` marker, `Completeness: X/10`, and 2-4 sentences of reasoning (never a bare bullet list); a closing `Net:` line. With `QUESTION_TUNING: true`, append the checked `<gstack-qid:{question_id}>` to the explicit reply line. Split chains / 5+ options: one prose block per per-option call, in order. Before an interactive prose question, finish the tool calls that do not depend on its answer; then send the complete brief as the turn's final message and STOP and wait for the typed answer. An open-ended question with no options list uses the `Q<N>` form below instead of a `D<N>` brief; a free-text reply answers the most recent unanswered `Q<N>`. Do not publish an earlier copy during tool work or follow it with tools or a waiting message. In plan mode this satisfies end-of-turn like a tool call.
-
-**Continuation — mapping a typed reply back to a brief.** Each brief carries a stable label (`D<N>`, or `D<N>.k` in a split chain) the user references (e.g. "3.2: B"). A bare letter maps to the most-recent UNANSWERED brief; if more than one is open (a split chain), do NOT guess — ask which `D<N>.k` it answers. Never apply a bare letter ambiguously across a chain.
-
-**One-way / destructive confirmations in prose.** A one-way door (irreversible or destructive: delete, force-push, drop, overwrite) makes prose a WEAKER gate than the tool, so strengthen it: require an explicit typed confirmation (the exact option letter or word), state plainly what is irreversible, and NEVER proceed on a vague, partial or ambiguous reply — re-ask. Silence or "ok"/"sure" without the explicit choice is not-yet-confirmed.
-
-### Format
-
-Every AskUserQuestion is a decision brief and must be sent as tool_use, not prose — unless the documented failure fallback above applies (interactive session + the call is unavailable/erroring), when the prose fallback is the correct output.
-
-**Open-question prose form (`Q<N>`)** — for open-ended questions with no fixed option set (the Phase 2A/2B diagnostic questions) when you are in prose:
+**Open-question prose form (`Q<N>`)** — for open-ended questions with no fixed option set (the Phase 2A/2B diagnostic questions) when you are in prose, use this form instead of a `D<N>` brief; a free-text reply answers the most recent unanswered `Q<N>`:
 
 ```text
 Q<N> — <question, verbatim>
@@ -123,39 +96,6 @@ Reply in your own words — I'll wait.
 ```
 
 Q-numbering starts at `Q1` per invocation, independent of D-numbering. Questions with discrete options always use `D<N>`.
-
-```
-D<N> — <one-line question title>
-Project/branch/task: <1 short grounding sentence using _BRANCH>
-ELI10: <plain English a 16-year-old could follow, 2-4 sentences, name the stakes>
-Stakes if we pick wrong: <one sentence on what breaks, what user sees, what's lost>
-Recommendation: <choice> because <one-line reason>
-Completeness: A=X/10, B=Y/10   (or: Note: options differ in kind, not coverage — no completeness score)
-Pros / cons:
-A) <option label> (recommended)
-  ✅ <pro — concrete, observable, ≥40 chars>
-  ❌ <con — honest, ≥40 chars>
-B) <option label>
-  ✅ <pro>
-  ❌ <con>
-Net: <one-line synthesis of what you're actually trading off>
-```
-
-D-numbering: first question in a skill invocation is `D1`; increment yourself. This is a model-level instruction, not a runtime counter.
-
-ELI10 is always present, in plain English, not function names; Recommendation is ALWAYS present. Keep the `(recommended)` label; AUTO_DECIDE depends on it.
-
-Completeness: use `Completeness: N/10` only when options differ in coverage. 10 = complete, 7 = happy path, 3 = shortcut. If options differ in kind, write: `Note: options differ in kind, not coverage — no completeness score.`
-
-Accepted shortcuts leave a trail: when the user selects an option that is BOTH Completeness ≤ 7 AND a durable-scope call (architecture or scope-cut, never a turn-level choice), log it via `gstack-decision-log` with the ceiling and the upgrade trigger in the rationale, and, while implementing that option (same edit, no follow-up question), mark each cut corner in code with `gstack-shortcut(dec-<id>): <ceiling>, upgrade when <trigger>` in the language's comment syntax. Never agent-initiated: the marker exists only downstream of the user's explicit choice. /retro harvests these into a debt ledger, joined on the decision id.
-
-`Pros / cons:` in question text; descriptions use literal ✅/❌ bullets, not Pro:/Con:. Each real option: ≥2 pros and ≥1 con, ≥40 chars each. One-way/destructive escape: `✅ No cons — this is a hard-stop choice`.
-
-Neutral posture: `Recommendation: <default> — this is a taste call, no strong preference either way`; `(recommended)` STAYS on the default option for AUTO_DECIDE.
-
-Effort both-scales: when an option involves effort, label both human-team and CC+gstack time, e.g. `(human: ~2 days / CC: ~15 min)`, so AI compression is visible at decision time.
-
-`Net:` line closes question text. Per-skill instructions may add stricter rules.
 
 ## Question Tuning (skip entirely if `QUESTION_TUNING: false`)
 

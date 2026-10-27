@@ -2373,7 +2373,12 @@ exact tokens it finds in these positions:
   `gates`, `backstop`, `bisect`, `rerun`, `dispatched`, `dispatch`,
   `failed`, `passed` (`failed 40269992077 | rerun passed 40287239206`,
   `gate 40323989742`, `run #19368712345`); a generic word such as `id`,
-  `job`, `attempt` or `workflow` exempts nothing;
+  `job`, `attempt` or `workflow` exempts nothing. This position is exempt in
+  the scanner itself (`isCiRunIdentifier` in `lib/redact-patterns.ts`), so
+  `gstack-approvals add`, `gstack-decision-trail` and the pregate secrets
+  check accept it too, not only `gstack-post`. A national number written
+  without its `+` right after a run word reads as a run id there; that is the
+  accepted residual of the ruling that a run id is not a phone number;
 - every 11-digit id chained after an allowlisted one through `, `, ` and `,
   ` & `, ` or ` or ` / `, optionally with a `(#1234)` between
   (`screen 40269992077 (#3434) and 40275443393 (#3453)`).
@@ -2708,11 +2713,19 @@ code (you already do when you run its tests), or drop the release tool.
 **Meaning.** `gstack-restamp` was told the base SHA (`--expect-base`) or the
 merge order (`--expect-order`) the allocation assumed, and one of them moved:
 the base advanced, a predecessor is not merged, or a successor merged first.
-The JSON result carries `expected`, `actual` and `recompute`.
+`--expect-order` lists the lane's own PR (`--pr`) first, then the remaining
+order; a list that leaves it out reads every entry as an unmerged predecessor,
+and the message says so. The JSON result carries `expected`, `actual` and
+`recompute`.
 
-**Fix.** Run the printed `recompute` command, which recomputes the version
-from the current base, then merge with the server-side head condition
-(`MERGE_CONDITION: sha=<head>`).
+**Fix.** Run the printed `recompute` command: it carries the corrected order
+(this PR first, merged PRs dropped, an unmerged predecessor kept ahead because
+it must merge first) and recomputes the version from the current base; then
+merge with the server-side head condition (`MERGE_CONDITION: sha=<head>`). A
+predecessor GitHub calls merged that the local base does not carry yet
+(`#<pr>=merged-not-in-base`) is kept ahead too, with `fix: git fetch origin
+<base>`: fetch, then rerun, so the recompute, pinned to that local base, never
+allocates the version the predecessor already took.
 
 <a id="restamp-version-source"></a>
 ### `RESTAMP_VERSION_SOURCE`
@@ -4174,13 +4187,19 @@ with the new pin (`train build --prs <n>@<new sha>,…`).
 ### `QUEUE_TRAIN_CONFLICT`
 
 **Meaning.** Merging a PR onto the prefix before it conflicts outside the
-version files and the CHANGELOG. The `QUEUE_TRAIN_CONFLICT:` line names the
-PR, the conflicting files and the PRs merged before it. Nothing was
-dispatched and no branch was pushed.
+version files and the CHANGELOG. From `train build`, the
+`QUEUE_TRAIN_CONFLICT:` line names the PR, the conflicting files and the PRs
+merged before it, and the check runs before the fill rule, so a filling train
+finds it too. From `ready --no-screen`, the prefix is the base itself: the
+`BASE_OVERLAP:` line names the files the base moved onto since the head
+forked, and the train would stop at this PR (under `--screen` the same
+conflict is `QUEUE_SCREEN_STALE_REF`). Nothing was dispatched and no branch
+was pushed.
 
-**Fix.** Run the printed `train build --prs <list without that PR>`. The PR's
-lane merges main (with the earlier PRs once they land) and reports READY
-again.
+**Fix.** From `train build`, run the printed `train build --prs <list without
+that PR>`. The PR's lane reports the conflict to the controller and, on its
+word (crew template rule 14), merges main into the pin (with the earlier PRs
+once they land), resolves, pushes, runs /ship and reports READY again.
 
 <a id="queue-train-free-red"></a>
 ### `QUEUE_TRAIN_FREE_RED`
@@ -4209,7 +4228,11 @@ run carrying the nonce, or marks the dispatch absent; only then does
 
 **Meaning.** The train has fewer PRs than `train.max_size` and its oldest
 READY PR has waited less than `train.fill_hours`, so it does not dispatch
-yet. The message prints when it will.
+yet. The message prints when it will. The scratch merges already ran: the
+`MERGE_CHECK: T1..T<k> merge clean onto <base>@<sha>` line above it says every
+seated pin merges in slot order (a pin that does not is `QUEUE_TRAIN_CONFLICT`
+instead), and a `#<pr> BASE_OVERLAP:` line names a pin whose files the base
+moved onto since it forked.
 
 **Fix.** Add READY PRs, rerun after the printed time, or pass `--urgent` for a
 one-PR train.
@@ -4688,14 +4711,21 @@ reason }` and carry the `Documentation exception: accepted by <owner> <date> via
 ## gstack-pr-wait
 
 `gstack-pr-wait <pr> [--repo owner/name] [--until green|ready|any-change]
-[--interval SECONDS] [--timeout MINUTES]` watches one pull request and prints
+[--interval SECONDS] [--timeout MINUTES] [--exclude CHECK,...]` watches one pull request and prints
 one stdout line per real event, prefixed `#<pr>`; progress and recoverable
 errors go to stderr. `/land-and-deploy` Step 3 runs it with `--until green`.
 Exit 0 means the `--until` condition is met or the PR merged; exit 1 and 2
 end with one of the two codes below. `green` gates on every check on the
 head, as `gstack-ci-gate` does, so the two never disagree; a check the base
 branch requires (rulesets and classic branch protection) counts as pending
-until it appears. A 403 on the classic
+until it appears. `--exclude <check,...>` leaves a named non-required check
+out of the verdict, as `gstack-ci-gate --exclude` does: it neither holds
+`green` while pending nor blocks when it fails, and the first poll logs
+`excluded from the verdict: <names>`; a required check cannot be excluded
+(`exclude refused for required check <name>`) and gates, and while a
+required-check source cannot be read nothing is excluded (`exclude refused for
+<names>: the required checks could not be read`), as `gstack-ci-gate` refuses
+its overrides. A 403 on the classic
 protection read (a token without admin scope) is logged and skipped, and the
 rulesets read still names the required checks. The review-bot lists are
 configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`

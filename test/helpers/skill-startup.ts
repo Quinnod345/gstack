@@ -23,7 +23,10 @@ export function readSkillStartup(skillMd: string): string {
   return `${skill.slice(0, at)}${shared}\n${skill.slice(at)}`;
 }
 
-const VARIANT_NOTE = 'Only these subsections replace the shared ones; the rest of this section is shared.';
+const VARIANT_NOTES = [
+  'Only these subsections replace the shared ones; the rest of this section is shared.',
+  'Only these subsections replace the shared ones or, under a new heading, add to its end; the rest of this section is shared.',
+];
 
 /** Split markdown at one heading level outside code fences; parts are trimmed. */
 function splitAt(text: string, marker: string): string[] {
@@ -59,7 +62,7 @@ export function readSharedSections(skillMd: string): string[] {
  * The text a tier 2+ skill effectively follows, laid out as one file: the
  * pointer section is replaced by the shared sections, each with this skill's
  * same-heading section (or, for a cut-down variant, its replacement
- * subsections) applied, and those overriding sections leave their own place.
+ * and added subsections) applied, and those overriding sections leave their own place.
  * Every preamble section then appears once with the text the skill used to
  * inline; only the grouping differs. SKILL.md without a pointer is returned as is.
  */
@@ -80,9 +83,12 @@ export function readSkillEffective(skillMd: string): string {
   const effective = shared.map(section => {
     const override = overrides.get(headingOf(section));
     if (!override) return section;
-    if (!override.includes(VARIANT_NOTE)) return override;
+    if (!VARIANT_NOTES.some(note => override.includes(note))) return override;
     const replacements = new Map(splitAt(override, '### ').slice(1).map(part => [headingOf(part), part]));
-    return splitAt(section, '### ').map(part => replacements.get(headingOf(part)) ?? part).join('\n\n');
+    const parts = splitAt(section, '### ');
+    const sharedHeads = new Set(parts.map(headingOf));
+    const added = [...replacements.values()].filter(part => !sharedHeads.has(headingOf(part)));
+    return [...parts.map(part => replacements.get(headingOf(part)) ?? part), ...added].join('\n\n');
   });
   return `${skill.slice(0, pointer + 1)}${effective.join('\n\n')}\n\n${kept.join('')}`;
 }

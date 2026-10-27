@@ -39,6 +39,31 @@ floor above; everything else is INFORMATIONAL. Data loss, a trust-boundary
 bypass and uncapped spend stay forced CRITICAL (the sideways sweep rule); no
 lane, specialist, dedup or saved decision downgrades them.
 
+<a id="rulings-below-the-floor"></a>
+### Rulings below the floor
+
+The floor is a test, and these classes have been put to it, each more than
+once, and failed it (#3485 from the /ship of #3484, #3504 from the /ship of
+#3487). A finding in one of them is a **note** from the first pass on, named
+by its ruling in the PR body's `## Review notes`; it never earns a fix round
+or another review pass, and the lead judgment stage drops it from the defect
+count with the pointer. The floor itself does not move, so a finding that also
+loses data, crosses a trust boundary or spends without a cap stays CRITICAL
+whatever class it resembles.
+
+| Ruling | What it looks like | Why it is below the floor |
+|---|---|---|
+| **own-artifact hardening** | A check missing between two things the repository's own tooling writes: a screen verdict not compared with the receipt it belongs to; a receipt schema that does not declare a key the writer records; a policy loader that defaults when the base branch's own file is invalid; a size read that follows a symlink inside the repository. | The only writer is the repository's maintainers through its tools; no caller inside the intended case reaches the gap, and no test fails. A writer outside that trust boundary makes it a bypass, and CRITICAL. |
+| **unwired or unread** | A helper with no caller, a field written and never read, a duplicated helper, a header comment naming a step that does not run it, a key-version constant that moved before any release carried the old value. | Nothing takes the path, so nothing breaks; it is dead code to delete or wire in its own change. |
+| **bounded repeat work** | A re-dispatch on every call, a redundant screen after main moves, an orphaned scratch branch, a refusal that could come one step earlier in the sequence, a settle that could wait one more check. | The operation completes, nothing is lost, and the cost is one more bounded run; uncapped spend is the sideways sweep's CRITICAL, not this class. |
+| **conservative refusal** | Stale state scoped wider than its cause: a RED verdict that keeps refusing a head after main moved, a pending result that keeps refusing after it settled. | A refusal costs a rerun and never passes something wrong; a wrong pass would be the floor. |
+| **artifact presentation** | A string from an artifact printed verbatim into a parsed line (whitespace, control characters); a classifier that reads a non-zero exit code beside a non-RED verdict as RED. | Display and classification of the repository's own output; it forges no parsed field. |
+| **test gap** | A state-matrix cell without a test, a coverage percentage, a weak or flaky test, a fixture that shares the coordinator's environment. | Category `testing`, below the floor by definition above; a gap is work for the test audit, not a defect in the diff. |
+
+A reviewer that wants a class promoted argues it against the floor with a
+reaching input, in the finding, and the owner rules; the table records the
+rulings, it does not close them.
+
 ## `NO FINDINGS` is a result
 
 A reviewer that finds nothing answers `NO FINDINGS` and nothing else. That is a
@@ -171,7 +196,7 @@ trailers, appended }`.
 
 ## Where this is enforced
 
-- `scripts/resolvers/review-army.ts`: the floor and `NO FINDINGS` in every specialist and Red Team prompt (rendered into `review/sections/review-army.md` and `ship/sections/review-army.md`); in `/ship` every specialist and Red Team prompt it renders carries its diff base as a literal sha the parent writes in (`DIFF_BASE=<diff-base>`: the merge base on pass 1, `RANGE_BASE` from pass 2 on), because a reviewer is its own process and never sees the parent's shell variables; the fan-out batches above.
+- `scripts/resolvers/review-army.ts`: the floor and `NO FINDINGS` in every specialist and Red Team prompt (rendered into `review/sections/review-army.md` and `ship/sections/review-army.md`), and the lead judgment's "On record" line that turns a [ruled class](#rulings-below-the-floor) into a note; in `/ship` every specialist and Red Team prompt it renders carries its diff base as a literal sha the parent writes in (`DIFF_BASE=<diff-base>`: the merge base on pass 1, `RANGE_BASE` from pass 2 on), because a reviewer is its own process and never sees the parent's shell variables; the fan-out batches above.
 - `ship/sections/review-army.md` Step 9: passes, `RANGE_BASE`, classify, defer, render, the cap check before any edit, the Step 11 late-defer row, scratch files under `.gstack/tmp/`, the cap decisions; `ship/sections/adversarial.md` Step 11: the outside voice reads the same range and scopes queued fixes the same way.
 - `lib/review-scope.ts`, `bin/gstack-review-scope`: `classify`, `defer`, `render`, `summary`; refusals are `REVIEW_SCOPE_INPUT` and `REVIEW_SCOPE_RANGE` ([troubleshooting.md](troubleshooting.md#review-scope-input)).
 - `lib/ship-policy.ts`: the `review_scope` key and its `ship: review_scope …` consequence line.

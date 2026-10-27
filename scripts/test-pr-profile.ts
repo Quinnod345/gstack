@@ -235,6 +235,7 @@ export const FREE_ONLY_PR_FILES = [
   'scripts/paid-test-durations.json',
   'scripts/ubicloud/**',
   'capy/skill/**', // The vendored Capy skill (Drive bootstrapper): run by Capy agents, read by no paid case; test/capy-skill-wrapper.test.ts covers it.
+  'captain/templates/**', // The /captain crew templates (CREW.md, merge-ask.md, slot-call.md, …): copied into a Captain's drive by people and Captains, read by no paid case; free test/captain-skill.test.ts covers them (#3499).
   'tsconfig.test.json', // Read only by `tsc -p tsconfig.test.json` (typecheck:test); Bun's runtime reads tsconfig.json.
   '.gitignore', // Changes which untracked files git reports, never tracked content a case reads.
   '.gstack/generated.json', // gstack's own regen registry: gstack-regen/gstack-pregate read it from origin/<base> of the repo they run in; paid cases run in fixture repos.
@@ -286,6 +287,14 @@ export const FREE_ONLY_PR_FILES = [
 ] as const;
 
 /**
+ * Release metadata no paid case reads: the third-party notices and licence
+ * texts, and the root LICENSE. A courtesy entry or a licence line never
+ * widens the PR gate (#3499); CHANGELOG.md and VERSION, which the train stamp
+ * rewrites on every slot, are already exempt in knownNonBehaviorFile.
+ */
+export const RELEASE_METADATA_FILES = ['NOTICE.md', 'LICENSE', 'licenses/**'] as const;
+
+/**
  * Inputs every paid case consumes that must always restore the full gate
  * (fail closed, even when a touchfile or a derived reference also names
  * them): dependencies and the CI image, setup and the build, the PR
@@ -317,6 +326,7 @@ export function knownNonBehaviorFile(file: string): boolean {
     // by free doc/generation checks and are not copied into paid fixtures.
     || ['AGENTS.md', 'CLAUDE.md', 'agents-digest/gstack-AGENTS.md'].includes(file)
     || FREE_ONLY_PR_FILES.some(pattern => matchGlob(file, pattern))
+    || RELEASE_METADATA_FILES.some(pattern => matchGlob(file, pattern))
     || (PERIODIC_ONLY_PR_FILES as readonly string[]).includes(file)
     || (file.startsWith('test/fixtures/') && Object.keys(FREE_FIXTURES).some(pattern => matchGlob(file, pattern)))
     // Free test files anywhere (test/, browse/test/, design/test/, make-pdf/test/): no paid case runs or reads a free test.

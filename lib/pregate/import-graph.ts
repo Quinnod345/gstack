@@ -49,7 +49,11 @@ const scanner = new Bun.Transpiler({ loader: 'tsx' });
 // `( ) [ ] +` appear in framework route paths: Next.js route groups `(app)`,
 // dynamic segments `[id]` / `[[...slug]]`, SvelteKit `+page.svelte`. A literal
 // that matches more text only gains an edge when it resolves to a repo file.
-const QUOTED = /['"`]([A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
+// A relative literal (`'../ship/sections/pr-body.md.tmpl'` read through
+// `new URL(…, import.meta.url)` or `readFileSync`) resolves from the file that
+// names it, like a relative import; without it a test reading a template by
+// relative path had no edge to the template (GSTA-121's test/ship-publication-gates.test.ts).
+const QUOTED = /['"`]((?:\.\.?\/)*[A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
 const JOIN = /\bjoin\(([^()]*)\)/g;
 const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 // A statement starts a line or follows `;` or a compound statement's `:`. The module spec is

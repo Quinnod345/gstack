@@ -76,6 +76,18 @@ describe('gstack-approvals add and render', () => {
     expect(fs.existsSync(path.join(state, 'projects'))).toBe(false);
   });
 
+  test('a GitHub Actions run id after a run word is not a phone number, and the record keeps it (GSTA-121)', () => {
+    const cwd = repo(); const state = tmp('appr-state-');
+    const words = 'Rule-19 grant: re-READY with --no-screen citing screen 40477638211 GREEN at 5619199800a2; gate=40477638210 passed';
+    const r = bin(['add', '--ask', 'Third rule 19 grant on the GREEN screen', '--words', words, '--by', 'GStack Minder', '--scope', 'one merge'], { cwd, env: { GSTACK_STATE_ROOT: state } });
+    expect(r.status, r.err).toBe(0);
+    const file = /^APPROVAL_RECORDED: a-[0-9a-f]{12} (.*\.jsonl)$/m.exec(r.out)![1]!;
+    expect(fs.readFileSync(file, 'utf8')).toContain('screen 40477638211 GREEN');
+    const control = bin(['add', '--ask', 'ok', '--words', 'call me on 40477638211 or +14155550123', '--by', 'g', '--scope', 's'], { cwd, env: { GSTACK_STATE_ROOT: state } });
+    expect(control.status).toBe(3);
+    expect(control.err).toContain('pii.phone.e164');
+  });
+
   test('missing fields, bad outcomes and impossible dates are usage errors', () => {
     const cwd = repo(); const state = tmp('appr-state-');
     expect(bin(['add', '--ask', 'x'], { cwd, env: { GSTACK_STATE_ROOT: state } }).err).toContain('APPROVAL_RECORD_INVALID');

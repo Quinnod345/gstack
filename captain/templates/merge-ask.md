@@ -10,7 +10,10 @@ it before training the PR.
 <one to three images, highest-signal first; a collapsed text version under each>
 
 ## Why
-<the cause and the user-visible effect, two or three sentences>
+<the problem in the person's words first, then the cause and the user-visible effect, two or three sentences>
+
+## Blast radius
+<what else the change touches and the one fact that makes that safe, with the evidence-ladder rung reached>
 
 ## Approvals
 <the table from gstack-approvals render>
