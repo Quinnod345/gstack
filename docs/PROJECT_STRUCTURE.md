@@ -97,7 +97,7 @@ gstack/
 ├── docs/designs/    # Design documents (incl. IMPECCABLE_INTEROP.md = the design detector / catalog / open DESIGN.md record, and fork-port-residual-2026-09/ evaluation evidence)
 ├── setup-deploy/    # /setup-deploy skill (one-time deploy config)
 ├── .github/         # CI workflows + shared composite actions (.github/actions/) + Docker image (claude CLI pinned)
-│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, CSO release, platform qualification and smaller gates
+│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan, CHANGELOG prose lint), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, CSO release, platform qualification and smaller gates
 │   └── docker/      # Dockerfile.ci (pre-baked toolchain + Playwright/Chromium)
 ├── contrib/         # Contributor-only tools (never installed for users)
 │   └── add-host/    # /gstack-contrib-add-host skill
@@ -105,7 +105,7 @@ gstack/
 ├── SKILL.md         # Generated from SKILL.md.tmpl (don't edit directly)
 ├── SKILL.md.tmpl    # Template: edit this, run gen:skill-docs
 ├── ETHOS.md         # Builder philosophy (Boil the Ocean, Search Before Building)
-├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (Apache-2.0), Elaya's design skills and hallmark's sloplint (MIT)
+├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (Apache-2.0), Elaya's design skills and hallmark's sloplint (MIT), plus courtesy entries for tstack and pstack ideas and word lists (MIT; no license text carried)
 ├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt, MIT-elaya.txt, MIT-hallmark.txt)
 └── package.json     # Build scripts for browse
 ```

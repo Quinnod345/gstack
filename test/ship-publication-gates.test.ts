@@ -14,6 +14,16 @@ function writeDrafts(root: string, top = '## Summary\n\n## Documentation', rest 
   return block => block.replace('<body-top-file-name>', 'pr-body-top.abc123').replace('<body-rest-file-name>', 'pr-body-rest.abc123');
 }
 const POST = resolve(import.meta.dir, '../bin/gstack-post');
+const PROSE_LINT = resolve(import.meta.dir, '../bin/gstack-prose-lint');
+
+/** The two real bins the blocks call, at the installed path under a HOME of `root`. */
+function installBins(root: string): void {
+  const bin = join(root, '.claude/skills/gstack/bin');
+  mkdirSync(bin, { recursive: true });
+  for (const [name, target] of [['gstack-post', POST], ['gstack-prose-lint', PROSE_LINT]] as const) {
+    writeFileSync(join(bin, name), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(target)} "$@"\n`, { mode: 0o755 });
+  }
+}
 const fenceAfter = (marker: string) => {
   const at = template.indexOf(marker);
   expect(at).toBeGreaterThan(-1);
@@ -26,7 +36,7 @@ const createBlock = fenceAfter('**No open PR/MR:**');
 
 /**
  * A repo whose origin is GitHub, a stub gh that records argv and stdin, and
- * the real gstack-post at the installed path the blocks call.
+ * the real gstack-post and gstack-prose-lint at the installed path the blocks call.
  */
 function publicationRepo(root: string) {
   const log = join(root, 'log');
@@ -38,7 +48,7 @@ function publicationRepo(root: string) {
   for (const args of [['init', '-q'], ['remote', 'add', 'origin', 'https://github.com/o/r.git']]) {
     Bun.spawnSync(['git', ...args], { cwd: root, env: { ...process.env, ...gitEnv }, timeout: 10_000 });
   }
-  writeFileSync(join(bin, 'gstack-post'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(POST)} "$@"\n`, { mode: 0o755 });
+  installBins(root);
   writeFileSync(join(stubs, 'gh'), `#!/usr/bin/env bash
 case "$1 $2" in
   "repo view") echo PRIVATE; exit 0 ;;
@@ -133,6 +143,7 @@ test('publication composes the saved documentation section unchanged and refuses
   const compose = block.slice(block.indexOf('PR_BODY_FILE=$(mktemp'), block.indexOf('echo "PR_BODY_FILE:'));
   const root = mkdtempSync(join(tmpdir(), 'ship-compose-'));
   try {
+    installBins(root);
     const section = '**Status:** current — no edits.\n\n- Diagram drift: none (no diagrams in any doc).';
     writeFileSync(join(root, 'section.md'), section);
     const run = (file: string) => Bun.spawnSync(['bash', '-c', `${writeDrafts(root)(compose)}cat -- "$PR_BODY_FILE"`], {

@@ -165,7 +165,7 @@ a push included. The sequence that works unattended on Capy:
    to the current tree.
 6. Docs audit: snapshot the documentation candidates read-only and record the vetted
    section.
-7. Body and receipt: compose the PR body (What changed, Why, Approvals first on Capy),
+7. Body and receipt: compose the PR body (What changed, Why, Blast radius, Approvals first on Capy),
    write the ship receipt into it, post body and title.
 8. Terminal line: `gstack-ship-receipt result --pr <n>` prints
    `GSTACK_RESULT: skill=ship status=complete`.

@@ -20,7 +20,8 @@ Write the text into each printed file with your file-write tool (Claude Code's W
    gh pr view <pr-number> --json title -q .title | ~/.claude/skills/gstack/bin/gstack-pr-title-rewrite.sh <new-version> --stdin > "$TITLE_FILE" || exit 1
    ```
    GitLab reads `glab mr view <pr-number> --output json | jq -r .title` into the same pipe.
-2. For a new PR/MR, write `v<NEW_VERSION> <type>: <summary>` into the file with your file-write tool.
+2. For a new PR/MR, write `v<NEW_VERSION> <type>: <summary>` into the file with your file-write tool;
+   `<summary>` names what the user gets, not the mechanism.
 3. Every created or updated title MUST start with `v$NEW_VERSION `; check the file with
    `grep -Eq '^v<new-version>( |$)' "$TITLE_FILE"` and never publish an unprefixed title.
 4. **NO_VERSION:** replaces items 1-3: keep an existing title (the platform title
@@ -74,8 +75,18 @@ The PR/MR body should contain these sections (never reuse a prior run's body):
 
 ```
 ## Summary
-<Read `git log origin/<base>..HEAD --oneline`. Group every substantive commit by
-theme, excluding VERSION/CHANGELOG bookkeeping. Do not paste the commit list.>
+<Open with the problem in the user's words (what they hit, saw or asked), then the fix
+and what they get now; themes from `git log origin/<base>..HEAD --oneline` after that,
+minus VERSION/CHANGELOG bookkeeping. Never an inventory or a commit list. BAD: "Adds
+gstack-prose-lint, wires Steps 13 and 19, refreshes the goldens." GOOD: "Nobody reads a
+CHANGELOG entry twice, so autopilot words shipped every release. /ship now lints the entry
+before the commit and names each line to rewrite.">
+
+## Blast radius
+<One or two sentences: what else the change touches (callers, consumers, generated
+files, hosts) and the one fact that makes that safe, with the rung of the evidence
+ladder the fact reached (file:line read, walked failure path, script ran, repro). The
+ladder is the `/investigate` skill's Blast radius section, when present.>
 
 ## Test Coverage
 <coverage diagram from Step 7, or "All new code paths have test coverage.">
@@ -197,6 +208,7 @@ PR_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gstack-pr-body.XXXXXX") || { echo "ERROR:
 BODY_TOP_FILE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.gstack/tmp/<body-top-file-name>"
 BODY_REST_FILE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.gstack/tmp/<body-rest-file-name>"
 [ -s "$BODY_TOP_FILE" ] && [ -s "$BODY_REST_FILE" ] || { echo "Not composed: $BODY_TOP_FILE or $BODY_REST_FILE is empty, so the body was never written. Write both, then rerun." >&2; exit 1; }
+~/.claude/skills/gstack/bin/gstack-prose-lint "$BODY_TOP_FILE" --sections 'Why,Summary,Blast radius' --gate >&2 || { echo "Not composed: fix what gstack-prose-lint printed above (a PROSE: line is a sentence to rewrite in the draft; a usage line means the draft lost a heading), then rerun." >&2; exit 1; }
 { awk 1 "$BODY_TOP_FILE" && cat -- "$DOCS_SECTION_FILE" && echo && awk 1 "$BODY_REST_FILE"; } > "$PR_BODY_FILE" || exit 1
 rm -f "$BODY_TOP_FILE" "$BODY_REST_FILE"
 echo "PR_BODY_FILE: $PR_BODY_FILE"
