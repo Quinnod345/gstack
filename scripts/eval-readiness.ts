@@ -42,17 +42,24 @@ export type ReadinessDecision =
   | { kind: 'blocked'; reason: string };
 
 /**
- * The Free Tests run events that count as this head's CI: GitHub's own
- * pull_request run, and a workflow_dispatch run on the branch (the dispatch
- * route in docs/ship-policy.md for a head whose only conflict with the base is
- * the CHANGELOG, which GitHub builds no merge ref for and so never runs
- * pull_request CI on; #3508). A push run is a branch build, not this head's gate.
+ * The Free Tests run events that count as this head's CI, in order of
+ * precedence: GitHub's own pull_request run (it builds the merge ref, the tree
+ * a merge would test), then a workflow_dispatch run on the branch (the
+ * dispatch route in docs/ship-policy.md for a head whose only conflict with
+ * the base is the CHANGELOG, which GitHub builds no merge ref for and so never
+ * runs pull_request CI on; #3508). A dispatched run builds the head alone, so
+ * it decides only for a head with no pull_request run: it never overrides a red
+ * pull_request run (rerun that run), and a lane's extra dispatch never holds a
+ * head its pull_request CI cleared. A push run is a branch build, not this
+ * head's gate.
  */
 export const FREE_TESTS_EVENTS: readonly string[] = ['pull_request', 'workflow_dispatch'];
 
-/** The newest Free Tests run on this exact head decides, pull_request or dispatched; a rerun updates that run in place. */
+/** The newest Free Tests run on this exact head under the first event present decides; a rerun updates that run in place. */
 export function freeTestsState(runs: FreeTestsRun[], headSha: string): FreeTestsState {
-  const newest = runs.filter(run => run.head_sha === headSha && FREE_TESTS_EVENTS.includes(run.event)).sort((a, b) => b.id - a.id)[0];
+  const atHead = runs.filter(run => run.head_sha === headSha);
+  const event = FREE_TESTS_EVENTS.find(e => atHead.some(run => run.event === e));
+  const newest = atHead.filter(run => run.event === event).sort((a, b) => b.id - a.id)[0];
   if (!newest) return { state: 'missing' };
   if (newest.status !== 'completed') return { state: 'running', runId: newest.id };
   if (newest.conclusion === 'success') return { state: 'success', runId: newest.id };

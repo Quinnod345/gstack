@@ -195,27 +195,37 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
   return 'error' in out ? { conflicts: [`(${out.error})`] } : { tree: out.tree };
 }
 
-export interface BaseOverlap { touched: string[]; conflicts: string[] | null; line: string | null }
+export interface BaseOverlap { touched: string[]; conflicts: string[] | null; unknown: boolean; line: string | null }
 
 /**
  * What gstack-pr-wait's base-overlap event tells a lane, read from git at
- * READY and at train build (handoff GSTA-119, rule 25): the files the base
- * changed since this head forked that the head also changes, and whether the
- * train's own merge of the head onto the base is clean. A base that moved
- * onto nothing the PR touches is one line of fact; a conflict is what
- * QUEUE_TRAIN_CONFLICT would otherwise discover at the scratch merge.
+ * READY and at train build (handoff GSTA-119): the files the base changed
+ * since this head forked that the head also changes and, when `verdict` is
+ * asked for, whether the train's own merge of the head onto the base is
+ * clean. A base that moved onto nothing the PR touches is one line of fact; a
+ * conflict is what QUEUE_TRAIN_CONFLICT would otherwise discover at the
+ * scratch merge. A git read that fails is `unknown`, said so, never "no
+ * overlap". Train build asks for no verdict: its own chain merges each pin
+ * onto its prefix, and a merge onto the bare base would contradict it for T2+.
  */
-export function baseOverlap(repoRoot: string, base: string, baseSha: string, head: string, policy: ShipPolicy): BaseOverlap {
+export function baseOverlap(repoRoot: string, base: string, baseSha: string, head: string, policy: ShipPolicy, verdict = true): BaseOverlap {
   const fork = git(repoRoot, ['merge-base', baseSha, head]);
-  if (!fork.ok || !fork.out || fork.out === baseSha) return { touched: [], conflicts: null, line: null };
-  const names = (from: string, to: string) => new Set(git(repoRoot, ['diff', '--name-only', from, to]).out.split('\n').filter(Boolean));
-  const theirs = names(fork.out, baseSha);
-  const touched = [...names(fork.out, head)].filter(f => theirs.has(f)).sort();
-  if (!touched.length) return { touched, conflicts: null, line: `BASE: ${base} moved to ${baseSha.slice(0, 7)} since this PR forked; its new commits touch no file this PR changes` };
+  const none = { touched: [] as string[], conflicts: null, unknown: false };
+  if (fork.ok && fork.out === baseSha) return { ...none, line: null };
+  const theirs = fork.ok && fork.out ? git(repoRoot, ['diff', '--name-only', fork.out, baseSha]) : fork;
+  const ours = fork.ok && fork.out ? git(repoRoot, ['diff', '--name-only', fork.out, head]) : fork;
+  if (!fork.ok || !fork.out || !theirs.ok || !ours.ok) {
+    const why = [fork, theirs, ours].find(r => !r.ok)?.out.split('\n')[0] || 'git read failed';
+    return { ...none, unknown: true, line: `BASE_OVERLAP: could not compare ${base}@${baseSha.slice(0, 12)} with ${head.slice(0, 12)} (${why}); conflicts unknown` };
+  }
+  const changed = new Set(theirs.out.split('\n').filter(Boolean));
+  const touched = ours.out.split('\n').filter(f => f && changed.has(f)).sort();
+  if (!touched.length) return { ...none, line: `BASE: ${base} moved to ${baseSha.slice(0, 7)} since this PR forked; its new commits touch no file this PR changes` };
+  if (!verdict) return { touched, conflicts: null, unknown: false, line: `BASE_OVERLAP: ${baseOverlapLine(base, baseSha, touched)}` };
   const m = mergeStep(repoRoot, baseSha, head, policy);
   const conflicts = 'conflicts' in m ? m.conflicts : null;
-  const verdict = conflicts ? `the train's merge onto ${base} conflicts beyond the CHANGELOG and the stamp files (${conflicts.join(', ')})` : `the train's merge onto ${base} is clean`;
-  return { touched, conflicts, line: `BASE_OVERLAP: ${baseOverlapLine(base, baseSha, touched)}; ${verdict}` };
+  const said = conflicts ? `the train's merge onto ${base} conflicts beyond the CHANGELOG and the stamp files (${conflicts.join(', ')})` : `the train's merge onto ${base} is clean`;
+  return { touched, conflicts, unknown: false, line: `BASE_OVERLAP: ${baseOverlapLine(base, baseSha, touched)}; ${said}` };
 }
 
 const TRAIN_IDENTITY = { GIT_AUTHOR_NAME: 'gstack-ship-queue', GIT_AUTHOR_EMAIL: 'ship-queue@gstack.local', GIT_COMMITTER_NAME: 'gstack-ship-queue',
@@ -379,11 +389,12 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
   ];
   const baseSha = git(env.ctx.repoRoot, ['rev-parse', `${env.remote}/${env.ctx.base}`]).out;
   const key = sha256(JSON.stringify({ base: baseSha, slots: order.train.map(s => `${s.pr}@${s.head}`) }));
-  // The scratch merges run before the fill rule (#3485, rule 25): a QUEUE_TRAIN_WAITING result is also a clean dry-run merge
-  // of every seated pin, and a pin the base moved onto is named before the train is refused for it.
+  // The scratch merges run before the fill rule (#3485): a QUEUE_TRAIN_WAITING result is also a clean dry-run merge of
+  // every seated pin, and a pin the base moved onto is named (files only; the chain below is the merge verdict) before the
+  // train is refused for it.
   for (const s of order.train) {
-    const overlap = baseOverlap(env.ctx.repoRoot, env.ctx.base, baseSha, s.head, env.policy.policy);
-    if (overlap.touched.length) lines.push(`#${s.pr} ${overlap.line}`);
+    const overlap = baseOverlap(env.ctx.repoRoot, env.ctx.base, baseSha, s.head, env.policy.policy, false);
+    if (overlap.touched.length || overlap.unknown) lines.push(`#${s.pr} ${overlap.line}`);
   }
   const chain = buildChain(env.ctx.repoRoot, baseSha, order.train, env.policy.policy);
   if ('stoppedAt' in chain) {

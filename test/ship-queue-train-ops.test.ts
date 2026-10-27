@@ -199,11 +199,12 @@ describe('#3465: the screen is planned on a scratch merge when GitHub\'s merge r
     expect(dispatches(fx, 'evals.yml').length).toBe(1);
     const main2 = repo.git('rev-parse', 'origin/main');
     expect(line(conflict.out, 'BASE_OVERLAP:')).toBe(`BASE_OVERLAP: main moved to ${main2.slice(0, 7)} and touches files in this PR: CHANGELOG.md, pr-1.txt; the train's merge onto main conflicts beyond the CHANGELOG and the stamp files (pr-1.txt)`);
-    // Without a screen there is no scratch merge to refuse at, so READY itself refuses the conflict the train would stop at (rule 25).
+    // Without a screen there is no scratch merge to refuse at, so READY itself refuses the conflict the train would stop at;
+    // the fix follows the crew template's rule 14 (the base is merged on the controller's word, never by the lane alone).
     const noScreen = queue(fx, ['ready', '--pr', '1', '--pregate', pregate, '--no-screen']);
     expect(noScreen.status).toBe(EXIT.refused);
     expect(noScreen.err).toMatch(new RegExp(`#1 conflicts with main@${main2.slice(0, 12)} beyond the CHANGELOG and the stamp files \\(pr-1\\.txt\\); the train would stop at this PR.*\\(QUEUE_TRAIN_CONFLICT\\)`));
-    expect(next(noScreen.out)).toBe('NEXT: trial-merge main into the pin (rule 25), resolve, push, run /ship, then gstack-ship-queue ready --pr 1 --screen|--no-screen');
+    expect(next(noScreen.out)).toBe('NEXT: report the conflict to the controller; on its word merge main into the pin (never rebase), resolve, push, run /ship, then gstack-ship-queue ready --pr 1 --screen|--no-screen');
     expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'ready', repoKey(fx), `1-${head}.json`))).toBe(true);
   }, 120_000);
 });

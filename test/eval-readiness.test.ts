@@ -55,7 +55,7 @@ describe('readiness decision', () => {
 
   // #3508: a head whose only conflict with main is the CHANGELOG gets no pull_request CI (GitHub has no merge ref to build);
   // the dispatch route runs Free Tests through workflow_dispatch on the branch, and readiness must read that run.
-  test('a dispatched-only head: the workflow_dispatch Free Tests run at the exact head decides, green or red, newest first', () => {
+  test('a dispatched-only head: the workflow_dispatch Free Tests run at the exact head decides, green or red, newest first; a pull_request run outranks it', () => {
     const dispatched = (id: number, status: string, conclusion: string | null, over: Partial<FreeTestsRun> = {}) => free(id, status, conclusion, { event: 'workflow_dispatch', ...over });
     expect(freeTestsState([dispatched(40448356650, 'completed', 'success')], HEAD)).toEqual({ state: 'success', runId: 40448356650 });
     expect(freeTestsState([dispatched(5, 'completed', 'failure')], HEAD)).toEqual({ state: 'failed', runId: 5, conclusion: 'failure' });
@@ -63,9 +63,13 @@ describe('readiness decision', () => {
     // A dispatched run on another head, or a push run on this one, is not this head's gate.
     expect(freeTestsState([dispatched(5, 'completed', 'success', { head_sha: NEWER })], HEAD)).toEqual({ state: 'missing' });
     expect(freeTestsState([free(5, 'completed', 'success', { event: 'push' })], HEAD)).toEqual({ state: 'missing' });
-    // The newest run at the head decides whatever its event: a dispatched rerun after a red pull_request run is green.
-    expect(freeTestsState([free(1, 'completed', 'failure'), dispatched(2, 'completed', 'success')], HEAD)).toEqual({ state: 'success', runId: 2 });
+    // A pull_request run at the head decides when one exists, whatever its age: it built the merge ref, a dispatch built the
+    // head alone, so a newer green dispatch never overrides a red pull_request run (rerun that run instead) and a red or
+    // running extra dispatch never holds a head its pull_request CI cleared (pre-landing review, pass 1).
+    expect(freeTestsState([free(1, 'completed', 'failure'), dispatched(2, 'completed', 'success')], HEAD)).toEqual({ state: 'failed', runId: 1, conclusion: 'failure' });
     expect(freeTestsState([dispatched(1, 'completed', 'success'), free(2, 'completed', 'failure')], HEAD)).toEqual({ state: 'failed', runId: 2, conclusion: 'failure' });
+    expect(freeTestsState([free(1, 'completed', 'success'), dispatched(2, 'in_progress', null)], HEAD)).toEqual({ state: 'success', runId: 1 });
+    expect(freeTestsState([free(1, 'completed', 'success'), dispatched(2, 'completed', 'failure')], HEAD)).toEqual({ state: 'success', runId: 1 });
   });
 
   test('ready needs both a green Free Tests on the head and an elapsed window; a moved head is superseded', () => {

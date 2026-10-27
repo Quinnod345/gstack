@@ -448,6 +448,13 @@ describe('pass-1 review fixes: gates agree, bounded waits, bot identity, local f
     expect(lines()[0]).toBe('#42 required check failed: free-tests https://ci.example/free-tests');
     expect(stderr.join('')).toContain('exclude refused for required check free-tests: a required check gates');
     stdout = []; stderr = [];
+    // When a required-check source cannot be read the set may be short, so nothing is excluded (gstack-ci-gate refuses its
+    // overrides the same way): the excluded failure gates and the first poll says why.
+    const unknown = excluded({ rulesets: err('gh: HTTP 403: rate limited', 1), checks: ok(checksJson(['free-tests', 'pass'], ['windows-free-tests', 'pass'], ['quality-gate', 'fail'])) }, 'quality-gate');
+    expect(unknown.poll()).toBe(PR_WAIT_EXIT.blocked);
+    expect(lines()[0]).toBe('#42 check failed: quality-gate https://ci.example/quality-gate');
+    expect(stderr.join('')).toContain('exclude refused for quality-gate: the required checks could not be read, so every check gates');
+    stdout = []; stderr = [];
     // Through main: the flag reaches the watcher.
     const e = env(fakeGh({ rulesets: RULESETS, checks }));
     expect(prWaitMain(['42', '--repo', REPO, '--until', 'green', '--exclude', 'quality-gate'], e)).toBe(PR_WAIT_EXIT.met);

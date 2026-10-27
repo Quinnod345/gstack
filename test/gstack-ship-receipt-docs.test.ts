@@ -213,6 +213,9 @@ describe('carry follow-ups: git floor, named refusal, branch-touched walk, digit
     expect(change(keys('1.3.0.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0', 'export const EXTRA = 1;\n'))).toBe(false);
     // Without the template the constant is not a stamp form, so the move is a product change.
     expect(stampOnlyText({ before: keys('1.3.0.0', '1.2.2.0'), after: keys('1.2.4.0', '1.2.2.0'), oldVersion: '1.2.3.0', newVersion: '1.2.4.0' })).toBe(false);
+    // A mention of another width is never a stamp candidate (tentativeMentions), so moving it by hand is a product change.
+    expect(change(keys('1.3.0', '1.2.2.0'), keys('1.2.4.0', '1.2.2.0'))).toBe(false);
+    expect(stampOnlyText({ before: 'left-pad since: 1.2.3\n', after: 'left-pad since: 1.2.4.0\n', oldVersion: '1.2.3.0', newVersion: '1.2.4.0' })).toBe(false);
   });
 
   test('planCarry names at most CARRY_NAMED_PATHS paths', () => {

@@ -205,6 +205,8 @@ export class Watcher {
   /** First run for this PR: record what exists and report nothing. */
   baseline: boolean;
   private required: Set<string> | null = null;
+  /** False when a required-check source could not be read: the set may be short, so no --exclude name is excluded. */
+  private requiredKnown = true;
   private prevSnapshot: string | null = null;
   private prFiles = new Map<string, Set<string>>();
   private pending: string[] = [];
@@ -315,9 +317,12 @@ export class Watcher {
     return count === null ? '' : `; ${count} commit${count === '1' ? '' : 's'} behind ${base}`;
   }
 
-  /** `--exclude` names that are not required checks: the ones the verdict leaves out, as gstack-ci-gate does. */
+  /**
+   * `--exclude` names that are not required checks: the ones the verdict leaves out, as gstack-ci-gate does. While the
+   * required set is unknown (a source could not be read) nothing is excluded, as gstack-ci-gate refuses its overrides.
+   */
   private excluded(): Set<string> {
-    return new Set(this.excludes.filter(name => !this.required?.has(name)));
+    return new Set(this.requiredKnown ? this.excludes.filter(name => !this.required?.has(name)) : []);
   }
 
   private evaluateChecks(all: Map<string, Check>, head: string) {
@@ -443,10 +448,14 @@ export class Watcher {
     if (pr.state === 'CLOSED') return this.finish(PR_WAIT_EXIT.blocked, [`closed without merging: ${pr.url}`]);
     const base = pr.baseRefName;
     if (this.required === null) {
-      this.required = requiredChecks(this.gh, this.repo, base);
+      const read = requiredChecks(this.gh, this.repo, base);
+      this.required = read.names;
+      this.requiredKnown = read.known;
       const gate = [...this.required].sort().join(', ') || 'none set';
       this.log(`watching ${this.repo}#${this.pr} until ${this.until}; required checks: ${gate}; every check on the head gates`);
-      if (this.excludes.length) {
+      if (this.excludes.length && !this.requiredKnown) {
+        this.log(`exclude refused for ${this.excludes.join(', ')}: the required checks could not be read, so every check gates`);
+      } else if (this.excludes.length) {
         const refused = this.excludes.filter(name => this.required!.has(name));
         const dropped = this.excludes.filter(name => !this.required!.has(name));
         if (dropped.length) this.log(`excluded from the verdict: ${dropped.join(', ')}`);

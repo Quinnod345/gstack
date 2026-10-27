@@ -4188,9 +4188,9 @@ conflict is `QUEUE_SCREEN_STALE_REF`). Nothing was dispatched and no branch
 was pushed.
 
 **Fix.** From `train build`, run the printed `train build --prs <list without
-that PR>`. The PR's lane trial-merges main into the pin (crew rule 25; with the
-earlier PRs once they land), resolves, pushes, runs /ship and reports READY
-again.
+that PR>`. The PR's lane reports the conflict to the controller and, on its
+word (crew template rule 14), merges main into the pin (with the earlier PRs
+once they land), resolves, pushes, runs /ship and reports READY again.
 
 <a id="queue-train-free-red"></a>
 ### `QUEUE_TRAIN_FREE_RED`
@@ -4713,7 +4713,10 @@ until it appears. `--exclude <check,...>` leaves a named non-required check
 out of the verdict, as `gstack-ci-gate --exclude` does: it neither holds
 `green` while pending nor blocks when it fails, and the first poll logs
 `excluded from the verdict: <names>`; a required check cannot be excluded
-(`exclude refused for required check <name>`) and gates. A 403 on the classic
+(`exclude refused for required check <name>`) and gates, and while a
+required-check source cannot be read nothing is excluded (`exclude refused for
+<names>: the required checks could not be read`), as `gstack-ci-gate` refuses
+its overrides. A 403 on the classic
 protection read (a token without admin scope) is logged and skipped, and the
 rulesets read still names the required checks. The review-bot lists are
 configuration: `gstack-config set pr_wait_gating_bots greptile,macroscope`

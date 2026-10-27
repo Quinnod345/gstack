@@ -430,10 +430,12 @@ from git: when the base moved since the head forked and its new commits touch
 files the PR changes, `BASE_OVERLAP: <base> moved to <sha7> and touches files
 in this PR: <files>; the train's merge onto <base> is clean` (or `conflicts
 beyond the CHANGELOG and the stamp files (<files>)`), the train's own merge
-rules run as a dry run in object storage. A conflict under `--no-screen` is
+rules run as a dry run in object storage; a git read that fails prints
+`conflicts unknown` and refuses nothing. A conflict under `--no-screen` is
 `QUEUE_TRAIN_CONFLICT` at READY, since the train would stop at this PR: the
-lane trial-merges the base into the pin (crew rule 25), resolves, pushes and
-runs /ship before READY, instead of learning it when the train is built. A finished screen that planned no cases (no
+lane reports it to the controller and, on its word (crew template rule 14),
+merges the base into the pin, resolves, pushes and runs /ship before READY,
+instead of learning it when the train is built. A finished screen that planned no cases (no
 `paid-plan` artifact, which a superseded run never uploads, or a plan manifest
 with nothing planned) is never followed as a screen: `ready --screen`
 dispatches a fresh one and `train build` prints `SCREEN: #<n> run <id> planned
@@ -462,11 +464,13 @@ through eval-bg's nonce. A train fills at `max_size` READY PRs or when its
 oldest READY has waited `fill_hours`, whichever comes first; until then
 `QUEUE_TRAIN_WAITING` names the time, and `--urgent` dispatches a one-PR
 train at once. The scratch merges run before the fill rule: every `train
-build` prints `#<pr> BASE_OVERLAP: …` for a seated pin whose files the base
-moved onto since it forked, refuses `QUEUE_TRAIN_CONFLICT` for a pin that
-does not merge, and otherwise prints `MERGE_CHECK: T1..T<k> merge clean onto
-<base>@<sha>`, so a `QUEUE_TRAIN_WAITING` result is also a clean dry-run merge
-of the pool (crew rule 25's trial merge, done by the tool). gstack's own block fills at 3 PRs or one hour (it was 5 PRs or
+build` prints `#<pr> BASE_OVERLAP: <base> moved to <sha7> and touches files in
+this PR: <files>` for a seated pin whose files the base moved onto since it
+forked (the chain's merge onto the pin's own prefix is the verdict), refuses
+`QUEUE_TRAIN_CONFLICT` for a pin that does not merge, and otherwise prints
+`MERGE_CHECK: T1..T<k> merge clean onto <base>@<sha>`, so a
+`QUEUE_TRAIN_WAITING` result is also a clean dry-run merge of the pool (the
+crew template's sibling trial merge, done by the tool). gstack's own block fills at 3 PRs or one hour (it was 5 PRs or
 three hours until 2026-10-26, which left READY PRs waiting most of a day). The same pins on the same base return the live train
 instead of a second one; `train build --train <nonce>` resumes a train from
 its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork

@@ -501,6 +501,13 @@ describe('gate-ahead (--after), predecessor movement and queue staleness', () =>
     expect(JSON.parse(unmerged.out)).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '4': 'open' } } });
     expect(JSON.parse(unmerged.out).message).toContain('#4 must merge before this PR stamps');
     expect(JSON.parse(unmerged.out).recompute).toMatch(/ --expect-order 4,2$/);
+    // A predecessor GitHub calls merged that the local base does not carry yet (the slot call came before the lane fetched)
+    // stays ahead in the recompute: dropping it would let --next allocate from the stale base the version it already took.
+    const unfetched = { state: 'MERGED', mergeCommit: { oid: repo.git('rev-parse', 'pr-b') }, headRefOid: 'y' };
+    const stale2 = restamp(repo, ['--next', '--pr', '2', '--expect-order', '1,4,2', '--json'], ghShim(repo, { '1': merged, '4': unfetched }));
+    expect(JSON.parse(stale2.out)).toMatchObject({ code: 'QUEUE_STALE', actual: { prs: { '4': 'merged-not-in-base' } }, fix: 'git fetch origin main' });
+    expect(JSON.parse(stale2.out).message).toContain('#4 merged but the local main does not carry the merge yet: git fetch origin main, then rerun');
+    expect(JSON.parse(stale2.out).recompute).toMatch(/ --expect-order 4,2$/);
   });
 
   // The slot-call lesson (GSTA-123, 2026-10-27): a lane given "remaining order 3487" ran --expect-order 3487 without its own

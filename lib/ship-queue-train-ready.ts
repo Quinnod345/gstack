@@ -181,14 +181,17 @@ export async function trainReady(ctx: QueueContext, o: ReadyOptions): Promise<Tr
   if (kind.kind === 'invalid') return outRefused({ code: 'QUEUE_NOT_READY', message: `the Version Gate refuses ${head.slice(0, 12)}: ${kind.reason}` }, base.lines, `fix the head, push, then ${Q} ready --pr ${o.pr} --screen|--no-screen`, 'none');
   const sel = await screenSelection(env, head, baseSha);
   const lines = [...base.lines, ...sel.lines];
-  // gstack-pr-wait's base-overlap event, read from git at READY (handoff GSTA-119, rule 25): the lane learns here that the
-  // base moved onto its files, and a merge the train would stop at is refused before the pin is pooled. Under --screen the
-  // scratch merge below reports the same conflict as QUEUE_SCREEN_STALE_REF.
+  // gstack-pr-wait's base-overlap event, read from git at READY (handoff GSTA-119): the lane learns here that the base
+  // moved onto its files, and a merge the train would stop at is refused before the pin is pooled. Under --screen the
+  // scratch merge below reports the same conflict as QUEUE_SCREEN_STALE_REF. A comparison git could not make is printed as
+  // unknown and refuses nothing: the screen or the train makes the merge for real.
   const overlap = baseOverlap(ctx.repoRoot, ctx.base, baseSha, head, env.policy.policy);
   if (overlap.line) lines.push(overlap.line);
   if (overlap.conflicts && o.screen !== 'screen') {
+    // The fix follows the crew template (captain/templates/CREW.md rule 14): a lane merges the base into a READY PR only on
+    // the controller's word, so the refusal is reported and the merge waits for that word.
     return outRefused({ code: 'QUEUE_TRAIN_CONFLICT', message: `#${o.pr} conflicts with ${ctx.base}@${baseSha.slice(0, 12)} beyond the CHANGELOG and the stamp files (${overlap.conflicts.join(', ')}); the train would stop at this PR` },
-      lines, `trial-merge ${ctx.base} into the pin (rule 25), resolve, push, run /ship, then ${Q} ready --pr ${o.pr} --screen|--no-screen`, 'none');
+      lines, `report the conflict to the controller; on its word merge ${ctx.base} into the pin (never rebase), resolve, push, run /ship, then ${Q} ready --pr ${o.pr} --screen|--no-screen`, 'none');
   }
   if (!loadReady(env.repo.keys, o.pr, head)) rebuildFromNotes(ctx.repoRoot, env.remote);
   const prior = loadReady(env.repo.keys, o.pr, head);

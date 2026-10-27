@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
+import { stampOnlyLine } from '../lib/restamp';
 import { BASE_POLICY, cleanup, ghShim, makeFixtureRepo, makePr, readFile, recordAndBundle, restamp, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -89,6 +90,19 @@ describe('tree receipt: stamps, stamp-sensitive gates and negative fixtures', ()
     const wrong = receipt(repo, ['--gated', gatedHead, '--bundle', bundle]);
     expect(wrong.status).toBe(EXIT.fail);
     expect(wrong.out).toMatch(/^TREE: changed \(lib\/policy\.ts\)$/m);
+    // A mention of another width (a 3-digit pin in a 4-digit repo) is never a stamp candidate, so moving it by hand to the
+    // new version is a product change even though it reads newer than the gated head (pre-landing review, pass 1).
+    repo.git('reset', '-q', '--hard', 'HEAD~1');
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\nexport const PIN_KEY_VERSION = '9.9.9';\n");
+    repo.git('commit', '-qam', 'a 3-digit pin');
+    const pinned = repo.git('rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(repo.work, 'lib', 'policy.ts'), "export const DOCS_KEY_VERSION = '1.2.4.0';\nexport const OLD_KEY_VERSION = '1.2.2.0';\nexport const PIN_KEY_VERSION = '1.2.4.0';\n");
+    repo.git('commit', '-qam', 'move the 3-digit pin by hand');
+    expect(stampOnlyLine("export const PIN_KEY_VERSION = '9.9.9';", "export const PIN_KEY_VERSION = '1.2.4.0';", '1.2.3.0', '1.2.4.0', ["_KEY_VERSION = '{version}'"])).toBe(false);
+    expect(stampOnlyLine('left-pad since: 1.2.3', 'left-pad since: 1.2.4.0', '1.2.3.0', '1.2.4.0')).toBe(false);
+    const width = receipt(repo, ['--gated', pinned, '--bundle', bundle]);
+    expect(width.status).toBe(EXIT.fail);
+    expect(width.out).toMatch(/^TREE: changed \(lib\/policy\.ts\)$/m);
   });
 
   test('negative fixture: a dependency pin equal to the old version is `changed`, not a stamp, even inside stamp_paths', () => {
