@@ -5097,7 +5097,7 @@ The name is not one of openclaw, hermes, dots, generic, qm, muse or grok. For a 
 <a id="harness-mode-unsupported"></a>
 ### `gstack-harness: Hermes does not support --skills router` (HARNESS_MODE_UNSUPPORTED)
 
-Hermes opens only skills it has indexed, so a router that points at unlisted files would not load. Drop `--skills` to take the harness's default (Hermes: all; OpenClaw, dots and generic: router).
+Hermes lists in its skills index only the skills registered as folders in its skills tree, so a router would leave every other gstack skill out of the listing the model chooses from (Hermes's `skill_view` can still load an unlisted skill by name, but nothing tells the model it exists). Drop `--skills` to take the harness's default (Hermes: all; OpenClaw: hybrid; dots and generic: router). OpenClaw takes router, hybrid or all.
 
 <a id="harness-unsafe-destination"></a>
 ### `gstack-harness: refusing to write into <dir>: <why>` (HARNESS_UNSAFE_DESTINATION)
@@ -5109,7 +5109,12 @@ The destination is your home folder, the filesystem root, inside the gstack chec
 
 gstack only replaces files its ledger says it wrote. A folder or a skill with the same name is yours (or another tool's), and harnesses resolve skills by name, so gstack stops instead of shadowing it. Rename or move that entry, then register again.
 
-The same code stops `register generic --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
+The same code stops `register <harness> --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
+
+<a id="harness-context-refused"></a>
+### `gstack-harness: refusing to write the gstack block into <file>: <why>` (HARNESS_CONTEXT_REFUSED)
+
+`--context` writes the routing block only into a file you name, and two kinds of file are refused before anything is written. `SOUL.md` (in any letter case) is the harness's identity file (Hermes and OpenClaw both load it every session), and gstack never edits it. For Hermes, a new `.hermes.md`, `HERMES.md`, `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` that would outrank a rules file Hermes loads now is refused too: Hermes loads one project context type, first match wins (`.hermes.md`/`HERMES.md`, then the `AGENTS.md` chain, then `CLAUDE.md`, then `.cursorrules`), takes the first name it finds in a folder (`.hermes.md` before `HERMES.md`, `AGENTS.override.md` before `AGENTS.md`), and takes the nearest `.hermes.md`/`HERMES.md` walking up to the git root, so creating it would hide those rules. Name the file Hermes already loads instead (the error names it), or a file in `$HERMES_HOME` for every session.
 
 <a id="harness-render-failed"></a>
 ### `gstack-harness: could not render <harness> skills: ...` (HARNESS_RENDER_FAILED)
