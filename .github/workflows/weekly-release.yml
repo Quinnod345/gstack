@@ -6,9 +6,12 @@ name: Stable release
 # weekly-release.yml name so its run history and every `gh workflow run`
 # reference stay intact). stable moves at most once per 72 hours: a cut inside
 # that floor is refused with REFUSED_FLOOR and NEXT_ALLOWED; a scheduled run
-# gets 3 hours of grace for cron start jitter, a hand-run cut none. The only
-# exception is a security cut: the security input with a ref, naming a GHSA,
-# CVE or #<n> the script ties to the released commits. Run it by hand with a
+# gets 3 hours of grace for cron start jitter, a hand-run cut none. Two
+# exceptions pass it, one per cut and each with a ref: a security cut (the
+# security input, naming a GHSA, CVE or #<n> the script ties to the released
+# commits) and a regression cut (the regression input, naming a
+# regression-labelled #<n> and the earlier stable release v<X> the behavior
+# worked in). Run it by hand with a
 # ref for a hotfix, or with dry_run to see the plan and change nothing. A pull request that touches
 # the release tooling runs the dry run against main with a read-only token,
 # which is the only pre-merge exercise of the real workflow. The candidate's
@@ -35,6 +38,10 @@ on:
         description: 'Security cut (needs ref): the reason, naming the GHSA-…, CVE-… or #<n> it fixes; passes the 72-hour floor once verified and lands in the release notes'
         type: string
         default: ''
+      regression:
+        description: 'Regression cut (needs ref): the reason, naming the regression-labelled #<n> it fixes and the earlier stable release v<X> it worked in; passes the 72-hour floor once verified and lands in the release notes'
+        type: string
+        default: ''
   pull_request:
     paths:
       - '.github/workflows/weekly-release.yml'
@@ -59,7 +66,7 @@ jobs:
       contents: write
       # Reads the candidate's check runs.
       checks: read
-      # A security cut reads the security label on the #<n> its reason names.
+      # A security or regression cut reads the label on the #<n> its reason names.
       issues: read
       pull-requests: read
     steps:
@@ -88,6 +95,7 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
           RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
           SECURITY_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.security || '' }}
+          REGRESSION_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.regression || '' }}
         run: |
           set -euo pipefail
           if [ -n "$RELEASE_REF" ] && ! [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
@@ -98,10 +106,15 @@ jobs:
             echo "::error::a security cut needs ref: the full SHA of the fix commit on main"
             exit 1
           fi
+          if [ -n "$REGRESSION_REASON" ] && [ -z "$RELEASE_REF" ]; then
+            echo "::error::a regression cut needs ref: the full SHA of the fix commit on main"
+            exit 1
+          fi
           args=(--repo "$GITHUB_REPOSITORY" --summary "$GITHUB_STEP_SUMMARY")
           [ "$DRY_RUN" = true ] && args+=(--dry-run)
           [ -n "$RELEASE_REF" ] && args+=(--ref "$RELEASE_REF")
           [ -n "$SECURITY_REASON" ] && args+=(--security "$SECURITY_REASON")
+          [ -n "$REGRESSION_REASON" ] && args+=(--regression "$REGRESSION_REASON")
           echo "## Stable release ($([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'cut'), $GITHUB_EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
           bun --no-env-file --config=/dev/null --no-install run scripts/release-cut.ts "${args[@]}"
 

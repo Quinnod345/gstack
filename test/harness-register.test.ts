@@ -13,7 +13,7 @@ import {
   BLOCK_BEGIN, BLOCK_END, CONTEXT_BLOCK_MAX, DOT_SKILLS_DIR, HARNESS_CODES, HarnessError, ROUTER_DESCRIPTION, ROUTER_DESCRIPTION_MAX, TARGETS,
   contextBlock, detect, listLedgers, readLedger, register, unregister, type RegisterOptions,
 } from '../lib/harness-register';
-import { qmRequest, registerQm, removeQmPack } from '../lib/harness-qm';
+import { QM_PACK_LIMITS, qmRequest, registerQm, removeQmPack } from '../lib/harness-qm';
 import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, registryRows, runSetup, tree } from './helpers/install-fixture';
 
 const ROOT = path.resolve(import.meta.dir, '..');
@@ -216,6 +216,18 @@ describe('gstack-harness register and unregister (skill folders)', () => {
   }, 60_000);
 });
 
+describe('bin/gstack-harness CLI error path', () => {
+  test('a refused command prints its reason code and fix, never a TypeError from the error printer', () => {
+    const d = tmp();
+    const r = spawnSync(process.execPath, ['--no-env-file', '--config=/dev/null', path.join(ROOT, 'bin', 'gstack-harness'), 'unregister', 'nothing-here'],
+      { env: { ...process.env, GSTACK_STATE_ROOT: path.join(d, 'state'), HOME: path.join(d, 'home') }, encoding: 'utf8', timeout: 60_000 });
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('gstack-harness: no registration named "nothing-here"');
+    expect(r.stderr).toContain('(HARNESS_NOT_REGISTERED; docs/troubleshooting.md#harness-not-registered)');
+    expect(r.stderr).not.toContain('TypeError');
+  }, 60_000);
+});
+
 describe('bin/gstack-harness-ledger.sh (the bun-free reader gstack-uninstall sources)', () => {
   const ledgerSh = path.join(ROOT, 'bin', 'gstack-harness-ledger.sh');
   test('removes every registration with only bash and coreutils on PATH, and refuses without a state root', () => {
@@ -287,19 +299,66 @@ describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
     expect(qmRequest('abc')).toContain('"ref":"abc"');
   });
 
+  /** A small committed repository standing in for a pack under QM's cap. */
+  function smallCheckout(): string {
+    const dir = tmp();
+    const git = (...args: string[]) => spawnSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8', timeout: 30_000 });
+    git('init', '-q');
+    fs.mkdirSync(path.join(dir, 'review'));
+    fs.writeFileSync(path.join(dir, 'review', 'SKILL.md'), '---\nname: review\ndescription: x\n---\nx\n');
+    git('add', '-A');
+    git('commit', '-qm', 'seed');
+    return dir;
+  }
+
+  test('refuses before sending anything when the repository is over QM\'s pack cap, and names the cap QM recorded when it refuses, without a retry', async () => {
+    const q = fakeQm();
+    try {
+      const d = tmp();
+      const err = await registerQm({ checkout: ROOT, stateRoot: path.join(d, 'state'), env: q.env, version: VERSION, yes: true }).catch(e => e);
+      expect(err.code).toBe('HARNESS_QM_PACK_TOO_LARGE');
+      expect(err.message).toContain('nothing was sent to QM');
+      expect(err.message).toContain(String(QM_PACK_LIMITS.files));
+      expect(q.calls).toEqual([]);
+      expect(fs.existsSync(path.join(d, 'state', 'harness'))).toBe(false);
+    } finally { q.server.stop(true); }
+    const recorded: Array<Record<string, unknown>> = [];
+    const imports: string[] = [];
+    const capped = Bun.serve({ port: 0, fetch: async (req) => {
+      const u = new URL(req.url);
+      if (req.method === 'GET') return Response.json({ packs: recorded });
+      if (u.pathname.endsWith('/import')) {
+        imports.push(u.pathname);
+        recorded[0].lastImport = { status: 'error', error: 'pack exceeds max bytes (33554432)' };
+        return Response.json({ error: 'internal', message: 'internal server error' }, { status: 500 });
+      }
+      const b = await req.json() as Record<string, unknown>;
+      recorded.push({ id: 'pk1', url: b.url, ref: b.ref });
+      return Response.json({ pack: recorded[0] });
+    } });
+    try {
+      const d = tmp();
+      const err = await registerQm({ checkout: smallCheckout(), stateRoot: path.join(d, 'state'), env: { GSTACK_QM_URL: 'http://127.0.0.1:' + capped.port, GSTACK_QM_ADMIN_TOKEN: 't0k' }, version: VERSION, yes: true }).catch(e => e);
+      expect(err.code).toBe('HARNESS_QM_PACK_TOO_LARGE');
+      expect(err.message).toContain('pack exceeds max bytes (33554432)');
+      expect(imports).toHaveLength(1);
+    } finally { capped.stop(true); }
+  });
+
   test('registers once, a retry after a failed import reuses the pack, two machines share it, --remote archives it', async () => {
     const q = fakeQm(1);
+    const co = smallCheckout();
     try {
       const a = tmp(); const b = tmp();
-      const r1 = await registerQm({ checkout: ROOT, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true });
+      const r1 = await registerQm({ checkout: co, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true });
       expect(q.packs.length).toBe(1);
       expect(q.calls.filter(c => c === 'POST /v1/admin/skill-packs').length).toBe(1);
       expect(q.calls.filter(c => c.endsWith('/import')).length).toBe(2);
       const ledger = fs.readFileSync(path.join(a, 'state', 'harness', r1.id + '.ledger'), 'utf8');
       expect(ledger).toContain('qm_pack\tpk1');
       expect(ledger).not.toContain('t0k');
-      expect((await registerQm({ checkout: ROOT, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true })).status).toBe('unchanged');
-      await registerQm({ checkout: ROOT, stateRoot: path.join(b, 'state'), env: q.env, version: VERSION, yes: true });
+      expect((await registerQm({ checkout: co, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true })).status).toBe('unchanged');
+      await registerQm({ checkout: co, stateRoot: path.join(b, 'state'), env: q.env, version: VERSION, yes: true });
       expect(q.packs.length).toBe(1);
       expect(await removeQmPack(path.join(a, 'state'), q.env, r1.id)).toBe('pk1');
       expect(q.packs.length).toBe(0);

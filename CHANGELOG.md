@@ -14,6 +14,48 @@
 ### Gate integrity
 - New `test/pregate-removed-paths.test.ts` (47 cases) covers the waived tests and the fail-closed negative controls; no existing test, threshold or allowlist changed.
 
+## [1.91.294.0] - 2026-10-28
+
+**`gstack-doctor` and setup's hook check start far fewer processes, so the doctor tests fit the Windows CI lane again.** On Windows Git Bash each process start costs 12 to 77 ms, and the doctor spent most of its time starting them: about 3.3 s per `--check` and 6 s per dashboard run. `windows-free-shard (1)` was red on main because `test/gstack-doctor.test.ts` took 553 to 647 s there. Every doctor row, fix line and JSON field prints the same as before.
+
+### Changed
+- **`bin/gstack-doctor`**: `clamp` uses bash builtins under `LC_ALL=C`, bytewise like the `tr` and `cut` it replaces. The doctor reads `codex_reviews`, `artifacts_sync_mode`, `telemetry`, `update_check` and `test_backend` in-process through `gstack_config_select`, the reader `gstack-config get` uses, with the same defaults, instead of starting `gstack-config` six times per `--check`.
+- **`bin/gstack-hook-check`** scans each hook shim's TypeScript entries once, reads the shebang with `read` and dedupes its marker-scan list in bash.
+- **`bin/gstack-launch-probe.sh`** takes the first non-blank output line in one subshell instead of a five-process pipeline.
+- Measured on `windows-latest` (profile runs 40672710554 and 40676938495): the doctor test file went from 481 s to 185 s, its slowest case from 25.6 s to 9.9 s, and shard 1 from 682 s (red) to 402 s (green). Dispatched run 40678519767 was green on all six Windows shards.
+
+### Tests
+- `test/gstack-doctor.test.ts`: the `--check` state-root row names `GSTACK_HOME` when `GSTACK_HOME` selected the root, in text and JSON.
+- `test/gstack-launch-probe.test.ts`: a broken binary's detail is its first non-blank line, with CRs dropped, cut to 200 bytes.
+
+### Gate integrity
+- `test/owner-brief-contributor-banned.test.ts` no longer pins the source text `gstack-config" get test_backend` in `bin/gstack-doctor-check.sh`, which the in-process read removed. It runs `gstack-doctor --check --require cores` against a state root holding `test_backend: ubicloud` and expects `test_backend=ubicloud`, with an empty state root as the negative control (`test_backend=local`). The under-8-cores wording pin stays.
+
+## [1.91.293.0] - 2026-10-28
+
+**`gstack-harness` errors print again, and `register qm` says plainly that QM cannot import gstack yet.** Every refused `gstack-harness` command crashed with `TypeError: e.line is not a function` instead of printing its reason, because Bun gives each thrown error its own numeric `line` property. Harness Evals then found that QM registration never worked: QM imports a skill pack by cloning the whole repository and stops at 32 MiB and 5,000 files, and gstack's repository is about 73 MiB in 4,300 files.
+
+### Fixed
+- **Error lines from `bin/gstack-harness`**: a refused command prints `gstack-harness: <reason>. Fix: <what to do> (<CODE>; docs/troubleshooting.md#<anchor>)` and exits 1, as documented. The printer is now `HarnessError.report()`.
+- **`gstack-harness register qm --yes`** measures the repository at the installed commit first and stops with `HARNESS_QM_PACK_TOO_LARGE` before sending anything to QM. A QM that refuses with its own cap message gets the same code with QM's words, and no blind retry.
+
+### Docs
+- docs/hosts.md lists QM as not available yet, with the paste-in route (`gstack-harness register generic --print`) meanwhile; docs/troubleshooting.md has the `harness-qm-pack-too-large` section.
+
+### Tests
+- `test/harness-register.test.ts`: the CLI error path prints the code and fix with no TypeError; `register qm` against the real checkout refuses with zero requests and no ledger; a QM that answers `pack exceeds max bytes` gets the cap code; the pack reuse and retry case now runs against a small committed repository.
+
+## [1.91.292.0] - 2026-10-28
+
+**A fix for a regression on stable can skip the 72-hour wait, like a security fix.** Garry, asked whether non-security breakage on stable may bypass the twice-weekly cadence and the floor, answered on 2026-10-28: "Regression". Until now a fix for something the last stable release did right, and the current one breaks, waited up to 72 hours on every team install. Now `--regression "#n: worked in v<X>: why"` with `--ref` passes the floor once the tool ties it to the release, and the claim is public in the tag and the notes.
+
+### Added
+- **Regression cuts in `scripts/release-cut.ts`: `--regression "<reason>"` with `--ref <fix sha>`** (workflow input `regression`). The reason must name exactly one earlier stable release `v<X>` and at least one `#<n>`. The cut is refused with `REFUSED_REGRESSION`, red on every trigger, unless `v<X>` is an annotated release tag strictly behind the current stable with a published GitHub Release (the current stable itself never counts, nor a tag a half-done cut left behind), `#<n>` carries the `regression` label (a maintainer's declaration; a `security` label does not count, nor the reverse) and a released commit references `#<n>`. That the behavior really worked in `v<X>` stays attested. The record matches a security cut. The sanitized reason and evidence go into the tag (`Regression:` / `Verified:`), the notes (`(regression release)`, `**Regression release:** …`) and the plan (`REGRESSION:`, `RIDING_ALONG:`); a half-done cut finishes from its tag; an unmoved exception tag must verify again with the reason it recorded (this now holds for security cuts too).
+
+### Changed
+- **One exception per cut.** `--security` and `--regression` together are `REFUSED_REGRESSION`. A regression cut passes a dated floor only; `FLOOR_UNKNOWN` (an undatable or unpublished stable) still yields to a security cut alone. The floor counts from any exception release, so the next scheduled cut may be held. `REFUSED_FLOOR` names both ways past it.
+- **"Weekly" wording follows the twice-weekly cadence** in README.md, `bin/gstack-update-channel.sh` (its comment and the no-stable-yet message, now "until the first stable release is cut"), the /gstack-upgrade skill's `AHEAD_OF_STABLE` line and the main-backstop workflow comments. docs/releases.md and docs/recommended-harness.md describe the regression exception.
+
 ## [1.91.291.0] - 2026-10-28
 
 **/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.

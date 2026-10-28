@@ -18,7 +18,7 @@ When qualified CSO runtime images are published, setup gives each automatic prel
 
 From inside your repo, `(cd ~/.claude/skills/gstack && ./setup --team) && ~/.claude/skills/gstack/bin/gstack-team-init required` switches you to team mode and bootstraps the repo so teammates get gstack automatically (the README has the full paste, which also commits the change).
 
-No vendored files in your repo, no version drift, no manual upgrades. Every Claude Code session starts with a fast auto-update check (throttled to once/hour, network-failure-safe, completely silent). Team mode follows the `stable` channel: the tagged release cut Monday and Thursday mornings, never more than once every 72 hours except for a security fix, not every merge to main. `gstack-config set update_channel main` follows every merge instead; see [releases.md](releases.md).
+No vendored files in your repo, no version drift, no manual upgrades. Every Claude Code session starts with a fast auto-update check (throttled to once/hour, network-failure-safe, completely silent). Team mode follows the `stable` channel: the tagged release cut Monday and Thursday mornings, never more than once every 72 hours except for a security or regression fix, not every merge to main. `gstack-config set update_channel main` follows every merge instead; see [releases.md](releases.md).
 
 Swap `required` for `optional` if you'd rather nudge teammates than block them.
 
@@ -53,7 +53,7 @@ Run inside OpenClaw, Hermes or a Dot, `./setup` also registers gstack's skills
 with that harness, in the harness's own skills folder, and prints every path
 it wrote. It never does this when `--host` names another host or with
 `--local`. Turn it off with `./setup --no-harness-auto` or
-`GSTACK_HARNESS_AUTO=0`. Per-harness details, QM and any other harness: [hosts.md](hosts.md#agent-harnesses).
+`GSTACK_HARNESS_AUTO=0`. Per-harness details, any other harness, and why QM is not available yet: [hosts.md](hosts.md#agent-harnesses).
 
 ## Uninstall
 

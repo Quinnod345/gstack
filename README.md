@@ -38,7 +38,7 @@ From inside your repo, paste this. Switches you to team mode, bootstraps the rep
 (cd ~/.claude/skills/gstack && ./setup --team) && ~/.claude/skills/gstack/bin/gstack-team-init required && git add .claude/ CLAUDE.md && git commit -m "require gstack for AI-assisted work"
 ```
 
-No vendored files in your repo, no version drift, no manual upgrades. Every Claude Code session starts with a fast auto-update check (throttled to once/hour, network-failure-safe, completely silent). Team mode follows the `stable` channel: the weekly tagged release (Monday mornings, plus off-cycle hotfixes), not every merge to main. `gstack-config set update_channel main` follows every merge instead; see [docs/releases.md](docs/releases.md).
+No vendored files in your repo, no version drift, no manual upgrades. Every Claude Code session starts with a fast auto-update check (throttled to once/hour, network-failure-safe, completely silent). Team mode follows the `stable` channel: the twice-weekly tagged release (Monday and Thursday, at most once every 72 hours, plus verified security and regression fixes), not every merge to main. `gstack-config set update_channel main` follows every merge instead; see [docs/releases.md](docs/releases.md).
 
 Swap `required` for `optional` if you'd rather nudge teammates than block them.
 
@@ -241,7 +241,7 @@ On Windows without Developer Mode (MSYS2 / Git Bash), `setup` falls back to file
 | Doc | What it covers |
 |-----|---------------|
 | [Skill Deep Dives](docs/skills.md) | Philosophy, examples, and workflow for every skill (includes Greptile integration) |
-| [The recommended harness](docs/recommended-harness.md) | gstack + Capy from zero to the first merged train: install, the Captain and its Drive, trains, the daily flaky pass, the weekly release, the factory scorecard, what is Capy-specific, known Capy limits |
+| [The recommended harness](docs/recommended-harness.md) | gstack + Capy from zero to the first merged train: install, the Captain and its Drive, trains, the daily flaky pass, the twice-weekly release, the factory scorecard, what is Capy-specific, known Capy limits |
 | [Why gstack](docs/why-gstack.md) | The story, the productivity numbers and their caveats, Karpathy's failure modes, parallel sprints |
 | [Install details](docs/install.md) | Setup timing, requirements in detail, team mode, the hooks setup registers, agent harness registration |
 | [Other agents](docs/hosts.md) | Agent harnesses (OpenClaw, Hermes, dots, QM, Muse Code, Grok, any other), OpenClaw and ClawHub, per-host notes, the Codex profile and model tiers, outside-review providers, the design binary's models |

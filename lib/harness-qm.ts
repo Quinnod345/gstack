@@ -21,6 +21,24 @@ type Env = Record<string, string | undefined>;
 export const GSTACK_REPO_URL = 'https://github.com/garrytan/gstack';
 /** Only the top-level skills: the committed renders at the repository root, not fixtures or the openclaw/ folder. */
 export const QM_PACK_CONFIG = { skillGlobs: ['*/SKILL.md'] };
+/** QM's git fetcher reads the whole tree before it applies skillGlobs, and refuses past these defaults (QM src/skills/pack-fetcher.ts). */
+export const QM_PACK_LIMITS = { files: 5000, bytes: 32 * 1024 * 1024 };
+
+const mib = (n: number) => (n / 1024 / 1024).toFixed(1) + ' MiB';
+const tooLarge = (what: string) => new HarnessError('HARNESS_QM_PACK_TOO_LARGE', what + '. QM imports the whole repository and caps a pack at ' + mib(QM_PACK_LIMITS.bytes) + ' and ' + QM_PACK_LIMITS.files + ' files by default, so it cannot import gstack yet');
+
+/** Files and bytes QM would read from the repository at ref. */
+export function packSize(checkout: string, ref: string): { files: number; bytes: number } {
+  const r = spawnSync('git', ['-C', checkout, 'ls-tree', '-r', '-l', ref], { encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0 || !ref) throw new HarnessError('HARNESS_QM_API', 'could not read the gstack checkout at ' + (ref || 'HEAD') + ' to size the pack (QM imports a git commit, so register qm needs a git checkout of gstack)');
+  let files = 0; let bytes = 0;
+  for (const line of (r.stdout ?? '').split('\n')) {
+    const [mode, type, , size] = line.split(/\s+/);
+    if (type !== 'blob' || mode === '120000' || !Number.isFinite(Number(size))) continue;
+    files++; bytes += Number(size);
+  }
+  return { files, bytes };
+}
 
 export interface QmAuth { url: string; headers: (method: string, pathname: string, body: string) => Record<string, string> }
 
@@ -81,6 +99,8 @@ export async function registerQm(opts: { checkout: string; stateRoot: string; en
   if (!auth || !opts.yes) {
     throw new HarnessError('HARNESS_QM_CREDENTIALS', (auth ? 'registering a QM pack publishes skills to the whole organization, so it needs --yes' : 'no QM admin credential in the environment') + '. The request is:\n' + qmRequest(ref));
   }
+  const size = packSize(opts.checkout, ref);
+  if (size.files > QM_PACK_LIMITS.files || size.bytes > QM_PACK_LIMITS.bytes) throw tooLarge('gstack at ' + ref.slice(0, 12) + ' is ' + mib(size.bytes) + ' in ' + size.files + ' files; nothing was sent to QM');
   const id = registrationId('qm', auth.url);
   const lfile = ledgerPath(opts.stateRoot, id);
   const prev = readLedger(lfile);
@@ -90,7 +110,11 @@ export async function registerQm(opts: { checkout: string; stateRoot: string; en
     const pack = existing ?? (await call(auth, 'POST', '/v1/admin/skill-packs', { url: GSTACK_REPO_URL, ref, config: QM_PACK_CONFIG, trustTier: 'third-party' })).pack;
     if (!pack?.id) throw new HarnessError('HARNESS_QM_API', 'QM did not return a pack id');
     writeLedger(lfile, { meta: { id, target: 'qm', dest: auth.url, mode: 'all', checkout: opts.checkout, version: opts.version, qm_pack: pack.id, qm_ref: ref }, files: [], dirs: [], blocks: [] });
-    const imported = await call(auth, 'POST', '/v1/admin/skill-packs/' + encodeURIComponent(pack.id) + '/import', { selected: 'all' });
+    const imported = await call(auth, 'POST', '/v1/admin/skill-packs/' + encodeURIComponent(pack.id) + '/import', { selected: 'all' }).catch(async (e) => {
+      const recorded = ((await call(auth, 'GET', '/v1/admin/skill-packs').catch(() => ({}))).packs ?? []).find((p: any) => p.id === pack.id)?.lastImport;
+      const cap = /pack exceeds max (bytes|files) \(\d+\)/.exec(String(recorded?.error ?? ''));
+      throw cap ? tooLarge('QM refused the pack: ' + cap[0]) : e;
+    });
     return { pack, existing: !!existing, imported };
   };
   let out;

@@ -5082,7 +5082,7 @@ gitignored entries (`.env`, build output) that go with the worktree.
 
 ## Agent harnesses (gstack-harness)
 
-`bin/gstack-harness` registers gstack's skills with the agent harness gstack is installed into (OpenClaw, Hermes, a Dot, QM, any other) and records every file it writes in `$GSTACK_STATE_ROOT/harness/<id>.ledger`. Each error line ends with its code and a link here. Per-harness install, verify and uninstall steps: [docs/hosts.md](hosts.md#agent-harnesses).
+`bin/gstack-harness` registers gstack's skills with the agent harness gstack is installed into (OpenClaw, Hermes, a Dot, any other; QM is not available yet) and records every file it writes in `$GSTACK_STATE_ROOT/harness/<id>.ledger`. Each error line ends with its code and a link here. Per-harness install, verify and uninstall steps: [docs/hosts.md](hosts.md#agent-harnesses).
 
 <a id="harness-unknown-target"></a>
 ### `gstack-harness: unknown harness "<name>"` (HARNESS_UNKNOWN_TARGET)
@@ -5129,10 +5129,15 @@ There is no ledger for that harness or id under `$GSTACK_STATE_ROOT/harness`. `g
 <a id="harness-qm-credentials"></a>
 ### `gstack-harness: no QM admin credential in the environment` / `... needs --yes` (HARNESS_QM_CREDENTIALS)
 
-Registering gstack in QM publishes an org skill pack, so it needs an org admin's credential and an explicit `--yes`. Set `GSTACK_QM_URL` and `GSTACK_QM_ADMIN_TOKEN` (or `GSTACK_QM_SIGNING_SECRET` with `GSTACK_QM_ADMIN_ACTOR`) in the environment and run `gstack-harness register qm --yes`. gstack never prompts for, prints or stores the credential; the message shows the exact request instead.
+Registering gstack in QM publishes an org skill pack, so it needs an org admin's credential and an explicit `--yes`. Set `GSTACK_QM_URL` and `GSTACK_QM_ADMIN_TOKEN` (or `GSTACK_QM_SIGNING_SECRET` with `GSTACK_QM_ADMIN_ACTOR`) in the environment and run `gstack-harness register qm --yes`. gstack never prompts for, prints or stores the credential; the message shows the exact request instead. With the credential set, registration still stops at the next check: QM cannot import gstack yet ([HARNESS_QM_PACK_TOO_LARGE](#harness-qm-pack-too-large)).
 
 <a id="harness-qm-api"></a>
 ### `gstack-harness: <METHOD> /v1/admin/skill-packs... returned HTTP <code>` / `... failed: timed out after 60 s` (HARNESS_QM_API)
 
 QM's admin API refused or did not answer. gstack lists packs before it creates one and retries once, so rerunning never makes a second pack. Check the URL is QM core and the credential is an org admin; `gstack-harness status` shows whether a pack id was recorded.
+
+<a id="harness-qm-pack-too-large"></a>
+### `gstack-harness: gstack at <sha> is <n> MiB in <n> files; nothing was sent to QM` / `QM refused the pack: pack exceeds max bytes (33554432)` (HARNESS_QM_PACK_TOO_LARGE)
+
+QM registration does not work yet. QM's skill-pack import clones the whole repository and reads every file before it picks the skills, and by default it refuses a pack over 32 MiB or 5,000 files. The gstack repository is larger (about 73 MiB in 4,300 files), so gstack checks the size first and sends nothing. When QM itself refuses (a QM with other limits), the pack it created stays in the org without skills: `gstack-harness unregister qm --remote` archives it. Meanwhile, give a QM agent gstack by pasting the output of `gstack-harness register generic --print` into its instructions.
 
