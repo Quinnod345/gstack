@@ -933,9 +933,13 @@ edit). A logic change in a
 stamped source file is product. Lockfiles are product unless the policy names
 them. An output of an entry with a `command` in origin/<base>'s
 `.gstack/generated.json` is `generated`, not product, only when the
-`--pregate` result passed for HEAD shows the `regen` check passing with those
-entries fresh; without that evidence, or for an entry with no command or one
-only the branch registers, the output is product (U1 on gstack-evals paid a
+`--pregate` result passed for HEAD lists it under the `regen` check's
+`proven` paths (the check deleted the touched output in its scratch worktree
+and the command recreated it byte-identically) and that check ran the same
+registry, origin/<base> at the commit the carry reads. A file that matches an
+output glob but that the command never writes is not proven. Without that
+evidence, or for an entry with no command or one only the branch registers,
+the output is product (U1 on gstack-evals paid a
 full rerun because a merge changed its generated index's diff). A base merge
 contributes no product change of its own. A receipt carried twice keeps the reviewed head as
 `carry.from` and adds up the merges and paths. The carried receipt records

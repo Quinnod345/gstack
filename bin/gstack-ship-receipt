@@ -63,7 +63,7 @@ const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block 
                                       the P7 adoption number over merged PRs (deduplicated by run and thread)
   carry --pr <n> [--repo <r>] | --body <file> [--base <ref>] [--head <sha>] [--pregate <pregate.json>] [--dry-run] [--out <dir>]
                                       carry the receipt to HEAD when only a base merge, tests, release metadata or registered
-                                      outputs the --pregate regen check proved fresh changed since its head (product patch-id
+                                      outputs the --pregate regen check proved (recreated them) changed since its head (product patch-id
                                       unchanged), or after a rebase onto a tree the receipt covers with the recorded product
                                       patch-id: rewrites the receipt with a \`carry\` record, posts the body (gh pr edit) and
                                       prints GSTACK_RESULT: skill=ship status=complete; RECEIPT_CARRY_PRODUCT_CHANGED /
@@ -385,18 +385,20 @@ function pregateFieldFor(repoRoot: string, file: string, head: string): { ok: tr
 }
 
 /**
- * Generated outputs the carry may set aside as metadata: the outputs of every
- * entry with a `command` in origin/<base>'s `.gstack/generated.json`, and only
- * when the pregate passed for HEAD shows the regen check regenerating them
- * fresh. Without that evidence an output is product like any other file.
+ * Generated outputs the carry may set aside as metadata: the paths the pregate
+ * passed for HEAD proved (its regen check deleted each touched output and the
+ * entry's command recreated it byte-identically), when that check ran
+ * origin/<base>'s `.gstack/generated.json` at the commit this carry reads and the
+ * path is an output of an entry with a `command` there. Anything else is product.
  */
 function verifiedOutputs(repoRoot: string, base: string, pregateFile: string | undefined): string[] {
   if (!pregateFile) return [];
   const regen = readPregateFile(pregateFile).file?.checks.find(c => c.id === 'regen');
-  if (!regen || regen.status !== 'pass' || !/\bfresh\b/.test(regen.detail ?? '')) return [];
+  if (!regen || regen.status !== 'pass' || !regen.proven?.length) return [];
   const load = loadRegistryFromBase(repoRoot, base);
-  if (isRegistryUnavailable(load) || load.errors.length) return [];
-  return load.registry.entries.filter(e => e.command).flatMap(e => e.outputs);
+  if (isRegistryUnavailable(load) || load.errors.length || regen.inputs?.registry !== load.source.label) return [];
+  const owned = load.registry.entries.filter(e => e.command).flatMap(e => e.outputs);
+  return regen.proven.filter(p => matchesAny(owned, p));
 }
 
 interface ProductRules { extra: { metadata: string[]; outputs: readonly string[] }; metadata: string[]; templates: readonly string[] }
@@ -445,7 +447,9 @@ function productPatchAgainstBase(repoRoot: string, rules: ProductRules, baseRef:
  * reran a full /ship on identical product code after a base merge or a
  * test-only fix; the carry compares the product diff against the base at the
  * receipt's head and at HEAD by patch-id, classifies every changed path, and
- * records the range-diff as evidence in the receipt it rewrites.
+ * records the range-diff as evidence in the receipt it rewrites. After a rebase
+ * or force-push it carries only onto a tree the receipt covers whose product
+ * patch-id against the current base is the recorded one (planTreeCarry).
  */
 function cmdCarry(rest: string[], json: boolean): number {
   const bodyFile = flag(rest, '--body');
