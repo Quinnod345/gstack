@@ -87,7 +87,7 @@ describe('carry across a rebase', () => {
     repo.git('checkout', '-q', '-B', 'feature', 'origin/main');
     repo.git('checkout', reviewed, '--', '.');
     repo.git('commit', '-qam', 'same tree, new base');
-    expect(repo.git('rev-parse', 'HEAD^{tree}')).toBe(receiptIn(body).head_tree);
+    expect(repo.git('rev-parse', 'HEAD^{tree}')).toBe(receiptIn(body).head_tree ?? '');
     const out = carry(repo, body);
     expect(out.status).toBe(EXIT.refused);
     expect(out.out).toContain('CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)');
