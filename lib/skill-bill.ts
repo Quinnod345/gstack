@@ -43,7 +43,8 @@ export function checkEvalTasks(file: string): EvalTasks {
   const problems: string[] = [];
   const ids = new Set<string>();
   for (const t of tasks as Record<string, unknown>[]) {
-    const where = String(t?.id ?? "?");
+    if (!t || typeof t !== "object" || Array.isArray(t)) { problems.push(`?: task must be an object, got ${JSON.stringify(t)}`); continue; }
+    const where = String(t.id ?? "?");
     for (const k of Object.keys(t ?? {})) if (!EVAL_TASK_KEYS.has(k)) problems.push(`${where}: unknown key ${k}`);
     if (typeof t?.id !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(t.id)) problems.push(`${where}: id must be kebab-case`);
     else if (ids.has(t.id)) problems.push(`${where}: duplicate id`);
@@ -198,7 +199,7 @@ export function buildSkillBill(dir: string): SkillBillReport {
   if (kind === "gstack-checkout") {
     const root = gstackRootOf(dir)!;
     const file = join(root, "test", "fixtures", "skill-evals", name, "tasks.json");
-    evalTasks = existsSync(file) ? { ...checkEvalTasks(file), path: relative(root, file) } : null;
+    evalTasks = existsSync(file) ? { ...checkEvalTasks(file), path: `test/fixtures/skill-evals/${name}/tasks.json` } : null;
     if (evalTasks?.problems.length) warnings.push(`EVAL_TASKS_INVALID: ${evalTasks.problems[0]}${evalTasks.problems.length > 1 ? ` (+${evalTasks.problems.length - 1} more)` : ""}. fix: the task format in docs/designs/SKILL_EVAL_CONTRACT.md`);
     const changed = git(dir, ["status", "--porcelain", "--", "SKILL.md.tmpl", "SKILL.md"]).out.split("\n").filter(Boolean);
     if (changed.some((l) => l.endsWith("SKILL.md.tmpl")) && !changed.some((l) => l.endsWith(" SKILL.md") || l.endsWith("/SKILL.md")))

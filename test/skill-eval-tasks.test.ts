@@ -34,6 +34,8 @@ describe('skill-evals task files follow the shared eval contract', () => {
       { id: 'Bad Id', prompt: '' },
       { id: 'dup', prompt: 'x', must: ['('], extra: 1 },
       { id: 'dup', prompt: 'y', check: 'true', setup: 'sh "$SKILL_EVAL_FIXTURES/seed.sh"', safety: 'yes' },
+      1,
+      ['nested'],
     ]));
     expect(checkEvalTasks(file).problems).toEqual([
       'Bad Id: id must be kebab-case',
@@ -44,6 +46,8 @@ describe('skill-evals task files follow the shared eval contract', () => {
       'dup: duplicate id',
       'dup: safety must be a boolean',
       'dup: setup runs seed.sh but it is missing',
+      '?: task must be an object, got 1',
+      '?: task must be an object, got ["nested"]',
     ]);
     fs.writeFileSync(file, '{');
     expect(checkEvalTasks(file).problems[0]).toStartWith('not valid JSON');
