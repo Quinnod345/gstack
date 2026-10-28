@@ -9,6 +9,18 @@
       "file": "craft-audit.md",
       "title": "Craft audit: Persuade pages and redesigns",
       "trigger": "a craft, Persuade or redesign audit"
+    },
+    {
+      "id": "outside-voices",
+      "file": "outside-voices.md",
+      "title": "Design outside voices",
+      "trigger": "the outside-voice pass that precedes Phase 7 triage (Codex availability, consent, both voices and synthesis)"
+    },
+    {
+      "id": "test-bootstrap",
+      "file": "test-bootstrap.md",
+      "title": "Test framework bootstrap",
+      "trigger": "writing a Phase 8e.5 regression test with no known test command (detect the framework, or offer to bootstrap one)"
     }
   ]
 }

@@ -1,14 +1,16 @@
 # Releases and update channels
 
 gstack stamps a version at every merge to main, about a dozen a day. Since
-late October 2026 there is also a weekly tagged release, and team-mode
-installs follow it instead of every merge.
+late October 2026 there is also a tagged release, cut twice a week, and
+team-mode installs follow it instead of every merge.
 
 ## What a release is
 
-Every Monday at 07:00 Pacific (06:00 in winter) the **Weekly release**
-workflow (`.github/workflows/weekly-release.yml`, which runs
-`scripts/release-cut.ts`) takes the newest green commit on main and:
+Every Monday and Thursday at 14:00 UTC (07:00 Pacific, 06:00 in winter) the
+**Stable release** workflow (`.github/workflows/weekly-release.yml`, which
+runs `scripts/release-cut.ts`; the file kept its old name so its run history
+and the `gh workflow run` commands below stay valid) takes the newest green
+commit on main and:
 
 1. tags it `v<VERSION>` (the VERSION file at that commit, an annotated tag);
 2. publishes a GitHub Release whose notes are one line per CHANGELOG version
@@ -18,7 +20,7 @@ workflow (`.github/workflows/weekly-release.yml`, which runs
 
 A tag and its release never change. `stable` is a moving pointer: always a
 commit on main's first-parent history, moved only by this workflow, only
-forward.
+forward, and at most once every 72 hours except for a security fix (below).
 
 **Green** means, on that exact commit: the `free-tests` check run succeeded
 (the status main requires), the commit was gated (below), every check run on
@@ -60,11 +62,109 @@ finished by the next run, by cron or by hand: `stable` itself stays a
 candidate until its release exists, and its notes compare against the release
 tag before it.
 
+## The 72-hour floor
+
+`stable` moves at most once every 72 hours (Garry, 2026-10-27). Every cut,
+scheduled or by hand, with or without `ref`, checks when `stable` last moved:
+the creation time of the annotated `v<VERSION>` tag (VERSION read at `stable`)
+pointing at `stable`, or the publish time of that tag's GitHub Release when it
+is later (a cut whose `stable` push was retried after the tag was pushed is
+dated by its release). Any other tag on that commit is ignored, so a hand-made
+extra tag can neither date the move nor stall later cuts.
+A cut inside the floor changes nothing and prints, as its first two lines:
+
+```
+REFUSED_FLOOR: stable moved to v1.91.300.0 at 2026-11-02T14:04:51Z, 47.2 h ago; a hand-run cut needs 72 h; a security fix passes with --security "<GHSA-…|CVE-…|#n>: why" --ref <fix sha>
+NEXT_ALLOWED: 2026-11-05T14:04:51Z for a hand-run cut; 2026-11-05T11:04:51Z for a scheduled run
+```
+
+followed by the plan it would have run. Monday to Thursday is exactly 72
+hours, so scheduled runs, and only scheduled runs (`GITHUB_EVENT_NAME=schedule`,
+which no dispatch input can set), get a 3-hour grace for GitHub's late cron
+starts: a Thursday run 69 hours after a late Monday cut still cuts. Two
+regular moves are therefore never less than 69 hours apart, and a hand-run cut
+always needs the full 72. Thursday to Monday is 96 hours.
+
+A refused hand cut exits 1 with an error annotation. A refused scheduled run
+exits 0 with a notice annotation and the same lines in the step summary: that
+is the policy working (a security cut on Wednesday holds Thursday, and
+Monday's cut carries everything), not a fault. A dry run prints the plan and
+the floor verdict (`FLOOR:` line) and exits 0.
+
+Two cases are not held. The first cut, before `stable` exists, has nothing to
+measure. Finishing a half-done cut (`stable` already at the candidate, release
+missing) is not a new move, and a run without `ref` finishes that cut before
+it considers anything newer.
+
+The floor fails closed when it cannot date the move. Three cases are
+`FLOOR_UNKNOWN`, red on every trigger, and only a verified security cut gets
+past them, as it gets past the floor. They are a `stable` that no annotated `v<VERSION>` tag dates
+(only this tool moves `stable` and it tags first, so that state means someone
+moved it by hand), a release that cannot be read (a GitHub API error is not
+"no release"), and a `ref` cut while `stable`'s own release is still
+unpublished (its tag may be days older than the push). A tag dated in the
+future holds the floor from now, not from that date. The floor binds the
+release tool, not a writer pushing `stable` directly; that would take a branch
+ruleset limiting `stable` to the Actions bot.
+
+The floor applies to non-security breakage too. If a cut breaks team
+installs, the fix waits for the floor; an affected install can follow main
+meanwhile (`gstack-config set update_channel main`) and the next scheduled
+cut brings it back.
+
+## Security releases
+
+A security fix is the one exception to the floor. Run the workflow by hand
+with `ref` set to the fix commit on main and `security` set to a reason that
+names what it fixes:
+
+```bash
+gh workflow run weekly-release.yml -f ref=<full sha of the fix> -f security="GHSA-xxxx-xxxx-xxxx: tar path traversal" -f dry_run=false
+```
+
+The reason must name a `GHSA-…`, a `CVE-…` or an issue or pull request
+`#<n>`, and the tool checks that it is tied to the commits being released
+(`stable`..`ref`). One of these must hold:
+
+1. a commit message in that span names the same GHSA or CVE;
+2. issue or pull request `#<n>` carries the `security` label and a commit in
+   the span references `#<n>` (the squash subject `(#<n>)` does);
+3. the GitHub Advisory Database entry for the GHSA or CVE (the data OSV
+   imports) lists an npm package whose own entry changes in the span's
+   `package.json` or `bun.lock` (a dependency line or a lockfile package key,
+   never a name listed inside another package's entry): a dependency bump that
+   fixes a known advisory. The direction of the bump and the patched range are
+   not checked.
+
+**Verified:** the identifier exists in the reason, the label exists on the
+issue, and the link between the identifier and a released commit or bumped
+package. **Attested, not verified:** that the change actually fixes the
+vulnerability, how severe it is, and that it cannot wait; the `security`
+label itself is applied by a person with triage access. A reason the tool
+cannot tie to the span is `REFUSED_SECURITY` with what it checked, red on
+every trigger, as is `security` without `ref`: a security cut releases up to
+the fix, never whatever happens to be newest. Every version between `stable`
+and the fix still ships with it (there are no cherry-picks); the plan's
+`RIDING_ALONG:` line counts them.
+
+The reason is public. It goes, as one line of at most 300 characters (control
+characters become spaces and backticks become apostrophes), into the tag
+message and the release notes: ``**Security release:** `<reason>` (verified: <evidence>)``. For an
+embargoed fix, use path 2 with a neutral commit subject and a labelled issue
+whose title says no more than the fix does, and keep advisory details out of
+the reason until disclosure.
+A security cut that stopped half-way after moving `stable` is finished by
+the next run with the reason and evidence its tag recorded, without checking
+them again. A tag that records a security cut but never moved `stable` gets
+no such pass: the cut is refused (`REFUSED_SECURITY`) until it runs again
+with `security` and `ref` and verifies. The floor then counts from the security
+release, and the next regular cut's notes list only the versions after it.
+
 ## Channels
 
 | Channel | Follows | Who |
 |---|---|---|
-| `stable` | `refs/heads/stable`: the weekly release, plus any hotfix cut off-cycle | team mode (`./setup --team`) by default |
+| `stable` | `refs/heads/stable`: the twice-weekly release (at most once per 72 hours), plus any security cut off-cycle | team mode (`./setup --team`) by default |
 | `main` | every merge to main | plain `./setup`, contributors, Capy crew machines |
 
 The config key is `update_channel` (`bin/gstack-config`):
@@ -72,12 +172,12 @@ The config key is `update_channel` (`bin/gstack-config`):
 ```bash
 gstack-config get update_channel          # auto (default) | stable | main
 gstack-config set update_channel main     # a team install that wants every merge
-gstack-config set update_channel stable   # a solo install that wants weekly releases
+gstack-config set update_channel stable   # a solo install that wants stable releases
 gstack-config unset update_channel        # back to auto
 ```
 
 `auto` resolves to `stable` when `team_mode` is true and to `main` otherwise,
-so existing team installs moved to weekly releases with nothing to migrate and
+so existing team installs moved to stable releases with nothing to migrate and
 contributor installs did not move at all. `GSTACK_UPDATE_CHANNEL=stable|main`
 overrides the key for one command. The resolution lives in one helper,
 `bin/gstack-update-channel.sh`, used by:
@@ -111,14 +211,15 @@ still holds and nothing about version stamping changed.
 ## Cutting a release by hand (hotfixes)
 
 A hotfix is an ordinary PR: it merges to main through a train and gets its
-version like any other change. To put it on stable before Monday, run the
-workflow by hand with the merge commit's SHA:
+version like any other change. To put it on stable before the next scheduled
+cut, run the workflow by hand with the merge commit's SHA, once the 72-hour
+floor allows it (a security fix uses the security input instead):
 
 ```bash
 gh workflow run weekly-release.yml -f ref=<full sha on main> -f dry_run=false
 ```
 
-or Actions → **Weekly release** → Run workflow, on main (the cut job runs
+or open Actions, pick **Stable release** and press Run workflow, on main (the cut job runs
 only from `refs/heads/main`, with main's tooling; `ref` must be the full
 40-hex SHA). The same green checks apply. The commit is tagged with its VERSION, the release notes say "hotfix release"
 and list every version since the previous release (everything merged in
@@ -134,8 +235,8 @@ first, then promote.
 Run the workflow with `dry_run=true` (the default for a manual run) to see the
 plan without changing anything: the candidate, its VERSION and tag, the stable
 move, how many version lines the notes would carry, every skipped commit with
-its reason, and the exact commands a real cut would run. The scheduled Monday
-run is never a dry run.
+its reason, the floor verdict, and the exact commands a real cut would run. The scheduled
+runs are never dry runs.
 
 ```bash
 gh workflow run weekly-release.yml -f dry_run=true
@@ -159,4 +260,10 @@ is exercised against real check runs before it merges.
 | `REFUSED: non-fast-forward: ...` | the candidate is behind stable; stable only moves forward |
 | `REFUSED: queue frozen since train ...` | the main backstop froze the queue; clear it first (docs/ship-policy.md) |
 | `REFUSED: tag v<X> already names <other sha>` | a version was stamped twice; needs a look before anything is cut |
+| `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; ...` | inside the 72-hour floor; nothing changed. Exit 1 by hand, 0 on the schedule or a dry run |
+| `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
+| `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated `v<VERSION>` tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
+| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
+| `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
+| ``SECURITY: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |
 | `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |

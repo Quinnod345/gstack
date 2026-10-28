@@ -143,11 +143,9 @@ console.log("GSTACK_STEP_OK");
    - "The first 3 things my eye goes to are: **[1]**, **[2]**, **[3]**." (hierarchy check — are these the 3 things the designer intended? If not, the visual hierarchy is lying.)
    - "If I had to describe this in one word: **[word]**." (gut verdict)
 
-**Narration mode:** Write this section in first person, as if you are a user scanning the page for the first time. "I'm looking at this page... my eye goes to the logo, then a wall of text I skip entirely, then... wait, is that a button?" Name the specific element, its position, its visual weight. If you can't name it specifically, you're not actually scanning, you're generating platitudes.
+**Narration mode:** write it in first person as a user scanning the page for the first time, naming each element, its position and its visual weight; an element you cannot name is a platitude, not a scan.
 
-**Page Area Test:** Point at each clearly defined area of the page. Can you instantly name its purpose? ("Things I can buy," "Today's deals," "How to search.") Areas you can't name in 2 seconds are poorly defined. List them.
-
-This is the section users read first. Be opinionated. A designer doesn't hedge — they react.
+**Page Area Test:** name the purpose of each clearly defined area of the page; list the areas you cannot name in 2 seconds as poorly defined. Be opinionated: this is the section users read first.
 
 ---
 
@@ -265,16 +263,7 @@ Check the \`URL=\` line every script prints. If it contains \`/login\`, \`/signi
 
 ### Trunk Test (run on every page)
 
-Imagine being dropped on this page with no context. Can you immediately answer:
-1. What site is this? (Site ID visible and identifiable)
-2. What page am I on? (Page name prominent, matches what I clicked)
-3. What are the major sections? (Primary nav visible and clear)
-4. What are my options at this level? (Local nav or content choices obvious)
-5. Where am I in the scheme of things? ("You are here" indicator, breadcrumbs)
-6. How can I search? (Search box findable without hunting)
-
-Score: PASS (all 6 clear) / PARTIAL (4-5 clear) / FAIL (3 or fewer clear).
-A FAIL on the trunk test is a HIGH-impact finding regardless of how polished the visual design is.
+Dropped on this page with no context, can you answer at once: (1) what site is this, (2) what page am I on, (3) what are the major sections, (4) what are my options here, (5) where am I ("you are here", breadcrumbs), (6) how do I search? PASS = all 6, PARTIAL = 4-5, FAIL = 3 or fewer. A FAIL is a HIGH-impact finding however polished the page looks.
 
 ### Design Audit Checklist (10 categories, ~80 items)
 
@@ -319,14 +308,13 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - No red/green only combinations (8% of men have red-green deficiency)
 - Neutral palette is warm or cool consistently — not mixed
 
-**4. Spacing & Layout** (12 items)
+**4. Spacing & Layout** (11 items)
 - Grid consistent at all breakpoints
 - Spacing uses a scale (4px or 8px base), not arbitrary values
 - Alignment is consistent — nothing floats outside the grid
 - Rhythm: related items closer together, distinct sections further apart
 - Border-radius hierarchy (not uniform bubbly radius on everything)
 - Inner radius = outer radius - gap (nested elements)
-- No horizontal scroll on mobile
 - Max content width set (no full-bleed body text)
 - \`env(safe-area-inset-*)\` for notch devices
 - URL reflects state (filters, tabs, pagination in query params)
@@ -347,12 +335,10 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - Mindless choice audit: every decision point (button, link, dropdown, modal choice) is a mindless click (obvious what happens). If a click requires thought about whether it's the right choice, flag as HIGH.
 - Browser surfaces themed from the palette: \`::selection\`, caret, scrollbars, focus ring, underline offset, tabular numerals. Left at defaults, the page reads as assembled, not designed
 
-**6. Responsive Design** (8 items)
+**6. Responsive Design** (6 items)
 - Mobile layout makes *design* sense (not just stacked desktop columns)
-- Touch targets sufficient on mobile (>= 44px)
 - No horizontal scroll on any viewport
 - Images handle responsive (srcset, sizes, or CSS containment)
-- Text readable without zooming on mobile (>= 16px body)
 - Navigation collapses appropriately (hamburger, bottom nav, etc.)
 - Forms usable on mobile (correct input types, no autoFocus on mobile)
 - No \`user-scalable=no\` or \`maximum-scale=1\` in viewport meta
@@ -366,18 +352,15 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - Only \`transform\` and \`opacity\` animated (not layout properties like width, height, top, left)
 - One authored motion moment per page: not the same entrance on every section, not a hover effect on everything. Ease-out from an already-visible default; content never hides behind animation timing
 
-**8. Content & Microcopy** (11 items)
-- Empty states designed with warmth (message + action + illustration/icon)
-- Error messages specific: what happened + why + what to do next
+**8. Content & Microcopy** (8 items)
 - Button labels specific ("Save API Key" not "Continue" or "Submit")
 - No placeholder/lorem ipsum text visible in production
 - Truncation handled (\`text-overflow: ellipsis\`, \`line-clamp\`, or \`break-words\`)
 - Active voice ("Install the CLI" not "The CLI will be installed")
 - Loading states end with \`…\` ("Saving…" not "Saving...")
 - Destructive actions have confirmation modal or undo window
-- Happy talk detection: scan for introductory paragraphs that start with "Welcome to..." or tell users how great the site is. If you can hear "blah blah blah", it's happy talk. Flag for removal.
-- Instructions detection: any visible instructions longer than one sentence. If users need to read instructions, the design has failed. Flag the instructions AND the interaction they're compensating for.
-- Happy talk word count: count total visible words on the page. Classify each text block as "useful content" vs "happy talk" (welcome paragraphs, self-congratulatory text, instructions nobody reads). Report: "This page has X words. Y (Z%) are happy talk."
+- Happy talk: welcome paragraphs and self-praise ("Welcome to..."). Flag them, and report "This page has X words. Y (Z%) are happy talk."
+- Instructions longer than one sentence mean the design failed: flag the instructions AND the interaction they compensate for.
 
 **9. AI Slop Detection** (${AI_SLOP_BLACKLIST.length} blacklist patterns, ${detectorAll.length} detector rules, ${judgmentAll.length} judgment tells; polish-level ones on the last line)
 
@@ -435,42 +418,21 @@ Evaluate:
 - **Feedback clarity:** Did the action clearly succeed or fail? Is the feedback immediate?
 - **Form polish:** Focus states visible? Validation timing correct? Errors near the source?
 
-**Narration mode:** Narrate the flow in first person. "I click 'Sign Up'... spinner appears... 3 seconds pass... still spinning... I'm getting nervous. Finally the dashboard loads, but where am I? The nav doesn't highlight anything." Name the specific element, its position, its visual weight. If you can't name it specifically, you're not actually experiencing the flow, you're generating platitudes.
+**Narration mode:** narrate the flow in first person ("I click 'Sign Up'... still spinning after 3 seconds..."), naming each element, its position and its visual weight.
 
 ### Goodwill Reservoir (track across the flow)
 
-As you walk the user flow, maintain a mental goodwill meter (starts at 70/100).
-These scores are heuristic, not measured. The value is in identifying specific
-drains and fills, not in the final number.
+Keep a heuristic goodwill meter starting at 70/100; the drains and fills matter, not the number. Drains: hidden information the user wants (pricing, contact, shipping) −15; interstitials, splash screens or forced tours −15; format punishment (rejecting dashes in a phone number) −10; unnecessary information requests −10; sloppy appearance −10; each ambiguous choice −5. Fills: top tasks obvious +10; graceful error recovery with a specific fix +10; upfront about costs and limits +5; each saved step (direct links, smart defaults, autofill) +5; apologizes when things go wrong +5.
 
-Subtract points for:
-- Hidden information the user would want (pricing, contact, shipping): subtract 15
-- Format punishment (rejecting valid input like dashes in phone numbers): subtract 10
-- Unnecessary information requests: subtract 10
-- Interstitials, splash screens, forced tours blocking the task: subtract 15
-- Sloppy or unprofessional appearance: subtract 10
-- Ambiguous choices that require thinking: subtract 5 each
-
-Add points for:
-- Top user tasks are obvious and prominent: add 10
-- Upfront about costs and limitations: add 5
-- Saves steps (direct links, smart defaults, autofill): add 5 each
-- Graceful error recovery with specific fix instructions: add 10
-- Apologizes when things go wrong: add 5
-
-Report the final goodwill score with a visual dashboard:
+Report it as a dashboard, one line per step:
 
 \`\`\`
 Goodwill: 70 ████████████████████░░░░░░░░░░
-  Step 1: Login page        70 → 75  (+5 obvious primary action)
-  Step 2: Dashboard          75 → 60  (-15 interstitial tour popup)
-  Step 3: Settings           60 → 50  (-10 format punishment on phone)
-  Step 4: Billing            50 → 35  (-15 hidden pricing info)
-  FINAL: 35/100 ⚠️ CRITICAL UX DEBT
+  Step 1: Dashboard   70 → 55  (-15 interstitial tour popup)
+  FINAL: 55/100
 \`\`\`
 
-Below 30 = critical UX debt. 30-60 = needs work. Above 60 = healthy.
-Include the biggest drains and fills as specific findings.
+Below 30 = critical UX debt, 30-60 = needs work, above 60 = healthy. File the biggest drains and fills as findings.
 
 ---
 
@@ -487,18 +449,9 @@ Compare screenshots and observations across pages for:
 
 ## Phase 6: Compile Report
 
-### Output Locations
+### Baseline
 
-**Local:** \`.gstack/design-reports/design-audit-{domain}-{YYYY-MM-DD}.md\`
-
-**Project-scoped:**
-\`\`\`bash
-GSTACK_STATE_ROOT=$(~/.claude/skills/gstack/bin/gstack-paths --get GSTACK_STATE_ROOT); : "\${GSTACK_STATE_ROOT:?gstack-paths failed; reinstall with ./setup or /gstack-upgrade}"
-SLUG=$(~/.claude/skills/gstack/bin/gstack-slug --get SLUG 2>/dev/null) && mkdir -p "$GSTACK_STATE_ROOT/projects/$SLUG" && echo "PROJECT_DIR: $GSTACK_STATE_ROOT/projects/$SLUG"
-\`\`\`
-Write to: \`<PROJECT_DIR>/{user}-{branch}-design-audit-{datetime}.md\` (\`PROJECT_DIR\` printed above)
-
-**Baseline:** Write \`design-baseline.json\` for regression mode (temp file then \`mv\`, and a per-run copy \`design-baseline.<runId>.json\` beside it):
+The report goes where Phase 10 says. Write \`$REPORT_DIR/design-baseline.json\` for regression mode (temp file then \`mv\`, and a per-run copy \`design-baseline.<runId>.json\` beside it):
 \`\`\`json
 {
   "schemaVersion": 2,
@@ -528,12 +481,7 @@ Write to: \`<PROJECT_DIR>/{user}-{branch}-design-audit-{datetime}.md\` (\`PROJEC
 - **Design Score: {A-F}** — weighted average of all 10 categories
 - **AI Slop Score: {A-F}** — standalone grade with pithy verdict
 
-**Per-category grades:**
-- **A:** Intentional, polished, delightful. Shows design thinking.
-- **B:** Solid fundamentals, minor inconsistencies. Looks professional.
-- **C:** Functional but generic. No major problems, no design point of view.
-- **D:** Noticeable problems. Feels unfinished or careless.
-- **F:** Actively hurting user experience. Needs significant rework.
+**Per-category grades:** A intentional and polished; B solid, minor inconsistencies; C functional but generic, no point of view; D noticeable problems, feels careless; F actively hurts the user.
 
 **Grade computation:** Each category starts at A. Each High-impact finding drops one letter grade. Each Medium-impact finding drops half a letter grade. Polish findings are noted but do not affect grade. Minimum is F.
 
@@ -565,29 +513,22 @@ When previous \`design-baseline.json\` exists or \`--regression\` flag is used:
 
 ## Design Critique Format
 
-Use structured feedback, not opinions:
-- "I notice..." — observation (e.g., "I notice the primary CTA competes with the secondary action")
-- "I wonder..." — question (e.g., "I wonder if users will understand what 'Process' means here")
-- "What if..." — suggestion (e.g., "What if we moved search to a more prominent position?")
-- "I think... because..." — reasoned opinion (e.g., "I think the spacing between sections is too uniform because it doesn't create hierarchy")
-
-Tie everything to user goals and product objectives. Always suggest specific improvements alongside problems.
+Phrase findings as "I notice..." (observation), "I wonder..." (question), "What if..." (suggestion) and "I think... because..." (reasoned opinion), tied to user goals, each with a specific improvement.
 
 ---
 
 ## Important Rules
 
-1. **Think like a designer, not a QA engineer.** You care whether things feel right, look intentional, and respect the user. You do NOT just care whether things "work."
-2. **Screenshots are evidence.** Every finding needs at least one screenshot. Use annotated screenshots (\`annotatedScreenshot(pg)\`) to highlight elements.
-3. **Be specific and actionable.** "Change X to Y because Z" — not "the spacing feels off."
+1. **Think like a designer, not a QA engineer:** whether it feels right and looks intentional, not only whether it works.
+2. **Screenshots are evidence.** Every finding needs at least one; annotate (\`annotatedScreenshot(pg)\`) to highlight elements.
+3. **Be specific and actionable:** "change X to Y because Z", never "the spacing feels off."
 4. **Never read source code.** Evaluate the rendered site, not the implementation. (Exception: offer to write DESIGN.md from extracted observations.)
-5. **AI Slop detection is your superpower.** Most developers can't evaluate whether their site looks AI-generated. You can. Be direct about it.
+5. **Name AI slop directly.** Most developers cannot see it.
 6. **Quick wins matter.** Always include a "Quick Wins" section — the 3-5 highest-impact fixes that take <30 minutes each.
-7. **Fall back to \`annotatedScreenshot(pg)\` for tricky UIs.** When the snapshot tree does not surface a control you can plainly see (clickable divs, canvas buttons), take the annotated screenshot, Read it, and drive by CSS selector or \`pg.getByText(...)\` instead of by ref.
-8. **Responsive is design, not just "not broken."** A stacked desktop layout on mobile is not responsive design — it's lazy. Evaluate whether the mobile layout makes *design* sense.
-9. **Document incrementally.** Write each finding to the report as you find it. Don't batch.
-10. **Depth over breadth.** 5-10 well-documented findings with screenshots and specific suggestions > 20 vague observations.
-11. **Show screenshots to the user.** After every script that saves a screenshot, annotated screenshot, or responsive set, \`cp\` the files out of the printed \`ASIDE_DIR\` into \`$REPORT_DIR/screenshots/\` and use the Read tool on each copied file so the user can see them inline. For the responsive set (3 files), Read all three. This is critical — without it, screenshots are invisible to the user.`;
+7. **Tricky UIs:** when the snapshot tree misses a control you can see (clickable divs, canvas buttons), Read the annotated screenshot and drive by CSS selector or \`pg.getByText(...)\`.
+8. **Document incrementally,** each finding as you find it.
+9. **Depth over breadth:** 5-10 well-documented findings beat 20 vague ones.
+10. **Show screenshots to the user.** After every script that saves a screenshot, annotated screenshot, or responsive set, \`cp\` the files out of the printed \`ASIDE_DIR\` into \`$REPORT_DIR/screenshots/\` and use the Read tool on each copied file so the user can see them inline. For the responsive set (3 files), Read all three. This is critical — without it, screenshots are invisible to the user.`;
 }
 
 export function generateDesignSketch(ctx: TemplateContext): string {

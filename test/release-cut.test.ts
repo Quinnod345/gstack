@@ -13,11 +13,19 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { bunIsolationArgs } from '../lib/bun-isolation';
 import {
-  BACKSTOP_CHECK, NOTES_CAP, NOTES_REF, REQUIRED_CHECK, changelogEntries, compareVersions, cutRelease, describePlan, gateVerdict, gitIn,
-  planRelease, readTrainNotes, releaseNotes, type Gh, type Git,
+  BACKSTOP_CHECK, FLOOR_HOURS, NOTES_CAP, NOTES_REF, REQUIRED_CHECK, SCHEDULED_GRACE_HOURS, changelogEntries, compareVersions, cutRelease, describePlan, floorStatus,
+  gateVerdict, gitIn, planRelease, readTrainNotes, releaseNotes, sanitizeReason, stableMovedAt, verifySecurity, type Gh, type Git,
 } from '../scripts/release-cut';
 
 const bases: string[] = [];
+// A cut made a moment ago clears the 72-hour floor at this clock.
+const pastFloor = () => Date.now() + (FLOOR_HOURS + 1) * 3_600_000;
+// The CLI reads GITHUB_EVENT_NAME (schedule grace) and GITHUB_ACTIONS (annotations); a test sets them itself, never inherits the runner's.
+function cliEnv(shim: string, extra: Record<string, string> = {}): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env, PATH: shim + path.delimiter + process.env.PATH };
+  for (const k of ['GITHUB_EVENT_NAME', 'GITHUB_ACTIONS', 'GITHUB_STEP_SUMMARY']) delete env[k];
+  return { ...env, ...extra };
+}
 afterEach(() => { for (const b of bases.splice(0)) fs.rmSync(b, { recursive: true, force: true }); });
 
 function git(cwd: string, ...args: string[]): string {
@@ -25,7 +33,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 type CheckRun = { name: string; status: string; conclusion: string | null };
-interface State { checks: Record<string, CheckRun[]>; released: Set<string>; createFails?: string; calls: string[][] }
+interface State { checks: Record<string, CheckRun[]>; released: Set<string>; createFails?: string; calls: string[][]; api?: Record<string, unknown> }
 
 const GREEN: CheckRun[] = [{ name: REQUIRED_CHECK, status: 'completed', conclusion: 'success' }, { name: BACKSTOP_CHECK, status: 'completed', conclusion: 'success' }, { name: 'typecheck', status: 'completed', conclusion: 'success' }];
 const backstop = (status: string, conclusion: string | null): CheckRun[] => [...GREEN.filter(c => c.name !== BACKSTOP_CHECK), { name: BACKSTOP_CHECK, status, conclusion }];
@@ -36,6 +44,8 @@ function fakeGh(state: State): Gh {
     const api = args[0] === 'api' ? args[args.length - 1]! : '';
     const m = /commits\/([0-9a-f]+)\/check-runs/.exec(api);
     if (m) return { status: 0, stdout: JSON.stringify([{ check_runs: state.checks[m[1]!] ?? GREEN }]), stderr: '' };
+    if (api && state.api && api in state.api) return { status: 0, stdout: JSON.stringify(state.api[api]), stderr: '' };
+    if (api) return { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
     if (args[0] === 'release' && args[1] === 'view') return state.released.has(args[2]!) ? { status: 0, stdout: '{}', stderr: '' } : { status: 1, stdout: '', stderr: 'release not found' };
     if (args[0] === 'release' && args[1] === 'create') {
       if (state.createFails === args[2]) return { status: 1, stdout: '', stderr: 'HTTP 502 Bad Gateway' };
@@ -57,12 +67,13 @@ function fixture() {
   git(seed, 'remote', 'add', 'origin', origin);
   const shas: Record<string, string> = {};
   let changelog = '# Changelog\n';
-  const release = (version: string, headline: string) => {
+  const release = (version: string, headline: string, o: { message?: string; files?: Record<string, string> } = {}) => {
     changelog = changelog.replace('# Changelog\n', '# Changelog\n\n## [' + version + '] - 2026-10-2' + version.slice(-1) + '\n\n**' + headline + '**\n\n### Fixed\n- a thing\n');
     fs.writeFileSync(path.join(seed, 'VERSION'), version + '\n');
     fs.writeFileSync(path.join(seed, 'CHANGELOG.md'), changelog);
+    for (const [file, text] of Object.entries(o.files ?? {})) fs.writeFileSync(path.join(seed, file), text);
     git(seed, 'add', '-A');
-    git(seed, 'commit', '-q', '-m', 'v' + version);
+    git(seed, 'commit', '-q', '-m', o.message ?? 'v' + version);
     git(seed, 'push', '-q', 'origin', 'main');
     shas[version] = git(seed, 'rev-parse', 'HEAD');
     return shas[version]!;
@@ -99,7 +110,7 @@ describe('release-cut: planning', () => {
     expect(r.plan.notes).not.toContain('1.0.2');
     const lines = describePlan(r.plan, true);
     expect(lines.some(l => l.startsWith('DRY_RUN:'))).toBe(true);
-    expect(lines).toContain('  git push origin ' + f.shas['1.0.1'] + ':refs/heads/stable');
+    expect(lines).toContain('  git push --force-with-lease=refs/heads/stable: origin ' + f.shas['1.0.1'] + ':refs/heads/stable');
   });
 
   test('a missing free-tests run, a running free-tests run, no backstop check run and a superseded (neutral) backstop are not green', () => {
@@ -335,7 +346,7 @@ describe('release-cut: train evidence gates a commit whose backstop never settle
     fs.mkdirSync(shim);
     fs.writeFileSync(path.join(shim, 'gh'), '#!/usr/bin/env bash\ncase "$*" in\n  *check-runs*) echo \'' + JSON.stringify([{ check_runs: f.state.checks[head] }]) + '\' ;;\n  *) exit 1 ;;\nesac\n', { mode: 0o755 });
     const run = (...args: string[]) => spawnSync(process.execPath, [...bunIsolationArgs(), 'run', path.join(path.resolve(import.meta.dir, '..'), 'scripts', 'release-cut.ts'), ...args],
-      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: { ...process.env, PATH: shim + path.delimiter + process.env.PATH } });
+      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: cliEnv(shim) });
     const cli = run('--repo', f.repo, '--dry-run', '--ref', head, '--required-check', 'ci', '--backstop-check', 'nightly-backstop', '--notes-ref', 'refs/notes/other-trains');
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
     expect(cli.stdout.split('\n')[0]).toBe('CANDIDATE: ' + head + ' (' + git(f.seed, 'show', '-s', '--format=%cs', head) + ') [hotfix: --ref] gated by train t9');
@@ -369,7 +380,7 @@ describe('release-cut: cutting, hotfixes and the forward-only stable', () => {
 
     const hot = f.release('1.0.4', 'Hotfix: the lease never blocks.');
     f.refresh();
-    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh });
+    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: pastFloor });
     expect(promo.ok, JSON.stringify(promo)).toBe(true);
     if (!promo.ok) return;
     expect(promo.plan.hotfix).toBe(true);
@@ -425,7 +436,7 @@ describe('release-cut: cutting, hotfixes and the forward-only stable', () => {
     f.state.createFails = 'v1.0.4';
     const hot = f.release('1.0.4', 'Hotfix: the lease never blocks.');
     f.refresh();
-    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh });
+    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: pastFloor });
     expect(promo.ok).toBe(true);
     if (!promo.ok) return;
     expect(cutRelease(promo.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base }).ok).toBe(false);
@@ -498,7 +509,7 @@ describe.skipIf(process.platform === 'win32')('release-cut: the workflow entry p
     fs.mkdirSync(shim);
     fs.writeFileSync(path.join(shim, 'gh'), '#!/usr/bin/env bash\necho "gh $*" >> "' + path.join(f.base, 'gh.log') + '"\ncase "$*" in\n  *check-runs*) echo \'' + JSON.stringify([{ check_runs: GREEN }]) + '\' ;;\n  "release view v1.0.3 "*) echo \'{\"tagName\":\"v1.0.3\"}\' ;;\n  *) exit 1 ;;\nesac\n', { mode: 0o755 });
     const run = (...args: string[]) => spawnSync(process.execPath, [...bunIsolationArgs(), 'run', path.join(path.resolve(import.meta.dir, '..'), 'scripts', 'release-cut.ts'), ...args],
-      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: { ...process.env, PATH: shim + path.delimiter + process.env.PATH } });
+      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: cliEnv(shim) });
 
     const summary = path.join(f.base, 'summary.md');
     const dry = run('--repo', f.repo, '--dry-run', '--summary', summary);
@@ -543,6 +554,400 @@ describe.skipIf(process.platform === 'win32')('release-cut: the workflow entry p
   });
 });
 
+const H = 3_600_000;
+const isoZ = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+/** Cut 1.0.3 for real (an annotated tag dated now); returns the floor's anchor, the tag time. */
+function cutFirst(f: ReturnType<typeof fixture>) {
+  const first = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+  if (!first.ok) throw new Error(JSON.stringify(first));
+  const cut = cutRelease(first.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base });
+  if (!cut.ok) throw new Error(cut.lines.join('\n'));
+  f.refresh();
+  const moved = stableMovedAt(f.git, f.gh, f.repo, f.shas['1.0.3']!);
+  if (moved.at === null) throw new Error(moved.why);
+  return moved.at;
+}
+
+describe('release-cut: the 72-hour floor', () => {
+  // Value: protects=Garry's rule that stable moves at most once per 72 h (2026-10-27), measured from the tag time of the release stable points at, with a 3 h
+  // cron-jitter grace for scheduled runs only; fails_when=a hand cut lands before 72:00, a scheduled run before 69:00, the grace leaks to hand-run cuts, or a
+  // refusal loses its code or NEXT_ALLOWED; why_new=no floor existed; seam=now is injected, the tag time is read back from the real annotated tag; no_claim=GitHub's cron timing
+  test('a cut inside 72 h is REFUSED_FLOOR with both next-allowed times; 72:00 clears a hand cut, 69:00 a scheduled run, and the grace is schedule-only', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    f.release('1.0.4', 'Later work.');
+    f.refresh();
+    const plan = (hours: number, scheduled = false) => planRelease({ repo: f.repo, git: f.git, gh: f.gh, scheduled, now: () => at + hours * H });
+
+    const early = plan(FLOOR_HOURS - 1 / 3600);
+    expect(early.ok).toBe(false);
+    if (early.ok) return;
+    expect(early.code).toBe('REFUSED_FLOOR');
+    expect(early.message).toStartWith('stable moved to v1.0.3 at ' + isoZ(at) + ', 72.0 h ago; a hand-run cut needs 72 h;');
+    expect(early.message).toContain('--security "<GHSA-…|CVE-…|#n>: why" --ref <fix sha>');
+    expect(early.next).toBe(isoZ(at + 72 * H) + ' for a hand-run cut; ' + isoZ(at + 69 * H) + ' for a scheduled run');
+    expect(early.plan!.sha).toBe(f.shas['1.0.4']);
+    expect(early.plan!.floor.line).toBe('FLOOR: refused');
+
+    const onTime = plan(FLOOR_HOURS);
+    expect(onTime.ok, JSON.stringify(onTime)).toBe(true);
+    if (onTime.ok) expect(onTime.plan.floor).toEqual({ verdict: 'clear', line: 'FLOOR: clear (stable moved to v1.0.3 at ' + isoZ(at) + ', 72.0 h ago; a hand-run cut needs 72 h)' });
+
+    expect(SCHEDULED_GRACE_HOURS).toBe(3);
+    const schedEarly = plan(FLOOR_HOURS - SCHEDULED_GRACE_HOURS - 1 / 3600, true);
+    expect(schedEarly.ok).toBe(false);
+    if (!schedEarly.ok) { expect(schedEarly.code).toBe('REFUSED_FLOOR'); expect(schedEarly.message).toContain('a scheduled run needs 69 h (72 h less 3 h cron grace)'); }
+    const schedOk = plan(FLOOR_HOURS - SCHEDULED_GRACE_HOURS, true);
+    expect(schedOk.ok, JSON.stringify(schedOk)).toBe(true);
+    if (schedOk.ok) expect(schedOk.plan.notes).toContain('## gstack v1.0.4 (regular release)');
+    const handInGrace = plan(70);
+    expect(handInGrace.ok).toBe(false);
+    if (!handInGrace.ok) expect(handInGrace.code).toBe('REFUSED_FLOOR');
+  });
+
+  // Value: protects=the floor's anchor is the annotated v<VERSION> tag on stable or its later release publish time, a stable it cannot date fails closed,
+  // and the first cut and a finishing cut are not held; fails_when=a lightweight tag, an extra tag or the commit date stands in for the move, a delayed
+  // release is ignored, or FLOOR_UNKNOWN passes; why_new=no floor existed; seam=gh release view is faked; no_claim=none beyond protects
+  test('stableMovedAt: annotated tags only, the later release publish time wins; an undatable stable is FLOOR_UNKNOWN; the first and a finishing cut skip the floor', () => {
+    const f = fixture();
+    git(f.seed, 'tag', 'v1.0.2', f.shas['1.0.2']!);
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.2', f.shas['1.0.2'] + ':refs/heads/stable');
+    f.refresh();
+    const unknown = planRelease({ repo: f.repo, git: f.git, gh: f.gh, now: pastFloor });
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) {
+      expect(unknown.code).toBe('FLOOR_UNKNOWN');
+      expect(unknown.message).toBe('no annotated v1.0.2 tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated; only a --security cut can move it until one does');
+      expect(unknown.next).toBe('none until an annotated v<VERSION> tag dates the release stable points at');
+    }
+    // Value: protects=FLOOR_UNKNOWN's promise that a verified --security cut still moves an undatable stable; fails_when=the unknown branch returns before
+    // the security check, stranding a security fix until someone hand-tags stable; why_new=the security test always starts from a dated stable; seam=none;
+    // no_claim=verifySecurity (floorStatus takes the verified flag)
+    expect(floorStatus({ git: f.git, gh: f.gh, repo: f.repo, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.3']!, security: true, scheduled: false, now: pastFloor() }))
+      .toEqual({ verdict: 'security', line: 'FLOOR: bypassed by the security exception (no annotated v1.0.2 tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated)' });
+
+    git(f.seed, 'push', '-q', '--delete', 'origin', 'refs/tags/v1.0.2');
+    git(f.work, 'tag', '-d', 'v1.0.2');
+    git(f.seed, 'tag', '-d', 'v1.0.2');
+    execFileSync('git', ['tag', '-a', 'v1.0.2', f.shas['1.0.2']!, '-m', 'gstack v1.0.2'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-10-20T10:00:00Z' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.2');
+    f.refresh();
+    expect(stableMovedAt(f.git, f.gh, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-20T10:00:00Z'), tag: 'v1.0.2', published: false });
+    const late: Gh = (args) => args[0] === 'release' && args[1] === 'view' && args[2] === 'v1.0.2' ? { status: 0, stdout: '{"publishedAt":"2026-10-21T09:30:00Z"}', stderr: '' } : f.gh(args);
+    expect(stableMovedAt(f.git, late, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-21T09:30:00Z'), tag: 'v1.0.2', published: true });
+    const held = planRelease({ repo: f.repo, git: f.git, gh: late, now: () => Date.parse('2026-10-24T09:00:00Z') });
+    expect(held.ok).toBe(false);
+    if (!held.ok) expect(held.next).toStartWith('2026-10-24T09:30:00Z for a hand-run cut');
+
+    const base = { git: f.git, gh: f.gh, repo: f.repo, security: false, scheduled: false, now: Date.now() };
+    expect(floorStatus({ ...base, prevStable: null, sha: f.shas['1.0.3']! }).verdict).toBe('first');
+    expect(floorStatus({ ...base, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.2']! }).verdict).toBe('finishing');
+
+    // A newer hand-made annotated tag on stable, with no release, neither dates the move nor pins later runs to stable (a silent NOTHING_NEW stall).
+    execFileSync('git', ['tag', '-a', 'v1.0.2-rc', f.shas['1.0.2']!, '-m', 'again'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-10-22T08:00:00Z' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.2-rc');
+    f.refresh();
+    expect(stableMovedAt(f.git, late, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-21T09:30:00Z'), tag: 'v1.0.2', published: true });
+    const pastStray = planRelease({ repo: f.repo, git: f.git, gh: late, now: () => Date.parse('2026-10-25T10:00:00Z') });
+    expect(pastStray.ok, JSON.stringify(pastStray)).toBe(true);
+    if (pastStray.ok) expect(pastStray.plan.tag).toBe('v1.0.3');
+  });
+
+  // Value: protects=the stable push is conditioned on the stable the floor read, so two overlapping cuts cannot both move it; fails_when=the push is a plain
+  // fast-forward that succeeds over a move made after planning; why_new=cuts never raced before the floor made the move time matter; seam=none (real bare origin);
+  // no_claim=none beyond protects
+  // Value: protects=a cut whose tag was pushed long before stable moved (a failed stable push, retried later) is still held by the floor and is dated by
+  // its release, not by the old tag; fails_when=the old tag time lets the next cut through early or the retry skips the floor; why_new=the half-done tests
+  // cover a missing release only; seam=gh release view is faked; no_claim=none beyond protects
+  test('a tag pushed earlier without moving stable is held by the floor, and once promoted its release publish time dates the move', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    const hot = f.release('1.0.4', 'Later work.');
+    execFileSync('git', ['tag', '-a', 'v1.0.4', hot, '-m', 'gstack v1.0.4 (regular release)'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.4');
+    f.refresh();
+    const held = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: () => at + 10 * H });
+    expect(held.ok).toBe(false);
+    if (!held.ok) { expect(held.code).toBe('REFUSED_FLOOR'); expect(held.plan!.tagExists).toBe('same'); }
+    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: () => at + 72 * H });
+    expect(promo.ok, JSON.stringify(promo)).toBe(true);
+    if (!promo.ok) return;
+    const cut = cutRelease(promo.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base });
+    expect(cut.lines).toEqual(['TAG: v1.0.4 already names ' + hot.slice(0, 12), 'STABLE: ' + f.shas['1.0.3']!.slice(0, 12) + ' -> ' + hot.slice(0, 12), 'RELEASE: v1.0.4 published https://github.com/o/r/releases/tag/v1.0.4']);
+    f.refresh();
+    const published = isoZ(at + 72 * H);
+    const viaRelease: Gh = (args) => args[0] === 'release' && args[1] === 'view' && args[2] === 'v1.0.4' ? { status: 0, stdout: JSON.stringify({ publishedAt: published }), stderr: '' } : f.gh(args);
+    expect(stableMovedAt(f.git, viaRelease, f.repo, hot)).toEqual({ at: Date.parse(published), tag: 'v1.0.4', published: true });
+    f.release('1.0.5', 'Even later.');
+    f.refresh();
+    const next = planRelease({ repo: f.repo, git: f.git, gh: viaRelease, now: () => at + 100 * H });
+    expect(next.ok).toBe(false);
+    if (!next.ok) { expect(next.code).toBe('REFUSED_FLOOR'); expect(next.message).toStartWith('stable moved to v1.0.4 at ' + published + ', 28.0 h ago'); }
+  });
+
+  // Value: protects=the floor fails closed when the move cannot be dated: a release that cannot be read is FLOOR_UNKNOWN, a stable whose release was never
+  // published is finished before stable moves again, and a future-dated tag holds from now; fails_when=a transient gh failure or a half-done cut lets the
+  // floor fall back to an old tag date; why_new=both adversarial reviews reproduced that bypass; seam=gh is faked; no_claim=none beyond protects
+  test('an unreadable release is FLOOR_UNKNOWN; an unpublished stable release is finished first; a future-dated tag holds from now', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    const hot = f.release('1.0.4', 'Later work.');
+    f.refresh();
+    const flaky: Gh = (args) => args[0] === 'release' && args[1] === 'view' ? { status: 1, stdout: '', stderr: 'HTTP 503: Service Unavailable' } : f.gh(args);
+    const unread = planRelease({ repo: f.repo, git: f.git, gh: flaky, now: () => at + 100 * H });
+    expect(unread.ok).toBe(false);
+    if (!unread.ok) { expect(unread.code).toBe('FLOOR_UNKNOWN'); expect(unread.message).toStartWith('cannot read the release for v1.0.3 (HTTP 503: Service Unavailable), so its last move cannot be dated'); }
+
+    // stable moved to 1.0.4 but its release failed: the next window run finishes 1.0.4 instead of moving on to 1.0.5.
+    f.state.createFails = 'v1.0.4';
+    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: () => at + 72 * H });
+    expect(promo.ok).toBe(true);
+    if (!promo.ok) return;
+    expect(cutRelease(promo.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base }).ok).toBe(false);
+    delete f.state.createFails;
+    const newer = f.release('1.0.5', 'Even later.');
+    f.refresh();
+    const finish = planRelease({ repo: f.repo, git: f.git, gh: f.gh, now: () => at + 100 * H });
+    expect(finish.ok, JSON.stringify(finish)).toBe(true);
+    if (finish.ok) { expect(finish.plan.sha).toBe(hot); expect(finish.plan.floor.verdict).toBe('finishing'); }
+    const past = planRelease({ repo: f.repo, ref: newer, git: f.git, gh: f.gh, now: () => at + 200 * H });
+    expect(past.ok).toBe(false);
+    if (!past.ok) { expect(past.code).toBe('FLOOR_UNKNOWN'); expect(past.message).toBe('stable moved to v1.0.4 but its release is not published, so the tag cannot date the move; finish that cut first (a run without --ref finishes it)'); }
+
+    const future = floorStatus({ git: f.git, gh: (args) => args[0] === 'release' ? { status: 0, stdout: JSON.stringify({ publishedAt: '2099-01-01T00:00:00Z' }), stderr: '' } : f.gh(args), repo: f.repo, prevStable: hot, sha: newer, security: false, scheduled: false, now: at });
+    expect(future.verdict).toBe('refused');
+    expect(future.next).toStartWith(isoZ(at + 72 * H) + ' for a hand-run cut');
+  });
+
+  test('cutRelease refuses to push a stable that the candidate does not descend from', () => {
+    const f = fixture();
+    git(f.seed, 'push', '-q', 'origin', f.shas['1.0.2'] + ':refs/heads/stable');
+    f.refresh();
+    const planned = planRelease({ repo: f.repo, ref: f.shas['1.0.3'], git: f.git, gh: f.gh, security: undefined });
+    const plan = planned.ok ? planned.plan : planned.plan!;
+    const cut = cutRelease({ ...plan, sha: f.shas['1.0.1']!, tag: 'v1.0.1', stableAt: false, prevStable: f.shas['1.0.2']! }, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base });
+    expect(cut.ok).toBe(false);
+    expect(cut.lines.at(-1)).toBe('STABLE: refused: ' + f.shas['1.0.1']!.slice(0, 12) + ' does not descend from stable ' + f.shas['1.0.2']!.slice(0, 12));
+    expect(git(f.origin, 'rev-parse', 'refs/heads/stable')).toBe(f.shas['1.0.2']);
+  });
+
+  test('a stable that moved after planning fails the push with a lease error and stays where the other cut put it', () => {
+    const f = fixture();
+    const planned = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    git(f.seed, 'push', '-q', 'origin', f.shas['1.0.1'] + ':refs/heads/stable');
+    const cut = cutRelease(planned.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base });
+    expect(cut.ok).toBe(false);
+    expect(cut.lines.at(-1)).toStartWith('STABLE: push failed (stable moved since this plan read it, or the push was rejected): ');
+    expect(git(f.origin, 'rev-parse', 'refs/heads/stable')).toBe(f.shas['1.0.1']);
+  });
+});
+
+describe('release-cut: the security exception', () => {
+  // Value: protects=a security cut passes the floor only with --ref and a reason the tool ties to the released commits (a commit naming the GHSA/CVE, a
+  // security-labelled #n a commit references, or an advisory whose package changes in package.json/bun.lock), its reason reaches the tag and the notes, a
+  // retry recovers it from the tag, and the next regular cut lists the versions since it; fails_when=a free-text reason or one naming an unrelated id
+  // bypasses the floor, a security cut runs without --ref, or the notes misstate either release; why_new=no exception existed; seam=gh advisories and
+  // issues are faked; no_claim=that the change fixes the advisory (attested)
+  test('verified reasons bypass the floor; unverifiable ones are REFUSED_SECURITY; the reason survives a retry; the next regular cut starts at the security release', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    const fix = f.release('1.0.4', 'Hardens tar extraction.', { message: 'v1.0.4: harden tar paths (GHSA-2345-cfgh-jmpq)' });
+    const labelled = f.release('1.0.5', 'Escapes the summary.', { message: 'v1.0.5 (#77)' });
+    const bump = f.release('1.0.6', 'Bumps left-pad.', { message: 'chore(deps): bump left-pad', files: { 'package.json': '{\n  "dependencies": {\n    "left-pad": "1.3.0"\n  }\n}\n' } });
+    f.refresh();
+    const now = () => at + H;
+    const sec = (ref: string | undefined, reason: string) => planRelease({ repo: f.repo, ref, git: f.git, gh: f.gh, now, security: reason });
+
+    const noRef = sec(undefined, 'GHSA-2345-cfgh-jmpq: tar path traversal');
+    expect(noRef.ok).toBe(false);
+    if (!noRef.ok) expect(noRef).toMatchObject({ code: 'REFUSED_SECURITY', message: '--security needs --ref <the fix commit>: a security cut releases up to the fix, never whatever is newest' });
+    const bare = sec(fix, 'urgent, trust me');
+    expect(bare.ok).toBe(false);
+    if (!bare.ok) expect(bare).toMatchObject({ code: 'REFUSED_SECURITY', message: 'the reason names no GHSA-…, CVE-… or #<n> to verify' });
+    const unrelated = sec(fix, 'CVE-2026-12345 in tar');
+    expect(unrelated.ok).toBe(false);
+    if (!unrelated.ok) expect(unrelated.message).toBe('nothing in ' + f.shas['1.0.3']!.slice(0, 12) + '..' + fix.slice(0, 12) + ' ties the reason to the release: CVE-2026-12345: no commit names it and the advisory database has no entry for it');
+    const unlabelled = sec(labelled, '#77: summary injection');
+    expect(unlabelled.ok).toBe(false);
+    if (!unlabelled.ok) expect(unlabelled.message).toEndWith('#77: cannot read it');
+    const unreferenced = sec(fix, '#78');
+    expect(unreferenced.ok).toBe(false);
+    if (!unreferenced.ok) expect(unreferenced.message).toEndWith('#78: cannot read it, no commit in the span references it');
+
+    f.state.api = {
+      'repos/o/r/issues/77': { labels: [{ name: 'bug' }] },
+      'repos/o/r/issues/79': { labels: [{ name: 'Security' }] },
+      'advisories/GHSA-9999-xxxx-wwww': { vulnerabilities: [{ package: { name: 'left-pad', ecosystem: 'npm' } }] },
+      'advisories?cve_id=CVE-2026-55555': [{ vulnerabilities: [{ package: { name: 'left-pad', ecosystem: 'npm' } }] }],
+    };
+    const noLabel = sec(labelled, '#77: summary injection');
+    if (!noLabel.ok) expect(noLabel.message).toEndWith('#77: no security label');
+    f.state.api['repos/o/r/issues/77'] = { labels: [{ name: 'Security' }] };
+    const byLabel = sec(labelled, '#77: summary injection');
+    expect(byLabel.ok, JSON.stringify(byLabel)).toBe(true);
+    if (byLabel.ok) { expect(byLabel.plan.security!.evidence).toBe('#77 carries the security label and commit ' + labelled.slice(0, 12) + ' references it'); expect(byLabel.plan.ridingAlong).toBe(1); }
+    const labelOnly = sec(labelled, '#79');
+    if (!labelOnly.ok) expect(labelOnly.message).toEndWith('#79: no commit in the span references it');
+    for (const id of ['GHSA-9999-xxxx-wwww', 'CVE-2026-55555']) {
+      const byAdvisory = sec(bump, id);
+      expect(byAdvisory.ok, JSON.stringify(byAdvisory)).toBe(true);
+      if (byAdvisory.ok) expect(byAdvisory.plan.security!.evidence).toBe('advisory ' + id + ' lists left-pad, which changes in package.json/bun.lock');
+    }
+
+    const verified = sec(fix, 'ghsa-2345-CFGH-jmpq: tar\npath traversal \`x\`');
+    expect(verified.ok, JSON.stringify(verified)).toBe(true);
+    if (!verified.ok) return;
+    const reason = 'ghsa-2345-CFGH-jmpq: tar path traversal ' + "'x'";
+    expect(verified.plan.security).toEqual({ reason, evidence: 'commit ' + fix.slice(0, 12) + ' names GHSA-2345-cfgh-jmpq' });
+    expect(verified.plan.floor.verdict).toBe('security');
+    expect(verified.plan.ridingAlong).toBe(0);
+    expect(verified.plan.notes).toContain('## gstack v1.0.4 (security release)\n\n**Security release:** \`' + reason + '\` (verified: commit ' + fix.slice(0, 12) + ' names GHSA-2345-cfgh-jmpq).');
+    expect(describePlan(verified.plan, false)).toEqual(expect.arrayContaining(['SECURITY: `' + reason + '` (verified: commit ' + fix.slice(0, 12) + ' names GHSA-2345-cfgh-jmpq)', 'RIDING_ALONG: 0 other versions ship with the fix']));
+
+    // The release step fails; a scheduled retry with no --security finishes it with the same reason, read back from the tag.
+    f.state.createFails = 'v1.0.4';
+    expect(cutRelease(verified.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base }).ok).toBe(false);
+    delete f.state.createFails;
+    expect(git(f.origin, 'cat-file', '-p', 'v1.0.4')).toContain('gstack v1.0.4 (security release)\n\nSecurity: ' + reason + '\nVerified: commit ' + fix.slice(0, 12));
+    f.refresh();
+    const retry = planRelease({ repo: f.repo, ref: fix, git: f.git, gh: f.gh, now, scheduled: true });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    if (!retry.ok) return;
+    expect(retry.plan.stableAt).toBe(true);
+    expect(retry.plan.security!.reason).toBe(reason);
+    expect(retry.plan.notes).toBe(verified.plan.notes);
+    expect(cutRelease(retry.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base }).ok).toBe(true);
+    f.refresh();
+
+    // The floor now counts from the security release; the next regular cut lists only what came after it.
+    const moved = stableMovedAt(f.git, f.gh, f.repo, fix);
+    if (moved.at === null) throw new Error(moved.why);
+    const movedAt = moved.at;
+    const held = planRelease({ repo: f.repo, git: f.git, gh: f.gh, scheduled: true, now: () => movedAt + 68 * H });
+    expect(held.ok).toBe(false);
+    if (!held.ok) { expect(held.code).toBe('REFUSED_FLOOR'); expect(held.message).toStartWith('stable moved to v1.0.4 at '); }
+    const next = planRelease({ repo: f.repo, git: f.git, gh: f.gh, scheduled: true, now: () => movedAt + 69 * H });
+    expect(next.ok, JSON.stringify(next)).toBe(true);
+    if (!next.ok) return;
+    expect(next.plan.security).toBeNull();
+    expect(next.plan.prevTag).toBe('v1.0.4');
+    expect(next.plan.notes).toContain('## gstack v1.0.6 (regular release)');
+    expect(next.plan.notes).toContain('2 versions since v1.0.4');
+    expect(next.plan.notes).not.toContain('- **1.0.4**');
+    expect(next.plan.notes).not.toContain('Security release');
+  });
+
+  // Value: protects=a finishing security cut keeps its tag's recorded evidence (no live re-check that a removed label or a gh failure can break), a tag that
+  // recorded a security cut but never moved stable cannot pass the floor without an explicit verified --security, and the advisory path counts only npm
+  // packages whose own entry changed; fails_when=a forged or stale tag bypasses the floor, finishing is blocked, or a transitive name verifies; why_new=adversarial findings
+  // 1, 4 and 5; seam=gh is faked; no_claim=none beyond protects
+  test('recorded evidence finishes a security cut; an unmoved security tag needs --security again; advisories match only npm packages whose own entry changed', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    const fix = f.release('1.0.4', 'Escapes the summary.', { message: 'v1.0.4 (#77)' });
+    f.refresh();
+    f.state.api = { 'repos/o/r/issues/77': { labels: [{ name: 'security' }] } };
+    const sec = planRelease({ repo: f.repo, ref: fix, git: f.git, gh: f.gh, now: () => at + H, security: '#77: summary injection' });
+    expect(sec.ok, JSON.stringify(sec)).toBe(true);
+    if (!sec.ok) return;
+    f.state.createFails = 'v1.0.4';
+    expect(cutRelease(sec.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base }).ok).toBe(false);
+    delete f.state.createFails;
+    f.refresh();
+    f.state.api = {};
+    const finish = planRelease({ repo: f.repo, git: f.git, gh: f.gh, now: () => at + 2 * H, scheduled: true });
+    expect(finish.ok, JSON.stringify(finish)).toBe(true);
+    if (finish.ok) expect(finish.plan.security).toEqual(sec.plan.security);
+
+    // A security-recorded tag at a commit stable never reached.
+    const later = f.release('1.0.5', 'Later.', { message: 'v1.0.5 (#78)' });
+    execFileSync('git', ['tag', '-a', 'v1.0.5', later, '-m', 'gstack v1.0.5 (security release)\n\nSecurity: #78: forged\nVerified: nothing'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.5');
+    f.refresh();
+    const forged = planRelease({ repo: f.repo, ref: later, git: f.git, gh: f.gh, now: () => at + 3 * H, scheduled: true });
+    expect(forged.ok).toBe(false);
+    if (!forged.ok) expect(forged).toMatchObject({ code: 'REFUSED_SECURITY', message: 'tag v1.0.5 records a security cut that has not moved stable; run it again with --security and --ref ' + later.slice(0, 12) + ' so the reason is verified' });
+
+    const lock = '{\n  "packages": {\n    "app": ["app@1.0.0", "", { "dependencies": { "zod": "^3" } }, "sha512-x"],\n  }\n}\n';
+    const bump = f.release('1.0.6', 'Bumps app.', { message: 'chore(deps): bump app', files: { 'bun.lock': lock } });
+    f.refresh();
+    const verify = (api: Record<string, unknown>, reason: string) => { f.state.api = api; return verifySecurity({ reason, git: f.git, gh: f.gh, repo: f.repo, from: later, to: bump }); };
+    expect(verify({ 'advisories/GHSA-2222-3333-4444': { vulnerabilities: [{ package: { name: 'zod', ecosystem: 'npm' } }] } }, 'GHSA-2222-3333-4444').ok).toBe(false);
+    expect(verify({ 'advisories/GHSA-2222-3333-4444': { vulnerabilities: [{ package: { name: 'app', ecosystem: 'pip' } }] } }, 'GHSA-2222-3333-4444').ok).toBe(false);
+    expect(verify({ 'advisories/GHSA-2222-3333-4444': { vulnerabilities: [{ package: { name: 'app', ecosystem: 'npm' } }] } }, 'GHSA-2222-3333-4444'))
+      .toEqual({ ok: true, evidence: 'advisory GHSA-2222-3333-4444 lists app, which changes in package.json/bun.lock' });
+  });
+
+  test('sanitizeReason keeps one public line: no control characters or backticks, at most 300 characters; #12a and &#13; are not issue numbers', () => {
+    expect(sanitizeReason('  CVE-2026-1234:\r\n a\tb \`c\`  ')).toBe("CVE-2026-1234: a b 'c'");
+    expect(sanitizeReason('#1 ' + 'x'.repeat(400)).length).toBe(300);
+    expect(verifySecurity({ reason: 'see #12a and &#13;', git: () => ({ ok: true, out: '' }), gh: () => ({ status: 1, stdout: '', stderr: '' }), repo: 'o/r', from: null, to: 'f'.repeat(40) }))
+      .toEqual({ ok: false, why: 'the reason names no GHSA-…, CVE-… or #<n> to verify' });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('release-cut: refusals at the workflow entry point', () => {
+  // Value: protects=the CLI contract for refusals: REFUSED_FLOOR then NEXT_ALLOWED on the first two lines, the plan after them, nothing pushed, exit 1 for a
+  // hand cut and an ::error:: annotation, exit 0 with a ::notice:: on the schedule or a dry run, REFUSED_SECURITY and FLOOR_UNKNOWN red on every trigger,
+  // and usage (exit 2) for an empty --security; fails_when=a refusal is silent, exits green on a hand cut, red on a scheduled hold, or pushes; why_new=no
+  // refusal codes existed; seam=a gh shim on PATH; no_claim=GitHub's rendering of annotations
+  test('refusal lines, annotations and exit codes for hand, scheduled and dry runs', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    f.release('1.0.4', 'Later work.');
+    f.refresh();
+    const shim = path.join(f.base, 'shim');
+    fs.mkdirSync(shim);
+    fs.writeFileSync(path.join(shim, 'gh'), '#!/usr/bin/env bash\ncase "$*" in\n  *check-runs*) echo \'' + JSON.stringify([{ check_runs: GREEN }]) + '\' ;;\n  "release view v1.0.3 "*) echo \'{"publishedAt":"' + isoZ(at) + '"}\' ;;\n  *) echo "release not found" >&2; exit 1 ;;\nesac\n', { mode: 0o755 });
+    const run = (env: Record<string, string>, ...args: string[]) => spawnSync(process.execPath, [...bunIsolationArgs(), 'run', path.join(path.resolve(import.meta.dir, '..'), 'scripts', 'release-cut.ts'), '--repo', f.repo, ...args],
+      { cwd: f.work, encoding: 'utf8', timeout: 60_000, env: cliEnv(shim, env) });
+    const stable = () => git(f.origin, 'rev-parse', 'refs/heads/stable');
+
+    const hand = run({});
+    expect(hand.status, hand.stdout + hand.stderr).toBe(1);
+    const lines = hand.stdout.split('\n');
+    expect(lines[0]).toStartWith('REFUSED_FLOOR: stable moved to v1.0.3 at ');
+    expect(lines[1]).toMatch(/^NEXT_ALLOWED: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ for a hand-run cut; \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ for a scheduled run$/);
+    expect(lines).toContain('FLOOR: refused');
+    expect(hand.stdout).not.toContain('::');
+    expect(stable()).toBe(f.shas['1.0.3']);
+
+    const annotated = run({ GITHUB_ACTIONS: 'true' });
+    expect(annotated.status).toBe(1);
+    expect(annotated.stdout).toContain('::error title=release-cut REFUSED_FLOOR::REFUSED_FLOOR: stable moved to v1.0.3');
+    const scheduled = run({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'schedule' });
+    expect(scheduled.status, scheduled.stdout).toBe(0);
+    expect(scheduled.stdout).toContain('::notice title=release-cut REFUSED_FLOOR::');
+    expect(scheduled.stdout).toContain('a scheduled run needs 69 h');
+    expect(run({}, '--dry-run').status).toBe(0);
+    expect(stable()).toBe(f.shas['1.0.3']);
+
+    const noRef = run({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'schedule' }, '--security', 'CVE-2026-1: x');
+    expect(noRef.status).toBe(1);
+    expect(noRef.stdout.split('\n')[0]).toBe('REFUSED_SECURITY: --security needs --ref <the fix commit>: a security cut releases up to the fix, never whatever is newest');
+    expect(noRef.stdout).toContain('::error title=release-cut REFUSED_SECURITY::');
+    // Value: protects=a refusal annotation stays one workflow command: % CR and LF in the message are escaped as %25 %0D %0A; fails_when=the escaping is
+    // dropped, so caller-supplied text in --ref or a git error splits the ::error:: line and starts a new workflow command; why_new=every other annotation
+    // message here is plain text; seam=none; no_claim=GitHub's rendering of the decoded annotation
+    const escaped = run({ GITHUB_ACTIONS: 'true' }, '--ref', 'no%such\r\nref');
+    expect(escaped.status).toBe(1);
+    expect(escaped.stdout.split('\n').find(l => l.startsWith('::error'))).toStartWith('::error title=release-cut REFUSED::REFUSED: --ref no%25such%0D%0Aref is not a commit here: ');
+    expect(run({}, '--security').status).toBe(2);
+    expect(run({}, '--security', '--dry-run').status).toBe(2);
+
+    git(f.seed, 'push', '-q', 'origin', f.shas['1.0.4'] + ':refs/heads/stable');
+    f.release('1.0.5', 'Even later.');
+    f.refresh();
+    const unknown = run({ GITHUB_EVENT_NAME: 'schedule' });
+    expect(unknown.status).toBe(1);
+    expect(unknown.stdout.split('\n')[0]).toStartWith('FLOOR_UNKNOWN: no annotated v1.0.4 tag points at stable ' + f.shas['1.0.4']!.slice(0, 12));
+    expect(stable()).toBe(f.shas['1.0.4']);
+  });
+});
+
 describe('release-cut: notes', () => {
   test('changelog headlines are the bold first line of each entry; versions order numerically', () => {
     const entries = changelogEntries('# Changelog\n\n## [1.91.221.0] - 2026-10-25\n\n**The updater no longer skips.** More.\n\n### Fixed\n- x\n\n## [1.91.99.0] - 2026-10-01\n\n| a | b |\n\n**Older.**\n');
@@ -558,6 +963,6 @@ describe('release-cut: notes', () => {
     expect(notes.length).toBeLessThanOrEqual(NOTES_CAP);
     expect(notes).toMatch(/- \.\.\.and \d+ more versions; see CHANGELOG\.md/);
     expect(notes).toContain('1000 versions since v1.91.0.0');
-    expect(notes.split('\n')[0]).toBe('## gstack v1.91.1000.0 (weekly release)');
+    expect(notes.split('\n')[0]).toBe('## gstack v1.91.1000.0 (regular release)');
   });
 });

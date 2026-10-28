@@ -3,11 +3,12 @@
  * release-cut: tag the newest green commit on main as v<VERSION>, publish a
  * GitHub Release whose notes are that span's CHANGELOG headlines, and
  * fast-forward refs/heads/stable to it (docs/releases.md). Run by
- * .github/workflows/weekly-release.yml every Monday morning and by hand for a
- * hotfix (--ref <sha on main>). Dry runs print the plan and change nothing.
+ * .github/workflows/weekly-release.yml ("Stable release") every Monday and
+ * Thursday at 14:00 UTC and by hand (--ref <sha on main> for a hotfix). Dry
+ * runs print the plan and change nothing.
  *
- *   bun scripts/release-cut.ts --repo owner/name [--ref <sha>] [--dry-run] [--summary <file>]
- *     [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]
+ *   bun scripts/release-cut.ts --repo owner/name [--ref <sha>] [--security <reason>] [--dry-run]
+ *     [--summary <file>] [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]
  *
  * The checkout needs origin's full history (fetch-depth 0). Green, for a
  * commit on main's first-parent history, means: its required check run
@@ -34,6 +35,17 @@
  * commit. A cut that stopped half-way (tag and stable pushed, release not
  * created) is finished by the next run; a completed cut reports NOTHING_NEW
  * and exits 0.
+ *
+ * The floor: stable moves at most once per FLOOR_HOURS (72). The last move is
+ * the annotated v<VERSION> tag pointing at stable, or its GitHub Release's
+ * publish time when that is later; a cut inside the floor is REFUSED_FLOOR
+ * with NEXT_ALLOWED, and a stable without that tag is FLOOR_UNKNOWN. A
+ * scheduled run (GITHUB_EVENT_NAME=schedule) gets SCHEDULED_GRACE_HOURS (3) of
+ * slack for cron start jitter; nothing else does. Finishing a half-done cut is
+ * not a new move. The one exception is a security cut: --security <reason>
+ * with --ref, where the reason names a GHSA, CVE or #<n> that verifySecurity
+ * ties to the commits being released; the reason and its evidence go into the
+ * tag message and the notes, and a retry recovers them from the tag.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -51,6 +63,9 @@ const RED = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'st
 export const WINDOW_DAYS = 7;
 export const WINDOW_COMMITS = 200;
 export const NOTES_CAP = 60_000;
+export const FLOOR_HOURS = 72;
+export const SCHEDULED_GRACE_HOURS = 3;
+const HOUR = 3_600_000;
 
 export const runGh: Gh = (args) => {
   const r = spawnSync('gh', args, { encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
@@ -168,7 +183,14 @@ export function changelogEntries(text: string): ChangelogEntry[] {
   return out;
 }
 
-export interface NotesInput { repo: string; version: string; date: string; prevVersion: string | null; prevTag: string | null; entries: ChangelogEntry[]; hotfix: boolean; first?: boolean }
+export interface NotesInput { repo: string; version: string; date: string; prevVersion: string | null; prevTag: string | null; entries: ChangelogEntry[]; hotfix: boolean; first?: boolean; security?: Security | null }
+
+/** A verified security cut: the sanitized reason and what tied it to the released commits. */
+export interface Security { reason: string; evidence: string }
+
+export function releaseKind(hotfix: boolean, security: Security | null | undefined): 'security' | 'hotfix' | 'regular' {
+  return security ? 'security' : hotfix ? 'hotfix' : 'regular';
+}
 
 /** Release notes: one headline per version in (prev, version], capped at NOTES_CAP. */
 export function releaseNotes(n: NotesInput): string {
@@ -178,8 +200,9 @@ export function releaseNotes(n: NotesInput): string {
   const changelogUrl = 'https://github.com/' + n.repo + '/blob/v' + n.version + '/CHANGELOG.md';
   const compare = n.prevTag ? '[Compare](https://github.com/' + n.repo + '/compare/' + n.prevTag + '...v' + n.version + ') or read ' : 'Read ';
   const head = [
-    '## gstack v' + n.version + (n.hotfix ? ' (hotfix release)' : ' (weekly release)'),
+    '## gstack v' + n.version + ' (' + releaseKind(n.hotfix, n.security) + ' release)',
     '',
+    ...(n.security ? ['**Security release:** `' + n.security.reason + '` (verified: ' + n.security.evidence + '). Every version since the previous release ships with it.', ''] : []),
     n.first || !n.prevVersion
       ? 'First tagged release: the ' + span.length + ' version' + plural + (n.prevVersion ? ' since v' + n.prevVersion + ' (the week before it)' : '') + ', one line each; the [full changelog](' + changelogUrl + ') has every earlier one.'
       : span.length + ' version' + plural + ' since v' + n.prevVersion + ', one line each. ' + compare + 'the [full changelog](' + changelogUrl + ').',
@@ -198,22 +221,133 @@ export function releaseNotes(n: NotesInput): string {
   return body;
 }
 
+const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+/**
+ * When stable last moved: the annotated v<VERSION> tag a cut made on it (VERSION
+ * read at stable), or that tag's release publish time when later. Any other tag
+ * on that commit is ignored, so a hand-made extra tag cannot date the move or
+ * pin later runs to stable. published is false when the release does not exist
+ * yet (a half-done cut, whose tag may predate the stable push); a release that
+ * cannot be read leaves the move undated.
+ */
+export function stableMovedAt(git: Git, gh: Gh, repo: string, stable: string): { at: number; tag: string; published: boolean } | { at: null; why: string } {
+  const version = git(['show', stable + ':VERSION']);
+  const tag = 'v' + (version.ok ? version.out.trim() : '<VERSION>');
+  const listed = version.ok ? git(['for-each-ref', '--points-at=' + stable, '--format=%(objecttype)%09%(creatordate:unix)', 'refs/tags/' + tag]) : null;
+  const [type, created] = listed?.ok && listed.out ? listed.out.split('\t') : [];
+  if (type !== 'tag') return { at: null, why: 'no annotated ' + tag + ' tag points at stable ' + stable.slice(0, 12) + ', so its last move cannot be dated' };
+  const at = Number(created) * 1000;
+  const view = gh(['release', 'view', tag, '--repo', repo, '--json', 'publishedAt']);
+  if (view.status !== 0) {
+    if (/not found|HTTP 404/i.test(view.stderr)) return { tag, at, published: false };
+    return { at: null, why: 'cannot read the release for ' + tag + ' (' + (view.stderr.trim().slice(0, 120) || 'gh exit ' + view.status) + '), so its last move cannot be dated' };
+  }
+  const published = Date.parse(parseJson<{ publishedAt?: string }>(view)?.publishedAt ?? '');
+  return { tag, at: Number.isFinite(published) ? Math.max(at, published) : at, published: true };
+}
+
+/** The floor verdict for moving stable from prevStable to sha. A refusal carries the message and the NEXT_ALLOWED text. */
+export interface Floor { verdict: 'first' | 'finishing' | 'clear' | 'security' | 'refused' | 'unknown'; line: string; message?: string; next?: string }
+
+export function floorStatus(o: { git: Git; gh: Gh; repo: string; prevStable: string | null; sha: string; security: boolean; scheduled: boolean; now: number }): Floor {
+  if (!o.prevStable) return { verdict: 'first', line: 'FLOOR: none (no stable yet; this cut creates it)' };
+  if (o.prevStable === o.sha) return { verdict: 'finishing', line: 'FLOOR: not applied (finishing the cut that already moved stable)' };
+  const moved = stableMovedAt(o.git, o.gh, o.repo, o.prevStable);
+  if (moved.at === null) {
+    if (o.security) return { verdict: 'security', line: 'FLOOR: bypassed by the security exception (' + moved.why + ')' };
+    return { verdict: 'unknown', line: 'FLOOR: unknown', message: moved.why + '; only a --security cut can move it until one does', next: 'none until an annotated v<VERSION> tag dates the release stable points at' };
+  }
+  if (!moved.published && !o.security) {
+    return { verdict: 'unknown', line: 'FLOOR: unknown', message: 'stable moved to ' + moved.tag + ' but its release is not published, so the tag cannot date the move; finish that cut first (a run without --ref finishes it)', next: 'once the release for ' + moved.tag + ' is published' };
+  }
+  // A tag dated in the future holds the floor from now, not from that date.
+  moved.at = Math.min(moved.at, o.now);
+  const need = FLOOR_HOURS - (o.scheduled ? SCHEDULED_GRACE_HOURS : 0);
+  const since = 'stable moved to ' + moved.tag + ' at ' + iso(moved.at) + ', ' + ((o.now - moved.at) / HOUR).toFixed(1) + ' h ago';
+  const next = iso(moved.at + FLOOR_HOURS * HOUR) + ' for a hand-run cut; ' + iso(moved.at + (FLOOR_HOURS - SCHEDULED_GRACE_HOURS) * HOUR) + ' for a scheduled run';
+  if (o.security) return { verdict: 'security', line: 'FLOOR: bypassed by the security exception (' + since + ')' };
+  const kind = o.scheduled ? 'a scheduled run needs ' + need + ' h (' + FLOOR_HOURS + ' h less ' + SCHEDULED_GRACE_HOURS + ' h cron grace)' : 'a hand-run cut needs ' + need + ' h';
+  if (o.now - moved.at >= need * HOUR) return { verdict: 'clear', line: 'FLOOR: clear (' + since + '; ' + kind + ')' };
+  return { verdict: 'refused', line: 'FLOOR: refused', message: since + '; ' + kind + '; a security fix passes with --security "<GHSA-…|CVE-…|#n>: why" --ref <fix sha>', next };
+}
+
+/** One line, no control characters or backticks, at most 300 characters: the reason is public in the notes and tag. */
+export function sanitizeReason(reason: string): string {
+  return reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/`/g, "'").replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+/**
+ * Ties a security reason to the commits in (from, to]. The reason must name a
+ * GHSA, CVE or #<n>; it is verified when (a) a commit message in the span names
+ * that GHSA/CVE, (b) issue or PR #<n> carries the security label and a commit
+ * in the span references #<n>, or (c) the GitHub Advisory Database entry for
+ * that GHSA/CVE lists a package whose line changes in the span's package.json
+ * or bun.lock. What the fix fixes, and how bad it was, stays attested.
+ */
+export function verifySecurity(o: { reason: string; git: Git; gh: Gh; repo: string; from: string | null; to: string }): { ok: true; evidence: string } | { ok: false; why: string } {
+  const advisories = [...new Set([...o.reason.matchAll(/\bGHSA(?:-[2-9cfghjmpqrvwx]{4}){3}\b/gi)].map(m => 'GHSA' + m[0].slice(4).toLowerCase())
+    .concat([...o.reason.matchAll(/\bCVE-\d{4}-\d{4,}\b/gi)].map(m => m[0].toUpperCase())))];
+  const issues = [...new Set([...o.reason.matchAll(/(?<![\w&])#(\d+)\b/g)].map(m => m[1]!))];
+  if (advisories.length === 0 && issues.length === 0) return { ok: false, why: 'the reason names no GHSA-…, CVE-… or #<n> to verify' };
+  const range = o.from ? [o.from + '..' + o.to] : ['--max-count=' + WINDOW_COMMITS, o.to];
+  const log = o.git(['log', '--format=%H%x1f%B%x1e', ...range]);
+  const commits = (log.ok ? log.out.split('\x1e') : []).map(c => c.trim().split('\x1f')).filter(c => c[0]).map(c => ({ sha: c[0]!.slice(0, 12), body: c[1] ?? '' }));
+  // Package names whose own entry changed: a package.json dependency line or a bun.lock package key, never a name listed inside another package's entry.
+  const changed = new Set((o.from ? o.git(['diff', '--unified=0', o.from, o.to, '--', 'package.json', 'bun.lock']).out.split('\n') : [])
+    .flatMap(l => { const m = /^[+-](?![+-])\s*"([^"]+)":\s*(?:"[^"]*"|\[\s*"([^"]+)@)/.exec(l); return m && (!m[2] || m[2] === m[1]) ? [m[1]!] : []; }));
+  const why: string[] = [];
+  for (const id of advisories) {
+    const named = commits.find(c => c.body.toUpperCase().includes(id.toUpperCase()));
+    if (named) return { ok: true, evidence: 'commit ' + named.sha + ' names ' + id };
+    const read = parseJson<unknown>(o.gh(['api', id.startsWith('GHSA') ? 'advisories/' + id : 'advisories?cve_id=' + id]));
+    const entries = (Array.isArray(read) ? read : read ? [read] : []) as Array<{ vulnerabilities?: Array<{ package?: { name?: string; ecosystem?: string } }> }>;
+    const packages = [...new Set(entries.flatMap(e => e.vulnerabilities ?? []).filter(v => v.package?.ecosystem?.toLowerCase() === 'npm').map(v => v.package?.name).filter((n): n is string => Boolean(n)))];
+    const bumped = packages.find(p => changed.has(p));
+    if (bumped) return { ok: true, evidence: 'advisory ' + id + ' lists ' + bumped + ', which changes in package.json/bun.lock' };
+    why.push(id + ': no commit names it' + (read ? ' and none of its ' + packages.length + ' npm advisory packages changes in package.json/bun.lock' : ' and the advisory database has no entry for it'));
+  }
+  for (const n of issues) {
+    const ref = commits.find(c => new RegExp('(?<![\\w&])#' + n + '\\b').test(c.body));
+    const issue = parseJson<{ labels?: Array<{ name?: string }> }>(o.gh(['api', 'repos/' + o.repo + '/issues/' + n]));
+    const labelled = Boolean(issue?.labels?.some(l => l.name?.toLowerCase() === 'security'));
+    if (ref && labelled) return { ok: true, evidence: '#' + n + ' carries the security label and commit ' + ref.sha + ' references it' };
+    why.push('#' + n + ': ' + [!issue ? 'cannot read it' : !labelled ? 'no security label' : '', !ref ? 'no commit in the span references it' : ''].filter(Boolean).join(', '));
+  }
+  return { ok: false, why: 'nothing in ' + (o.from ? o.from.slice(0, 12) + '..' : 'up to ') + o.to.slice(0, 12) + ' ties the reason to the release: ' + why.join('; ') };
+}
+
+/** The security reason and evidence an earlier run wrote into this release's annotated tag, so a retry publishes the same notes. */
+export function securityFromTag(git: Git, tag: string): Security | null {
+  const body = git(['for-each-ref', '--format=%(contents)', 'refs/tags/' + tag]);
+  const reason = body.ok ? /^Security: (.+)$/m.exec(body.out) : null;
+  if (!reason) return null;
+  return { reason: reason[1]!.trim(), evidence: /^Verified: (.+)$/m.exec(body.out)?.[1]!.trim() ?? 'recorded in tag ' + tag };
+}
+
 export interface Plan {
   sha: string; version: string; tag: string; date: string; hotfix: boolean; via: string;
   prevStable: string | null; prevVersion: string | null; prevTag: string | null;
   tagExists: 'no' | 'same' | 'other'; stableAt: boolean; notes: string; skipped: string[];
+  security: Security | null; floor: Floor; ridingAlong: number;
 }
-export type PlanResult = { ok: true; plan: Plan } | { ok: false; code: 'NOTHING_NEW' | 'NO_GREEN_COMMIT' | 'REFUSED'; message: string; skipped?: string[] };
+export type RefusalCode = 'NOTHING_NEW' | 'NO_GREEN_COMMIT' | 'REFUSED' | 'REFUSED_FLOOR' | 'FLOOR_UNKNOWN' | 'REFUSED_SECURITY';
+export type PlanResult = { ok: true; plan: Plan } | { ok: false; code: RefusalCode; message: string; skipped?: string[]; next?: string; plan?: Plan };
 
 export interface PlanOptions {
   repo: string; ref?: string; git: Git; gh: Gh; now?: () => number; windowDays?: number; windowCommits?: number;
   requiredCheck?: string; backstopCheck?: string; notesRef?: string;
+  /** A scheduled run (GITHUB_EVENT_NAME=schedule): the floor allows SCHEDULED_GRACE_HOURS of cron jitter. */
+  scheduled?: boolean;
+  /** --security <reason>: bypass the floor for a verified security fix; needs ref. */
+  security?: string;
 }
 
 export function planRelease(o: PlanOptions): PlanResult {
   const { git, gh, repo } = o;
   const windowDays = o.windowDays ?? WINDOW_DAYS;
   const skipped: string[] = [];
+  if (o.security !== undefined && !o.ref) return { ok: false, code: 'REFUSED_SECURITY', message: '--security needs --ref <the fix commit>: a security cut releases up to the fix, never whatever is newest' };
   const mainHead = git(['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}']);
   if (!mainHead.ok) return { ok: false, code: 'REFUSED', message: 'origin/main is not fetched: ' + mainHead.out };
   const stable = git(['rev-parse', '--verify', '-q', 'refs/remotes/origin/stable^{commit}']);
@@ -238,6 +372,9 @@ export function planRelease(o: PlanOptions): PlanResult {
     const list = git(['rev-list', '--first-parent', '--max-count=' + (o.windowCommits ?? WINDOW_COMMITS), '--since=' + since, 'refs/remotes/origin/main']);
     candidates = list.ok && list.out ? list.out.split('\n') : [];
     if (candidates.length === 0) return { ok: false, code: 'NOTHING_NEW', message: 'no commit on origin/main in the last ' + windowDays + ' days' };
+    // A cut that moved stable but never published its release is finished before stable moves again.
+    const moved = prevStable ? stableMovedAt(git, gh, repo, prevStable) : null;
+    if (prevStable && moved && moved.at !== null && !moved.published) candidates = [prevStable];
   }
 
   // stable itself stays a candidate so a cut that stopped half-way (tag and
@@ -287,10 +424,25 @@ export function planRelease(o: PlanOptions): PlanResult {
     const older = git(['rev-list', '--first-parent', '-1', '--before=' + before, sha]);
     if (older.ok && older.out) prevVersion = git(['show', older.out + ':VERSION']).out.trim() || null;
   }
+  // Finishing a security cut keeps the reason and evidence its tag recorded; a tag
+  // that recorded one but never moved stable needs --security verified again.
+  const recorded = tagExists === 'same' ? securityFromTag(git, tag) : null;
+  let security: Security | null = recorded && prevStable === sha ? recorded : null;
+  if (recorded && !security && o.security === undefined) return { ok: false, code: 'REFUSED_SECURITY', message: 'tag ' + tag + ' records a security cut that has not moved stable; run it again with --security and --ref ' + sha.slice(0, 12) + ' so the reason is verified' };
+  if (!security && o.security !== undefined) {
+    const reason = sanitizeReason(o.security);
+    const verified = verifySecurity({ reason, git, gh, repo, from: before, to: sha });
+    if (!verified.ok) return { ok: false, code: 'REFUSED_SECURITY', message: verified.why };
+    security = { reason, evidence: verified.evidence };
+  }
   const changelog = git(['show', sha + ':CHANGELOG.md']);
   const date = git(['show', '-s', '--format=%cs', sha]).out;
-  const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !before });
-  return { ok: true, plan: { sha, version, tag, date, hotfix: Boolean(o.ref), via, prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped } };
+  const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !before, security });
+  const floor = floorStatus({ git, gh, repo, prevStable, sha, security: Boolean(security), scheduled: Boolean(o.scheduled), now: o.now?.() ?? Date.now() });
+  const ridingAlong = Math.max(0, notes.split('\n').filter(l => l.startsWith('- **')).length - 1);
+  const plan: Plan = { sha, version, tag, date, hotfix: Boolean(o.ref), via, prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped, security, floor, ridingAlong };
+  if (floor.verdict === 'refused' || floor.verdict === 'unknown') return { ok: false, code: floor.verdict === 'refused' ? 'REFUSED_FLOOR' : 'FLOOR_UNKNOWN', message: floor.message!, next: floor.next, plan };
+  return { ok: true, plan };
 }
 
 export interface CutResult { ok: boolean; lines: string[] }
@@ -302,7 +454,8 @@ export function cutRelease(p: Plan, o: { repo: string; git: Git; gh: Gh; notesDi
   const existing = git(['rev-parse', '--verify', '-q', 'refs/tags/' + p.tag + '^{commit}']);
   if (existing.ok && existing.out !== p.sha) return { ok: false, lines: ['TAG: ' + p.tag + ' already names ' + existing.out.slice(0, 12) + ', not ' + p.sha.slice(0, 12)] };
   if (!existing.ok) {
-    const t = git(['tag', '-a', p.tag, p.sha, '-m', 'gstack ' + p.tag + (p.hotfix ? ' (hotfix release)' : ' (weekly release)')]);
+    const message = 'gstack ' + p.tag + ' (' + releaseKind(p.hotfix, p.security) + ' release)' + (p.security ? '\n\nSecurity: ' + p.security.reason + '\nVerified: ' + p.security.evidence : '');
+    const t = git(['tag', '-a', p.tag, p.sha, '-m', message]);
     if (!t.ok) return { ok: false, lines: [...lines, 'TAG: failed: ' + t.out] };
     const push = git(['push', 'origin', 'refs/tags/' + p.tag]);
     if (!push.ok) return { ok: false, lines: [...lines, 'TAG: push failed: ' + push.out] };
@@ -311,8 +464,10 @@ export function cutRelease(p: Plan, o: { repo: string; git: Git; gh: Gh; notesDi
     lines.push('TAG: ' + p.tag + ' already names ' + p.sha.slice(0, 12));
   }
   if (!p.stableAt) {
-    const push = git(['push', 'origin', p.sha + ':refs/heads/stable']);
-    if (!push.ok) return { ok: false, lines: [...lines, 'STABLE: push failed: ' + push.out] };
+    if (p.prevStable && !git(['merge-base', '--is-ancestor', p.prevStable, p.sha]).ok) return { ok: false, lines: [...lines, 'STABLE: refused: ' + p.sha.slice(0, 12) + ' does not descend from stable ' + p.prevStable.slice(0, 12)] };
+    // The lease pins origin's stable to the commit the floor and the ancestry check read; a move in between fails the push.
+    const push = git(['push', '--force-with-lease=refs/heads/stable:' + (p.prevStable ?? ''), 'origin', p.sha + ':refs/heads/stable']);
+    if (!push.ok) return { ok: false, lines: [...lines, 'STABLE: push failed (stable moved since this plan read it, or the push was rejected): ' + push.out] };
     lines.push('STABLE: ' + (p.prevStable ? p.prevStable.slice(0, 12) : 'none') + ' -> ' + p.sha.slice(0, 12));
   } else {
     lines.push('STABLE: already at ' + p.sha.slice(0, 12));
@@ -337,12 +492,14 @@ export function describePlan(p: Plan, dryRun: boolean): string[] {
     'VERSION: ' + p.version + ' -> tag ' + p.tag + (p.tagExists === 'same' ? ' (exists at this commit)' : ''),
     'STABLE: ' + (p.stableAt ? 'already at ' + p.sha.slice(0, 12) + ' (finishing an earlier cut)' : (p.prevStable ? p.prevStable.slice(0, 12) + ' (v' + (p.prevVersion ?? '?') + ')' : 'none yet') + ' -> ' + p.sha.slice(0, 12)),
     'NOTES: ' + p.notes.split('\n').filter(l => l.startsWith('- ')).length + ' version lines, ' + p.notes.length + ' chars',
+    p.floor.line,
   ];
+  if (p.security) lines.push('SECURITY: `' + p.security.reason + '` (verified: ' + p.security.evidence + ')', 'RIDING_ALONG: ' + p.ridingAlong + ' other version' + (p.ridingAlong === 1 ? '' : 's') + ' ship with the fix');
   for (const s of p.skipped) lines.push('SKIPPED: ' + s);
   if (dryRun) {
     lines.push('DRY_RUN: nothing pushed, nothing created. The cut would run:',
       '  git tag -a ' + p.tag + ' ' + p.sha + ' && git push origin refs/tags/' + p.tag,
-      '  git push origin ' + p.sha + ':refs/heads/stable',
+      '  git push --force-with-lease=refs/heads/stable:' + (p.prevStable ?? '') + ' origin ' + p.sha + ':refs/heads/stable',
       '  gh release create ' + p.tag + ' --verify-tag --title "gstack ' + p.tag + '" --notes-file <notes>');
   }
   return lines;
@@ -357,18 +514,29 @@ if (import.meta.main) {
   const repo = arg('--repo');
   const dryRun = process.argv.includes('--dry-run');
   const summary = arg('--summary');
-  if (!repo) { console.error('usage: release-cut.ts --repo owner/name [--ref <sha>] [--dry-run] [--summary <file>] [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]'); process.exit(2); }
+  const security = arg('--security');
+  if (!repo || (process.argv.includes('--security') && (!security || security.startsWith('--')))) {
+    console.error('usage: release-cut.ts --repo owner/name [--ref <sha>] [--security <reason naming GHSA-…|CVE-…|#n>] [--dry-run] [--summary <file>] [--required-check <name>] [--backstop-check <name>] [--notes-ref <ref>]');
+    process.exit(2);
+  }
+  const scheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
   const git = gitIn(process.cwd());
   const emit = (lines: string[]) => {
     for (const l of lines) console.log(l);
     if (summary) fs.appendFileSync(summary, lines.map(l => '- ' + l).join('\n') + '\n');
   };
-  const planned = planRelease({ repo, ref: arg('--ref'), git, gh: runGh, requiredCheck: arg('--required-check'), backstopCheck: arg('--backstop-check'), notesRef: arg('--notes-ref') });
+  const planned = planRelease({ repo, ref: arg('--ref'), git, gh: runGh, requiredCheck: arg('--required-check'), backstopCheck: arg('--backstop-check'), notesRef: arg('--notes-ref'), scheduled, security });
   if (!planned.ok) {
-    emit([planned.code + ': ' + planned.message, ...(planned.skipped ?? []).map(s => 'SKIPPED: ' + s)]);
-    // A dry run that finds nothing green has done its job (the skips say why);
-    // the real cut goes red so someone looks.
-    process.exit(planned.code === 'NOTHING_NEW' || (dryRun && planned.code === 'NO_GREEN_COMMIT') ? 0 : 1);
+    emit([planned.code + ': ' + planned.message, ...(planned.next ? ['NEXT_ALLOWED: ' + planned.next] : []), ...(planned.skipped ?? []).map(s => 'SKIPPED: ' + s), ...(planned.plan ? describePlan(planned.plan, false) : [])]);
+    // A dry run that finds nothing green has done its job (the skips say why),
+    // and so has a floor hold on a dry run or on the schedule: the policy
+    // working, not a fault. Every other refusal goes red so someone looks.
+    const hold = planned.code === 'REFUSED_FLOOR' && (dryRun || scheduled);
+    if (process.env.GITHUB_ACTIONS === 'true' && planned.code !== 'NOTHING_NEW' && planned.code !== 'NO_GREEN_COMMIT') {
+      const text = planned.code + ': ' + planned.message + (planned.next ? ' NEXT_ALLOWED: ' + planned.next : '');
+      console.log('::' + (hold ? 'notice' : 'error') + ' title=release-cut ' + planned.code + '::' + text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A'));
+    }
+    process.exit(planned.code === 'NOTHING_NEW' || (dryRun && planned.code === 'NO_GREEN_COMMIT') || hold ? 0 : 1);
   }
   emit(describePlan(planned.plan, dryRun));
   if (summary) fs.appendFileSync(summary, '\n<details><summary>Release notes</summary>\n\n' + planned.plan.notes + '\n</details>\n');

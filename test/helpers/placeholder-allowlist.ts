@@ -165,7 +165,6 @@ export const IDENTIFIER_PLACEHOLDERS: Record<string, IdentifierGrammar> = {
   '<page-url>': { grammar: URL, what: 'http(s) URL', quoted: true },
   '<base-url>': { grammar: URL, what: 'http(s) URL', quoted: true },
   '<target-url>': { grammar: URL, what: 'http(s) URL', quoted: true },
-  '<affected-url>': { grammar: URL, what: 'http(s) URL', quoted: true },
   '<TARGET_URL>': { grammar: URL, what: 'http(s) URL', quoted: true },
   '<site>': { grammar: URL, what: 'http(s) URL', quoted: true },
   '<selector>': { grammar: QUOTED, what: 'CSS selector', quoted: true },
