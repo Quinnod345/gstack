@@ -89,7 +89,7 @@ carries its own copy of how to do things. The rules: session-start install check
 validation discipline, untrusted external diffs, file ownership, pre-approved spend, the
 READY contract, reports, one routing path (everything through the controller), no merging
 base into a READY branch, the CHANGELOG entry under `[Unreleased]`, the flaky rule,
-approvals, /ship before READY, and review convergence. Every rule that rests on the
+approvals, /ship before READY, review convergence, and plan before build. Every rule that rests on the
 owner's words carries the date and the words. A rule that exists only in a crew's file is
 a gap in gstack: write it there, then point at it.
 
@@ -278,6 +278,14 @@ option's cost and the recommended one-word reply as the default; and a closing
 **"do it"** reply that takes every recommendation at full scope, follow-ons included,
 with one line saying what it covers. `gstack-owner-brief render --captain` prints this shape from
 a plan; relay it whole. Template: `captain/templates/plan-ask.md`.
+
+**Plan before build.** A lane that builds something runs a sized `/autoplan` on its brief as
+its first act after the session-start check and sends the controller the plan ask above; the controller relays it, and the
+lane builds only after the owner's word is answered into the run and it reports `APPROVED`.
+New scope taken on part-way gets its own plan. Read-only lanes, the flaky pass's repairs,
+slot stamps, CHANGELOG resolves and cap re-pins under a grant are exempt. The brief a
+controller hands a lane, with its `Plan: required | approved | exempt` line, is
+`captain/templates/brief.md`; the rule is `docs/captain.md` (Plan before build).
 
 **C. The merge ask.** Every READY the controller brings to the owner, and every PR body:
 before/after images (uploaded with the host's PR asset tool, each captioned with what

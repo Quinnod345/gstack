@@ -1445,7 +1445,7 @@ this model disagree (squash or merge, who stamps, gate-ahead, the severe race, a
 id in the READY), the skill ships both as options for the crew rules file.
 
 Templates (CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report,
-the READY block, the slot call, the plan and merge asks, the daily automation prompt)
+the READY block, the slot call, the lane brief, the plan and merge asks, the daily automation prompt)
 live in `captain/templates/`; the team setup guide for Capy is [docs/captain.md](captain.md).
 
 ## `/gstack-upgrade`

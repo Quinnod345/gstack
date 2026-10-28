@@ -15,7 +15,7 @@ const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const skill = read('captain/SKILL.md');
 const tmpl = read('captain/SKILL.md.tmpl');
 const flat = skill.replace(/\s+/g, ' ');
-const TEMPLATES = ['CREW.md', 'AGENTS.md', 'NOTES.md', 'DIGEST.md', 'flaky-ledger.md', 'report.md', 'READY.md', 'slot-call.md', 'plan-ask.md', 'merge-ask.md', 'automation-flaky-pass.md'];
+const TEMPLATES = ['CREW.md', 'AGENTS.md', 'NOTES.md', 'DIGEST.md', 'flaky-ledger.md', 'report.md', 'READY.md', 'slot-call.md', 'plan-ask.md', 'merge-ask.md', 'automation-flaky-pass.md', 'brief.md'];
 
 describe('/captain skill', () => {
   test('frontmatter names the skill and its /crew alias trigger', () => {
@@ -59,12 +59,25 @@ describe('/captain skill', () => {
     expect(read('captain/templates/slot-call.md')).toContain('STAMP_VERSION=<X>');
     expect(read('captain/templates/flaky-ledger.md')).toMatch(/## Open[\s\S]*## Fixed[\s\S]*## Won't fix/);
     const crew = read('captain/templates/CREW.md');
-    expect(crew).toMatch(/^23\. /m);
-    expect(crew).not.toMatch(/^24\. /m);
-    for (let n = 1; n <= 23; n++) expect(crew, 'rule ' + n + ' names its home').toMatch(new RegExp('^' + n + '\\. \\*\\*[^]*?Home:', 'm'));
-    for (let n = 1; n <= 23; n++) expect(doc, 'docs/captain.md maps rule ' + n).toMatch(new RegExp('^\\| ' + n + ' \\| ', 'm'));
-    for (const h of ['## Lane discipline', '## Contributions from outside the crew']) expect(doc).toContain(h);
+    expect(crew).toMatch(/^24\. /m);
+    expect(crew).not.toMatch(/^25\. /m);
+    for (let n = 1; n <= 24; n++) expect(crew, 'rule ' + n + ' names its home').toMatch(new RegExp('^' + n + '\\. \\*\\*[^]*?Home:', 'm'));
+    for (let n = 1; n <= 24; n++) expect(doc, 'docs/captain.md maps rule ' + n).toMatch(new RegExp('^\\| ' + n + ' \\| ', 'm'));
+    for (const h of ['## Lane discipline', '## Plan before build', '## Contributions from outside the crew']) expect(doc).toContain(h);
+    expect(doc).toMatch(/## Plan before build[^]*?reports `APPROVED`[^]*?## Contributions from outside the crew/);
+    const brief = read('captain/templates/brief.md');
+    expect(brief).toContain('Plan: required | approved: <autoplan run dir, or its checkpoint dir> | exempt: <reason');
+    expect(brief).toContain('gstack-autoplan answer --out <run dir> --gate-rev <n> --reply <tokens>');
+    expect(brief).toMatch(/^1\. Plan[^]*?^2\. Build after the word[^]*?^3\. Ship[^]*?^Done when:/m);
+    expect(brief).toContain('gstack-approvals import --autoplan');
+    expect(flat).toContain('**Plan before build.**');
+    const capySkill = read('capy/skill/gstack/SKILL.md');
+    expect(capySkill).toMatch(/^## Plan, approve, ship$/m);
+    expect(capySkill).toMatch(/## Plan, approve, ship[^]*?reports `APPROVED`[^]*?Exempt from the plan step[^]*?## Working under a Captain/);
+    expect(capySkill).not.toMatch(/## Plan, approve, ship[^]*?\]\((?:\.\.\/)?docs\//);
+    expect(read('capy/skill/gstack/captain.md')).toContain('"Plan, approve, ship" section of SKILL.md');
     expect(read('captain/templates/plan-ask.md')).toContain('**do it**');
+    expect(read('captain/templates/plan-ask.md')).toContain('gstack-approvals import --autoplan');
     expect(read('captain/templates/automation-flaky-pass.md')).toContain('never merge');
   });
 
