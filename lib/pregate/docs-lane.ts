@@ -41,6 +41,9 @@ function isMarkdown(rel: string): boolean {
   return MARKDOWN.test(rel);
 }
 
+/** Fixture, snapshot and golden trees, CI workflows and actions, and `.gstack/`: files a test or the CI may read by a path the import graph cannot see. */
+export function isFixtureOrCiTree(rel: string): boolean { return PROTECTED_TREE.test(rel.replace(/\\/g, '/').replace(/^\.\//, '')); }
+
 function isTestTree(rel: string): boolean {
   return TEST_TREE.test(rel);
 }

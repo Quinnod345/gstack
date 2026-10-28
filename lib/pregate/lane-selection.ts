@@ -12,10 +12,10 @@ import { GENERATED_PATH } from '../regen';
 import { runBashSync } from '../script-invocation';
 import { matchesAny } from '../ship-policy';
 import { PREGATE_CONFIG_PATH } from './config';
-import { isDocsEmptyLane, isInertNoTests, isProtectedTree } from './docs-lane';
+import { isDocsEmptyLane, isFixtureOrCiTree, isInertNoTests, isProtectedTree } from './docs-lane';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { buildGraph, isTestFile, listRepoFiles, testsFor, type Graph } from './import-graph';
+import { buildGraph, isTestFile, listRepoFiles, SOURCE_EXT, testsFor, type Graph } from './import-graph';
 import { stampFileKind, versionStampOnly } from './stamp-only';
 import type { PregateContext, RemoteObligation } from './types';
 import type { Lane } from './workflows';
@@ -105,30 +105,47 @@ function readWorkingTree(repoRoot: string, rel: string): { text: string | null; 
 /** Tracked files matching a registry entry's output globs. */
 function outputsOf(all: readonly string[], globs: readonly string[]): string[] { return all.filter(f => matchesAny(globs, f)); }
 
+/** Tracked files outside Markdown that name `file` by its repo path (a config, a script or a workflow may load it where the import graph cannot see). */
+function namedBy(ctx: PregateContext, file: string): string[] {
+  const r = spawnSync('git', ['grep', '--untracked', '-l', '-F', '-e', file, '--', '.', ':(exclude)*.md', ':(exclude)*.mdx'], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: ctx.env });
+  if (r.status === 1) return [];
+  return r.status === 0 ? (r.stdout ?? '').split('\n').filter(Boolean) : ['(git grep failed)'];
+}
+
+const shown = (files: readonly string[]) => `${files.slice(0, 8).join(' ')}${files.length > 8 ? ` … +${files.length - 8} more` : ''}`;
+
 /**
- * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects: a rename's old name defers
- * to the new path; a deleted test selects the remaining tests of the files it exercised and names those that lost their last
- * test; any other removed file has nothing left to test. Null when a deleted test's merge-base text could not be read: it fails closed.
+ * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects, or `refused` when it must
+ * fail closed as no lane. A rename's old name defers to the new path, unless a test was renamed to a non-test path. A deleted
+ * test runs the tests that directly exercise the files it exercised and names those left with no test at all. Any other removed
+ * file owes nothing only when it is code the import graph reads (outside fixture, golden and CI trees) and no remaining
+ * non-Markdown file names it: deleting a manifest, a lockfile, a config or a workflow owes what editing it owes.
  */
-function removedPath(ctx: PregateContext, graph: Graph, file: string): { removed: Removed; suite: string[] } | null {
+function removedPath(ctx: PregateContext, graph: Graph, file: string): { removed: Removed; suite: string[] } | { refused: string } {
   const renamedTo = ctx.touched.find(t => t.renamedFrom === file)?.path;
-  if (renamedTo) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
-  if (!isTestFile(file)) return { removed: { file, note: 'no remaining test references it', lostCoverage: [] }, suite: [] };
+  if (renamedTo && !(isTestFile(file) && !isTestFile(renamedTo))) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
+  if (!isTestFile(file)) {
+    const code = (SOURCE_EXT.test(file) || file.startsWith('bin/')) && !isFixtureOrCiTree(file) && path.posix.basename(file) !== 'conftest.py';
+    if (!code) return { refused: 'removed, but not code the import graph reads (a manifest, lockfile, config, fixture or workflow owes what an edit owes)' };
+    const names = namedBy(ctx, file);
+    if (names.length) return { refused: `removed, but still named by ${shown(names)}` };
+    return { removed: { file, note: 'nothing in the tree references it', lostCoverage: [] }, suite: [] };
+  }
   const subjects = graph.goneSubjects?.get(file);
-  if (!subjects) return null;
+  if (!subjects) return { refused: 'removed test whose merge-base text could not be read (not a regular file there, invalid UTF-8 or over 1 MiB)' };
   if (!subjects.length) return { removed: { file, note: 'it exercised no file still in the tree', lostCoverage: [] }, suite: [] };
   const suite = new Set<string>();
   const lostCoverage: string[] = [];
   for (const subject of subjects) {
     const m = testsFor(graph, subject, ctx.config.dependencies);
-    for (const t of m.tests) suite.add(t);
+    for (const e of graph.reverse.get(subject) ?? []) if (graph.tests.has(e.from)) suite.add(e.from);
     if (!m.tests.length && !m.declaredNone) lostCoverage.push(subject);
   }
   const notes = [
-    suite.size ? `owning suite runs: ${[...suite].sort().join(' ')}` : '',
+    suite.size ? `owning suite runs: ${shown([...suite].sort())}` : '',
     lostCoverage.length ? `coverage removed: ${lostCoverage.join(' ')} ${lostCoverage.length === 1 ? 'has' : 'have'} no remaining test` : '',
   ].filter(Boolean);
-  return { removed: { file, note: notes.join('; ') || 'it exercised only files declared no lane needed', lostCoverage }, suite: [...suite] };
+  return { removed: { file, note: notes.join('; ') || 'its files keep indirect or declared coverage', lostCoverage }, suite: [...suite] };
 }
 
 export function selectLanes(ctx: PregateContext): Selection {
@@ -136,9 +153,10 @@ export function selectLanes(ctx: PregateContext): Selection {
   const gone = touched.flatMap(t => [t.status === 'D' ? t.path : null, t.renamedFrom ?? null]).filter((p): p is string => !!p);
   const goneSources = new Map<string, string>();
   for (const t of touched) {
-    if (t.status !== 'D' || !isTestFile(t.path)) continue;
-    const text = readAtMergeBase(ctx, t.path, ['100644', '100755']);
-    if (text !== null) goneSources.set(t.path, text);
+    const removedTest = t.status === 'D' && isTestFile(t.path) ? t.path : t.renamedFrom && isTestFile(t.renamedFrom) && !isTestFile(t.path) ? t.renamedFrom : null;
+    if (!removedTest) continue;
+    const text = readAtMergeBase(ctx, removedTest, ['100644', '100755']);
+    if (text !== null) goneSources.set(removedTest, text);
   }
   const graph: Graph = buildGraph(ctx.repoRoot, { declarations: ctx.config.dependencies, extraFiles: gone, goneSources });
   const all = listRepoFiles(ctx.repoRoot);
@@ -199,13 +217,13 @@ export function selectLanes(ctx: PregateContext): Selection {
     }
     if (gone.includes(file)) {
       const r = removedPath(ctx, graph, file);
-      if (r) {
+      if ('removed' in r) {
         removed.push(r.removed);
         for (const t of r.suite) tests.add(t);
         provenance.push(`${file}: removed (no lane owed) — ${r.removed.note}`);
         continue;
       }
-      provenance.push(`${file}: removed test whose merge-base text could not be read (not a regular file there, invalid UTF-8 or over 1 MiB); no lane until declared`);
+      provenance.push(`${file}: ${r.refused}; no lane until declared`);
     }
     noLane.push(file);
   }

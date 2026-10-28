@@ -478,7 +478,7 @@ export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
   const all = listRepoFiles(repoRoot).filter(f => !gone.has(f));
   const files = new Set([...all, ...gone]);
   const dirs = new Set<string>();
-  for (const f of all) { let d = path.posix.dirname(f); while (d && d !== '.') { dirs.add(d); d = path.posix.dirname(d); } }
+  for (const f of files) { let d = path.posix.dirname(f); while (d && d !== '.') { dirs.add(d); d = path.posix.dirname(d); } }
   const config = readPathAliases(repoRoot);
   const graph: Graph = { files, tests: new Set(all.filter(isTestFile)), reverse: new Map(), unresolved: new Map(), aliasNotes: config.notes };
   const maxBytes = opts.maxBytes ?? 2 * 1024 * 1024;
@@ -493,8 +493,8 @@ export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
     for (const { target, via } of referencesIn(files, dirs, rel, source, config, graph.tests.has(rel) ? unresolved : undefined, packages)) addEdge(graph, target, rel, via);
     if (unresolved.length) graph.unresolved!.set(rel, unresolved);
   }
-  const rust = rustEdges(all, rel => readRepoFile(repoRoot, rel, maxBytes));
-  for (const t of rust.tests) graph.tests.add(t);
+  const rust = rustEdges([...files], rel => readRepoFile(repoRoot, rel, maxBytes));
+  for (const t of rust.tests) if (!gone.has(t)) graph.tests.add(t);
   for (const e of rust.edges) addEdge(graph, e.dependency, e.dependent, e.via);
   const django = djangoEdges({ files: [...files], tests: graph.tests, read: rel => pySources.get(rel) ?? readRepoFile(repoRoot, rel, maxBytes), code: pythonCode, resolveDotted: dotted => pythonPatchTarget(files, dotted) });
   for (const e of django) addEdge(graph, e.dependency, e.dependent, 'framework');

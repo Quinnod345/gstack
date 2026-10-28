@@ -196,18 +196,25 @@ Two stages with separate clocks, both printed:
   transitively through
   non-test files; deleted and renamed files select the tests that named them.
   A removed path (a deleted file, or a rename's old name) that no remaining
-  test selects owes no lane: it prints `removed (no lane owed): <path> — <why>`
-  and the `lanes` detail adds `N removed path(s)`. A rename's old name defers to
-  the new path (`old name of <new>`); a deleted test runs its owning suite, the
-  remaining tests of the files its merge-base text exercised (`owning suite
-  runs: …`; test helpers and fixtures are not subjects), and names each file
-  left with no test (`coverage removed: <file> has no remaining test`, and
-  `M subject(s) lost their last test` in the detail); any other deleted file
-  has nothing left to test (`no remaining test references it`). A deleted test
-  whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB)
-  fails closed with `PREGATE_NO_LANE`, and a modified file whose only test the
-  branch deleted still has no lane. /review lists the deletion as a gate edit
-  (RH-1) either way.
+  test selects owes no lane when one of these holds, and prints
+  `removed (no lane owed): <path> — <why>` (the `lanes` detail adds
+  `N removed path(s)`): a rename's old name defers to the new path (`old name
+  of <new>`); a deleted test, or a test renamed to a non-test path, runs its
+  owning suite, the remaining tests that directly exercise the files its
+  merge-base text exercised (`owning suite runs: …`; test helpers and fixtures
+  are not subjects), and names each file left with no test at all (`coverage
+  removed: <file> has no remaining test`, and `M subject(s) lost their last
+  test` in the detail); a deleted code file outside fixture, golden and CI
+  trees that no remaining non-Markdown file names reads `nothing in the tree
+  references it`. Every other removal owes what an edit owes, so it is still
+  `PREGATE_NO_LANE` until a test or a `dependencies` entry covers it: a
+  deleted manifest, lockfile, config, conftest.py, fixture, golden or workflow,
+  a deleted file a config or script still names, and a deleted test whose
+  merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A
+  modified file whose only test the branch deleted still has no lane, a
+  remaining test that reads a deleted file or directory is selected, and a
+  deleted Rust module selects its crate's tests. /review lists a deleted test
+  as a gate edit (RH-1) either way.
   An extensionless JS/TS import (relative, a tsconfig/jsconfig `paths` alias or
   `baseUrl`) tries the exact path, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
   `.cjs`, `.mts`, `.cts`, then `index.ts`, `index.tsx`, `index.js`, `index.jsx`

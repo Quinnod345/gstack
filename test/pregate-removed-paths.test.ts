@@ -9,7 +9,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, write, type FixtureRepo } from './helpers/pregate-fixture';
+import { buildGraph, testsFor } from '../lib/pregate/import-graph';
+import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/pregate-fixture';
 
 const repos: FixtureRepo[] = [];
 const fixture = (opts?: Parameters<typeof makeFixtureRepo>[0]) => { const r = makeFixtureRepo(opts); repos.push(r); return r; };
@@ -60,7 +61,7 @@ describe('removed paths in lanes (#3529)', () => {
     const r = lanes(repo);
     expect(r.check.status).toBe('pass');
     expect(r.removed).toEqual([
-      'removed (no lane owed): lib/util.js — no remaining test references it',
+      'removed (no lane owed): lib/util.js — nothing in the tree references it',
       'removed (no lane owed): test/util.test.js — it exercised no file still in the tree',
     ]);
     expect(r.check.detail).not.toContain('lost their last test');
@@ -89,7 +90,7 @@ describe('removed paths in lanes (#3529)', () => {
     commit(repo, { 'lib/orphan.js': null });
     const r = lanes(repo);
     expect(r.check.status).toBe('pass');
-    expect(r.removed).toEqual(['removed (no lane owed): lib/orphan.js — no remaining test references it']);
+    expect(r.removed).toEqual(['removed (no lane owed): lib/orphan.js — nothing in the tree references it']);
   });
 
   test('an unstaged deletion behaves like a committed one: the missing test is never selected', () => {
@@ -122,7 +123,71 @@ describe('removed paths in lanes (#3529)', () => {
     expect(r.ran).not.toContain('helper-user');
   });
 
+  test('a deleted test named after a bin/ entrypoint reports that bin when it loses its last test', () => {
+    const repo = fixture({ baseFiles: { 'bin/gstack-foo': '#!/bin/sh\necho foo\n', 'test/gstack-foo.test.js': "const test = require('node:test');\ntest('foo', () => {});\n" } });
+    commit(repo, { 'test/gstack-foo.test.js': null });
+    expect(lanes(repo).removed).toEqual(['removed (no lane owed): test/gstack-foo.test.js — coverage removed: bin/gstack-foo has no remaining test']);
+  });
+
+  test('a file declared no lane needed never reads as lost coverage', () => {
+    const repo = fixture({ pregate: { ...BASE_PREGATE, dependencies: { ...BASE_PREGATE.dependencies, 'lib/util.js': [] } } });
+    commit(repo, { 'test/util.test.js': null });
+    const r = lanes(repo);
+    expect(r.check.status).toBe('pass');
+    expect(r.removed).toEqual(['removed (no lane owed): test/util.test.js — its files keep indirect or declared coverage']);
+    expect(r.check.detail).not.toContain('lost their last test');
+  });
+
+  test('the owning suite is the tests that exercise the same files directly, not every test that reaches them', () => {
+    const wrap = "exports.addTwice = (a) => require('./util.js').add(a, a);\n";
+    const wrapTest = "const test = require('node:test');\nconst assert = require('node:assert');\nconst { addTwice } = require('../lib/wrap.js');\ntest('twice', () => assert.strictEqual(addTwice(2), 4));\n";
+    const repo = fixture({ baseFiles: { 'lib/wrap.js': wrap, 'test/wrap.test.js': wrapTest, 'test/util-v2.test.js': UTIL_V2 } });
+    commit(repo, { 'test/util.test.js': null });
+    const r = lanes(repo);
+    expect(r.removed).toEqual(['removed (no lane owed): test/util.test.js — owning suite runs: test/util-v2.test.js']);
+    expect(r.ran).not.toContain('test/wrap.test.js');
+  });
+
+  test('a test renamed to a non-test path is accounted for like a deleted test', () => {
+    const repo = fixture();
+    move(repo, 'test/util.test.js', 'docs/util-notes.md');
+    expect(lanes(repo).removed).toEqual(['removed (no lane owed): test/util.test.js — coverage removed: lib/util.js has no remaining test']);
+  });
+
+  test('a deleted Rust module selects its crate\'s tests', () => {
+    const repo = fixture({ baseFiles: { 'crates/demo/Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\n', 'crates/demo/src/lib.rs': 'pub mod gone;\n#[cfg(test)]\nmod tests {\n  #[test]\n  fn t() {}\n}\n', 'crates/demo/src/gone.rs': 'pub fn f() {}\n' } });
+    commit(repo, { 'crates/demo/src/gone.rs': null });
+    const g = buildGraph(repo.work, { extraFiles: ['crates/demo/src/gone.rs'] });
+    expect(testsFor(g, 'crates/demo/src/gone.rs').tests).toEqual(['crates/demo/src/lib.rs']);
+  });
+
   describe('negative controls', () => {
+    test('deleting every file of a fixture directory a remaining test reads selects that test', () => {
+      const reader = "const test = require('node:test');\nconst fs = require('node:fs');\ntest('reads the fixture dir', () => { fs.readdirSync('test/fixtures/data'); });\n";
+      const repo = fixture({ baseFiles: { 'test/fixtures/data/a.json': '{}\n', 'test/fixtures/data/b.json': '{}\n', 'test/fixture-dir.test.js': reader } });
+      commit(repo, { 'test/fixtures/data/a.json': null, 'test/fixtures/data/b.json': null });
+      const r = lanes(repo);
+      expect(r.removed).toEqual([]);
+      expect(r.ran).toContain('test/fixture-dir.test.js');
+    });
+
+    test.each(['package.json', '.github/workflows/windows.yml', 'test/golden/digest.txt'])('deleting %s owes what editing it owes: PREGATE_NO_LANE', file => {
+      const repo = fixture();
+      commit(repo, { [file]: null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain(file);
+      expect(r.removed).toEqual([]);
+    });
+
+    test('a deleted source file a remaining config still names fails closed', () => {
+      const repo = fixture({ baseFiles: { 'scripts/setup.js': "console.log('setup');\n", 'bunfig.toml': '[test]\npreload = ["./scripts/setup.js"]\n' } });
+      commit(repo, { 'scripts/setup.js': null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain('scripts/setup.js');
+    });
+
     test('a modified file whose only test was deleted still fails PREGATE_NO_LANE', () => {
       const repo = fixture();
       commit(repo, { 'test/util.test.js': null, 'lib/util.js': "exports.add = (a, b) => b + a;\n" });
@@ -131,6 +196,7 @@ describe('removed paths in lanes (#3529)', () => {
       expect(r.check.code).toBe('PREGATE_NO_LANE');
       expect(r.check.detail).toContain('lib/util.js');
       expect(r.check.detail).not.toContain('test/util.test.js');
+      expect(r.check.detail).toContain('1 removed path(s); 1 subject(s) lost their last test');
       expect(r.removed).toEqual(['removed (no lane owed): test/util.test.js — coverage removed: lib/util.js has no remaining test']);
     });
 
