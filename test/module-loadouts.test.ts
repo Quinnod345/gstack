@@ -5,9 +5,11 @@
  * only exclusion coverage; committed bytes are covered by Skill Docs Freshness.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { bunIsolationArgs } from '../lib/bun-isolation';
 import { MODEL_CATALOG } from '../lib/model-catalog';
 import { runGeneration } from '../scripts/gen-skill-docs';
 import { ModuleError, excludedSkillDirs, loadLoadouts, moduleCatalog, normalizeModelId, rungFor, selectModules, validateLoadouts, type ModuleErrorCode } from '../scripts/modules';
@@ -215,5 +217,60 @@ describe('gstack-modules render', () => {
   test('the full loadout regenerates the committed claude tree byte for byte', async () => {
     const result = await runGeneration({ host: 'claude', dryRun: true, modules: selectModules({ loadout: 'full' }) });
     expect(result.diagnostics.filter(d => d.kind === 'stale' || d.kind === 'error')).toEqual([]);
+  });
+});
+
+describe('modules/loadouts.schema.json', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'modules/loadouts.schema.json'), 'utf-8'));
+  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'modules/loadouts.json'), 'utf-8'));
+
+  test('the manifest carries every required key and no key the schema lacks', () => {
+    for (const key of schema.required) expect(raw).toHaveProperty(key);
+    for (const key of Object.keys(raw)) expect(Object.keys(schema.properties)).toContain(key);
+    expect(raw.version).toBe(schema.properties.version.const);
+  });
+
+  test('rung names and patterns agree between the schema and the manifest', () => {
+    const rungs = schema.properties.rungs.required as string[];
+    expect(Object.keys(raw.rungs).sort()).toEqual([...rungs].sort());
+    expect([...schema.properties.aliases.additionalProperties.enum].sort()).toEqual([...rungs].sort());
+    const pattern = new RegExp(schema.properties.rungs.properties.frontier.items.pattern);
+    for (const rung of rungs) for (const glob of raw.rungs[rung]) expect(glob).toMatch(pattern);
+  });
+});
+
+describe('bin/gstack-modules', () => {
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [...bunIsolationArgs(), path.join(ROOT, 'bin/gstack-modules'), ...args], { cwd: ROOT, encoding: 'utf-8', timeout: 60_000 });
+    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+
+  test('validate and list read the committed manifest', () => {
+    expect(run('validate')).toMatchObject({ code: 0, stdout: expect.stringContaining('LOADOUTS: ok') });
+    const listed = JSON.parse(run('list', '--json').stdout);
+    expect(listed.modules.map((m: { id: string }) => m.id)).toEqual(catalog.map(e => e.id));
+    const pinned = run('list', '--pinned').stdout;
+    expect(pinned).toContain('preamble:bash');
+    expect(pinned).not.toContain('skill:design-shotgun');
+  });
+
+  test('refused inputs exit 2 with their code; unknown commands print usage', () => {
+    const out = path.join(tmp, 'cli-refused');
+    expect(run('render', '--host', 'claude', '--modules', 'full,-skill:nope', '--out-dir', out)).toMatchObject({ code: 2, stderr: expect.stringContaining('MODULE_UNKNOWN') });
+    expect(run('render', '--host', 'claude', '--modules', 'full,-preamble:bash', '--out-dir', out)).toMatchObject({ code: 2, stderr: expect.stringContaining('MODULE_PINNED') });
+    expect(run('render', '--host', 'claude', '--loadout', 'full', '--out-dir', out, '--plan-mode', 'maybe')).toMatchObject({ code: 2, stderr: expect.stringContaining('MODULE_SPEC_INVALID') });
+    expect(run('render', '--host', 'claude', '--loadout', 'full', '--out-dir', out, '--model', 'no-such-model')).toMatchObject({ code: 2, stderr: expect.stringContaining('MODULE_SPEC_INVALID') });
+    expect(run('render', '--host', 'claude', '--out-dir', out)).toMatchObject({ code: 2, stderr: expect.stringContaining('MODULE_SPEC_INVALID') });
+    expect(fs.existsSync(out)).toBe(false);
+    expect(run('bogus')).toMatchObject({ code: 2, stderr: expect.stringContaining('Usage:') });
+    expect(run('--help')).toMatchObject({ code: 0, stdout: expect.stringContaining('gstack-modules render') });
+  });
+
+  test('render prints one RENDERED line and writes the lock', () => {
+    const out = path.join(tmp, 'cli-render');
+    const result = run('render', '--host', 'claude', '--modules', 'full,-skill:design-shotgun', '--out-dir', out);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/^RENDERED: loadout=adhoc host=claude files=\d+ bytes=\d+ excluded=1 lock=/);
+    expect(JSON.parse(fs.readFileSync(path.join(out, LOCK_FILE), 'utf-8')).excluded).toEqual(['skill:design-shotgun']);
   });
 });
