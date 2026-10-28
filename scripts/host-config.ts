@@ -125,13 +125,6 @@ export interface HostConfig {
     /** How skills are linked into the host dir. */
     linkingStrategy: 'real-dir-symlink' | 'symlink-generated';
     /**
-     * Instruction-only fallback tier: a committed rules digest this host's
-     * users can hand-copy when there is no full install arm. Delivery is
-     * print-path + user-performed copy ONLY — setup must never write or
-     * overwrite a user's own AGENTS.md. See scripts/gen-agents-digest.ts.
-     */
-    instructionTier?: { rulesFile: string };
-    /**
      * 'harness': setup's arm for this host is `gstack-harness register <host>`
      * (lib/harness-register.ts): the host's render copied into the harness's own
      * skills folder with an ownership ledger, not linked into a host skills dir.
@@ -197,9 +190,6 @@ export function validateHostConfig(config: HostConfig, validResolverNames?: Read
   }
   if (config.install.registration === 'harness' && config.tier !== 'experimental') {
     errors.push('install.registration harness needs tier experimental (setup registers it through gstack-harness)');
-  }
-  if (config.tier === 'instruction-only' && !config.install.instructionTier && config.name !== 'slate' && config.name !== 'gbrain') {
-    errors.push('instruction-only hosts must declare install.instructionTier (what setup tells the user to copy)');
   }
   const modelError = validateModel(config.defaultModel);
   if (modelError) {
