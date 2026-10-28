@@ -26,6 +26,7 @@ _gstack_harness_sha() {
 # True when $1 is below $2 and no path from $2 down to $1 is a symlink.
 _gstack_harness_owned() {
   local p="$1" dest="$2"
+  [ -n "$dest" ] || return 1
   case "$p" in "$dest"/*) ;; *) return 1 ;; esac
   while [ "$p" != "$dest" ]; do [ -L "$p" ] && return 1; p="$(dirname "$p")"; done
   [ ! -L "$dest" ]

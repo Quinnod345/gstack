@@ -233,6 +233,18 @@ describe('bin/gstack-harness-ledger.sh (the bun-free reader gstack-uninstall sou
     expect(fs.existsSync(path.join(d, 'skills'))).toBe(false);
     expect(listLedgers(path.join(d, 'state'))).toEqual([]);
   }, 60_000);
+
+  test('a ledger with no destination row touches nothing and still finishes', () => {
+    const d = tmp();
+    const victim = path.join(d, 'mine.md');
+    fs.writeFileSync(victim, 'x');
+    const ledger = path.join(d, 'state', 'harness', 'broken.ledger');
+    fs.mkdirSync(path.dirname(ledger), { recursive: true });
+    fs.writeFileSync(ledger, 'meta\ttarget\tdots\nfile\t' + require('node:crypto').createHash('sha256').update('x').digest('hex') + '\t' + victim + '\n');
+    const r = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_ledger "$1"', ledgerSh, ledger], { env: { PATH: '/usr/bin:/bin', GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 10_000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(fs.readFileSync(victim, 'utf8')).toBe('x');
+  }, 30_000);
 });
 
 describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
