@@ -2,6 +2,7 @@
 # gstack-harness-ledger.sh — sourced; removes what gstack-harness registered,
 # from its ledger, without bun (bin/gstack-uninstall runs it before it removes
 # the checkout and the state root). Ledger format: lib/harness-register.ts.
+# Callers set GSTACK_STATE_ROOT first (bin/gstack-state-root.sh).
 #
 #   gstack_harness_unregister_ledger <ledger>   remove one registration
 #   gstack_harness_unregister_all               remove every registration under
@@ -28,7 +29,7 @@ _gstack_harness_cut_block() {
 }
 
 gstack_harness_unregister_ledger() {
-  local ledger="$1" root="${GSTACK_STATE_ROOT:-$HOME/.gstack}" stamp kind a b target="" dest="" pack="" backup
+  local ledger="$1" root="${GSTACK_STATE_ROOT:?gstack-harness-ledger: GSTACK_STATE_ROOT is not set}" stamp kind a b target="" dest="" pack="" backup
   [ -f "$ledger" ] || return 0
   stamp="$(date -u +%Y-%m-%dT%H-%M-%SZ)-$$"
   backup="$root/backups/harness/$stamp"
@@ -54,7 +55,7 @@ gstack_harness_unregister_ledger() {
 }
 
 gstack_harness_unregister_all() {
-  local root="${GSTACK_STATE_ROOT:-$HOME/.gstack}" l
+  local root="${GSTACK_STATE_ROOT:?gstack-harness-ledger: GSTACK_STATE_ROOT is not set}" l
   for l in "$root"/harness/*.ledger; do
     [ -f "$l" ] || continue
     gstack_harness_unregister_ledger "$l" && echo "harness: $(basename "$l" .ledger)"

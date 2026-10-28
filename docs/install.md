@@ -47,6 +47,14 @@ prune-stale --repoint` removes dead gstack hook entries, re-points stale ones
 at the stable install, and collapses duplicates, printing one line (and
 writing a backup beside the file) only when it changed something.
 
+## Agent harnesses
+
+Run inside OpenClaw, Hermes or a Dot, `./setup` also registers gstack's skills
+with that harness, in the harness's own skills folder, and prints every path
+it wrote. It never does this when `--host` names another host. Turn it off
+with `./setup --no-harness-auto` or `GSTACK_HARNESS_AUTO=0`. Per-harness
+details, QM and any other harness: [hosts.md](hosts.md#agent-harnesses).
+
 ## Uninstall
 
 See [uninstall.md](uninstall.md).
