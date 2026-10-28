@@ -146,34 +146,64 @@ export async function callJudge<T>(
       ...(opts?.effort === undefined ? {} : { effort: opts.effort }) } }),
     messages: [{ role: 'user' as const, content: prompt }],
   };
-  const makeRequest = () => opts?.stream
-    ? client.messages.stream(request, signal ? { signal } : undefined).finalMessage()
-    : client.messages.create(request, signal ? { signal } : undefined);
+  // What a cancelled request had received, so a judge deadline names rate-limit
+  // waits, a stream with no events, or a long thinking phase. Counts only, never content.
+  const started = performance.now();
+  const elapsedMs = () => Math.round(performance.now() - started);
+  const progress = { retryWaitsMs: [] as number[], firstEventMs: null as number | null, lastEventMs: null as number | null,
+    block: null as string | null, thinkingChars: 0, textChars: 0, messageId: null as string | null, requestId: null as string | null };
+  const makeRequest = () => {
+    if (!opts?.stream) return client.messages.create(request, signal ? { signal } : undefined);
+    const stream = client.messages.stream(request, signal ? { signal } : undefined);
+    stream.on('streamEvent', event => {
+      progress.firstEventMs ??= elapsedMs();
+      progress.lastEventMs = elapsedMs();
+      progress.requestId ??= stream.request_id ?? null;
+      if (event.type === 'message_start') progress.messageId = event.message.id;
+      if (event.type === 'content_block_start') progress.block = event.content_block.type;
+      if (event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') progress.thinkingChars += event.delta.thinking.length;
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') progress.textChars += event.delta.text.length;
+    });
+    return stream.finalMessage();
+  };
 
   // 429s under CI concurrency: jittered exponential backoff over 3 retries
   // (~1s/4s/16s + jitter), honoring the server's retry-after when present.
   // The old single fixed 1s retry lost races reliably at 40-way concurrency.
   let response;
   let attempt = 0;
-  for (;;) {
-    try {
-      signal?.throwIfAborted();
-      response = await makeRequest();
-      signal?.throwIfAborted();
-      break;
-    } catch (err: any) {
-      signal?.throwIfAborted();
-      if (err?.status !== 429 || attempt >= 3) throw err;
-      const retryAfterSecs = Number(err?.headers?.['retry-after']);
-      const baseMs = Number.isFinite(retryAfterSecs) && retryAfterSecs > 0
-        ? retryAfterSecs * 1000
-        : 1000 * 4 ** attempt;
-      await delay(baseMs + Math.random() * 500, undefined, { signal }).catch(error => {
+  try {
+    for (;;) {
+      try {
         signal?.throwIfAborted();
-        throw error;
-      });
-      attempt += 1;
+        response = await makeRequest();
+        signal?.throwIfAborted();
+        break;
+      } catch (err: any) {
+        signal?.throwIfAborted();
+        if (err?.status !== 429 || attempt >= 3) throw err;
+        const retryAfterSecs = Number(err?.headers?.['retry-after']);
+        const baseMs = Number.isFinite(retryAfterSecs) && retryAfterSecs > 0
+          ? retryAfterSecs * 1000
+          : 1000 * 4 ** attempt;
+        const waitMs = baseMs + Math.random() * 500;
+        progress.retryWaitsMs.push(Math.round(waitMs));
+        await delay(waitMs, undefined, { signal }).catch(error => {
+          signal?.throwIfAborted();
+          throw error;
+        });
+        attempt += 1;
+      }
     }
+  } catch (error) {
+    if (signal?.aborted) {
+      console.error(JSON.stringify({
+        type: 'llm-judge-aborted', model: resolvedModel, stream: opts?.stream === true, elapsedMs: elapsedMs(),
+        requests: attempt + 1, ...progress,
+        reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason),
+      }));
+    }
+    throw error;
   }
 
   opts?.onResponse?.({

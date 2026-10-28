@@ -103,3 +103,59 @@ test('streaming retains the caller abort signal instead of extending its deadlin
   expect(await rejected).toBe(failure);
   expect(transport).toHaveBeenCalledTimes(1);
 });
+
+test('a judge aborted mid-stream retains what it had received, as counts without content', async () => {
+  const encoder = new TextEncoder();
+  const partial = [
+    { type: 'message_start', message: { id: 'msg_stalled', type: 'message', role: 'assistant', model: 'claude-fable-5-1',
+      content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 99023, output_tokens: 1 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'PRIVATE_THINKING' } },
+  ];
+  let delivered!: () => void;
+  const received = new Promise<void>(resolve => { delivered = resolve; });
+  transport.mockImplementation(async (_url: string, init: RequestInit) => new Response(new ReadableStream({
+    start(stream) {
+      for (const event of partial) stream.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
+      init.signal!.addEventListener('abort', () => stream.error(init.signal!.reason), { once: true });
+      setTimeout(delivered, 20);
+    },
+  }), { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_stalled' } }));
+  const controller = new AbortController();
+  const rejected = callJudge('score the whole bundle', 'claude-fable-5-1', {
+    max_tokens: 65_536, stream: true, jsonSchema: WORKFLOW_JUDGE_RESPONSE_SCHEMA, signal: controller.signal,
+  }).catch(error => error);
+  await received;
+  const failure = new Error('ship/SKILL.md workflow exceeded its workflow judge work deadline');
+  controller.abort(failure);
+  expect(await rejected).toBe(failure);
+  expect(diagnostics).toHaveBeenCalledTimes(1);
+  const diagnostic = diagnostics.mock.calls[0]![0];
+  expect(diagnostic).not.toContain('PRIVATE_');
+  const event = JSON.parse(diagnostic);
+  expect(event).toMatchObject({ type: 'llm-judge-aborted', model: 'claude-fable-5-1', stream: true, requests: 1,
+    retryWaitsMs: [], block: 'thinking', thinkingChars: 'PRIVATE_THINKING'.length, textChars: 0,
+    messageId: 'msg_stalled', requestId: 'req_stalled', reason: failure.message });
+  expect(event.firstEventMs).toBeGreaterThanOrEqual(0);
+  expect(event.lastEventMs).toBeGreaterThanOrEqual(event.firstEventMs);
+  expect(event.elapsedMs).toBeGreaterThanOrEqual(event.lastEventMs);
+});
+
+test('a stream that never sent an event is retained as such, and provider errors without an abort are not', async () => {
+  transport.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+  }));
+  const controller = new AbortController();
+  const rejected = callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: controller.signal }).catch(error => error);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  controller.abort(new Error('deadline'));
+  await rejected;
+  expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ type: 'llm-judge-aborted', firstEventMs: null,
+    lastEventMs: null, block: null, thinkingChars: 0, messageId: null, requestId: null, reason: 'deadline' });
+
+  diagnostics.mockClear();
+  transport.mockResolvedValue(new Response(JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'boom' } }),
+    { status: 500, headers: { 'content-type': 'application/json', 'x-should-retry': 'false' } }));
+  await expect(callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: new AbortController().signal })).rejects.toThrow();
+  expect(diagnostics).not.toHaveBeenCalled();
+});

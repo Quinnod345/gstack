@@ -806,7 +806,7 @@ After outputting your own findings, if Greptile comments were classified in Step
 
 Before replying to any comment, run greptile-triage.md's **Escalation Detection** to choose Tier 1 (friendly) or Tier 2 (firm) reply templates.
 
-1. **VALID & ACTIONABLE comments:** Use their Step 5a–5d disposition; do not ask a second fix question. Step 5c alone supplies A) Fix / B) Skip for ASK items. After a completed fix, use the **Fix reply template** with diff and explanation; cite the current diff if uncommitted, never invent a commit SHA. A Skip leaves the defect unresolved and grants no new fix permission. If evidence disproves the finding, reclassify it below.
+1. **VALID & ACTIONABLE comments:** Use their Step 5a–5d disposition; do not ask a second fix question. After a completed fix, use the **Fix reply template** with diff and explanation; cite the current diff if uncommitted, never invent a commit SHA. A Skip leaves the defect unresolved and grants no new fix permission. If evidence disproves the finding, reclassify it below.
 
 2. **FALSE POSITIVE comments:** These are reply decisions, not code approval. Show file:line (or [top-level]), summary, permalink and evidence, then ask:
    - A) Reply explaining why this is incorrect (recommended if clearly wrong)
@@ -835,6 +835,8 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
      final: repeat Steps 3–5 with a full start.
 2. On a repeat, execute Steps 3–5 in order. At Step 4.7, an edited pass supersedes
    every earlier QA capture (exploratory §4): rerun each probe the verdict relies on.
+   These reruns are revalidation, so they run even after smoke expiry; keep the
+   PROBE_DIR and run its once-only `materialize` on the final pass.
    A zero-edit pass reuses only this invocation's unchanged-input QA evidence,
    rerunning any probe whose inputs changed or are uncertain. Reusing never skips a review step.
 3. **Verify completed actions.** On the final zero-edit pass, reconcile this
@@ -846,9 +848,8 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
    defects and unresolved counts; earlier fixes do not suppress them.
 4. **Recheck skipped advice.** Re-read its final-snapshot supporting source and
    reconfirm the decision; otherwise report its history without a reusable skip.
-   The logger computes `snapshot_covered_paths` from eligible paths whose raw bytes
-   equal the bound snapshot blobs (`[]` if none). Never carry prior-cycle, supplied
-   or prior-record coverage forward or build this proof yourself. Fixed advice
+   The logger computes `snapshot_covered_paths` itself; never carry prior-cycle,
+   supplied or prior-record coverage forward or build this proof yourself. Fixed advice
    needs no skip coverage.
 
 ### 2. Fill the record
@@ -878,7 +879,8 @@ pass: report it with its reason.
   `helper_target`. Recheck source after fixes. The logger uses `sharedLibsFingerprint`,
   never supplied/model hashes.
   Actions: `auto-fixed` (Step 5b), `fixed` (approved **and completed** in Step 5d),
-  `skipped` (explicit Skip in Step 5c). Advice is never `auto-fixed`; pending
+  `skipped` (explicit Skip in Step 5c),
+  `open` (any other defect, e.g. unanswered). Advice is never `auto-fixed`; pending
   advice stays in the response, not the record. Exclude prior Step 5.0
   suppressions; include this invocation's revalidated decisions.
 - Gate findings additionally carry `gate` (the RH tag, e.g. `"RH-15"`), `gate_id`
@@ -896,9 +898,8 @@ pass: report it with its reason.
 
 `TIMESTAMP` is ISO 8601; `COMMIT` is `git rev-parse --short HEAD`.
 `quality_score` is Step 4.6's specialist score (`10.0` when small-diff specialists
-were skipped or this host omits Review Army). This default is not completion evidence;
-unresolved non-advisory core defects still count in `issues_found`,
-`critical`, `informational`. The logger builds trusted `review_binding` from the
+were skipped or this host omits Review Army). This default is not completion evidence
+and never lowers defect counts. The logger builds trusted `review_binding` from the
 validated captured branch digest, discarding caller bindings. Never invent a binding
 or replace REVIEW_START at log time; finish only this pass's own token.
 

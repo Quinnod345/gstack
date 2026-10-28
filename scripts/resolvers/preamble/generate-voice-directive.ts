@@ -2,9 +2,7 @@
 import type { TemplateContext } from '../types';
 
 export function generateVoiceDirective(ctx: TemplateContext, tier: number): string {
-  const emDashRule = ctx.skillName === 'plan-eng-review'
-    ? 'Do not add em dashes in prose you compose during the review. Existing templates, quoted text, command output, and required copied labels may contain them.'
-    : 'No em dashes.';
+  const emDashRule = 'No em dashes.';
 
   if (tier <= 1) {
     return `## Voice
