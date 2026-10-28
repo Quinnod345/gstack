@@ -141,7 +141,7 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
 \`${diffBase(ctx)} && git diff "$DIFF_BASE"\` to get the ${ctx.skillName === 'ship' ? 'diff (`<diff-base>`: write the sha in before dispatch, the merge base on pass 1 and `RANGE_BASE` from pass 2 on; never a shell variable)' : 'full diff'}. Apply the checklist against the diff.
 
-\`NO FINDINGS\` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line, at most 400 words of findings in all:
+\`NO FINDINGS\` alone is the expected, complete result for a clean diff; never invent an item. Otherwise output one JSON object per finding per line, 400 words at most:
 {\\"severity\\":\\"CRITICAL|INFORMATIONAL\\",\\"confidence\\":N,\\"path\\":\\"file\\",\\"line\\":N,\\"category\\":\\"category\\",\\"summary\\":\\"description\\",\\"fix\\":\\"recommended fix\\",\\"fingerprint\\":\\"path:line:category\\",\\"specialist\\":\\"name\\"}
 
 Required fields: severity, confidence, path, category, summary, specialist.
