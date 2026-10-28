@@ -1269,7 +1269,7 @@ Claude: 23 learnings for this project (14 high confidence, 6 medium, 3 low)
 
         3 potentially stale (referenced files deleted):
         - "auth middleware uses JWT" — auth/middleware.ts was deleted
-        [Prune these? Y/N]
+        [Remove, keep, or update each one?]
 ```
 
 ---
