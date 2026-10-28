@@ -96,6 +96,14 @@ https://github.com/google-labs-code/design.md
 format (YAML token front matter in five groups, eight canonical sections in
 spec order, `{path}` token references). No specification text is reproduced.
 
+## skill-diet — Copyright Nico Bailon — MIT License
+
+https://github.com/nicobailon/skill-diet (at 5f41df1; license text: `licenses/MIT-skill-diet.txt`).
+Adapted, not vendored: the levels table, the five-step edit ladder and the size-budget rule in
+`write-skill/SKILL.md.tmpl`, and the full-diet procedure in `write-skill/references/diet.md`,
+rewritten for gstack's templates, carved sections, bins and ratchet tests. The before/after/none
+scoring rules in `docs/designs/SKILL_EVAL_CONTRACT.md` follow skill-diet's `scripts/eval.mjs`.
+
 ## tstack — Copyright Theo Browne — MIT License
 
 https://github.com/t3dotgg/tstack (`skills/sol-loop`, at 7de017b3). Ideas, not text: the

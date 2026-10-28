@@ -1,9 +1,15 @@
-name: Weekly release
+name: Stable release
 # Tags the newest green commit on main as v<VERSION>, publishes the GitHub
 # Release, and fast-forwards refs/heads/stable to it (docs/releases.md). Team
 # installs follow stable, so this is the only thing that moves them. Runs
-# every Monday morning Pacific; run it by hand with a ref for a hotfix, or
-# with dry_run to see the plan and change nothing. A pull request that touches
+# twice a week, Monday and Thursday at 14:00 UTC (the file keeps its
+# weekly-release.yml name so its run history and every `gh workflow run`
+# reference stay intact). stable moves at most once per 72 hours: a cut inside
+# that floor is refused with REFUSED_FLOOR and NEXT_ALLOWED; a scheduled run
+# gets 3 hours of grace for cron start jitter, a hand-run cut none. The only
+# exception is a security cut: the security input with a ref, naming a GHSA,
+# CVE or #<n> the script ties to the released commits. Run it by hand with a
+# ref for a hotfix, or with dry_run to see the plan and change nothing. A pull request that touches
 # the release tooling runs the dry run against main with a read-only token,
 # which is the only pre-merge exercise of the real workflow. The candidate's
 # gate must already be green (free-tests and main-backstop check runs
@@ -12,8 +18,9 @@ name: Weekly release
 # runs only there, with main's tooling.
 on:
   schedule:
-    # Monday 14:00 UTC: 07:00 PDT, 06:00 PST.
-    - cron: '0 14 * * 1'
+    # Monday and Thursday 14:00 UTC (07:00 PDT, 06:00 PST): exactly 72 h, then
+    # 96 h, apart; the floor's scheduled grace covers a late Monday start.
+    - cron: '0 14 * * 1,4'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -22,6 +29,10 @@ on:
         default: true
       ref:
         description: 'Hotfix: release this commit of main instead of the newest green one (full 40-hex SHA)'
+        type: string
+        default: ''
+      security:
+        description: 'Security cut (needs ref): the reason, naming the GHSA-…, CVE-… or #<n> it fixes; passes the 72-hour floor once verified and lands in the release notes'
         type: string
         default: ''
   pull_request:
@@ -48,6 +59,9 @@ jobs:
       contents: write
       # Reads the candidate's check runs.
       checks: read
+      # A security cut reads the security label on the #<n> its reason names.
+      issues: read
+      pull-requests: read
     steps:
       # The dispatched ref supplies the tooling; the release candidate always
       # comes from origin/main, which fetch-depth 0 brings along with every
@@ -73,16 +87,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
           RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
+          SECURITY_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.security || '' }}
         run: |
           set -euo pipefail
           if [ -n "$RELEASE_REF" ] && ! [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::ref must be the full 40-hex SHA of a commit on main, not '$RELEASE_REF'"
+            echo "::error::ref must be the full 40-hex SHA of a commit on main"
+            exit 1
+          fi
+          if [ -n "$SECURITY_REASON" ] && [ -z "$RELEASE_REF" ]; then
+            echo "::error::a security cut needs ref: the full SHA of the fix commit on main"
             exit 1
           fi
           args=(--repo "$GITHUB_REPOSITORY" --summary "$GITHUB_STEP_SUMMARY")
           [ "$DRY_RUN" = true ] && args+=(--dry-run)
           [ -n "$RELEASE_REF" ] && args+=(--ref "$RELEASE_REF")
-          echo "## Weekly release ($([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'cut'))" >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$SECURITY_REASON" ] && args+=(--security "$SECURITY_REASON")
+          echo "## Stable release ($([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'cut'), $GITHUB_EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
           bun --no-env-file --config=/dev/null --no-install run scripts/release-cut.ts "${args[@]}"
 
   dry-run:
@@ -110,5 +130,5 @@ jobs:
           set -euo pipefail
           git fetch --quiet origin '+refs/heads/stable:refs/remotes/origin/stable' 2>/dev/null || echo "origin has no stable yet"
           git fetch --quiet --tags origin
-          echo "## Weekly release (dry run from PR #${{ github.event.pull_request.number }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Stable release (dry run from PR #${{ github.event.pull_request.number }})" >> "$GITHUB_STEP_SUMMARY"
           bun --no-env-file --config=/dev/null --no-install run scripts/release-cut.ts --repo "$GITHUB_REPOSITORY" --summary "$GITHUB_STEP_SUMMARY" --dry-run

@@ -42,6 +42,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/context-restore`](#context-restore) | **Restore State** | Resume from a saved context, even across Conductor workspace handoffs. |
 | [`/health`](#health) | **Code Quality Dashboard** | Wraps type checker, linter, tests, dead code detection. Computes a weighted 0-10 score; tracks trends over time. |
 | [`/deslop-shared-libs`](#deslop-shared-libs) | **Shared Code Reviewer** | Find worthwhile shared-code extractions in recent work. Recommendations only. |
+| [`/write-skill`](#write-skill) | **Skill Editor** | Write or improve an agent skill without bloat: edit ladder, size per level, skill-to-bin drift check, full diets with a before/after test. |
 | [`/test-audit`](#test-audit) | **Test Auditor** | Sweep existing tests for low-value, implementation-coupled or duplicate tests. Report-only unless you approve a batch. |
 | [`/landing-report`](#landing-report) | **Ship Queue Dashboard** | Read-only snapshot of the workspace-aware ship queue. Which version slots are claimed, which sibling workspaces have WIP. |
 | [`/captain`](#captain) | **Crew Controller** | Run many coding agents from one controller. Lanes build and send a READY block; the controller validates it, merges through trains (stamp on call, verify, merge with the expected head, verify again), keeps the digest, relays approvals in three fixed shapes and runs a daily flaky-fix pass. Also answers to `/crew`. |
@@ -885,6 +886,33 @@ checks do not run the history audit. Optional extractions are advisory and requi
 approval; they do not block a clean review or reduce its score. Actual defects
 keep their normal fix handling.
 
+## `/write-skill`
+
+Every skill is read in full each time it runs, so every extra line costs tokens on every run, and a skill that names a
+command the tool no longer has produces wrong calls that pass CI. `/write-skill` keeps skills lean and correct, for
+gstack's own templates and for any skill folder you own.
+
+- **Find the skill.** `gstack-skill-bill <name|folder>` resolves exact names only and says what you are holding: a
+  folder you own, a gstack checkout template (edit `SKILL.md.tmpl`, then `bun run gen:skill-docs`), or an installed
+  gstack skill, which it never edits because `gstack-upgrade` overwrites it.
+- **Edit ladder.** Stop at the first step that handles the change: fix the tool (a clearer error, a flag, a test);
+  add nothing a fresh session already does; edit the line that covers the idea instead of appending; put the fact on the
+  lowest level that reaches the agent in time (description, SKILL.md, `references/`, the tool's `--help`, the tool's
+  errors); write the rule and put the story in the commit message.
+- **Size.** `gstack-skill-bill` prints bytes and estimated tokens per level, and in a gstack checkout the skill's eval
+  task file (`EVAL TASKS:`). Commits carry
+  `Skill-Size: <before>→<after> bytes`; a skill more than 10% over its last `Skill-Diet:` commit is DUE, and a red
+  context-budget ratchet means diet, not a higher ceiling.
+- **Drift.** `test/skill-bin-drift.test.ts` fails when a template or rendered skill calls a gstack bin or flag that
+  does not exist (`bun run scripts/skill-bin-drift.ts --skill <name>` for one skill). Its allowlist only shrinks.
+- **Full diet.** Report first, write the eval tasks before any cut
+  (`test/fixtures/skill-evals/<skill>/tasks.json`), cut, then prove before vs after vs no skill with the shared skill
+  eval (`docs/designs/SKILL_EVAL_CONTRACT.md`). A diet ships only when no task that passed before fails after.
+
+`/write-skill` is not `/skillify`: `/skillify` codifies a browser scrape into a browser-skill. Adapted from
+[nicobailon/skill-diet](https://github.com/nicobailon/skill-diet) (MIT). The first diet, /learn, cut its template from
+5,797 to 2,955 bytes.
+
 ## `/test-audit`
 
 Find existing tests that cost more than they protect. `/review`, `/ship`, `/qa` and
@@ -1242,7 +1270,7 @@ Claude: 23 learnings for this project (14 high confidence, 6 medium, 3 low)
 
         3 potentially stale (referenced files deleted):
         - "auth middleware uses JWT" — auth/middleware.ts was deleted
-        [Prune these? Y/N]
+        [Remove, keep, or update each one?]
 ```
 
 ---
@@ -1445,7 +1473,7 @@ this model disagree (squash or merge, who stamps, gate-ahead, the severe race, a
 id in the READY), the skill ships both as options for the crew rules file.
 
 Templates (CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report,
-the READY block, the slot call, the plan and merge asks, the daily automation prompt)
+the READY block, the slot call, the lane brief, the plan and merge asks, the daily automation prompt)
 live in `captain/templates/`; the team setup guide for Capy is [docs/captain.md](captain.md).
 
 ## `/gstack-upgrade`

@@ -37,6 +37,7 @@ Homes are paths in the gstack checkout the lane checked at session start.
 | 21 approvals | <date> | "<words>" | the three shapes |
 | 22 /ship before READY | <date> | "<words>" | every READY, re-READYs included |
 | 23 blocking floor | <date> | "<words>" | what blocks another review pass |
+| 24 plan before build | <date> | "<words>" | a sized /autoplan first, the owner's word before the build |
 
 ## Rules
 
@@ -125,8 +126,18 @@ Homes are paths in the gstack checkout the lane checked at session start.
     skills, scope knob `REVIEW_SCOPE`; record the pass count in your READY. Home: the
     `/ship` and `/review` skills.
 
+24. **Plan before build.** If you build something, a `/autoplan` run on your brief, sized
+    to the work, is your first act after the session-start check; send `CONTROLLER` the plan and its gate in plain
+    language with the recommended reply named; build only after the owner's word is
+    answered into the run and it reports `APPROVED`; record it with `gstack-approvals
+    import --autoplan`. New scope taken on part-way gets the same. Exempt: read-only
+    lanes, the daily flaky pass's repairs, slot stamps, CHANGELOG-only resolves, cap
+    re-pins under a written grant. Home: `docs/captain.md` (Plan before build),
+    `captain/templates/brief.md`.
+
 ## Crew-specific rules
 
-Add rules here, numbered from 24, each with the date, the owner's words where there are
-any, and the thread that produced it. A rule that stays here for long is a gap in gstack:
-file it.
+Add rules here, numbered from 25, each with the date, the owner's words where there are
+any, and the thread that produced it. A crew whose own rules already took 24 before rule
+24 shipped keeps its numbering and cites `docs/captain.md` (Plan before build) by section
+name. A rule that stays here for long is a gap in gstack: file it.
