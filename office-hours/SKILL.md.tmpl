@@ -169,13 +169,13 @@ If no matches found, proceed silently.
 
 Read ETHOS.md for the full Search Before Building framework (three layers, eureka moments). The preamble's Search Before Building section has the ETHOS.md path.
 
-After understanding the problem through questioning, search for what the world thinks. This is NOT competitive research (that's /design-consultation's job). This is understanding conventional wisdom so you can evaluate where it's wrong.
+After the questioning, learn the conventional wisdom (not competitive research) so you can judge where it's wrong.
 
 **Privacy gate:** Before searching, use AskUserQuestion: "I'd like to search for what the world thinks about this space to inform our discussion. This sends generalized category terms (not your specific idea) to a search engine through your Aside browser (or the WebSearch tool if Aside is not running). OK to proceed?"
 Options: A) Yes, search away  B) Skip — keep this session private
 If B: skip this phase entirely and proceed to Phase 3. Use only in-distribution knowledge.
 
-When searching, use **generalized category terms** — never the user's specific product name, proprietary concept, or stealth idea. For example, search "task management app landscape" not "SuperTodo AI-powered task killer."
+Search **generalized category terms** only, never the user's product name, proprietary concept or stealth idea ("task management app landscape", not "SuperTodo AI-powered task killer").
 
 If the Aside check did not print `READY`, run the same searches with the WebSearch tool when the host provides it; with neither, skip this phase and note: "Search unavailable — proceeding with in-distribution knowledge only."
 
@@ -202,7 +202,7 @@ Read the top 2-3 sources it cites. Run the three-layer synthesis:
 
 If no eureka moment exists, say: "The conventional wisdom seems sound here. Let's build on it." Proceed to Phase 3.
 
-**Important:** This search feeds Phase 3 (Premise Challenge). If you found reasons the conventional approach fails, those become premises to challenge. If conventional wisdom is solid, that raises the bar for any premise that contradicts it.
+Findings feed Phase 3: reasons the conventional approach fails become premises to challenge; solid conventional wisdom raises the bar for any premise that contradicts it.
 
 ---
 
@@ -228,7 +228,13 @@ Use AskUserQuestion to confirm. If the user disagrees with a premise, revise und
 
 ---
 
-{{CODEX_SECOND_OPINION}}
+## Phase 3.5: Cross-Model Second Opinion (optional)
+
+Use AskUserQuestion: "Want a second opinion from an independent AI perspective? It reviews your problem statement, key answers, premises and landscape findings from a structured summary, without this conversation. Usually 2-5 minutes." A) Yes, get a second opinion. B) No, proceed to alternatives.
+
+If B: skip Phase 3.5 and remember the second opinion did NOT run (the design doc, founder signals and Phase 4 depend on it).
+If A:
+{{SECTION:second-opinion}}
 
 ---
 
@@ -264,13 +270,14 @@ Rules:
 
 Emit ONE AskUserQuestion that lists every alternative (A/B and optionally C) as numbered options, using the preamble's AskUserQuestion Format section. The AskUserQuestion call is a tool_use, not prose — write the question text and call the tool.
 
-**STOP.** Do NOT proceed to Phase 4.5 (Founder Signal Synthesis), Phase 5 (Design Doc), Phase 6 (Closing), or any design-doc generation until the user responds. A "clearly winning approach" is still an approach decision and still needs explicit user approval before it lands in the design doc. Writing the recommendation in chat prose and continuing forward is the failure mode this gate exists to prevent.
+**STOP.** Do NOT proceed to Phase 4.25, 4.5, 5 or 6, or write any design doc, until the user responds. A "clearly winning approach" still needs explicit approval; writing the recommendation in prose and continuing is the failure this gate prevents.
 
 ---
 
-{{DESIGN_MOCKUP}}
+## Phase 4.25: Visual design (UI ideas only)
 
-{{DESIGN_SKETCH}}
+If the approach approved in Phase 4 has no user-facing UI (screens, pages, forms, dashboards, interactive elements), skip to Phase 4.5.
+{{SECTION:visual-design}}
 
 ---
 

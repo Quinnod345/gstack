@@ -332,7 +332,7 @@ const GENERATED_WITH_GUIDANCE = [
   'design-consultation/sections/proposal-and-preview.md',
   'design-review/SKILL.md',
   'document-release/sections/release-body.md',
-  'office-hours/SKILL.md',
+  'office-hours/sections/second-opinion.md',
   'office-hours/sections/design-and-handoff.md',
   'plan-ceo-review/SKILL.md',
   'plan-ceo-review/sections/review-sections.md',
