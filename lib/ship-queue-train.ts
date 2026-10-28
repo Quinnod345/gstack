@@ -427,6 +427,7 @@ export function frozenLines(f: NonNullable<ReturnType<typeof activeFreeze>>): st
   return [
     `QUEUE_TRAIN_FROZEN: train ${f.train} merged ${f.merged.map(p => '#' + p).join(',') || '(none)'}; main ${f.main.sha.slice(0, 12)} tree ${f.main.tree.slice(0, 12)}; backstop ${f.backstop ? `${f.backstop.state} run ${f.backstop.run ?? 'unknown'} (nonce ${f.backstop.nonce})` : 'not dispatched'}`,
     `freeze: ${f.reason}; unmerged ${f.unmerged.map(u => '#' + u.pr).join(',') || '(none)'}; repair ${f.repair ? `#${f.repair.pr}@${f.repair.head.slice(0, 12)}` : 'none admitted'}`,
+    ...(f.unreadable?.length ? [`unreadable: ${f.unreadable.map(u => `#${u.pr}@${u.head.slice(0, 12)}`).join(', ')} (GitHub did not answer at the freeze; neither merged nor unmerged)`] : []),
   ];
 }
 

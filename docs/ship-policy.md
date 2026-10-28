@@ -562,6 +562,26 @@ leave it out and report it. The tree receipt refuses such a move after the fact
 only while the moved version is older than the base's at the build, so the
 restamp, not the receipt, is what keeps the base's key in place.
 
+**Size caps compose; nothing re-pins at the slot.** Ship's union-size cap is a
+ledger, `test/size-ledger/ship/`: `base.json` plus one `<branch>.json` per
+branch that changed ship's union bytes (`{ "bytes": <signed>, "why": "…" }`),
+and the parity suite requires ship's union bytes to equal the base plus every
+entry, exactly. A lane records its own change once, before /ship, with `bun
+--no-env-file --config=/dev/null scripts/size-ledger.ts record ship --why
+"<what changed>"`. The entry is a property of the branch's own diff, so it
+stays right across base merges, and each prefix carries the entries of the
+slots in it, so T<k> passes with no re-pin and the stamp commit stays the four
+files (a cap re-pinned at the slot would be a fifth file on a tree the gate
+never ran). A clean merge adds byte deltas exactly; overlapping hunks are a
+train conflict anyway, and two branches making an identical edit (git keeps
+one copy, both entries count) fail closed with the same record command as the
+fix. A branch that grows ship beyond its entry, or shrinks it without a
+negative one, fails on its own tree and on every prefix that includes it.
+`scripts/size-ledger.ts check ship` prints the ledger; `fold ship
+--measured-at <tree>` moves the entries into `base.json` in a tidy-up PR,
+never in a stamp commit. Other skills keep their `maxSizeRatio` caps in
+`test/helpers/carve-guards.ts`.
+
 **A stacked child whose parent merged earlier.** When the pin was stacked on a
 PR that squash-merged in an earlier slot or train, the base merge conflicts
 beyond the CHANGELOG wherever the parent's squash and the pin touched the same
@@ -624,9 +644,19 @@ freezes the same way, since main already holds the unverified squash. The
 record comes from the one GitHub read that decided to freeze, never a second
 one: a slot that read MERGED stays merged even when GitHub stops answering
 before the record is written, and a slot unreadable beside a merged one is
-left out of `unmerged` and named in the reason; nothing reads it again, so
-the `NEXT:` after the repair omits it and the operator seats it in a train by
-hand once `gh pr view` answers. When
+left out of `unmerged`, recorded under `unreadable` and printed on an
+`unreadable:` line; the `NEXT:` after the repair names it (`gh pr view <n>
+--json state,headRefOid (unreadable at the freeze: #<n>@<sha>); seat each
+that is OPEN in a train`).
+When every slot of the train already merged on GitHub and main's SHA is a
+prefix another train's verify confirmed (read after the notes ref, so a
+machine that never ran that train still sees it), the mismatch says nothing
+about this train: verify refuses with `QUEUE_TRAIN_STALE` and `NEXT:
+gstack-ship-queue train prune --stale --train <nonce>`, freezing nothing and
+dispatching no backstop (train 24's record froze the queue that way on a main
+train 28 had verified, #3519). Only a verify that fetched main takes this
+exit: under `--no-fetch` the local main may be older than GitHub's, so the
+mismatch freezes as before. When
 whether a slot merged on GitHub cannot be read, verify refuses
 (`QUEUE_PROOF_MISSING`, "whether #<n> merged on GitHub could not be read")
 and asks to be rerun once `gh pr view` answers; an unreadable state is never

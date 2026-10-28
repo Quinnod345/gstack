@@ -64,6 +64,8 @@ export interface BisectRecord {
 }
 export interface FreezeRecord {
   schema: 1; kind: 'freeze'; repo_key: string; train: string; merged: string[]; unmerged: Array<{ pr: string; head: string }>;
+  /** Slots GitHub could not answer for beside a merged one: neither merged nor unmerged (#3519); absent on records written before the field. */
+  unreadable?: Array<{ pr: string; head: string }>;
   main: { sha: string; tree: string }; reason: string; backstop: { nonce: string; run: number | null; state: string } | null;
   repair: { pr: string; head: string; train: string | null } | null; created_at: string; cleared_at: string | null; cleared_by: string | null; updated_at: string;
 }

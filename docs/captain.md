@@ -97,6 +97,7 @@ Where each rule lives:
 | 21 | Approvals, plan asks and merge asks in the three shapes | [Approvals](#approvals-three-shapes); [capy/skill/gstack/captain.md](../capy/skill/gstack/captain.md) |
 | 22 | /ship before every READY; the block carries `SHIP_RECEIPT`; stamp commits hold only tool output | [ship-policy.md](ship-policy.md#ship-before-ready); [the lane's /ship sequence](#the-lanes-ship-sequence-before-ready) |
 | 23 | Review loops converge: scope frozen after pass 1, later passes on the delta, a pass cap, a blocking floor | the `/ship` and `/review` skills' own convergence policy ([skills.md](skills.md#ship)); a crew names it in one line and sets only the scope knob (`REVIEW_SCOPE`) |
+| 24 | Plan before build: a sized `/autoplan` is a building lane's first act; the plan ask goes up, the build starts after the owner's word is in the run and it reports `APPROVED` | [Plan before build](#plan-before-build); the [brief template](../captain/templates/brief.md) |
 
 ## Lane discipline
 
@@ -120,6 +121,61 @@ with another owner, missing access, or a decision that is the owner's, and it br
 such decision with a plain-language explanation of every option: what it is, why it
 matters, what each answer does, and what it costs. A gate code or a tool's result line
 alone is not an ask.
+
+## Plan before build
+
+A lane that builds something plans first. Its first act after the session-start install
+check, before any product code, is a `/autoplan` run on its brief, sized to the work. The
+phases run in order, CEO, then design, then DX, then eng, with design and DX only when the
+scope has them, and a one-file fix gets a short run (`--no-ui --no-dx --max-rounds 1`, with
+`--estimate-usd` set so a small `--spend-cap` still seats its attempts), not no run. On Capy the
+unattended loop is `autoplan/DRIVER.md` in the gstack checkout. New functionality a lane
+takes on part-way, scope its brief did not name, gets its own plan and its own ask before
+the lane builds it. In the rules file this is rule 24 of the
+[template](../captain/templates/CREW.md); a crew whose own rules already took 24 before
+this rule shipped cites this section by name.
+
+**What the lane sends.** The plan and its gate in plain language a person outside the
+project can follow: what changes, why now, what the change does, what it costs, the lane's
+pick, and the recommended one-word reply. `gstack-owner-brief render --captain --out <run dir>`
+prints that from the plan's `## Before → after`, `## Why it matters`,
+`## What caused this work` and `## Big decisions` sections, with the cost lines
+(`GATE_SPEND:`, `GATE_REC_COST:`) and a last line for the controller; a plan missing a
+section exits `CAPTAIN_BRIEF_INCOMPLETE`, so the lane adds the section and renders again
+([capy/skill/gstack/captain.md](../capy/skill/gstack/captain.md) § 3 lists them). The lane
+sends it whole, as a needs-you report, and builds nothing yet.
+
+**What the controller relays.** One ask to the owner in shape B below: the recommended
+reply (every recommendation, plan changes included) as the one-word default and a "do it"
+reply that takes every recommendation at full scope, follow-ons included. The plan as
+first written is never the default.
+
+**The build gate.** The lane builds only after the owner's word has come back through the
+controller and been answered into the run
+(`gstack-autoplan answer --out <run dir> --gate-rev <n> --reply <tokens> --by agent:<thread> --owner-reply "<their words>"`),
+every accepted plan change has been incorporated (`revise`), every reopened phase has
+finished, and the run reports `APPROVED` (`status=complete` after `export`). An answered
+gate that still prints `PLAN_AMEND_PENDING` or `REOPENED:` is not a completed plan, and an
+imported approval row alone is not completion.
+
+**The record.** `gstack-approvals import --autoplan <run dir> --by "<owner>"` writes the
+approval row (date, the ask, the owner's exact words, the lane that answered as relayer,
+what it covers); `gstack-approvals render` puts it in the report and the PR body. Before
+training the PR the controller compares that row's words and `gate_rev` with the ask it
+relayed and the reply it carried back; a row that does not match is not READY (shape A).
+The brief's done line names the row. A plan approval is not a READY field; the
+[READY contract](#the-ready-contract) is unchanged.
+
+**Exemptions.** Read-only lanes (triage, research, measurement, a review voice), the daily
+flaky pass's repairs, slot stamps, CHANGELOG-only conflict resolves and a size or budget
+cap re-pinned under the controller's written grant need no plan. A crew may add exemptions
+in its rules file with the owner's words and date; it does not remove these. The brief
+says which applies, `Plan: required | approved: <run> | exempt: <reason>`, so an
+already-approved plan is not planned twice and exempt work does not wait on an ask.
+
+The copy-paste brief is [`captain/templates/brief.md`](../captain/templates/brief.md): the
+plan and the ask as step 1, the build after the word as step 2, /ship to READY as step 3,
+and a done line that names the approval row or the exemption.
 
 ## Contributions from outside the crew
 
@@ -303,5 +359,6 @@ can read the incident behind the rule.
 3. Install the gstack Capy skill in the owner's user scope so every thread runs the
    session-start check ([capy-install.md](capy-install.md)).
 4. Create the daily flaky-pass automation.
-5. Start lanes with a prompt that names the files they own, the rules file, and the
-   READY contract. Read their reports before their chat.
+5. Start lanes with the [brief](../captain/templates/brief.md): the files they own, the
+   rules file, whether a plan is required, and the READY contract. Read their reports
+   before their chat.

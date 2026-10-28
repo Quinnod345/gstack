@@ -4346,6 +4346,23 @@ current main. When whether a slot merged on GitHub cannot be read, verify
 refuses with `QUEUE_PROOF_MISSING` instead of either answer; rerun it once
 `gh pr view` answers.
 
+<a id="queue-train-stale"></a>
+### `QUEUE_TRAIN_STALE`
+
+**Meaning.** Verify found main's tree outside this train's prefixes, but every
+slot of the train already merged on GitHub and main's SHA is a prefix another
+train's verify confirmed, so the record is stale: its PRs landed and later
+trains moved main on. Comparing today's main with its prefixes proves nothing,
+so the queue is not frozen and no backstop is dispatched (train 24's record
+did both on a main train 28 had verified, #3519). Other trains are read after
+the notes ref, so a machine that never ran the later train still sees it.
+
+**Fix.** `gstack-ship-queue train prune --stale --train <nonce>` settles the
+record. When some slot is not merged, no train verified main's SHA, or verify
+ran with `--no-fetch`, verify freezes as before (`QUEUE_TRAIN_FROZEN`). A queue
+another machine already froze stays frozen; the refusal prints its freeze
+lines.
+
 <a id="queue-train-frozen"></a>
 ### `QUEUE_TRAIN_FROZEN`
 
@@ -4360,8 +4377,9 @@ stops answering a moment later, and a slot whose state could not be read when
 another slot had merged is left out of `unmerged` and named in the reason
 (`#<n> unreadable on GitHub, left out of unmerged; seat it in a train by hand
 once gh pr view answers`), so the rebuild after the repair never seats a PR
-that may already be in; nothing reads that slot again, so the `NEXT:` after
-the repair omits it and the operator seats it by hand. The
+that may already be in; the record keeps it under `unreadable`, an
+`unreadable:` line prints it, and the `NEXT:` after the repair names it for a
+`gh pr view` check. The
 freeze lives in local state and on `refs/notes/gstack-trains`. Ordinary
 trains and other trains' merges are refused until a repair lands.
 
