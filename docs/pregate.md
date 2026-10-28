@@ -204,7 +204,11 @@ Two stages with separate clocks, both printed:
   that directly exercise the files its merge-base text exercised (`owning suite
   runs: …`; test helpers and fixtures are not subjects), and names each file
   left with no test at all (`coverage removed: <file> has no remaining test`,
-  and `M subject(s) lost their last test` in the detail). A deleted JS, TS,
+  and `M subject(s) lost their last test` in the detail). Either kind of
+  removed test also runs the tests of each remaining non-Markdown file that
+  mentions its basename, such as a curation list (`files naming it run: …`),
+  and fails closed when such a file has no test (`still named by …, which no
+  test covers`). A deleted JS, TS,
   Python or Dart file, or the old name of a renamed one, outside fixture,
   snapshot, golden, baseline and CI trees and `.gstack/` reads `nothing in
   the tree references it` when no remaining file imports it (directly or

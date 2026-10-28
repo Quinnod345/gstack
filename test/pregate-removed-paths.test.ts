@@ -224,6 +224,30 @@ describe('removed paths in lanes (#3529)', () => {
       expect(explain.out + explain.err).toContain(why);
     });
 
+    const CURATION = "exports.SKIP = ['test/util.test.js'];\n";
+    const CURATION_TEST = "const test = require('node:test');\nconst assert = require('node:assert');\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst { SKIP } = require('../scripts/curation.js');\ntest('every entry names a real test', () => assert.deepStrictEqual(SKIP.filter(f => !fs.existsSync(path.join(__dirname, '..', f))), []));\n";
+    test.each([
+      ['deleted test', (repo: FixtureRepo) => commit(repo, { 'test/util.test.js': null })],
+      ['test renamed to another test', (repo: FixtureRepo) => move(repo, 'test/util.test.js', 'test/util2.test.js')],
+    ])('a %s that a tested curation list still names runs that list\'s test, which fails loudly', (_how, change) => {
+      const repo = fixture({ baseFiles: { 'scripts/curation.js': CURATION, 'test/curation.test.js': CURATION_TEST } });
+      change(repo);
+      const r = lanes(repo);
+      expect(r.ran).toContain('test/curation.test.js');
+      expect(r.check.status).toBe('fail');
+      expect(r.removed[0]).toContain('files naming it run: test/curation.test.js');
+    });
+
+    test('a removed test a file no test covers still names fails closed', () => {
+      const repo = fixture({ baseFiles: { 'scripts/skip-list.txt': 'test/util.test.js\n' } });
+      commit(repo, { 'test/util.test.js': null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.removed).toEqual([]);
+      const explain = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(explain.out + explain.err).toContain('test/util.test.js: removed, but still named by scripts/skip-list.txt, which no test covers');
+    });
+
     test('a rename into a waived path does not waive the old name: package.json renamed to Markdown fails closed', () => {
       const repo = fixture();
       move(repo, 'package.json', 'docs/package.md');

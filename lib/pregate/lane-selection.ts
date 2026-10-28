@@ -125,11 +125,13 @@ const shown = (files: readonly string[]) => `${files.slice(0, 8).join(' ')}${fil
 /**
  * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects, or `refused` when it must
  * fail closed as no lane. Nothing is waived while a remaining file imports it, directly or through a directory reference, nor
- * is a Go or Ruby test (it may define helpers its package still uses). Any other test renamed to a test defers to its new
- * name. A deleted JS, TS, Python, Dart or bats test, or one renamed to a non-test path, runs the tests that directly exercise
- * the files it exercised and names those left with no test at all. Any other removed file, a rename's old name included, owes
- * nothing only when it is JS, TS, Python or Dart outside fixture, golden and CI trees, not loaded by name, and no remaining
- * non-Markdown file mentions its basename: deleting a manifest, a config, a workflow or a Go file owes what editing it owes.
+ * is a Go or Ruby test (it may define helpers its package still uses). A removed test also runs the tests of every remaining
+ * non-Markdown file that names its basename (a curation list, a durations manifest), and is refused when such a file has no
+ * test. Beyond that, a test renamed to a test defers to its new name. A deleted JS, TS, Python, Dart or bats test, or one
+ * renamed to a non-test path, runs the tests that directly exercise the files it exercised and names those left with no test.
+ * Any other removed file, a rename's old name included, owes nothing only when it is JS, TS, Python or Dart outside fixture,
+ * golden and CI trees, not loaded by name, and no remaining non-Markdown file mentions its basename: deleting a manifest, a
+ * config, a workflow or a Go file owes what editing it owes.
  */
 function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string>, file: string): { removed: Removed; suite: string[] } | { refused: string } {
   const edges = [...graph.reverse].filter(([k]) => k === file || (k.endsWith('/**') && file.startsWith(k.slice(0, -2)))).flatMap(([, list]) => list);
@@ -137,7 +139,18 @@ function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string
   if (importers.length) return { refused: `removed, but still imported by ${shown(importers)}` };
   if (isTestFile(file) && !RESOLVED_IMPORTS.test(file) && !file.endsWith('.bats')) return { refused: 'removed, but a Go or Ruby test may define helpers its package still uses, which the graph cannot see' };
   const renamedTo = ctx.touched.find(t => t.renamedFrom === file)?.path;
-  if (renamedTo && isTestFile(file) && isTestFile(renamedTo)) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
+  const namerSuite = new Set<string>();
+  if (isTestFile(file)) {
+    const namers = namedBy(ctx, file).filter(f => !gone.has(f));
+    const uncovered = namers.filter(n => {
+      const m = testsFor(graph, n, ctx.config.dependencies);
+      for (const t of m.tests) namerSuite.add(t);
+      return !m.tests.length;
+    });
+    if (uncovered.length) return { refused: `removed, but still named by ${shown(uncovered)}, which no test covers` };
+  }
+  const namerNote = namerSuite.size ? `; files naming it run: ${shown([...namerSuite].sort())}` : '';
+  if (renamedTo && isTestFile(file) && isTestFile(renamedTo)) return { removed: { file, note: `old name of ${renamedTo}${namerNote}`, lostCoverage: [] }, suite: [...namerSuite] };
   if (!isTestFile(file)) {
     if (!RESOLVED_IMPORTS.test(file) || isFixtureOrCiTree(file) || LOADED_BY_NAME.test(file)) return { refused: 'removed, but not JS, TS, Python or Dart code whose importers the graph resolves (a manifest, config, fixture, workflow, file loaded by name, or Go, Ruby, shell, Rust or bin file owes what an edit owes)' };
     const names = namedBy(ctx, file);
@@ -146,7 +159,7 @@ function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string
   }
   const subjects = graph.goneSubjects?.get(file);
   if (!subjects) return { refused: 'removed test whose merge-base text could not be read (not a regular file there, invalid UTF-8 or over 1 MiB)' };
-  if (!subjects.length) return { removed: { file, note: 'it exercised no file still in the tree', lostCoverage: [] }, suite: [] };
+  if (!subjects.length) return { removed: { file, note: `it exercised no file still in the tree${namerNote}`, lostCoverage: [] }, suite: [...namerSuite] };
   const suite = new Set<string>();
   const lostCoverage: string[] = [];
   for (const subject of subjects) {
@@ -157,8 +170,9 @@ function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string
   const notes = [
     suite.size ? `owning suite runs: ${shown([...suite].sort())}` : '',
     lostCoverage.length ? `coverage removed: ${lostCoverage.join(' ')} ${lostCoverage.length === 1 ? 'has' : 'have'} no remaining test` : '',
+    namerSuite.size ? `files naming it run: ${shown([...namerSuite].sort())}` : '',
   ].filter(Boolean);
-  return { removed: { file, note: notes.join('; ') || 'its files keep indirect or declared coverage', lostCoverage }, suite: [...suite] };
+  return { removed: { file, note: notes.join('; ') || 'its files keep indirect or declared coverage', lostCoverage }, suite: [...new Set([...suite, ...namerSuite])] };
 }
 
 export function selectLanes(ctx: PregateContext): Selection {
