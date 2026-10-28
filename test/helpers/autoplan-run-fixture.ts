@@ -69,12 +69,14 @@ export interface PhaseRunOptions { nativeModel?: string; outsideModel?: string; 
 export function runPhase(out: string, phase: string, o: PhaseRunOptions = {}): { next: SpawnSyncReturns<string>; native: SpawnSyncReturns<string>; outside: SpawnSyncReturns<string> } {
   const next = autoplan(['next', '--out', out]);
   if (next.status !== 0) throw new Error(`next failed: ${next.stderr}\n${next.stdout}`);
-  for (const voice of ['native', 'outside'] as const) {
+  const outsideDisabled = readRun(out).phases[phase]?.outside?.status === 'disabled';
+  for (const voice of outsideDisabled ? ['native'] as const : ['native', 'outside'] as const) {
     const r = review(path.join(out, `${phase}-${voice}-prompt.md`), o.breakVoice === voice && o.breakKind ? { FIXTURE_BREAK: o.breakKind } : {});
     if (r.status !== 0) throw new Error(`fixture reviewer failed: ${r.stderr}`);
   }
   const ids = attemptsOf(out, phase);
   const native = autoplan(['submit', '--out', out, '--phase', phase, '--voice', 'native', '--result', resultOf(out, phase, 'native'), '--model', o.nativeModel ?? 'anthropic/claude-opus-4-7', '--attempt', ids.native, '--runner', 'host-subagent']);
+  if (outsideDisabled) return { next, native, outside: native };
   const outside = autoplan(['submit', '--out', out, '--phase', phase, '--voice', 'outside', '--result', resultOf(out, phase, 'outside'), '--model', o.outsideModel ?? 'openai/gpt-6-astra', '--attempt', ids.outside, '--runner', 'host-subagent', ...(o.reconcile ? ['--reconcile', o.reconcile] : [])]);
   return { next, native, outside };
 }

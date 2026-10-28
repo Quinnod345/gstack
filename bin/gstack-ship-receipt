@@ -356,14 +356,6 @@ function gitVersionBelow(repoRoot: string, minimum: string): string | null {
   return major > minMajor || (major === minMajor && minor >= minMinor) ? null : m[0];
 }
 
-/**
- * The receipt follows HEAD when the reviewed product is unchanged
- * (docs/unattended.md#the-terminal-line; harness lane E row 3). Four Captains
- * reran a full /ship on identical product code after a base merge or a
- * test-only fix; the carry compares the product diff against the base at the
- * receipt's head and at HEAD by patch-id, classifies every changed path, and
- * records the range-diff as evidence in the receipt it rewrites.
- */
 type PregateField = { pregate: string; requires_remote?: string[] };
 /** A pregate result file → the receipt's pregate field, verified current for this checkout's tree (shared by write and carry). */
 function pregateFieldFor(repoRoot: string, file: string, head: string): { ok: true; field: PregateField } | { ok: false; errors: Array<{ code: string; message: string }> } {
@@ -375,6 +367,14 @@ function pregateFieldFor(repoRoot: string, file: string, head: string): { ok: tr
   return { ok: true, field: { pregate: `${read.file.verdict ?? 'pass'} @${read.file.tree.slice(0, 12)} (${read.file.checks.length} checks, current for ${head.slice(0, 12)})`, requires_remote: remote.length ? remote.map(r => `${r.lane}: ${r.receipt}`) : undefined } };
 }
 
+/**
+ * The receipt follows HEAD when the reviewed product is unchanged
+ * (docs/unattended.md#the-terminal-line; harness lane E row 3). Four Captains
+ * reran a full /ship on identical product code after a base merge or a
+ * test-only fix; the carry compares the product diff against the base at the
+ * receipt's head and at HEAD by patch-id, classifies every changed path, and
+ * records the range-diff as evidence in the receipt it rewrites.
+ */
 function cmdCarry(rest: string[], json: boolean): number {
   const bodyFile = flag(rest, '--body');
   const pr = flag(rest, '--pr');
@@ -491,6 +491,8 @@ function cmdCarry(rest: string[], json: boolean): number {
   const pregateFile = flag(rest, '--pregate');
   let pregateField: PregateField | undefined;
   if (pregateFile) {
+    const local = git(['rev-parse', 'HEAD'], repoRoot)?.trim();
+    if (local !== head) return refused('RECEIPT_CARRY_PREGATE_STALE', `--pregate verifies this checkout's tree, but the checkout is at ${local?.slice(0, 12) ?? 'no commit'}, not the carried head ${head.slice(0, 12)}; check out ${head.slice(0, 12)} and run gstack-pregate there`);
     const read = pregateFieldFor(repoRoot, pregateFile, head);
     if (!read.ok) return refused('RECEIPT_CARRY_PREGATE_STALE', `--pregate ${pregateFile}: ${read.errors[0]?.code ?? 'invalid'} ${read.errors[0]?.message ?? ''}`.trim());
     pregateField = read.field;

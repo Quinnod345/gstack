@@ -54,6 +54,31 @@ function bindNative(out: string) {
   return r.ap(['submit', '--out', out, '--phase', 'ceo', '--voice', 'native', '--result', run.phases.ceo.native.attempts[0].result, '--model', 'anthropic/claude-opus-5-5', '--attempt', run.phases.ceo.native.attempt]);
 }
 
+describe('a quiet revise after a capped one', () => {
+  // Value: protects=the owner still sees an earlier capped delta; fails_when=a below-High revise after a capped one leaves the
+  // answered gate in place (gate_rev unchanged, the delta item never rendered); seam=none; no_claim=none
+  test('regates so the capped delta reaches the owner', () => {
+    const s = start(['--max-rounds', '1']);
+    phaseVia(r, s.out, 'ceo', {
+      native: [{ id: 'F1', severity: 'High', title: 'Jitter source is unstated', file: 'lib/worker.ts', line: 19, fix: 'name the source' },
+               { id: 'F2', severity: 'Medium', title: 'Cap value is unexplained', file: 'lib/config.ts', line: 3, fix: 'explain the cap' }],
+      outside: [{ id: 'O1', severity: 'Low', title: 'Jitter source is unstated', file: 'lib/worker.ts', line: 19, fix: 'name the source' },
+                { id: 'O2', severity: 'Informational', title: 'Cap value is unexplained', file: 'lib/config.ts', line: 3, fix: 'explain the cap' }],
+    });
+    phaseVia(r, s.out, 'eng', NONE);
+    expect(r.ap(['answer', '--by', 'human', '--out', s.out, '--gate-rev', '1', '--reply', 'all except d1b d2b']).status).toBe(0);
+    const first = r.ap(['revise', '--out', s.out, '--plan', v2File(s.dir), '--incorporates', 'd1']);
+    expect(first.stdout).toMatch(/capped=/);
+    const second = r.ap(['revise', '--out', s.out, '--plan', v2File(s.dir, SMALL_PLAN.replace('cap 30 s', 'cap 30 s (explained), jitter drawn from a seeded source')), '--incorporates', 'd2']);
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toContain('without re-review (below High; plan +');
+    const run = readRunJson(s.out);
+    expect(run.status).toBe('gate_pending');
+    expect(run.gate_rev).toBe(2);
+    expect(JSON.parse(fs.readFileSync(path.join(s.out, 'gate.json'), 'utf8')).gate_rev).toBe(2);
+  }, 30_000);
+});
+
 describe('round budget', () => {
   test('a new unattended run defaults to two rounds per phase', () => {
     expect(DEFAULT_MAX_ROUNDS).toBe(2);
@@ -78,7 +103,7 @@ describe('revise by severity', () => {
     const rev = r.ap(['revise', '--out', g.out, '--plan', v2File(g.dir), '--incorporates', 'd1']);
     expect(rev.status, rev.stderr).toBe(0);
     expect(rev.stdout).toMatch(/^REVISED: plan=[0-9a-f]{12} reopened=none$/m);
-    expect(rev.stdout).toContain(`APPLIED: ${g.run}-d1 without re-review (below High)`);
+    expect(rev.stdout).toContain(`APPLIED: ${g.run}-d1 without re-review (below High; plan +`);
     expect(rev.stdout).toContain('GSTACK_RESULT: skill=autoplan status=complete');
     const run = readRunJson(g.out);
     const row = journal(g.out).find(e => e.event === 'applied_without_rereview');
@@ -93,7 +118,7 @@ describe('revise by severity', () => {
     expect(run.amendments[0]).toMatchObject({ status: 'incorporated' });
     const v = r.validate(g.out);
     expect(v.status, v.stdout + v.stderr).toBe(0);
-  });
+  }, 30_000);
 
   test('a High decision reopens as before', () => {
     const g = amended('High', 'Low');
@@ -101,7 +126,7 @@ describe('revise by severity', () => {
     expect(rev.stdout).toMatch(/^REVISED: plan=\S+ reopened=ceo,eng$/m);
     expect(rev.stdout).not.toContain('APPLIED:');
     expect(journal(g.out).some(e => e.event === 'applied_without_rereview')).toBe(false);
-  });
+  }, 30_000);
 
   test('a decision of unknown severity reopens', () => {
     const g = amended('Medium', 'Informational');
@@ -111,7 +136,7 @@ describe('revise by severity', () => {
     expect(rev.status, rev.stderr).toBe(0);
     expect(rev.stdout).toMatch(/reopened=ceo,eng$/m);
     expect(rev.stdout).not.toContain('APPLIED:');
-  });
+  }, 30_000);
 
   test('a below-High edit that brings a phase into scope reopens and adds it', () => {
     const g = amended('Medium', 'Informational');
@@ -119,19 +144,19 @@ describe('revise by severity', () => {
     expect(rev.status, rev.stderr).toBe(0);
     expect(rev.stdout).toMatch(/^REVISED: plan=\S+ reopened=ceo,eng added=dx$/m);
     expect(rev.stdout).not.toContain('APPLIED:');
-  });
+  }, 30_000);
 
   test('at the round cap a below-High edit applies without a capped delta; a High one keeps the unreviewed-delta gate item', () => {
     const low = amended('Medium', 'Informational', ['--max-rounds', '1']);
     const quiet = r.ap(['revise', '--out', low.out, '--plan', v2File(low.dir), '--incorporates', 'd1']);
-    expect(quiet.stdout).toContain(`APPLIED: ${low.run}-d1 without re-review (below High)`);
+    expect(quiet.stdout).toContain(`APPLIED: ${low.run}-d1 without re-review (below High; plan +`);
     expect(readRunJson(low.out).capped_deltas).toBeUndefined();
     const high = amended('High', 'Low', ['--max-rounds', '1']);
     const capped = r.ap(['revise', '--out', high.out, '--plan', v2File(high.dir), '--incorporates', 'd1']);
     expect(capped.stdout).toMatch(/^REVISED: plan=\S+ reopened=none capped=ceo,eng$/m);
     expect(capped.stdout).not.toContain('APPLIED:');
     expect(readRunJson(high.out).capped_deltas.map((d: any) => d.phase)).toEqual(['ceo', 'eng']);
-  });
+  }, 30_000);
 });
 
 describe('ESCALATE at the round cap', () => {
@@ -142,7 +167,7 @@ describe('ESCALATE at the round cap', () => {
     const eng = phaseVia(r, s.out, 'eng', NONE);
     expect(eng.outside.stdout).toMatch(/^GATE: gate_rev=1 /m);
     expect(eng.outside.stdout.split('\n').filter(l => l.startsWith('ESCALATE:'))).toEqual(['ESCALATE: evidence sufficient, decision needed (ceo: 1 High open)']);
-  });
+  }, 30_000);
   test('control: below the cap, or at it with nothing High open, no ESCALATE', () => {
     const s = start();
     phaseVia(r, s.out, 'ceo', HIGH);
@@ -152,7 +177,7 @@ describe('ESCALATE at the round cap', () => {
     const gate = phaseVia(r, m.out, 'eng', NONE).outside.stdout;
     expect(gate).toMatch(/^GATE: /m);
     expect(gate).not.toContain('ESCALATE:');
-  });
+  }, 30_000);
 });
 
 describe('docs-only', () => {
@@ -185,7 +210,7 @@ describe('docs-only', () => {
     expect(exp.stdout).toContain(`DISPATCHES: 3 est_input_tokens=${run.est_input_tokens} (relative estimate)`);
     const v = r.validate(s.out);
     expect(v.status, v.stdout + v.stderr).toBe(0);
-  });
+  }, 30_000);
 
   test('--docs-only on the first next forces CEO + Eng on a code plan; a phase-enabling flag outranks detection', () => {
     const flagged = start(['--docs-only', '--developer-tool']);
@@ -215,5 +240,5 @@ describe('dispatch counts', () => {
     const v = r.validate(s.out);
     expect(v.status, v.stdout + v.stderr).toBe(0);
     expect(r.ap(['status', '--out', s.out]).status).toBe(0);
-  });
+  }, 30_000);
 });

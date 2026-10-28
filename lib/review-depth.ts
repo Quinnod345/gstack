@@ -7,6 +7,8 @@
  * review-army resolver and the skills read the same definitions.
  */
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export type DiffClass = 'docs' | 'tests' | 'code' | 'gate';
 export type PathClass = 'docs' | 'tests' | 'code';
@@ -19,9 +21,10 @@ export type Specialist = (typeof SPECIALISTS)[number];
 export const FULL_PASS_CAP = 2;
 export const SMALL_DIFF_LINES = 50;
 export const RED_TEAM_LINES = 200;
+export const LARGE_DIFF_LINES = 100;
 const CLASS_RANK: Record<DiffClass, number> = { docs: 0, tests: 1, code: 2, gate: 3 };
 
-const AGENT_PROSE = [/(^|\/)SKILL\.md(\.tmpl)?$/, /(^|\/)sections\//, /^scripts\/resolvers\//, /^docs\/[^/]*-policy\.md$/, /(^|\/)DRIVER\.md(\.tmpl)?$/, /(^|\/)templates\//, /(^|\/)(AGENTS|CLAUDE|ETHOS)\.md$/, /(^|\/)specialists\//, /(^|\/)checklist\.md$/, /^\.gstack\//];
+const AGENT_PROSE = [/(^|\/)SKILL\.md(\.tmpl)?$/, /(^|\/)sections\//, /^scripts\/resolvers\//, /^docs\/[^/]*-policy\.md$/, /^docs\/(captain|unattended|pregate)\.md$/, /(^|\/)DRIVER\.md(\.tmpl)?$/, /(^|\/)templates\//, /(^|\/)(AGENTS|CLAUDE|ETHOS)\.md$/, /(^|\/)specialists\//, /(^|\/)checklist\.md$/, /^\.gstack\//];
 /** gstack-diff-scope's TEST_PATH_RE (the test-bootstrap rule), plus fixture directories. */
 const TEST_PATH = [/(^|\/)(tests?|spec|__tests__)\/|(^|\/)tests?\.py$|(^|\/)test_[^/]+\.py$|_test\.(go|py|rb|ts|js|exs|dart)$|\.(test|spec)\.[jt]sx?$|_spec\.rb$|Test\.(java|kt)$/, /(^|\/)fixtures?\//];
 const DOC_PATH = /\.(md|mdx|markdown|rst|txt|adoc)$/i;
@@ -29,13 +32,15 @@ const DOC_PATH = /\.(md|mdx|markdown|rst|txt|adoc)$/i;
 const RELEASE_METADATA = [/^CHANGELOG\.md$/, /^VERSION$/, /^agents-digest\//];
 const GATE_PATH = [/(^|\/)\.github\/workflows\//, /(^|\/)(secrets?|credentials?|keychain|token[s]?)([._/-]|$)/i, /state-root/, /(^|\/)(pregate|gate|ship-receipt|ship-policy)[^/]*\.(ts|sh|json)$/, /(^|\/)bin\/gstack-(pregate|gate|ship-receipt|verify-gate|ci-gate)$/];
 
-/** One changed path's class. Markdown an agent or a gate reads (skills, sections, resolvers, policy docs, templates) is code: it is gstack's product. */
-export function classifyPath(p: string): PathClass {
+/** One changed path's class. Markdown an agent or a gate reads (skills, sections, resolvers, policy and rule docs, templates, any markdown in a skill directory under `root`) is code: it is gstack's product. */
+export function classifyPath(p: string, root?: string): PathClass {
   if (RELEASE_METADATA.some(r => r.test(p))) return 'docs';
   if (AGENT_PROSE.some(r => r.test(p))) return 'code';
   if (TEST_PATH.some(r => r.test(p))) return 'tests';
-  if (DOC_PATH.test(p)) return 'docs';
-  return 'code';
+  if (!DOC_PATH.test(p)) return 'code';
+  const top = p.includes('/') ? p.split('/')[0]! : '';
+  if (root && top && ['SKILL.md', 'SKILL.md.tmpl'].some(f => fs.existsSync(path.join(root, top, f)))) return 'code';
+  return 'docs';
 }
 
 export interface ClassInput {
@@ -48,6 +53,8 @@ export interface ClassInput {
   deleted?: readonly string[];
   /** Paths whose whole change is a version stamp (package.json's version key): classified as docs. */
   stampOnly?: readonly string[];
+  /** The repository root: markdown inside a skill directory there is code. */
+  root?: string;
 }
 export interface ClassResult { class: DiffClass; reasons: string[] }
 
@@ -57,18 +64,19 @@ export function classifyDiff(i: ClassInput): ClassResult {
   let cls: DiffClass = 'docs';
   const raise = (c: DiffClass, why: string) => { if (CLASS_RANK[c] > CLASS_RANK[cls]) cls = c; reasons.push(why); };
   if (!i.paths.length) raise('docs', 'no changed paths');
-  for (const p of i.paths) { const c = (i.stampOnly ?? []).includes(p) ? 'docs' : classifyPath(p); if (CLASS_RANK[c] > CLASS_RANK[cls]) raise(c, `${c}: ${p}`); }
+  for (const p of i.paths) { const c = (i.stampOnly ?? []).includes(p) ? 'docs' : classifyPath(p, i.root); if (CLASS_RANK[c] > CLASS_RANK[cls]) raise(c, `${c}: ${p}`); }
   const s = i.scope ?? {};
   if (s.SCOPE_ERROR) raise('code', `scope error: ${s.SCOPE_ERROR}`);
-  const codeLike = CLASS_RANK[cls] >= CLASS_RANK.code;
-  if (codeLike) {
-    if (s.SCOPE_AUTH === 'true') raise('gate', 'auth paths');
-    if (s.SCOPE_MIGRATIONS === 'true') raise('gate', 'migrations');
+  if (CLASS_RANK[cls] >= CLASS_RANK.tests) {
     if (i.gateTagged === null) raise('gate', 'gate scan unavailable');
     else if (i.gateTagged > 0) raise('gate', `gate scan tagged ${i.gateTagged} hunk(s)`);
+    const deletedGuarded = (i.deleted ?? []).filter(p => classifyPath(p, i.root) !== 'docs');
+    if (deletedGuarded.length) raise('gate', `deletes ${deletedGuarded.length} code or test path(s)`);
+  }
+  if (CLASS_RANK[cls] >= CLASS_RANK.code) {
+    if (s.SCOPE_AUTH === 'true') raise('gate', 'auth paths');
+    if (s.SCOPE_MIGRATIONS === 'true') raise('gate', 'migrations');
     for (const p of i.paths) if (GATE_PATH.some(r => r.test(p))) { raise('gate', `gate path: ${p}`); break; }
-    const deletedCode = (i.deleted ?? []).filter(p => classifyPath(p) === 'code');
-    if (deletedCode.length) raise('gate', `deletes ${deletedCode.length} code path(s)`);
   }
   return { class: cls, reasons };
 }
@@ -87,10 +95,13 @@ const CLAIM = new RegExp([
 const NOT_CLAIM = /\b\d{4}-\d{2}-\d{2}\b|\bv?\d+(?:\.\d+){2,}\b|#\d+\b|\b(?:step|phase|pass|rule|item|round)\s+\d+(?:\.\d+)?\b/gi;
 export interface NumbersResult { publishes: boolean; claims: number; fingerprint: string }
 
-/** Added lines (path → lines) → whether the diff publishes numeric claims, and a fingerprint of those claims and their files. */
+/** Where a number is published: prose and data files. Code and test source are not publications. */
+const PUBLISHED = /\.(md|mdx|markdown|rst|txt|adoc|json|csv|tsv)$/i;
+
+/** Added lines (path → lines) → whether the diff publishes numeric claims in prose or data files, and a fingerprint of those claims and their files. */
 export function scanNumbers(added: Record<string, readonly string[]>): NumbersResult {
   const hits: string[] = [];
-  for (const p of Object.keys(added).sort()) for (const line of added[p] ?? []) if (CLAIM.test(line.replace(NOT_CLAIM, ' '))) hits.push(`${p}\t${line.trim()}`);
+  for (const p of Object.keys(added).filter(f => PUBLISHED.test(f)).sort()) for (const line of added[p] ?? []) if (CLAIM.test(line.replace(NOT_CLAIM, ' '))) hits.push(`${p}\t${line.trim()}`);
   const fingerprint = hits.length ? createHash('sha256').update(hits.join('\n')).digest('hex').slice(0, 16) : 'none';
   return { publishes: hits.length > 0, claims: hits.length, fingerprint };
 }
@@ -125,7 +136,8 @@ export function nextStep(h: History): NextStep {
   const fixed = !!(h.fixedBlocking || h.fixedBelow);
   if (h.last === 'fix-check') return h.blockingOpen || fixed ? { step: 'stop', reason: 'the fix-check found a blocking finding: name it for the owner, never a third full pass' } : { step: 'done', reason: 'the fix-check found nothing blocking' };
   if (h.blockingOpen && h.fullPasses >= FULL_PASS_CAP) return { step: 'stop', reason: `a blocking finding is open after ${FULL_PASS_CAP} full passes: name it for the owner` };
-  if (!fixed) return h.blockingOpen ? { step: 'stop', reason: 'a blocking finding is open with no fix applied' } : { step: 'done', reason: 'the step applied no edits' };
+  if (h.blockingOpen) return { step: 'stop', reason: 'a blocking finding is still open in fix scope: name it for the owner' };
+  if (!fixed) return { step: 'done', reason: 'the step applied no edits' };
   if ((h.fixedBlocking || h.touchedGate) && h.fullPasses < FULL_PASS_CAP) return { step: 'full', reason: h.fixedBlocking ? 'a blocking finding was fixed: full pass on the range' : 'a fix touched a gate-class path: full pass on the range' };
   return { step: 'fix-check', reason: h.fixedBlocking ? `full-pass cap ${FULL_PASS_CAP} reached: one fix-check reads the fix` : 'only below-floor fixes: one fix-check reads the touched hunks' };
 }
@@ -143,6 +155,8 @@ export interface PlanInput extends ClassInput {
   gated?: readonly string[];
   /** A specialist produced a CRITICAL finding (Red Team activation on code class). */
   criticalFound?: boolean;
+  /** Step 11's native adversarial pass already ran in this invocation. */
+  adversarialRan?: boolean;
   /** The numeric-claim fingerprint the outside voice last reviewed; a change reruns it. */
   reviewedNumbers?: string;
 }
@@ -161,12 +175,12 @@ export function specialistsFor(cls: DiffClass, i: PlanInput, skipped: string[] =
     if (i.diffLines < SMALL_DIFF_LINES) return false;
     switch (n) {
       case 'testing': case 'maintainability': return true;
-      case 'security': return s.SCOPE_AUTH === 'true' || (s.SCOPE_BACKEND === 'true' && i.diffLines > 100);
+      case 'security': return s.SCOPE_AUTH === 'true' || (s.SCOPE_BACKEND === 'true' && i.diffLines > LARGE_DIFF_LINES);
       case 'performance': return s.SCOPE_BACKEND === 'true' || s.SCOPE_FRONTEND === 'true';
       case 'data-migration': return s.SCOPE_MIGRATIONS === 'true';
       case 'api-contract': return s.SCOPE_API === 'true';
       case 'design': return s.SCOPE_FRONTEND === 'true';
-      case 'simplification': return i.diffLines > 100;
+      case 'simplification': return i.diffLines > LARGE_DIFF_LINES;
     }
   };
   return SPECIALISTS.filter(n => {
@@ -188,13 +202,13 @@ export function planReview(i: PlanInput): ReviewPlan {
     const redTeam = cls === 'gate' || (cls === 'code' && (i.diffLines > RED_TEAM_LINES || !!i.criticalFound));
     if (redTeam) dispatches.push({ role: 'red-team', name: 'red-team', effort: 'full' });
     else skipped.push(`red-team (${cls} class${cls === 'code' ? `, ${i.diffLines} lines, no critical` : ''})`);
-    if (i.history.fullPasses === 0) {
+    if (i.history.fullPasses === 0 || (!i.adversarialRan && (cls === 'code' || cls === 'gate'))) {
       if (cls === 'docs' || cls === 'tests') skipped.push(`adversarial-native (${cls} class)`);
       else dispatches.push({ role: 'adversarial-native', name: 'adversarial', effort: 'full' });
       if (cls === 'code' || cls === 'gate' || i.numbers.publishes) dispatches.push({ role: 'outside-voice', name: 'outside-voice', effort: 'host' });
       else skipped.push(`outside-voice (${cls} class, no numeric claims)`);
     } else {
-      skipped.push('adversarial-native and outside-voice (run once, on pass 1)');
+      skipped.push('adversarial-native and outside-voice (run once per invocation)');
       if (numbersChanged) dispatches.push({ role: 'outside-voice', name: 'outside-voice (numbers changed)', effort: 'host' });
     }
   } else if (next.step === 'fix-check') {

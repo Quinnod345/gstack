@@ -3,7 +3,7 @@
  * gstack-review-plan — how much review the next /ship step dispatches (docs/review-policy.md#review-depth).
  *
  *   gstack-review-plan --base <ref> [--pass <full passes run>] [--last none|full|fix-check] [--fixed-blocking] [--fixed-below]
- *                      [--blocking-open] [--touched-gate] [--critical-found] [--gate-tagged <n>] [--gated a,b] [--force a,b|all]
+ *                      [--blocking-open] [--touched-gate] [--critical-found] [--adversarial-ran] [--gate-tagged <n>] [--gated a,b] [--force a,b|all]
  *                      [--reviewed-numbers <fingerprint>] [--no-tiers] [--json]
  *   gstack-review-plan --fix-check-prompt --fix-list <file> --hunks <file> --tests <file> [--callers <file>]
  *
@@ -30,6 +30,7 @@ const HELP = `gstack-review-plan — the review depth of the next /ship step (do
   --blocking-open           a blocking finding is still open in fix scope
   --touched-gate            a fix touched a gate-class path
   --critical-found          a specialist reported a CRITICAL finding (Red Team on code class)
+  --adversarial-ran         Step 11's native adversarial pass already ran (a repeat skips it)
   --gate-tagged <n>         gate hunks the gate scan tagged (default: run gstack-gate-diff; failure means unavailable)
   --gated a,b               specialists the hit-rate stats tag GATE_CANDIDATE
   --force a,b|all           specialists forced by prompt flags (--all-specialists is all)
@@ -64,18 +65,26 @@ function main(): number {
   if (!['none', 'full', 'fix-check'].includes(last)) { process.stderr.write('gstack-review-plan: --last must be none, full or fix-check\n'); return EXIT.usage; }
   const pass = Number(flag('--pass') ?? '0');
   if (!Number.isInteger(pass) || pass < 0) { process.stderr.write('gstack-review-plan: --pass needs an integer >= 0\n'); return EXIT.usage; }
+  const root = git(['rev-parse', '--show-toplevel'])?.trim();
+  if (!root) { process.stderr.write('gstack-review-plan: run it inside a git checkout\n'); return EXIT.fail; }
+  process.chdir(root);
   const ref = git(['rev-parse', '--verify', '-q', `origin/${base}`]) !== null ? `origin/${base}` : base;
   const mergeBase = git(['merge-base', ref, 'HEAD'])?.trim();
   if (!mergeBase) { process.stderr.write(`gstack-review-plan: no merge base with ${ref} (fetch the base first)\n`); return EXIT.fail; }
-  const nameStatus = (git(['diff', '--name-status', '--no-renames', mergeBase]) ?? '').split('\n').filter(Boolean).map(l => l.split('\t'));
-  const untracked = (git(['ls-files', '--others', '--exclude-standard']) ?? '').split('\n').filter(Boolean);
+  const nameStatusRaw = git(['diff', '--name-status', '--no-renames', mergeBase]);
+  const untrackedRaw = git(['ls-files', '--others', '--exclude-standard']);
+  const numstatRaw = git(['diff', '--numstat', mergeBase]);
+  if (nameStatusRaw === null || untrackedRaw === null || numstatRaw === null) { process.stderr.write('gstack-review-plan: git could not list the diff; no plan is safer than a plan for an empty diff\n'); return EXIT.fail; }
+  const scratch = (p: string) => p.startsWith('.gstack/tmp/');
+  const nameStatus = nameStatusRaw.split('\n').filter(Boolean).map(l => l.split('\t')).filter(c => !scratch(c[1] ?? ''));
+  const untracked = untrackedRaw.split('\n').filter(Boolean).filter(p => !scratch(p));
   const paths = [...new Set([...nameStatus.map(c => c[1]!).filter(Boolean), ...untracked])].sort();
   const deleted = nameStatus.filter(c => c[0] === 'D').map(c => c[1]!);
   const stampOnly = paths.filter(p => p.endsWith('package.json') && !untracked.includes(p)).filter(p => {
     const changed = (git(['diff', '-U0', '--no-color', mergeBase, '--', p]) ?? '').split('\n').filter(l => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l));
     return changed.length > 0 && changed.every(l => /^[+-]\s*"version"\s*:/.test(l));
   });
-  const diffLines = (git(['diff', '--numstat', mergeBase]) ?? '').split('\n').reduce((n, l) => { const [a, d] = l.split('\t'); return n + (Number(a) || 0) + (Number(d) || 0); }, 0)
+  const diffLines = numstatRaw.split('\n').reduce((n, l) => { const [a, d] = l.split('\t'); return n + (Number(a) || 0) + (Number(d) || 0); }, 0)
     + untracked.reduce((n, p) => { try { return n + fs.readFileSync(p, 'utf8').split('\n').length; } catch { return n; } }, 0);
   const added: Record<string, string[]> = {};
   let current = '';
@@ -101,8 +110,8 @@ function main(): number {
   const tiersSetting = runScriptSync(path.join(binDir, 'gstack-config'), ['get', 'review_effort_tiers'], { encoding: 'utf8', timeout: 15_000 });
   const auditEffort = has('--no-tiers') || (tiersSetting.stdout ?? '').trim() === 'off' ? 'host' : 'light';
   const plan = planReview({
-    paths, deleted, stampOnly, scope, gateTagged, diffLines, numbers: scanNumbers(added), force, gated: list('--gated'),
-    criticalFound: has('--critical-found'), reviewedNumbers: flag('--reviewed-numbers'),
+    paths, deleted, stampOnly, root, scope, gateTagged, diffLines, numbers: scanNumbers(added), force, gated: list('--gated'),
+    criticalFound: has('--critical-found'), adversarialRan: has('--adversarial-ran'), reviewedNumbers: flag('--reviewed-numbers'),
     history: { fullPasses: pass, last, fixedBlocking: has('--fixed-blocking'), fixedBelow: has('--fixed-below'), blockingOpen: has('--blocking-open'), touchedGate: has('--touched-gate') },
   });
   if (has('--json')) { process.stdout.write(JSON.stringify({ ...plan, diff_lines: diffLines, pass, audit_effort: auditEffort, scope, gate_tagged: gateTagged, paths, deleted, stamp_only: stampOnly }) + '\n'); return EXIT.ok; }

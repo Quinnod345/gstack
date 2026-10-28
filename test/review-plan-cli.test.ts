@@ -58,6 +58,36 @@ describe('gstack-review-plan', () => {
     const missing = spawnSync(BIN, ['--fix-check-prompt', '--fix-list', path.join(r.state, 'nope.txt'), '--hunks', files[3]!, '--tests', files[5]!], { cwd: r.dir, encoding: 'utf8', timeout: 60_000 });
     expect(missing.status).toBe(2);
   });
+  test('untracked files count, a version-only package.json bump stays docs, and review_effort_tiers off renders audits at host effort', () => {
+    const r = repo({ 'docs/a.md': '# a\n' });
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
+    git('checkout', '-q', 'main');
+    fs.writeFileSync(path.join(r.dir, 'package.json'), '{\n  "name": "x",\n  "version": "1.0.0"\n}\n');
+    git('add', '.'); git('commit', '-qm', 'package');
+    git('checkout', '-q', 'feat'); git('reset', '-q', '--hard', 'main');
+    fs.writeFileSync(path.join(r.dir, 'package.json'), '{\n  "name": "x",\n  "version": "1.0.1"\n}\n');
+    git('commit', '-qam', 'stamp');
+    const stamp = JSON.parse(run(r, ['--json']).stdout);
+    expect(stamp.stamp_only).toContain('package.json');
+    expect(stamp.class).toBe('docs');
+    fs.mkdirSync(path.join(r.dir, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(r.dir, 'lib', 'new.ts'), 'export const a = 1;\n');
+    const withUntracked = JSON.parse(run(r, ['--json']).stdout);
+    expect(withUntracked.paths).toContain('lib/new.ts');
+    expect(withUntracked.class).toBe('code');
+    const cfg = spawnSync(path.join(import.meta.dir, '..', 'bin', 'gstack-config'), ['set', 'review_effort_tiers', 'off'], { cwd: r.dir, encoding: 'utf8', timeout: 30_000, env: { ...process.env, GSTACK_STATE_ROOT: r.state } });
+    expect(cfg.status).toBe(0);
+    expect(JSON.parse(run(r, ['--json']).stdout).audit_effort).toBe('host');
+    const bad = spawnSync(path.join(import.meta.dir, '..', 'bin', 'gstack-config'), ['set', 'review_effort_tiers', 'maybe'], { cwd: r.dir, encoding: 'utf8', timeout: 30_000, env: { ...process.env, GSTACK_STATE_ROOT: r.state } });
+    expect(bad.status).not.toBe(0);
+    expect(bad.stderr).toContain("review_effort_tiers 'maybe' not recognized");
+  });
+  test('without --gate-tagged the plan runs the gate scan itself', () => {
+    const r = repo({ 'lib/a.ts': 'export const a = 1;\n' });
+    const res = spawnSync(BIN, ['--base', 'main', '--json'], { cwd: r.dir, encoding: 'utf8', timeout: 120_000, env: { ...process.env, GSTACK_STATE_ROOT: r.state } });
+    expect(res.status, res.stderr).toBe(0);
+    expect(typeof JSON.parse(res.stdout).gate_tagged).toBe('number');
+  });
   test('usage errors exit 2', () => {
     expect(spawnSync(BIN, [], { encoding: 'utf8', timeout: 10_000 }).status).toBe(2);
     expect(run(repo({ 'a.md': 'x' }), ['--last', 'later']).status).toBe(2);

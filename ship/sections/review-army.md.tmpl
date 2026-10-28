@@ -222,7 +222,8 @@ Apply these decisions in order:
    `converged:false`; do not run a fourth fixing cycle. Under `frozen` the plan
    decides sooner: `gstack-review-plan --base <base> --pass $PASS --last full` with
    each flag that holds (`--fixed-blocking`, `--fixed-below`, `--blocking-open`,
-   `--touched-gate` for a fix to an item 2.5 path, `--reviewed-numbers <fp>`).
+   `--touched-gate` for a fix to an item 2.5 path, `--critical-found` when this pass
+   logged a CRITICAL, `--adversarial-ran` once Step 11's native pass ran, `--reviewed-numbers <fp>`).
    `NEXT: stop` stops here, unfixed; `full` is decision 3, `fix-check` 3.5, `done` 4.
    Name each blocking finding (path, severity, problem) for the owner. Deferred and noted items are never recurring findings, so a capped pass
    whose remaining findings are all below the floor applies no edits and continues
@@ -233,7 +234,7 @@ Apply these decisions in order:
    past what the request needs (a helper, a guard, a case nothing takes), cut that
    growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
-3.5. **One fix-check.** Take a `gstack-review-log --start review` token; write the
+3.5. **One fix-check.** Take a `gstack-review-log --start review-fix-check` token; write the
    fix list, touched hunks (`git diff $PASS_HEAD`), callers of changed symbols and
    test results to `.gstack/tmp/fix-check-*.txt`; dispatch one full-effort reviewer
    on `gstack-review-plan --fix-check-prompt --fix-list <f> --hunks <f> --tests <f>

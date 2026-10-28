@@ -40,7 +40,9 @@ function openHigh(state: RunState, phase: string): number {
   const ps = state.phases[phase];
   if (ps?.deferred) return (ps.deferred.counts.High ?? 0) + (ps.deferred.counts.Critical ?? 0);
   const file = path.join(state.out, `${phase}-consensus.json`);
-  const paired = new Set(fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as ConsensusRecord).rows.filter(r => r.native_id).map(r => r.outside_id) : []);
+  let rows: ConsensusRecord['rows'] = [];
+  try { rows = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as ConsensusRecord).rows : []; } catch {}
+  const paired = new Set(rows.filter(r => r.native_id).map(r => r.outside_id));
   const answered = settledIds(state);
   return [...voiceRows(state, phase, 'native'), ...voiceRows(state, phase, 'outside')]
     .filter(r => !paired.has(r.id) && !(r as { settled_by?: string }).settled_by && !answered.has(r.id) && (r.severity === 'High' || r.severity === 'Critical')).length;

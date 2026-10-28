@@ -1,6 +1,8 @@
 import { describe, test, expect } from 'bun:test';
+import * as path from 'node:path';
 import { classifyDiff, classifyPath, nextStep, planReview, scanNumbers, FULL_PASS_CAP, type PlanInput } from '../lib/review-depth';
 
+const ROOT = path.join(import.meta.dir, '..');
 const none = scanNumbers({});
 const base = (o: Partial<PlanInput>): PlanInput => ({ paths: ['src/app.ts'], scope: { SCOPE_BACKEND: 'true', SCOPE_STATE_MACHINE: 'false' }, gateTagged: 0, diffLines: 120, history: { fullPasses: 0, last: 'none' }, numbers: none, ...o });
 const roles = (p: ReturnType<typeof planReview>) => p.dispatches.map(d => `${d.role}:${d.name}:${d.effort}`);
@@ -88,10 +90,15 @@ describe('planReview', () => {
     expect(roles(planReview(base({ gated: ['simplification'] })))).not.toContain('specialist:simplification:full');
     expect(planReview(base({ diffLines: 20 })).dispatches.filter(d => d.role === 'specialist')).toEqual([]);
   });
-  test('pass 2 reruns the army on the range but not the adversarial or outside voice', () => {
-    const p = planReview(base({ history: { fullPasses: 1, last: 'full', fixedBlocking: true } }));
+  test('pass 2 reruns the army on the range but not the adversarial or outside voice once Step 11 ran', () => {
+    const p = planReview(base({ adversarialRan: true, history: { fullPasses: 1, last: 'full', fixedBlocking: true } }));
     expect(p.next.step).toBe('full');
     expect(roles(p).some(r => r.startsWith('outside-voice') || r.startsWith('adversarial'))).toBe(false);
+  });
+  test('a repeat that became code class keeps the adversarial pass Step 11 has not run yet', () => {
+    const p = planReview(base({ history: { fullPasses: 1, last: 'full', fixedBlocking: true } }));
+    expect(roles(p)).toContain('adversarial-native:adversarial:full');
+    expect(planReview(base({ paths: ['docs/a.md'], history: { fullPasses: 1, last: 'full', fixedBlocking: true } })).dispatches.some(d => d.role === 'adversarial-native')).toBe(false);
   });
   test('a fix-check is one full-effort dispatch', () => {
     expect(roles(planReview(base({ history: { fullPasses: 1, last: 'full', fixedBelow: true } })))).toEqual(['fix-check:fix-check:full']);
@@ -106,4 +113,57 @@ describe('planReview', () => {
       expect(planReview(base({ gateTagged: 1, history: h })).dispatches.filter(d => d.role !== 'outside-voice').every(d => d.effort === 'full')).toBe(true);
   });
   test('done dispatches nothing', () => expect(planReview(base({ history: { fullPasses: 1, last: 'full' } })).dispatches).toEqual([]));
+});
+
+describe('GSTA-131 pass-1 review repairs', () => {
+  test('rule docs agents follow are code, and markdown inside a skill directory is code when the root is known', () => {
+    for (const p of ['docs/captain.md', 'docs/unattended.md', 'docs/pregate.md']) expect(classifyPath(p)).toBe('code');
+    expect(classifyPath('autoplan/notes.md')).toBe('docs');
+    expect(classifyPath('autoplan/notes.md', ROOT)).toBe('code');
+    expect(classifyPath('docs/howto-x.md', ROOT)).toBe('docs');
+  });
+  test.each([
+    [{ gateTagged: 3 }], [{ gateTagged: null }], [{ deleted: ['test/old.test.ts'] }],
+  ])('a tests-only diff with gate signal %j is gate class', (o: any) => expect(classifyDiff({ paths: ['test/a.test.ts'], gateTagged: 0, ...o }).class).toBe('gate'));
+  test('a version-only package.json stays docs; the same path with any other edit is code', () => {
+    expect(classifyDiff({ paths: ['package.json', 'CHANGELOG.md'], stampOnly: ['package.json'], gateTagged: 0 }).class).toBe('docs');
+    expect(classifyDiff({ paths: ['package.json', 'CHANGELOG.md'], gateTagged: 0 }).class).toBe('code');
+  });
+  test('an open blocker never routes to a fix-check, even when other fixes landed', () => {
+    expect(nextStep({ fullPasses: 1, last: 'full', fixedBelow: true, blockingOpen: true }).step).toBe('stop');
+    expect(nextStep({ fullPasses: 1, last: 'full', fixedBlocking: true, blockingOpen: true }).step).toBe('stop');
+  });
+  test('code and test source publish no numbers; prose and data files do', () => {
+    expect(scanNumbers({ 'test/a.test.ts': ['const n = 3;', 'for (let i = 0; i < 10; i++)', 'expect(x).toBe(0.5)'] }).publishes).toBe(false);
+    expect(scanNumbers({ 'test/fixtures/bench.json': ['{ "ratio": 0.74 }'] }).publishes).toBe(true);
+  });
+  test('--all-specialists forces every specialist; a code diff past 200 lines or with a CRITICAL adds the Red Team', () => {
+    expect(planReview(base({ force: 'all' })).dispatches.filter(d => d.role === 'specialist').length).toBe(9);
+    const has = (o: Partial<PlanInput>) => roles(planReview(base(o))).some(r => r.startsWith('red-team'));
+    expect(has({ diffLines: 120 })).toBe(false);
+    expect(has({ diffLines: 201 })).toBe(true);
+    expect(has({ diffLines: 120, criticalFound: true })).toBe(true);
+  });
+});
+
+describe('GSTA-131 coverage: Red Team and specialist arms', () => {
+  const roles = (p: ReturnType<typeof planReview>) => p.dispatches.map(d => `${d.role}:${d.name}`);
+  test('Red Team runs on code past 200 lines or after a CRITICAL, and on every gate diff', () => {
+    expect(roles(planReview(base({ diffLines: 120 })))).not.toContain('red-team:red-team');
+    expect(roles(planReview(base({ diffLines: 201 })))).toContain('red-team:red-team');
+    expect(roles(planReview(base({ diffLines: 120, criticalFound: true })))).toContain('red-team:red-team');
+    expect(roles(planReview(base({ diffLines: 20, gateTagged: 1 })))).toContain('red-team:red-team');
+  });
+  test('scope arms select their specialist, state machines default on when scope is unknown, and --force all reaches docs class', () => {
+    const picked = (scope: Record<string, string>) => roles(planReview(base({ scope: { SCOPE_STATE_MACHINE: 'false', ...scope } })));
+    expect(picked({ SCOPE_MIGRATIONS: 'true' })).toContain('specialist:data-migration');
+    expect(picked({ SCOPE_API: 'true' })).toContain('specialist:api-contract');
+    expect(picked({ SCOPE_FRONTEND: 'true' })).toContain('specialist:design');
+    expect(roles(planReview(base({ scope: {} })))).toContain('specialist:state-machines');
+    expect(roles(planReview(base({ scope: { SCOPE_STATE_MACHINE: 'false' } })))).not.toContain('specialist:state-machines');
+    const docsAll = planReview(base({ paths: ['docs/a.md'], force: 'all' }));
+    expect(docsAll.class).toBe('docs');
+    expect(docsAll.dispatches.filter(d => d.role === 'specialist').length).toBeGreaterThan(5);
+    expect(roles(planReview(base({ paths: ['docs/a.md'], force: ['security'] })))).toEqual(['specialist:security']);
+  });
 });

@@ -34,7 +34,7 @@ export interface Fixture { name: string; commit: string; paths: string[]; delete
 /** clean: pass 1 finds nothing; nits: pass 1 fixes below-floor findings; blocker: pass 1 fixes a blocker; adversarial-fix: Step 11 finds a should that is fixed; fix-regression: a pass-1 fix introduces a blocker the next step finds. */
 type Scenario = 'clean' | 'nits' | 'blocker' | 'adversarial-fix' | 'fix-regression';
 const SCENARIOS: Scenario[] = ['clean', 'nits', 'blocker', 'adversarial-fix', 'fix-regression'];
-interface Call { role: string; effort: 'full' | 'light' | 'host'; diffBytes: number }
+interface Call { role: string; name?: string; effort: 'full' | 'light' | 'host'; diffBytes: number }
 
 const fileBytes = (rel: string) => { try { return fs.statSync(path.join(ROOT, rel)).size; } catch { return 0; } };
 function promptBytes(role: string, name: string): number {
@@ -52,7 +52,7 @@ function legacyShip(f: Fixture, sc: Scenario): Call[] {
   const legacySpecialists = specialistsFor('code', { ...base(f), history: { fullPasses: 0, last: 'none' } });
   for (let p = 1; p <= passes; p++) {
     const diffBytes = p === 1 ? f.diff_bytes : f.diff_bytes * RANGE_FRACTION;
-    for (const d of legacySpecialists) calls.push({ role: 'specialist', effort: 'full', diffBytes });
+    for (const name of legacySpecialists) calls.push({ role: 'specialist', name, effort: 'full', diffBytes });
     const critical = (sc === 'blocker' && p === 1) || (sc === 'fix-regression' && p === 2);
     if (f.diff_lines > 200 || critical) calls.push({ role: 'red-team', effort: 'full', diffBytes });
   }
@@ -77,11 +77,13 @@ function newShip(f: Fixture, sc: Scenario): { calls: Call[]; ending: string } {
   };
   let h: History = { fullPasses: 0, last: 'none' };
   let ending = 'done';
+  let adversarialRan = false;
   for (let i = 0; i < 6; i++) {
-    const plan = planReview({ ...base(f), history: h, criticalFound: sc === 'blocker' && i === 0 });
+    const plan = planReview({ ...base(f), history: h, criticalFound: sc === 'blocker' && i === 0, adversarialRan });
     if (plan.next.step === 'done' || plan.next.step === 'stop') { ending = plan.next.step; break; }
     const diffBytes = plan.next.step === 'fix-check' ? f.diff_bytes * FIX_CHECK_FRACTION : h.fullPasses === 0 ? f.diff_bytes : f.diff_bytes * RANGE_FRACTION;
-    for (const d of plan.dispatches) calls.push({ role: d.role, effort: d.effort, diffBytes: d.role === 'outside-voice' ? f.diff_bytes : diffBytes });
+    for (const d of plan.dispatches) calls.push({ role: d.role, name: d.name, effort: d.effort, diffBytes: d.role === 'outside-voice' ? f.diff_bytes : diffBytes });
+    adversarialRan ||= plan.dispatches.some(d => d.role === 'adversarial-native');
     const o = outcomes[sc][Math.min(i, outcomes[sc].length - 1)] ?? {};
     h = { fullPasses: h.fullPasses + (plan.next.step === 'full' ? 1 : 0), last: plan.next.step, ...o };
   }
@@ -92,7 +94,7 @@ function newShip(f: Fixture, sc: Scenario): { calls: Call[]; ending: string } {
 function tokens(calls: Call[], out: typeof DEFAULT_OUT): number {
   return Math.round(calls.reduce((n, c) => {
     const o = out[c.role] ?? out.audit!;
-    return n + (promptBytes(c.role, '') + c.diffBytes) / BYTES_PER_TOKEN + (c.effort === 'light' ? o.light : o.full);
+    return n + (promptBytes(c.role, c.name ?? '') + c.diffBytes) / BYTES_PER_TOKEN + (c.effort === 'light' ? o.light : o.full);
   }, 0));
 }
 
@@ -110,11 +112,12 @@ function autoplanRuns(docsOnly: boolean): Array<{ scenario: string; legacy: numb
 
 function capture(sha: string, name: string, out: string): number {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-compare-'));
+  const captureBase = `review-compare-base-${process.pid}-${sha.slice(0, 8)}`;
   const git = (args: string[], cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
   try {
     if (git(['worktree', 'add', '-q', '--detach', dir, sha]).status !== 0) throw new Error(`cannot check out ${sha}`);
-    git(['branch', '-f', 'gsta131-capture-base', `${sha}^`], dir);
-    const r = runScriptSync(path.join(ROOT, 'bin', 'gstack-review-plan'), ['--base', 'gsta131-capture-base', '--json'], { cwd: dir, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+    git(['branch', '-f', captureBase, `${sha}^`], dir);
+    const r = runScriptSync(path.join(ROOT, 'bin', 'gstack-review-plan'), ['--base', captureBase, '--json'], { cwd: dir, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
     if (r.status !== 0) throw new Error(`gstack-review-plan failed: ${r.stderr}`);
     const plan = JSON.parse(r.stdout);
     const diffBytes = Buffer.byteLength(git(['diff', `${sha}^`, sha], dir).stdout ?? '');
@@ -125,7 +128,7 @@ function capture(sha: string, name: string, out: string): number {
     return 0;
   } finally {
     git(['worktree', 'remove', '--force', dir]);
-    git(['branch', '-D', 'gsta131-capture-base']);
+    git(['branch', '-D', captureBase]);
   }
 }
 
@@ -160,7 +163,12 @@ function main(argv: string[]): number {
   lines.push('', '| fixture | /autoplan scenario | voice dispatches legacy → new |', '|---|---|---|');
   for (const a of ap) for (const r of a.runs) lines.push(`| ${a.fixture} | ${r.scenario} | ${r.legacy} → ${r.next} |`);
   const ratios = rows.map(r => Number(r.ratio)).sort((a, b) => a - b);
-  lines.push('', `SHIP_TOKEN_RATIO: median=${ratios[Math.floor(ratios.length / 2)]} min=${ratios[0]} max=${ratios[ratios.length - 1]} (n=${ratios.length})`);
+  const mid = Math.floor(ratios.length / 2);
+  const median = ratios.length % 2 ? ratios[mid]! : Math.round(((ratios[mid - 1]! + ratios[mid]!) / 2) * 100) / 100;
+  lines.push('', `SHIP_TOKEN_RATIO: median=${median} min=${ratios[0]} max=${ratios[ratios.length - 1]} (n=${ratios.length})`);
+  const byClass = new Map<string, number[]>();
+  for (const r of rows) byClass.set(String(r.class), [...(byClass.get(String(r.class)) ?? []), Number(r.ratio)].sort((x, y) => x - y));
+  lines.push(`SHIP_TOKEN_RATIO_BY_CLASS: ${[...byClass].map(([c, v]) => `${c} median=${v[Math.floor(v.length / 2)]} (n=${v.length})`).join('; ')}`);
   process.stdout.write(lines.join('\n') + '\n');
   return 0;
 }

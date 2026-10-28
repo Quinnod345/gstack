@@ -1,6 +1,6 @@
 <!-- AUTO-GENERATED from adversarial.md.tmpl — do not edit directly -->
 <!-- Regenerate: bun run gen:skill-docs -->
-**Step 9's plan governs this step:** run the native pass only on
+**Step 9's latest plan governs this step:** run the native pass only on
 `DISPATCH: adversarial-native` and the outside voice only on
 `DISPATCH: outside-voice`; otherwise print `ADVERSARIAL: skipped (review plan)`.
 

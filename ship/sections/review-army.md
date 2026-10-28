@@ -392,7 +392,7 @@ Every other specialist, including Testing, reads the full diff with fixtures.
 "You are a specialist code reviewer. Read the checklist at {checklist path}, then run
 `DIFF_BASE=<diff-base> && git diff "$DIFF_BASE"` to get the diff (`<diff-base>`: write the sha in before dispatch, the merge base on pass 1 and `RANGE_BASE` from pass 2 on; never a shell variable). Apply the checklist against the diff.
 
-`NO FINDINGS` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line:
+`NO FINDINGS` alone is the expected, complete result for a clean diff; never invent an item to show work. Otherwise output one JSON object per finding, on its own line, at most 400 words of findings in all:
 {\"severity\":\"CRITICAL|INFORMATIONAL\",\"confidence\":N,\"path\":\"file\",\"line\":N,\"category\":\"category\",\"summary\":\"description\",\"fix\":\"recommended fix\",\"fingerprint\":\"path:line:category\",\"specialist\":\"name\"}
 
 Required fields: severity, confidence, path, category, summary, specialist.
@@ -808,7 +808,8 @@ Apply these decisions in order:
    `converged:false`; do not run a fourth fixing cycle. Under `frozen` the plan
    decides sooner: `gstack-review-plan --base <base> --pass $PASS --last full` with
    each flag that holds (`--fixed-blocking`, `--fixed-below`, `--blocking-open`,
-   `--touched-gate` for a fix to an item 2.5 path, `--reviewed-numbers <fp>`).
+   `--touched-gate` for a fix to an item 2.5 path, `--critical-found` when this pass
+   logged a CRITICAL, `--adversarial-ran` once Step 11's native pass ran, `--reviewed-numbers <fp>`).
    `NEXT: stop` stops here, unfixed; `full` is decision 3, `fix-check` 3.5, `done` 4.
    Name each blocking finding (path, severity, problem) for the owner. Deferred and noted items are never recurring findings, so a capped pass
    whose remaining findings are all below the floor applies no edits and continues
@@ -819,7 +820,7 @@ Apply these decisions in order:
    past what the request needs (a helper, a guard, a case nothing takes), cut that
    growth before anything else; the repeat reviews the cut as part of the range. Tests must pass or retain approval for the same verified pre-existing
    failures and scope. Keep CYCLES and scoped approvals across this repeat; PASS increments on entry.
-3.5. **One fix-check.** Take a `gstack-review-log --start review` token; write the
+3.5. **One fix-check.** Take a `gstack-review-log --start review-fix-check` token; write the
    fix list, touched hunks (`git diff $PASS_HEAD`), callers of changed symbols and
    test results to `.gstack/tmp/fix-check-*.txt`; dispatch one full-effort reviewer
    on `gstack-review-plan --fix-check-prompt --fix-list <f> --hunks <f> --tests <f>

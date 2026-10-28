@@ -56,4 +56,22 @@ describe('carry with a recorded pregate', () => {
     expect(after.head).toBe(head);
     expect(after.pregate).toContain(`current for ${head.slice(0, 12)}`);
   }, 60_000);
+
+  // Value: protects=--head cannot borrow another tree's pregate; fails_when=carry verifies the checkout's tree but stamps the
+  // pregate current for a different --head; seam=none; no_claim=gh pr edit (--body stands in)
+  test('a --pregate from a checkout at another commit never rebinds the receipt to --head', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const reviewed = commit(repo, { 'lib/util.js': "exports.add = (a, b) => a + b + 0;\n" });
+    expect(pregate(repo).status).toBe(EXIT.ok);
+    const body = path.join(repo.root, 'body.md');
+    expect(runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '7', '--base', 'main', '--version', '1.0.0', '--session-kind', 'unattended', '--pregate', outFile(repo), '--body', body]).status).toBe(EXIT.ok);
+    const target = commit(repo, { 'test/util.test.js': "require('node:assert').strictEqual(1, 2);\n" });
+    repo.git('checkout', '-q', reviewed);
+    expect(pregate(repo).status).toBe(EXIT.ok);
+    const borrowed = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main', '--head', target, '--pregate', outFile(repo)]);
+    expect(borrowed.status).toBe(EXIT.refused);
+    expect(borrowed.out).toContain('CARRY: refused (RECEIPT_CARRY_PREGATE_STALE)');
+    expect(borrowed.err).toContain(`not the carried head ${target.slice(0, 12)}`);
+    expect(extractReceipt(fs.readFileSync(body, 'utf8')).receipt!.head).toBe(reviewed);
+  }, 60_000);
 });

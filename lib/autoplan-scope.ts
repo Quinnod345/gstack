@@ -11,8 +11,7 @@
  * the Implementation plan names: a plan that touches only markdown no agent
  * or gate consumes is docs-only (CEO + Eng, outside voice on Eng only).
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { classifyPath } from './review-depth';
 
 export const UI_TERMS = ['component', 'screen', 'form', 'button', 'modal', 'layout', 'dashboard', 'sidebar', 'nav', 'dialog'] as const;
 export const VISUAL_NOUNS = ['page', 'layout', 'style', 'pixel', 'view', 'browser', 'css'] as const;
@@ -48,17 +47,11 @@ export function detectUiScope(implementationPlan: string): UiScope {
   return { uiRequired: files.length > 0 || visual.length > 0, uiMatches: terms.reduce((s, t) => s + t.count, 0), uiEvidence: { terms, visual: [...new Set(visual)], files } };
 }
 
-/** Markdown an agent or a gate reads is code: skill prose and its sections, resolvers, DRIVER and template prose, policy docs, agent instructions. */
-const CODE_MARKDOWN = [/(?:^|\/)SKILL\.md/i, /(?:^|\/)sections\//, /(?:^|\/)scripts\/resolvers\//, /(?:^|\/)DRIVER[^/]*$/, /\.tmpl$/, /(?:^|\/)templates?\//, /^docs\/[^/]*-policy\.md$/, /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i];
-
-/** Docs-class: README*, CHANGELOG*, TODOS*, docs/** and *.md outside a skill directory (one holding SKILL.md or SKILL.md.tmpl under `root`). */
+/** Docs-class: what /ship's review classifies as docs (lib/review-depth.ts classifyPath: README, CHANGELOG, TODOS and prose markdown outside agent-read and skill-directory paths), plus a docs directory named without a file. */
 export function docsClassPath(file: string, root: string): boolean {
   const p = file.replace(/^\.\//, '');
-  if (CODE_MARKDOWN.some(re => re.test(p))) return false;
-  if (/^(?:README|CHANGELOG|TODOS)/i.test(path.basename(p)) || p.startsWith('docs/')) return true;
-  if (!/\.md$/i.test(p)) return false;
-  const top = p.includes('/') ? p.split('/')[0]! : '';
-  return !top || !['SKILL.md', 'SKILL.md.tmpl'].some(f => fs.existsSync(path.join(root, top, f)));
+  if (/^docs\/[^.]*$/.test(p)) return true;
+  return classifyPath(p, root) === 'docs';
 }
 
 export interface DocsOnlyScope { docsOnly: boolean; paths: string[]; code: string[] }

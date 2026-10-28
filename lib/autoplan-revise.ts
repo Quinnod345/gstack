@@ -173,7 +173,7 @@ export function reviseRun(o: ReviseOptions): ReviseResult {
   // A phase that used its last round is not reopened: the delta becomes an owner gate item, so the cap neither loops nor hides it.
   const capped = quiet ? [] : touched.filter(p => atCap(state, p));
   const reopen = quiet ? [] : touched.filter(p => !capped.includes(p));
-  const delta = capped.length ? diffStat(lineDiff(fs.readFileSync(state.active_plan, 'utf8'), fs.readFileSync(path.join(staging, FILES.active), 'utf8'))) : { added: 0, removed: 0 };
+  const delta = capped.length || quiet ? diffStat(lineDiff(fs.readFileSync(state.active_plan, 'utf8'), fs.readFileSync(path.join(staging, FILES.active), 'utf8'))) : { added: 0, removed: 0 };
   const atGate = state.status === 'gate_pending' ? state.gate_rev : undefined;
   journal(out, { event: 'revise_intent', k, staging: path.relative(out, staging), plan: file, old_plan_sha256: oldHash, new_plan_sha256: newHash, at_gate_rev: atGate ?? null, incorporates, withdraw, settle });
 
@@ -197,12 +197,13 @@ export function reviseRun(o: ReviseOptions): ReviseResult {
     ...settleAmendments(state, settle, 'settled', at, { plan_sha256: evidence?.plan_sha256 }).map(r => ({ ...r, changes: evidence!.changes[r.decision as string] })),
     ...(quiet ? [{ event: 'applied_without_rereview', k, decisions: incorporates, severities: Object.fromEntries(severities), phases: touched, old_plan_sha256: oldHash, new_plan_sha256: newHash }] : [])];
   if (amending) state.status = pendingAmendments(state).length ? 'amend_pending' : state.phase_order.some(p => !state.phases[p]?.closed_at) ? 'running' : pendingDeltas(state).length ? 'gate_pending' : 'complete';
-  const regate = capped.length > 0 && state.status === 'gate_pending';
+  // A quiet revise that ends at gate_pending still has an earlier capped delta waiting: the owner gets a new gate for it.
+  const regate = (capped.length > 0 || quiet) && state.status === 'gate_pending';
   const committed = { event: 'plan_revised', k, plan: file, old_plan_sha256: oldHash, new_plan_sha256: newHash, reopened: reopen, added, at_gate_rev: atGate ?? null };
   fs.writeFileSync(path.join(staging, FILES.run), JSON.stringify({ state, renames, committed, settled }, null, 2) + '\n');
   publish(state, staging, renames, committed, settled);
   const lines = [`REVISED: plan=${newHash.slice(0, 12)} reopened=${reopen.join(',') || 'none'}${added.length ? ` added=${added.join(',')}` : ''}${capped.length ? ` capped=${capped.join(',')}` : ''}`,
-    ...(quiet ? [`APPLIED: ${incorporates.join(',')} without re-review (below High)`] : []), amendmentLine(state)];
+    ...(quiet ? [`APPLIED: ${incorporates.join(',')} without re-review (below High; plan +${delta.added} -${delta.removed} lines)`] : []), amendmentLine(state)];
   for (const phase of capped) lines.push(`CAPPED: ${phase} used round ${roundOf(state, phase)} of ${roundCap(state, phase)}: not reopened; the gate asks the owner about the unreviewed delta (+${delta.added} -${delta.removed} lines)`);
   if (regate) {
     lines.push(...approveOrRegate(state, at));

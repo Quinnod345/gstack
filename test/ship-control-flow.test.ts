@@ -40,6 +40,27 @@ describe('ship source controller', () => {
     expect(freshness).not.toContain('**No attempt remains or no repair is available:**');
   });
 
+  test('the review plan drives the repeat, the fix-check binds under its own skill, and Step 11.5 accepts a fix-check or a planned adversarial skip', () => {
+    const decide = review.slice(review.indexOf('### Decide whether to repeat Step 9'), review.indexOf('**Required-probe parent gate:**'));
+    for (const flag of ['--fixed-blocking', '--fixed-below', '--blocking-open', '--touched-gate', '--critical-found', '--adversarial-ran', '--reviewed-numbers <fp>']) expect(decide).toContain(flag);
+    expect(decide).toContain('`NEXT: stop` stops here, unfixed; `full` is decision 3, `fix-check` 3.5, `done` 4.');
+    expect(decide).toContain('`gstack-review-log --start review-fix-check` token');
+    expect(decide).toContain('`"skill":"review-fix-check"` with `--finish <token>`');
+    expect(compact(read('ship/sections/adversarial.md.tmpl'))).toContain("Step 9's latest plan governs this step");
+    const bind = compact(entry.slice(entry.indexOf('## Step 11.5:'), entry.indexOf('## Step 12:')));
+    expect(bind).toContain("3.5's `review-fix-check` when it ended the loop");
+    expect(bind).toContain('none after `ADVERSARIAL: skipped`');
+    expect(bind).toContain('`review_freshness` `CURRENT`');
+  });
+
+  test('Step 1 carries a receipt only after a dry run and a pregate at HEAD', () => {
+    const carry = compact(entry.slice(entry.indexOf('4. **Carry check.**'), entry.indexOf('5. Display historical readiness')));
+    const order = ['carry --pr <n> --base <base> --dry-run', '`CARRY: would carry`', 'skip review', '`gstack-pregate --allow-repo-commands`', 'carry without `--dry-run`', '`--pregate .gstack/tmp/pregate.json`', '`CARRY: carried` binds HEAD', 'A failed check, a moved HEAD, `refused` or `current` re-runs Steps 2–16.'];
+    const at = order.map(t => carry.indexOf(t));
+    expect(at.every(i => i >= 0)).toBe(true);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+  });
+
   test('repairs use one ordered work list without a return stack', () => {
     const text = compact(controller);
     expect(compact(entry)).toContain('**Next steps:**');

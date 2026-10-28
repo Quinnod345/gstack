@@ -217,8 +217,9 @@ coverage, not as a clean outside review.
 ### The carry across a base merge or a test-only fix
 
 When the parent merges the base in or fixes a test after the receipt was
-written, it runs `gstack-ship-receipt carry --pr <n> --base <base>` instead of
-another /ship. `CARRY: carried from <old> to <new> (<reason>)` plus the
+written, it runs `gstack-ship-receipt carry --pr <n> --base <base> --dry-run`
+instead of another /ship; on `CARRY: would carry` it runs `gstack-pregate` at HEAD
+and reruns carry with `--pregate .gstack/tmp/pregate.json`. `CARRY: carried from <old> to <new> (<reason>)` plus the
 `GSTACK_RESULT: skill=ship status=complete run=<dir>` line means the receipt
 now names HEAD with a `carry` object holding the `git range-diff` evidence, and
 `ship-run.json` gains `carried_from` and `carry_reason`; the `review_loop`
