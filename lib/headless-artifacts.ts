@@ -99,7 +99,9 @@ export interface ShipReceipt {
   issues?: { fixes: number[]; refs: number[]; flakes: Array<{ issue: number; run: string }>; related?: Array<{ pr: number; repo?: string; author: string; closes: number[]; supersedes?: boolean; credit?: boolean }> };
   /** Harness lane E: the review loop's counters (gstack-review-scope summary) and the carry record when the receipt followed a head whose product diff was unchanged (gstack-ship-receipt carry). */
   review_loop?: { passes: number; blocking_found: number; deferred: number; noted?: number; fixed?: number; scope?: string; fix_checks?: number; dispatches?: Record<string, number>; est_input_tokens?: number };
-  carry?: { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[] };
+  carry?: { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[]; trees?: string[]; ancestry?: 'linear' | 'rewritten' };
+  /** The reviewed head's tree and its product patch-id against the base (gstack-ship-receipt write; carry rebinds both): what a carry across rewritten history compares. */
+  head_tree?: string; product_patch_id?: string;
 }
 
 export const RESULT_STATUSES: readonly ResultStatus[] = ['complete', 'gate_pending', 'amend_pending', 'incomplete', 'interrupted', 'refused'];
@@ -219,7 +221,8 @@ export const ARTIFACT_SCHEMAS = {
       pregate: { ...str, description: 'pass|warn|requires-remote cleared … @<tree> from pregate.json, current for this head' }, requires_remote: strList,
       approval: { type: 'object', description: 'approval classes: { source, status: checked|unavailable, classes: [{ class, scope, effects, citation: verified|unverified, approved_by, date, via, binding, evidence }], report_only }' },
       review_loop: { type: 'object', required: ['passes', 'blocking_found', 'deferred'], properties: { passes: { type: 'integer', minimum: 0 }, blocking_found: { type: 'integer', minimum: 0 }, deferred: { type: 'integer', minimum: 0 }, noted: { type: 'integer', minimum: 0 }, fixed: { type: 'integer', minimum: 0 }, scope: str, fix_checks: { type: 'integer', minimum: 0 }, dispatches: { type: 'object', description: 'reviewer dispatches by role' }, est_input_tokens: { type: 'integer', minimum: 0 } } },
-      carry: { type: 'object', required: ['from', 'reason', 'product_patch_id'], properties: { from: str, reason: str, product_patch_id: str, changed_paths: strList, merge_commits: { type: 'integer', minimum: 0 }, range_diff: str, covers: strList, reruns: strList } },
+      carry: { type: 'object', required: ['from', 'reason', 'product_patch_id'], properties: { from: str, reason: str, product_patch_id: str, changed_paths: strList, merge_commits: { type: 'integer', minimum: 0 }, range_diff: str, covers: strList, reruns: strList, trees: strList, ancestry: { enum: ['linear', 'rewritten'] } } },
+      head_tree: str, product_patch_id: str,
       issues: { type: 'object', properties: { fixes: { type: 'array', items: { type: 'integer' } }, refs: { type: 'array', items: { type: 'integer' } }, flakes: { type: 'array', items: { type: 'object', required: ['issue', 'run'], properties: { issue: { type: 'integer' }, run: str } } }, related: { type: 'array', items: { type: 'object', required: ['pr', 'author', 'closes'], properties: { pr: { type: 'integer' }, repo: str, author: str, closes: { type: 'array', items: { type: 'integer' } }, supersedes: { type: 'boolean' }, credit: { type: 'boolean' } } } } } },
     },
   },
