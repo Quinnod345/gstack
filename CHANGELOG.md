@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.91.296.0] - 2026-10-28
+## [Unreleased]
 
 **You can now render gstack with whole skills, skill sections, model overlays or preamble pieces left out, as a byte-exact tree with a lock file, so an eval can measure which instructions a model actually needs.** Garry asked for "95% of the outcome but with 50% of the token use", and the free ceiling measurement on train gate run 40705984271 found skill text is about 21% of billed eval cost (35 of 103 tests), so trimming it per model is worth measuring. Nothing changes for anyone today. Every model rung and unknown models load `full`, and the committed SKILL.md files are byte-identical to the previous release. A smaller loadout ships only after GSTA-2 measures it.
 
