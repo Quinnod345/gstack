@@ -899,7 +899,8 @@ gstack's own templates and for any skill folder you own.
   add nothing a fresh session already does; edit the line that covers the idea instead of appending; put the fact on the
   lowest level that reaches the agent in time (description, SKILL.md, `references/`, the tool's `--help`, the tool's
   errors); write the rule and put the story in the commit message.
-- **Size.** `gstack-skill-bill` prints bytes and estimated tokens per level. Commits carry
+- **Size.** `gstack-skill-bill` prints bytes and estimated tokens per level, and in a gstack checkout the skill's eval
+  task file (`EVAL TASKS:`). Commits carry
   `Skill-Size: <before>→<after> bytes`; a skill more than 10% over its last `Skill-Diet:` commit is DUE, and a red
   context-budget ratchet means diet, not a higher ceiling.
 - **Drift.** `test/skill-bin-drift.test.ts` fails when a template or rendered skill calls a gstack bin or flag that

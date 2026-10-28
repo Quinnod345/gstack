@@ -27,7 +27,40 @@ export interface SkillBillReport {
   authored: string;
   rows: LevelRow[];
   baseline: Baseline;
+  evalTasks?: EvalTasks | null;
   warnings: string[];
+}
+
+export interface EvalTasks { path: string; count: number; problems: string[] }
+
+const EVAL_TASK_KEYS = new Set(["id", "prompt", "setup", "must", "must_not", "check", "safety"]);
+
+/** Problems in a tasks.json against the task format in docs/designs/SKILL_EVAL_CONTRACT.md. */
+export function checkEvalTasks(file: string): EvalTasks {
+  let tasks: unknown;
+  try { tasks = JSON.parse(readFileSync(file, "utf-8")); } catch (err) { return { path: file, count: 0, problems: [`not valid JSON: ${(err as Error).message}`] }; }
+  if (!Array.isArray(tasks)) return { path: file, count: 0, problems: ["must be a JSON array of tasks"] };
+  const problems: string[] = [];
+  const ids = new Set<string>();
+  for (const t of tasks as Record<string, unknown>[]) {
+    const where = String(t?.id ?? "?");
+    for (const k of Object.keys(t ?? {})) if (!EVAL_TASK_KEYS.has(k)) problems.push(`${where}: unknown key ${k}`);
+    if (typeof t?.id !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(t.id)) problems.push(`${where}: id must be kebab-case`);
+    else if (ids.has(t.id)) problems.push(`${where}: duplicate id`);
+    else ids.add(t.id);
+    if (typeof t?.prompt !== "string" || !t.prompt.trim()) problems.push(`${where}: prompt must be a non-empty string`);
+    for (const k of ["setup", "check"]) if (t && k in t && typeof t[k] !== "string") problems.push(`${where}: ${k} must be a string`);
+    for (const k of ["must", "must_not"]) {
+      if (!t || !(k in t)) continue;
+      const v = t[k];
+      if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) { problems.push(`${where}: ${k} must be a string array`); continue; }
+      for (const re of v) { try { new RegExp(re); } catch { problems.push(`${where}: ${k} pattern /${re}/ does not compile`); } }
+    }
+    if (t && "safety" in t && typeof t.safety !== "boolean") problems.push(`${where}: safety must be a boolean`);
+    if (!t || (!("must" in t) && !("check" in t))) problems.push(`${where}: needs must or check, or nothing can fail it`);
+    if (typeof t?.setup === "string" && t.setup.includes("seed.sh") && !existsSync(join(dirname(file), "seed.sh"))) problems.push(`${where}: setup runs seed.sh but it is missing`);
+  }
+  return { path: file, count: tasks.length, problems };
 }
 
 export class SkillBillError extends Error {
@@ -161,13 +194,18 @@ export function buildSkillBill(dir: string): SkillBillReport {
   if (existsSync(md)) rows.push(row("SKILL.md", dir, md));
   for (const f of onDemandFiles(dir)) rows.push(row("on-demand", dir, f));
   const warnings: string[] = [];
+  let evalTasks: EvalTasks | null | undefined;
   if (kind === "gstack-checkout") {
+    const root = gstackRootOf(dir)!;
+    const file = join(root, "test", "fixtures", "skill-evals", name, "tasks.json");
+    evalTasks = existsSync(file) ? { ...checkEvalTasks(file), path: relative(root, file) } : null;
+    if (evalTasks?.problems.length) warnings.push(`EVAL_TASKS_INVALID: ${evalTasks.problems[0]}${evalTasks.problems.length > 1 ? ` (+${evalTasks.problems.length - 1} more)` : ""}. fix: the task format in docs/designs/SKILL_EVAL_CONTRACT.md`);
     const changed = git(dir, ["status", "--porcelain", "--", "SKILL.md.tmpl", "SKILL.md"]).out.split("\n").filter(Boolean);
     if (changed.some((l) => l.endsWith("SKILL.md.tmpl")) && !changed.some((l) => l.endsWith(" SKILL.md") || l.endsWith("/SKILL.md")))
       warnings.push("RENDER_STALE: SKILL.md.tmpl changed but SKILL.md did not. fix: bun run gen:skill-docs");
   }
   if (kind === "gstack-install") warnings.push("INSTALLED_GSTACK_SKILL: gstack-upgrade overwrites this folder. fix: edit <skill>/SKILL.md.tmpl in a gstack checkout, or copy the skill to a folder you own");
-  return { name, dir, kind, authored, rows, baseline: findBaseline(dir, name, authored), warnings };
+  return { name, dir, kind, authored, rows, baseline: findBaseline(dir, name, authored), evalTasks, warnings };
 }
 
 export function renderSkillBill(r: SkillBillReport): string {
@@ -176,6 +214,8 @@ export function renderSkillBill(r: SkillBillReport): string {
   const b = r.baseline;
   if (b.status === "found") lines.push(`BASELINE: ${b.sha!.slice(0, 7)} ${b.date} ${r.authored} ${b.bytes} B; now ${b.growthPct! >= 0 ? "+" : ""}${b.growthPct}%${b.due ? ` DUE: over ${DUE_PCT}% since the last diet, so diet before adding` : ""}`);
   else lines.push(`BASELINE: ${b.status} (${b.reason})`);
+  if (r.evalTasks) lines.push(`EVAL TASKS: ${r.evalTasks.path} (${r.evalTasks.count} tasks)`);
+  else if (r.evalTasks === null) lines.push(`EVAL TASKS: none; a diet writes test/fixtures/skill-evals/${r.name}/tasks.json before any cut`);
   lines.push(...r.warnings);
   lines.push(`Commit line: Skill-Size: <before>→<after> bytes (${r.authored})`);
   return lines.join("\n");
