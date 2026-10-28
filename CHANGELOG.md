@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+**Installing gstack inside an agent harness now gives that harness gstack's skills, the harness's own way.** Until now OpenClaw and Hermes were instruction-only: `./setup --host hermes` printed a digest path and changed nothing, so an agent working inside OpenClaw or Hermes could not find a single gstack skill until a person wired one in by hand, and QM, dots, Muse Code and Grok were unknown to gstack (Garry, 2026-10-27: "when gstack is installed inside OpenClaw, Hermes, qm, muse, grok bot, dots or any harness it auto resolves and figures out how to use the skills"). `./setup` run inside OpenClaw, Hermes or a Dot now registers gstack there in the same run; `gstack-uninstall` takes it back out.
+
+### Added
+- **`bin/gstack-harness`** (`lib/harness-register.ts`, `lib/harness-qm.ts`): `register`, `unregister`, `status`, `detect`, `refresh`, `auto` and `manifest` for seven targets. OpenClaw gets one `gstack` router skill (one 254-byte description line in every request; its body lists every skill with its path) in `$OPENCLAW_STATE_DIR/skills`, or every skill with `--skills all`. Hermes gets every skill as `gstack-<skill>` in one `gstack` category, because it opens only skills it has indexed. A Dot gets the router in `/home/dot/skills`. QM gets an org skill pack (`github.com/garrytan/gstack` at the installed commit) through one explicit admin command, `register qm --yes`, which lists packs first so a retry never makes a second one. Muse Code and Grok Build already read `~/.claude/skills`; `status` reports them as discovered, Claude-rendered and unverified. Any other harness gets the router in a skills folder (`--skills-dir`) or a routing block of at most 600 bytes between `gstack:begin`/`gstack:end` markers in a context file (`--context`), and `--print` writes both to stdout for chat-only apps such as Grok Bot.
+- **Ownership ledger**: every file gstack-harness writes goes into `$GSTACK_STATE_ROOT/harness/<id>.ledger` with its sha256. Registering again changes only what changed; a folder or a skill name gstack did not write stops it; a destination that is your home, the checkout, a symlink or outside a plain path is refused. `gstack-uninstall` reads the ledgers with `bin/gstack-harness-ledger.sh` (bash only) before it removes the checkout, and moves any file you edited to `$GSTACK_STATE_ROOT/backups/harness/`.
+- **Ten reason codes** (`HARNESS_*`), each with a fix line and a `docs/troubleshooting.md` section.
+
+### Changed
+- **OpenClaw and Hermes are `experimental` hosts** with `install.registration: 'harness'`: `./setup --host openclaw|hermes` registers through gstack-harness, publishes an install-registry row and ends with `gstack ready (<host>)`; `./setup --refresh-registered` (what `/gstack-upgrade` runs) refreshes every registration. OpenClaw's ACP route is unchanged.
+- **`./setup` with no `--host` (or `--host auto`) inside a harness** registers with it, detected from the marker the harness sets for its agent's commands (`OPENCLAW_SHELL=exec`, `HERMES_AGENT=true`, a Dot's `HOME=/home/dot`) or the harness among setup's parent processes. An explicit `--host claude` writes nothing under a harness folder. `--no-harness-auto` or `GSTACK_HARNESS_AUTO=0` turns it off. Capy's installer names its hosts, so nothing changes on Capy machines.
+
+### Removed
+- `install.instructionTier` from the host config and the setup arms that printed the digest path for OpenClaw and Hermes; the 2KB digest itself stays for rules-reading agents.
+
+### Fixed
+- `./setup --status` no longer tells an OpenClaw or Hermes install to move the checkout out of its runtime root, because those hosts run from the checkout by design, as Claude does.
+
+### Tests
+- `test/harness-register.test.ts`: per-target registration against temporary harness folders (idempotent rerun, exact removal, user skills and context lines kept, edited files backed up), the refusals, the Dot engine's skill-parser rules, the budgets, every reason code's anchor, inside-harness detection, the bun-free ledger reader, QM against a fake admin API (a failed import retried without a second pack, two machines sharing one pack, `--remote` archiving), and the real `./setup` and `gstack-uninstall` for `--host openclaw`, `--host hermes` and setup run inside OpenClaw.
+
+### Docs
+- docs/hosts.md § Agent harnesses (install, verify and remove for each harness), docs/install.md, docs/uninstall.md, docs/OPENCLAW.md (native skills or ACP), docs/ADDING_A_HOST.md (harness hosts and how to add a target), docs/capy-install.md, README host matrix.
+
 ## [1.91.286.0] - 2026-10-28
 
 **Two ship-touching PRs in one merge train no longer overshoot ship's size cap together, and verify stops freezing the queue on a train whose PRs all landed long ago.** Train 26's free run failed twice ("size ratio 1.753 > maxSizeRatio 1.7528", then "1.752 > 1.7524") because each PR re-pinned the same ratio on its own tree. Ship's cap is now a byte ledger. Each branch records its own signed delta, and the deltas add up exactly in any train order. Train 24's leftover record froze the queue on a main train 28 had already verified (#3519); verify now calls that record stale instead.
