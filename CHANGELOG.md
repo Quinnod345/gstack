@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+**/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.
+
+### Added
+- **`gstack-review-plan`**: prints `REVIEW_CLASS`, `REVIEW_PLAN`, `NEXT` (full, fix-check, stop or done), one `DISPATCH:` line per reviewer with its effort, `SKIP:` lines with reasons, and `AUDIT_EFFORT`; `--json` for scripts. Docs-class diffs run the core checklist only, tests-class adds the testing specialist, code and gate keep scope-selected specialists, and gate adds the Red Team every time. Markdown an agent reads (skills, sections, templates, policy and rule docs, any markdown in a skill directory) counts as code. A git error fails closed instead of planning an empty diff.
+- **One fix-check instead of a repeat army**: below-floor fixes, or a blocker fixed at the two-pass cap, go to one full-effort reviewer that reads the fix list, the touched hunks, the callers and the test results (`gstack-review-plan --fix-check-prompt`). It logs as `review-fix-check`, never a pass, and Step 11.5 binds it. The cap is two full passes plus one fix-check; a blocker still open stops for the owner.
+- **Step 11's voices run once per invocation**, from the last full-pass plan; the outside voice reruns only when a published number changes (`--reviewed-numbers`). A docs diff that publishes numbers keeps the cross-family voice.
+- **Delta /ship after a base merge**: Step 1 runs `gstack-ship-receipt carry --dry-run`; when the product patch-id is unchanged it skips the review loop, repairs only the CHANGELOG and size caps, runs `gstack-pregate` at HEAD and carries the receipt with `--pregate`. Replayed on #3497's history, 3 of its 6 base merges would have carried.
+- **Receipt counters**: `review_loop` gains `fix_checks`, `dispatches` by role and `est_input_tokens`; `/autoplan export` prints `DISPATCHES: <n> est_input_tokens=<k>`.
+- **`/autoplan` rounds**: one round by default, a second only for High or Critical findings, `ESCALATE: evidence sufficient, decision needed` at the cap; a revise whose decisions all sit below High applies without re-review, unless an earlier capped revise is still waiting on the owner. Docs-only plans (`--docs-only` or detected) run CEO on the native voice, then Eng.
+- **`review_effort_tiers`** (`gstack-config`, default `on`): coverage, plan-completion and docs audits, trail reviewers and watchers run at `light` on the same model family; `off` runs them at the host default.
+
+### Changed
+- `gstack-ship-receipt carry --pregate` refuses when the checkout is not at `--head` (`RECEIPT_CARRY_PREGATE_STALE`), so one head's pregate cannot certify another.
+- Specialist prompts cap findings at 400 words. `docs/unattended.md` adds report-length limits (READY at most 150 words plus required lines, reports at most 300).
+
+### Gate integrity
+- Ship union cap 1.7529 → 1.7631 and ship skeleton cap 60,913 → 60,960 bytes in `test/helpers/carve-guards.ts`, each pinned at the measured size (330,941 / 187,706 = 1.76308; 60,960 bytes). GSTA-132's size ledger replaces these re-pins once it lands.
+- `test/autoplan-token-efficiency.test.ts` gives its subprocess-driven cases a 30-second timeout; the resumed `max_rounds` case in that file now expects the new default of 1.
+
 ## [1.91.284.0] - 2026-10-27
 
 **Five small takes from tstack, in gstack's words.** Theo Browne's tstack (MIT, 2026-10-24) is nine short PR-landing skills; its best ideas that gstack lacked were a verb for an aging pull request, a Codex picker that says what each skill is for, a written grant for unattended sessions, a repo-level rule for porting a contributor's PR, and a visible author line on agent-posted comments. Each lands here as gstack prose and gstack code; no sentence is copied (NOTICE.md). Approved by Garry, 2026-10-26: "Do it, send" (yes to the opt-in attribution callout, off by default).
