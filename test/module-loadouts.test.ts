@@ -156,6 +156,7 @@ describe('render filter units', () => {
 describe('gstack-modules render', () => {
   const spec = 'full,-section:office-hours/second-opinion,-section:office-hours/visual-design,-preamble:writing-style,-overlay:claude,-skill:design-shotgun';
   const readLock = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, LOCK_FILE), 'utf-8')) as LoadoutLock;
+  const ensureArm = async (dir: string) => { if (!fs.existsSync(path.join(dir, LOCK_FILE))) await renderLoadout({ host: 'claude', selection: selectModules({ modules: spec }), outDir: dir }); };
 
   test('claude: one arm excludes one module of each kind and locks every file', async () => {
     const out = path.join(tmp, 'claude-arm');
@@ -194,6 +195,7 @@ describe('gstack-modules render', () => {
 
   test('a dangling reference is refused and the earlier render survives', async () => {
     const out = path.join(tmp, 'claude-arm');
+    await ensureArm(out);
     const before = readLock(out);
     const unsafe = renderLoadout({ host: 'claude', selection: selectModules({ modules: 'full,-section:plan-design-review/review-sections' }), outDir: out });
     await expect(unsafe).rejects.toMatchObject({ code: 'MODULE_EXCLUSION_UNSAFE' });
@@ -204,6 +206,8 @@ describe('gstack-modules render', () => {
 
   test('a later render replaces an earlier one; a foreign directory is never replaced', async () => {
     const out = path.join(tmp, 'claude-arm');
+    await ensureArm(out);
+    expect(readLock(out).loadout).toBe('adhoc');
     const lock = await renderLoadout({ host: 'claude', selection: selectModules({ modules: 'full,-skill:design-shotgun' }), outDir: out });
     expect(readLock(out).spec_sha256).toBe(lock.spec_sha256);
     expect(fs.existsSync(path.join(out, 'office-hours/sections/second-opinion.md'))).toBe(true);
@@ -264,6 +268,14 @@ describe('bin/gstack-modules', () => {
     expect(fs.existsSync(out)).toBe(false);
     expect(run('bogus')).toMatchObject({ code: 2, stderr: expect.stringContaining('Usage:') });
     expect(run('--help')).toMatchObject({ code: 0, stdout: expect.stringContaining('gstack-modules render') });
+  });
+
+  test('gen:skill-docs refuses an exclusion render into the committed tree', () => {
+    const before = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 }).stdout;
+    const result = spawnSync(process.execPath, [...bunIsolationArgs(), path.join(ROOT, 'scripts/gen-skill-docs.ts'), '--host', 'claude', '--modules', 'full,-skill:design-shotgun'], { cwd: ROOT, encoding: 'utf-8', timeout: 120_000 });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr + result.stdout).toContain('MODULE_SPEC_INVALID');
+    expect(spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 }).stdout).toBe(before);
   });
 
   test('render prints one RENDERED line and writes the lock', () => {

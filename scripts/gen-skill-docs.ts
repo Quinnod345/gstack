@@ -24,7 +24,7 @@ import type { Host, TemplateContext } from './resolvers/types';
 import { HOST_PATHS } from './resolvers/types';
 import { RESOLVERS } from './resolvers/index';
 import { applySectionGuards, rewriteCarvedSectionRefs, SKILL_BYTE_CEILING, usesLazySections } from './resolvers/sections';
-import { excludedSkillDirs, selectModules } from './modules';
+import { ModuleError, excludedSkillDirs, selectModules } from './modules';
 import type { ModuleFilter } from './resolvers/types';
 import { insertRuntimePreludes } from './resolvers/runtime-root';
 import { generateSharedPreambleFile, hoistsPreamble, SHARED_PREAMBLE_FILE } from './resolvers/preamble-hoist';
@@ -150,6 +150,9 @@ function parseGenerationArgs(args: string[]): GenerationOptions {
   const badDisabled = disabledSkills.find(n => !/^\/?[a-z0-9-]+$/.test(n));
   if (badDisabled) throw new Error(`--disabled-skills takes skill names (got ${JSON.stringify(badDisabled)})`);
   const modules = selectModules({ loadout: value('--loadout'), modules: value('--modules') });
+  if (modules && outDir === undefined) {
+    throw new ModuleError('MODULE_SPEC_INVALID', `--${value('--modules') === undefined ? 'loadout' : 'modules'} with exclusions needs --out-dir; the committed tree is always the full render`, 'bin/gstack-modules render --host <host> --modules <spec> --out-dir <dir>');
+  }
   const installRoot = value('--install-root');
   if (installRoot !== undefined && !INSTALL_ROOT_PATTERN.test(installRoot)) {
     throw new Error(`--install-root must be an absolute path of letters, digits and . _ - + @ / (got ${JSON.stringify(installRoot)})`);

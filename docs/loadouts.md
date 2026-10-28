@@ -26,7 +26,7 @@ bin/gstack-modules render --host claude \
 
 `render` writes the whole host tree into a staging directory beside `--out-dir`. It checks that no rendered file still points at an excluded module, writes `loadout.lock.json` last (loadout name or `adhoc`, the normalized spec and its sha256, host, model, every excluded id, and the sha256 and byte count of every file), then swaps the result into place. A failure leaves an earlier render at `--out-dir` untouched. Claude section links name `--out-dir`, so point the eval harness at that directory. Pass the same `--model`, `--install-root` and `--plan-mode` the install under test uses, so the arms differ only by the modules. Codex renders default to the host's generic `gpt` overlay, while `./setup` uses `gpt-6-astra`.
 
-`bun run gen:skill-docs --loadout <name>` and `--modules <spec>` apply the same filter to an ordinary generation run. A non-`full` render adds `<!-- loadout: <name> -->` to each SKILL.md header.
+`bun run gen:skill-docs --loadout <name> --out-dir <dir>` and `--modules <spec> --out-dir <dir>` apply the same filter to a generation run without the staging, dangling-reference check or lock file; a selection with exclusions and no `--out-dir` is refused with `MODULE_SPEC_INVALID`, because the committed tree is always the `full` render. A non-`full` render adds `<!-- loadout: <name> -->` to each SKILL.md header.
 
 ## Building an eval arm
 
