@@ -887,8 +887,7 @@ pass: report it with its reason.
 - Gate findings additionally carry `gate` (the RH tag, e.g. `"RH-15"`), `gate_id`
   (the tool's hunk identity), `reason` (for `kept`) and one of the actions
   `kept`, `restored` or `open`. Never store hunk text, test names or commit
-  messages in the record (it is brain-synced). `open` findings count in
-  `issues_found` and in `critical`/`informational` by severity. The logger stamps
+  messages in the record (it is brain-synced). The logger stamps
   `actor` from `gstack-session-kind` itself and discards any `actor` you supply;
   for a non-interactive session it also forces `action: "open"` on every gate
   finding. Dispositions are per invocation: `/ship`'s own review pass asks again.
@@ -899,8 +898,9 @@ pass: report it with its reason.
 
 `TIMESTAMP` is ISO 8601; `COMMIT` is `git rev-parse --short HEAD`.
 `quality_score` is Step 4.6's specialist score (`10.0` when small-diff specialists
-were skipped or this host omits Review Army). This default is not completion evidence
-and never lowers defect counts. The logger builds trusted `review_binding` from the
+were skipped or this host omits Review Army). This default is not completion evidence;
+unresolved defects, `open` ones included, still count in `issues_found` and
+by severity in `critical`/`informational`. The logger builds trusted `review_binding` from the
 validated captured branch digest, discarding caller bindings. Never invent a binding
 or replace REVIEW_START at log time; finish only this pass's own token.
 

@@ -96,7 +96,7 @@ describe('callJudge cancellation', () => {
       await expect(pending).rejects.toThrow('Expired during rate-limit backoff.');
       expect(diagnostics).toHaveBeenCalledTimes(1);
       expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ type: 'llm-judge-aborted', model: 'test-judge-model',
-        stream: false, requests: 1, retryWaitsMs: [30000], firstEventMs: null, reason: 'Expired during rate-limit backoff.' });
+        stream: false, attempts: 1, httpRequests: 0, retryWaitsMs: [30000], firstEventMs: null, reason: 'Expired during rate-limit backoff.' });
       create.mockResolvedValue(response as any);
       diagnostics.mockClear();
       expect(await callJudge('Judge this.', undefined, { signal: new AbortController().signal })).toEqual({ passed: true });

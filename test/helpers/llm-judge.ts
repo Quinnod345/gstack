@@ -135,7 +135,21 @@ export async function callJudge<T>(
   // could be exhausted before a frontier judge emitted any JSON.
   const resolvedModel = resolveEvalModel('judge', model);
   const maxTokens = opts?.max_tokens ?? DEFAULT_JUDGE_MAX_TOKENS;
-  const client = new Anthropic();
+  // What a cancelled request had received, so a judge deadline names rate-limit
+  // waits, SDK retries, a stream with no events, or a long thinking phase. Counts
+  // only, never content; an observer that throws never changes the judge outcome.
+  const started = performance.now();
+  const elapsedMs = () => Math.round(performance.now() - started);
+  const progress = { httpRequests: 0, httpStatuses: [] as number[], retryWaitsMs: [] as number[], connectedMs: null as number | null,
+    firstEventMs: null as number | null, lastEventMs: null as number | null, block: null as string | null, thinkingChars: 0,
+    textChars: 0, messageId: null as string | null, requestId: null as string | null };
+  const observe = (record: () => void) => { try { record(); } catch {} };
+  const client = new Anthropic({ fetch: async (...args: Parameters<typeof fetch>) => {
+    progress.httpRequests += 1;
+    const response = await globalThis.fetch(...args);
+    progress.httpStatuses.push(response.status);
+    return response;
+  } });
 
   const request = {
     model: resolvedModel,
@@ -146,16 +160,14 @@ export async function callJudge<T>(
       ...(opts?.effort === undefined ? {} : { effort: opts.effort }) } }),
     messages: [{ role: 'user' as const, content: prompt }],
   };
-  // What a cancelled request had received, so a judge deadline names rate-limit
-  // waits, a stream with no events, or a long thinking phase. Counts only, never content.
-  const started = performance.now();
-  const elapsedMs = () => Math.round(performance.now() - started);
-  const progress = { retryWaitsMs: [] as number[], firstEventMs: null as number | null, lastEventMs: null as number | null,
-    block: null as string | null, thinkingChars: 0, textChars: 0, messageId: null as string | null, requestId: null as string | null };
   const makeRequest = () => {
     if (!opts?.stream) return client.messages.create(request, signal ? { signal } : undefined);
     const stream = client.messages.stream(request, signal ? { signal } : undefined);
-    stream.on('streamEvent', event => {
+    stream.on('connect', () => observe(() => {
+      progress.connectedMs ??= elapsedMs();
+      progress.requestId ??= stream.request_id ?? null;
+    }));
+    stream.on('streamEvent', event => observe(() => {
       progress.firstEventMs ??= elapsedMs();
       progress.lastEventMs = elapsedMs();
       progress.requestId ??= stream.request_id ?? null;
@@ -163,7 +175,7 @@ export async function callJudge<T>(
       if (event.type === 'content_block_start') progress.block = event.content_block.type;
       if (event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') progress.thinkingChars += event.delta.thinking.length;
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') progress.textChars += event.delta.text.length;
-    });
+    }));
     return stream.finalMessage();
   };
 
@@ -199,8 +211,8 @@ export async function callJudge<T>(
     if (signal?.aborted) {
       console.error(JSON.stringify({
         type: 'llm-judge-aborted', model: resolvedModel, stream: opts?.stream === true, elapsedMs: elapsedMs(),
-        requests: attempt + 1, ...progress,
-        reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason),
+        attempts: attempt + 1, ...progress,
+        reason: (signal.reason instanceof Error ? signal.reason.message : String(signal.reason)).slice(0, 200),
       }));
     }
     throw error;

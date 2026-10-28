@@ -139,8 +139,8 @@ test('a judge aborted mid-stream retains what it had received, as counts without
   const diagnostic = diagnostics.mock.calls[0]![0];
   expect(diagnostic).not.toContain('PRIVATE_');
   const event = JSON.parse(diagnostic);
-  expect(event).toMatchObject({ type: 'llm-judge-aborted', model: 'claude-fable-5-1', stream: true, requests: 1,
-    retryWaitsMs: [], block: 'thinking', thinkingChars: 'PRIVATE_THINKING'.length, textChars: 0,
+  expect(event).toMatchObject({ type: 'llm-judge-aborted', model: 'claude-fable-5-1', stream: true, attempts: 1,
+    httpRequests: 1, httpStatuses: [200], retryWaitsMs: [], block: 'thinking', thinkingChars: 'PRIVATE_THINKING'.length, textChars: 0,
     messageId: 'msg_stalled', requestId: 'req_stalled', reason: failure.message });
   expect(event.firstEventMs).toBeGreaterThanOrEqual(0);
   expect(event.lastEventMs).toBeGreaterThanOrEqual(event.firstEventMs); // gstack-timing-ok: ordering of two recorded offsets, not an elapsed-time bound
@@ -159,12 +159,67 @@ test('a stream that never sent an event is retained as such, and provider errors
   await requested;
   controller.abort(new Error('deadline'));
   await rejected;
-  expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ type: 'llm-judge-aborted', firstEventMs: null,
-    lastEventMs: null, block: null, thinkingChars: 0, messageId: null, requestId: null, reason: 'deadline' });
+  expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ type: 'llm-judge-aborted', httpRequests: 1,
+    httpStatuses: [], connectedMs: null, firstEventMs: null, lastEventMs: null, block: null, thinkingChars: 0, messageId: null, requestId: null, reason: 'deadline' });
 
   diagnostics.mockClear();
   transport.mockResolvedValue(new Response(JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'boom' } }),
     { status: 500, headers: { 'content-type': 'application/json', 'x-should-retry': 'false' } }));
   await expect(callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: new AbortController().signal })).rejects.toThrow();
   expect(diagnostics).not.toHaveBeenCalled();
+});
+
+test('a deadline after headers but before any event retains the connection and its request id', async () => {
+  let reading!: () => void;
+  const connected = new Promise<void>(resolve => { reading = resolve; });
+  transport.mockImplementation(async (_url: string, init: RequestInit) => new Response(new ReadableStream({
+    start(stream) { init.signal!.addEventListener('abort', () => stream.error(init.signal!.reason), { once: true }); },
+    pull() { reading(); return new Promise<void>(() => {}); },
+  }, { highWaterMark: 0 }), { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_quiet' } }));
+  const controller = new AbortController();
+  const rejected = callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: controller.signal }).catch(error => error);
+  await connected;
+  controller.abort(new Error('deadline'));
+  await rejected;
+  const event = JSON.parse(diagnostics.mock.calls[0]![0]);
+  expect(event).toMatchObject({ httpRequests: 1, httpStatuses: [200], requestId: 'req_quiet', firstEventMs: null, block: null });
+  expect(event.connectedMs).toBeGreaterThanOrEqual(0);
+});
+
+test('SDK-internal 429 retries are counted, so throttling never reads as a silent stream', async () => {
+  let resent!: () => void;
+  const retried = new Promise<void>(resolve => { resent = resolve; });
+  transport.mockResolvedValueOnce(new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } }),
+    { status: 429, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' } }));
+  transport.mockImplementationOnce((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    resent();
+  }));
+  const controller = new AbortController();
+  const rejected = callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: controller.signal }).catch(error => error);
+  await retried;
+  controller.abort(new Error('deadline'));
+  await rejected;
+  expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ attempts: 1, httpRequests: 2, httpStatuses: [429],
+    retryWaitsMs: [], connectedMs: null, firstEventMs: null });
+});
+
+test('an event the diagnostic cannot read never changes the judge result', async () => {
+  const unreadable = response();
+  const body = (await unreadable.text()).replace('"thinking":"PRIVATE_THINKING"', '"thinking":null');
+  transport.mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }));
+  expect(await callJudge('score the whole bundle', 'claude-fable-5-1', {
+    max_tokens: 65_536, stream: true, jsonSchema: WORKFLOW_JUDGE_RESPONSE_SCHEMA,
+  })).toEqual(scores);
+});
+
+test('an abort reason is retained at most 200 characters long', async () => {
+  transport.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+  }));
+  const controller = new AbortController();
+  const rejected = callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: controller.signal }).catch(error => error);
+  controller.abort(new Error('x'.repeat(500)));
+  await rejected;
+  expect(JSON.parse(diagnostics.mock.calls[0]![0]).reason).toBe('x'.repeat(200));
 });

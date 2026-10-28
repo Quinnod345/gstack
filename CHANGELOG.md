@@ -10,15 +10,15 @@
 - **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
 
 ### Changed
-- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, requests and 429 waits, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason. Counts only, never content. Deadlines, effort, samples and thresholds are unchanged.
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, wrapper attempts and 429 waits, HTTP requests and statuses (so the SDK's own retries show), connection, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason (at most 200 characters). Counts only, never content; an observer that throws cannot change a judge result. Deadlines, effort, samples and thresholds are unchanged.
 
 ### Tests
 - `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
-- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events and a cancelled 429 wait, with no-abort controls; all three fail with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events, one cancelled after headers, an SDK-retried 429, a cancelled 429 wait, an event the observer cannot read and an overlong reason, with no-abort controls; each fails with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
 - Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
 
 ### Gate integrity
-- No threshold, sample, trial, deadline or case-kind change. Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+- No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
 
 ## [1.91.294.0] - 2026-10-28
 
