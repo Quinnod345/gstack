@@ -1619,13 +1619,14 @@ describe('Codex skill', () => {
     expect(content).toContain('200');
   });
 
-  test('adversarial review in /ship always runs both passes', () => {
+  test('adversarial review in /ship runs the passes the review plan dispatches', () => {
     const content = readShipUnion();
-    expect(content).toContain('Adversarial review (always-on)');
+    expect(content).toContain("Step 9's last full-pass plan governs this step");
+    expect(content).toContain('## Step 11: Adversarial review\n');
     expect(content).toContain('adversarial-review');
     expect(content).toContain('run-with-timeout --effort high ');
     expect(content).toContain('Investigate and fix');
-    expect(content).toContain('Claude adversarial subagent (always runs)');
+    expect(content).toContain('Claude adversarial subagent (on `DISPATCH: adversarial-native`)');
   });
 
   test('scope drift detection in /review and /ship', () => {

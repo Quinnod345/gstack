@@ -2,11 +2,12 @@
 <!-- Regenerate: bun run gen:skill-docs -->
 **Step 9's last full-pass plan governs this step:** run the native pass only on
 `DISPATCH: adversarial-native` and the outside voice only on
-`DISPATCH: outside-voice`; otherwise print `ADVERSARIAL: skipped (review plan)`.
+`DISPATCH: outside-voice`. With neither, print `ADVERSARIAL: skipped (review plan)`
+and take decision 3 of Finish the adversarial phase.
 
-## Step 11: Adversarial review (always-on)
+## Step 11: Adversarial review
 
-Every diff gets the Claude adversarial pass. Add Codex when its preflight is ready; unavailable or disabled outside coverage stays explicit.
+Unavailable or disabled outside coverage stays explicit.
 
 **Detect diff size:**
 
@@ -77,13 +78,12 @@ Branch on the echoed `CODEX_MODE`:
 
 `CODEX_MODE: disabled` means skip the Codex passes ONLY.
 `ready` and `unverified` run them; every other mode skips them with the printed reason.
-The Claude adversarial subagent always runs.
 
 **User override:** If the user explicitly requested "full review", "structured review", or "P1 gate", also run the Codex structured review regardless of diff size (still requires `CODEX_MODE: ready` (or `unverified`)).
 
 ---
 
-### Claude adversarial subagent (always runs)
+### Claude adversarial subagent (on `DISPATCH: adversarial-native`)
 
 Before dispatch, run `~/.claude/skills/gstack/bin/gstack-review-log --start adversarial-review`
 and save the returned token for this native attempt. Do the same before each outside
@@ -281,7 +281,7 @@ Retain the historical review-log skill ID; add `"host":"claude","outside_provide
 After all passes complete, synthesize findings across all sources:
 
 ```
-ADVERSARIAL REVIEW SYNTHESIS (always-on, N lines):
+ADVERSARIAL REVIEW SYNTHESIS (N lines):
 ════════════════════════════════════════════════════════════
   High confidence (found by multiple sources): [findings agreed on by >1 pass]
   Unique to the parent checklist/specialists: [from earlier steps]
@@ -316,7 +316,7 @@ in order before leaving Step 11:
    Step 9 completes full review before fixes; any further repair inserts its checks
    ahead of the remaining items. These fresh reviews after code edits are not recovery retries.
    Returning here never resets Step 9's three-cycle fix limit.
-3. **Native complete with no queued fixes:** Finish the memory updates below,
+3. **Native complete with no queued fixes, or not dispatched:** Finish the memory updates below,
    then continue to Step 11.5. Never jump directly to release preparation.
 
 ---

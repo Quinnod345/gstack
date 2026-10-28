@@ -23,7 +23,7 @@ test('adversarial outside failures retain the required native pass without dupli
       expect(preflight).toMatch(/(?:do not dispatch a duplicate|without duplicating it)/);
       expect(preflight).not.toMatch(/fall(?:ing)? back to (?:a|the) .*subagent/i);
       const output = generateAdversarialStep(ctx);
-      expect(output).toContain('adversarial subagent (always runs)');
+      expect(output).toContain(skillName === 'ship' ? 'adversarial subagent (on `DISPATCH: adversarial-native`)' : 'adversarial subagent (always runs)');
       expectMentions(output, [['do not', 'dispatch', 'retain']], 'output');
       expect(output.match(/Retain the required native pass without duplicating it; it cannot complete outside coverage\./g)).toHaveLength(2);
       expect(output).not.toContain("Use the caller's fallback");

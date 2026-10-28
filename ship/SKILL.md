@@ -329,10 +329,10 @@ repository-landing asks, including on Apple repos.
 
 4. **Carry check.** If `gh pr list --head <branch-name> --state open --json number`
    names a PR, run `~/.claude/skills/gstack/bin/gstack-ship-receipt carry --pr <n> --base <base> --dry-run`.
-   `CARRY: would carry` (same product patch-id): skip review, fix what the merge broke
-   (CHANGELOG, size caps), run `gstack-pregate --allow-repo-commands`, then carry without
-   `--dry-run` plus `--pregate .gstack/tmp/pregate.json`. `CARRY: carried` binds HEAD: stop.
-   A failed check, HEAD moving after pregate, `refused` or `current` re-runs Steps 2–16.
+   `CARRY: would carry` (base merge committed, same product patch-id): skip review, fix
+   what it broke (CHANGELOG, size caps), run `gstack-pregate --allow-repo-commands`, then carry
+   without `--dry-run` plus `--pregate .gstack/tmp/pregate.json`. `CARRY: carried` binds HEAD and
+   ends the run. A failed check, HEAD moving after pregate, `refused` or `current` re-runs Steps 2–16.
 
 5. Display historical readiness using the dashboard below, then finish Step 1.
    Prior CLEAR reviews or dashboard skips never replace Step 9's gates.
@@ -396,8 +396,7 @@ This verdict never skips Step 9 or its finding, approval and convergence gates. 
 Other rows provide context, not a substitute for Eng Review:
 - Recommend CEO Review for product/business or scope decisions, not routine fixes or cleanup.
 - Recommend Design Review for UI/UX work, not backend, infrastructure or prompt-only work.
-- Adversarial review always includes a native pass. Available, enabled outside
-  challenges supplement it; diffs of 200+ lines also get the structured P1 gate.
+- Step 9's review plan decides the adversarial passes (Step 11).
 - Outside Voice is the default-on plan review after CEO/Eng review. `codex_reviews`
   disables that extra step. Provider failure uses native fallback and records
   missing outside coverage; this dashboard row never gates shipping.
@@ -509,10 +508,10 @@ repeat Step 2 (decisions included) on the merged content, then Step 4.
    last 3.5 `review-fix-check`) and Step 11 native record (`skill:"adversarial-review"`;
    none after `ADVERSARIAL: skipped`). Match each to its saved
    handle, original token and source; reject outside-provider or older records.
-2. **Compare their content.** Require the native record's `review_binding.state`
-   to be `verified`. All three snapshots must match: its `wtree` (none: `review_freshness`
-   `CURRENT`), the Step 9 record's
-   `review_binding.start_wtree` and `review_binding.end_wtree`. A mismatch or missing
+2. **Compare their content.** All three snapshots must match: the native record's
+   `wtree` (its `review_binding.state` `verified`), the Step 9 record's
+   `review_binding.start_wtree` and `review_binding.end_wtree`; after a planned skip, the
+   last two with `review_freshness` `CURRENT`. A mismatch or a missing required
    record/field blocks release preparation: report **Review records missing or mismatched**
    and insert `9 → 10 → 11 → 11.5` before Step 12. Bind the new records at 11.5.
    Never attach new tokens to old work.
@@ -752,7 +751,7 @@ command, result/counts, timestamp and log, never resample. Mandatory reviews sti
 `--allow-paths` exempts only release metadata. A `package.json` version-only edit
 can qualify; scripts, dependencies and runtime configuration require live tests.
 Uncertain edits cannot be exempted. Docs, TODO edits, new/generated tests and fixes
-make evidence STALE even without a new code review. Use this example only once
+make evidence STALE even without a new code review; a Step 14 TODOS.md edit reruns them. Use this example only once
 every allowed edit is release metadata:
 
 ```bash
