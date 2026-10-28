@@ -14,8 +14,8 @@
  * values is waived as version-stamp-only (lib/pregate/stamp-only.ts) and named
  * on its own line; any other change to it still needs a lane.
  * A removed path (deleted, or a rename's old name) no remaining test selects
- * owes no lane when it is a rename's old name, a deleted test, or deleted code
- * nothing remaining imports or names, and is named on its own
+ * owes no lane when it is a renamed or deleted test, or deleted JS, TS, Python
+ * or Dart code nothing remaining imports or names, and is named on its own
  * `removed (no lane owed)` line; a deleted test runs its owning suite or names
  * the files that lost their last test (issue #3529). Any other removal owes
  * what an edit owes.

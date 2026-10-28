@@ -15,7 +15,7 @@ import { PREGATE_CONFIG_PATH } from './config';
 import { isDocsEmptyLane, isFixtureOrCiTree, isInertNoTests, isProtectedTree } from './docs-lane';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { buildGraph, isTestFile, listRepoFiles, SOURCE_EXT, testsFor, type Graph } from './import-graph';
+import { buildGraph, isTestFile, listRepoFiles, testsFor, type Graph } from './import-graph';
 import { stampFileKind, versionStampOnly } from './stamp-only';
 import type { PregateContext, RemoteObligation } from './types';
 import type { Lane } from './workflows';
@@ -105,35 +105,52 @@ function readWorkingTree(repoRoot: string, rel: string): { text: string | null; 
 /** Tracked files matching a registry entry's output globs. */
 function outputsOf(all: readonly string[], globs: readonly string[]): string[] { return all.filter(f => matchesAny(globs, f)); }
 
-/** Tracked files outside Markdown that name `file` by its repo path (a config, a script or a workflow may load it where the import graph cannot see). */
+/**
+ * Tracked files outside Markdown that name `file` where the import graph cannot see (a config, a script or a workflow): by its
+ * repo path anywhere, or by its path relative to an ancestor directory from a file under that directory (`preload = ["./setup.ts"]`).
+ */
 function namedBy(ctx: PregateContext, file: string): string[] {
-  const r = spawnSync('git', ['grep', '--untracked', '-l', '-F', '-e', file, '--', '.', ':(exclude)*.md', ':(exclude)*.mdx'], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: ctx.env });
-  if (r.status === 1) return [];
-  return r.status === 0 ? (r.stdout ?? '').split('\n').filter(Boolean) : ['(git grep failed)'];
+  const parts = file.split('/');
+  const hits = new Set<string>();
+  for (let i = 0; i < parts.length; i++) {
+    const scope = parts.slice(0, i).join('/') || '.';
+    const r = spawnSync('git', ['grep', '--untracked', '-l', '-F', '-e', parts.slice(i).join('/'), '--', scope, ':(exclude)*.md', ':(exclude)*.mdx'], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: ctx.env });
+    if (r.status === 1) continue;
+    if (r.status !== 0) return ['(git grep failed)'];
+    for (const f of (r.stdout ?? '').split('\n')) if (f) hits.add(f);
+  }
+  return [...hits].sort();
 }
+
+/** Languages whose importers the graph resolves file by file; Go packages, Ruby requires, shell `source`, Rust modules and bins are not. */
+const RESOLVED_IMPORTS = /\.(?:[cm]?[jt]sx?|py|dart)$/;
+/** Files a runner or interpreter loads by name, which no import or path mention points at. */
+const LOADED_BY_NAME = /(?:^|\/)(?:[^/]*\.config\.[cm]?[jt]s|\.[^/]*rc\.[cm]?js|(?:conftest|sitecustomize|usercustomize|setup|noxfile|__init__|__main__)\.py)$/;
 
 const shown = (files: readonly string[]) => `${files.slice(0, 8).join(' ')}${files.length > 8 ? ` … +${files.length - 8} more` : ''}`;
 
 /**
  * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects, or `refused` when it must
- * fail closed as no lane. A rename's old name defers to the new path, unless a test was renamed to a non-test path. A deleted
- * test runs the tests that directly exercise the files it exercised and names those left with no test at all. Any other removed
- * file owes nothing only when it is code the import graph reads (outside fixture, golden and CI trees), no remaining file
- * imports it and no remaining non-Markdown file names it: deleting a manifest, a lockfile, a config or a workflow owes what
- * editing it owes.
+ * fail closed as no lane. Nothing is waived while a remaining file imports it, directly or through a directory reference. A
+ * test renamed to a test defers to its new name. A deleted JS, TS, Python, Dart or bats test, or one renamed to a non-test
+ * path, runs the tests that directly exercise the files it exercised and names those left with no test at all. Any other
+ * removed file, a rename's old name included, owes nothing only when it is JS, TS, Python or Dart outside fixture, golden and
+ * CI trees, not loaded by name, and no remaining non-Markdown file names it: deleting a manifest, a config, a workflow or a Go
+ * file owes what editing it owes.
  */
 function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string>, file: string): { removed: Removed; suite: string[] } | { refused: string } {
+  const edges = [...graph.reverse].filter(([k]) => k === file || (k.endsWith('/**') && file.startsWith(k.slice(0, -2)))).flatMap(([, list]) => list);
+  const importers = [...new Set(edges.map(e => e.from))].filter(f => !gone.has(f) && path.posix.basename(f) !== 'Cargo.toml').sort();
+  if (importers.length) return { refused: `removed, but still imported by ${shown(importers)}` };
   const renamedTo = ctx.touched.find(t => t.renamedFrom === file)?.path;
-  if (renamedTo && !(isTestFile(file) && !isTestFile(renamedTo))) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
+  if (renamedTo && isTestFile(file) && isTestFile(renamedTo)) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
   if (!isTestFile(file)) {
-    const code = (SOURCE_EXT.test(file) || file.startsWith('bin/')) && !isFixtureOrCiTree(file) && path.posix.basename(file) !== 'conftest.py';
-    if (!code) return { refused: 'removed, but not code the import graph reads (a manifest, lockfile, config, fixture or workflow owes what an edit owes)' };
-    const importers = [...new Set((graph.reverse.get(file) ?? []).map(e => e.from))].filter(f => !gone.has(f)).sort();
-    if (importers.length) return { refused: `removed, but still imported by ${shown(importers)}` };
+    if (!RESOLVED_IMPORTS.test(file) || isFixtureOrCiTree(file) || LOADED_BY_NAME.test(file)) return { refused: 'removed, but not JS, TS, Python or Dart code whose importers the graph resolves (a manifest, config, fixture, workflow, file loaded by name, or Go, Ruby, shell, Rust or bin file owes what an edit owes)' };
     const names = namedBy(ctx, file);
     if (names.length) return { refused: `removed, but still named by ${shown(names)}` };
-    return { removed: { file, note: 'nothing in the tree references it', lostCoverage: [] }, suite: [] };
+    return { removed: { file, note: renamedTo ? `old name of ${renamedTo}; nothing in the tree references it` : 'nothing in the tree references it', lostCoverage: [] }, suite: [] };
   }
+  if (!RESOLVED_IMPORTS.test(file) && !file.endsWith('.bats')) return { refused: 'removed, but a Go or Ruby test may define helpers its package still uses, which the graph cannot see' };
   const subjects = graph.goneSubjects?.get(file);
   if (!subjects) return { refused: 'removed test whose merge-base text could not be read (not a regular file there, invalid UTF-8 or over 1 MiB)' };
   if (!subjects.length) return { removed: { file, note: 'it exercised no file still in the tree', lostCoverage: [] }, suite: [] };

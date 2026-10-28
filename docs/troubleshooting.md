@@ -3211,15 +3211,19 @@ versions, line endings or any non-version byte changed, one under a test,
 fixture, golden, `.gstack/` or workflow tree, or one added, deleted, renamed
 or re-moded, is still this error; `--explain` prints `not version-stamp-only (<reason>)`
 for it.
-A path the branch removed is usually not this error either: a rename's old
-name, a deleted test, and a deleted code file nothing in the tree still names
-print `removed (no lane owed): <path> — <why>` instead (a deleted test runs its
-owning suite or says `coverage removed: <file> has no remaining test`). A
-removal owes what an edit owes, so these are still this error: a deleted
-manifest, lockfile, config, conftest.py, fixture, golden or workflow, a deleted
-file remaining code still imports or a config or script still names, a deleted test whose merge-base text
-cannot be read (a symlink, invalid UTF-8, over 1 MiB), and a modified file whose
-only test the branch deleted.
+A path the branch removed is usually not this error either: a renamed test, a
+deleted JS, TS, Python, Dart or bats test, and a deleted JS, TS, Python or Dart
+file nothing in the tree still imports or names print `removed (no lane owed):
+<path> — <why>` instead (a deleted test runs its owning suite or says `coverage
+removed: <file> has no remaining test`). A removal owes what an edit owes, so
+these are still this error: a deleted or renamed manifest, lockfile, config,
+fixture, golden or workflow, a file a runner loads by name (`*.config.ts`,
+`conftest.py`, `sitecustomize.py`), a Go, Ruby, shell, Rust or bin file, a Go
+or Ruby test, a file remaining code still imports or a config or script still
+names (by repo path or relative to the config), a deleted test whose merge-base
+text cannot be read (a symlink, invalid UTF-8, over 1 MiB), and a modified file
+whose only test the branch deleted. `--explain` prints the reason as
+`<path>: removed, but …`.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
 for files with no behaviour) under `dependencies` in `.gstack/pregate.json` (or the user-owned file the message names).

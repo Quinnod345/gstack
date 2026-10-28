@@ -1,7 +1,8 @@
 /**
  * Paths a branch removes (deleted files and the old name of a rename) owe no lane
- * when only a rename, a deleted test or unreferenced code goes (issue #3529,
- * gbrain#7829); any other removal owes what an edit owes. Each waived one
+ * when only a renamed or deleted test, or JS, TS, Python or Dart code nothing
+ * imports or names, goes (issue #3529, gbrain#7829); any other removal owes what
+ * an edit owes. Each waived one
  * prints a visible `removed (no lane owed): <path> — <why>` line: a deleted test
  * runs its owning suite (the remaining tests of the files it exercised) or says
  * which subjects lost their last test; a modified file whose only test was
@@ -82,7 +83,7 @@ describe('removed paths in lanes (#3529)', () => {
     move(repo, 'lib/util.js', 'lib/util2.js', ['test/util.test.js', t => t.replace('../lib/util.js', '../lib/util2.js')]);
     const r = lanes(repo);
     expect(r.check.status).toBe('pass');
-    expect(r.removed).toEqual(['removed (no lane owed): lib/util.js — old name of lib/util2.js']);
+    expect(r.removed).toEqual(['removed (no lane owed): lib/util.js — old name of lib/util2.js; nothing in the tree references it']);
     expect(r.ran).toContain('test/util.test.js');
   });
 
@@ -201,6 +202,54 @@ describe('removed paths in lanes (#3529)', () => {
       expect(r.removed).toEqual([]);
       const why = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
       expect(`${why.out}${why.err}`).toContain(`${deleted}: removed, but still imported by ${importer}`);
+    });
+
+    const GO_MOD = 'module example.com/demo\n\ngo 1.22\n';
+    test.each([
+      ['a Go file its package still uses', { 'go.mod': GO_MOD, 'pkg/value.go': 'package pkg\n\nfunc value() int { return 1 }\n', 'pkg/main.go': 'package pkg\n\nfunc Main() int { return value() }\n' }, 'pkg/value.go', 'not JS, TS, Python or Dart'],
+      ['a Go test whose package may share its helpers', { 'go.mod': GO_MOD, 'pkg/a.go': 'package pkg\n', 'pkg/a_test.go': 'package pkg\n\nfunc helper() {}\n', 'pkg/b_test.go': 'package pkg\n' }, 'pkg/a_test.go', 'Go or Ruby test may define helpers'],
+      ['a Ruby file loaded by require_relative', { 'lib/value.rb': 'VALUE = 1\n', 'lib/main.rb': "require_relative 'value'\n" }, 'lib/value.rb', 'not JS, TS, Python or Dart'],
+      ['a shell helper a bin sources', { 'bin/helper.sh': 'greet() { echo hi; }\n', 'bin/tool': '#!/bin/sh\nDIR=$(dirname "$0")\n. "$DIR/helper.sh"\ngreet\n' }, 'bin/helper.sh', 'not JS, TS, Python or Dart'],
+      ['a config its runner loads by name', { 'vitest.config.ts': 'export default {};\n' }, 'vitest.config.ts', 'loaded by name'],
+      ['a Python startup file', { 'sitecustomize.py': 'import builtins\nbuiltins.FEATURE = True\n' }, 'sitecustomize.py', 'loaded by name'],
+      ['a setup file a nested config names relative to itself', { 'packages/app/setup.ts': 'export {};\n', 'packages/app/bunfig.toml': '[test]\npreload = ["./setup.ts"]\n' }, 'packages/app/setup.ts', 'still named by packages/app/bunfig.toml'],
+    ])('deleting %s fails closed', (_what, files, deleted, why) => {
+      const repo = fixture({ baseFiles: files });
+      commit(repo, { [deleted]: null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.removed).toEqual([]);
+      const explain = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(explain.out + explain.err).toContain(deleted + ': removed');
+      expect(explain.out + explain.err).toContain(why);
+    });
+
+    test('a rename into a waived path does not waive the old name: package.json renamed to Markdown fails closed', () => {
+      const repo = fixture();
+      move(repo, 'package.json', 'docs/package.md');
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain('package.json');
+      expect(r.removed).toEqual([]);
+    });
+
+    test('a renamed source remaining untested code still imports by its old name fails closed', () => {
+      const repo = fixture({ baseFiles: { 'lib/a.js': 'exports.a = 1;\n', 'lib/u.js': "exports.u = require('./a.js').a;\n", 'notes/plan.md': '# plan\n' } });
+      move(repo, 'lib/a.js', 'notes/a.md');
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain('lib/a.js');
+      expect(r.removed).toEqual([]);
+    });
+
+    test('a deleted file a remaining bin reads through its directory fails closed', () => {
+      const repo = fixture({ baseFiles: { 'lib/plugins/a.js': 'exports.a = 1;\n', 'lib/plugins/b.js': 'exports.b = 2;\n', 'bin/load.js': "const fs = require('node:fs');\nfor (const f of fs.readdirSync('lib/plugins')) require('../lib/plugins/' + f);\n" } });
+      commit(repo, { 'lib/plugins/a.js': null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.removed).toEqual([]);
+      const explain = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(explain.out + explain.err).toContain('lib/plugins/a.js: removed, but still imported by bin/load.js');
     });
 
     test('a modified file whose only test was deleted still fails PREGATE_NO_LANE', () => {
