@@ -330,7 +330,7 @@ const GENERATED_WITH_GUIDANCE = [
   // CSO's private startup does not import the shared synchronous-dispatch
   // guidance and its bounded worker policy is specified in its own skeleton.
   'design-consultation/sections/proposal-and-preview.md',
-  'design-review/SKILL.md',
+  'design-review/sections/outside-voices.md',
   'document-release/sections/release-body.md',
   'office-hours/sections/second-opinion.md',
   'office-hours/sections/design-and-handoff.md',
