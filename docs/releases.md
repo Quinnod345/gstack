@@ -95,7 +95,8 @@ missing) is not a new move, and a run without `ref` finishes that cut before
 it considers anything newer.
 
 The floor fails closed when it cannot date the move. Three cases are
-`FLOOR_UNKNOWN`, red on every trigger. They are a `stable` that no annotated tag dates
+`FLOOR_UNKNOWN`, red on every trigger, and only a verified security cut gets
+past them, as it gets past the floor. They are a `stable` that no annotated tag dates
 (only this tool moves `stable` and it tags first, so that state means someone
 moved it by hand), a release that cannot be read (a GitHub API error is not
 "no release"), and a `ref` cut while `stable`'s own release is still
@@ -145,8 +146,8 @@ and the fix still ships with it (there are no cherry-picks); the plan's
 `RIDING_ALONG:` line counts them.
 
 The reason is public. It goes, as one line of at most 300 characters (control
-characters and backticks stripped), into the tag message and the release
-notes: `**Security release:** <reason> (verified: <evidence>)`. For an
+characters become spaces and backticks become apostrophes), into the tag
+message and the release notes: ``**Security release:** `<reason>` (verified: <evidence>)``. For an
 embargoed fix, use path 2 with a neutral commit subject and a labelled issue
 whose title says no more than the fix does, and keep advisory details out of
 the reason until disclosure.
@@ -261,6 +262,6 @@ is exercised against real check runs before it merges.
 | `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
 | `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
 | `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
-| `FLOOR: clear|refused|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
-| `SECURITY: <reason> (verified: <evidence>)`, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |
+| `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
+| ``SECURITY: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |
 | `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |
