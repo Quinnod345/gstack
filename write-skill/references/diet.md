@@ -5,7 +5,7 @@ nicobailon/skill-diet (MIT) at 5f41df1.
 
 ## 1. Report first (free)
 
-Run `gstack-skill-bill <skill>` and, in a gstack checkout, `bun run scripts/skill-bin-drift.ts --skill <skill>`.
+Run `~/.claude/skills/gstack/bin/gstack-skill-bill <skill>` and, in a gstack checkout, `bun run scripts/skill-bin-drift.ts --skill <skill>`.
 Show the user the size per level, every drift finding, and the moves you propose (what goes to `references/`, to the
 tool's `--help` or errors, or out). Ask go or no-go before writing eval tasks.
 
@@ -42,7 +42,8 @@ per reference.
 Run the before, after and no-skill versions through the shared skill eval
 (docs/designs/SKILL_EVAL_CONTRACT.md), 3 trials each on the same model. Ship only when no task whose before panel
 passed fails after, no safety task breaks, and after is not worse by more than chance. Until the shared eval is
-available, run upstream skill-diet's `scripts/eval.mjs` with the same tasks and apply those rules to its per-task table;
+available, run upstream skill-diet's `scripts/eval.mjs` at commit 5f41df1 (the version this text adapts) with the
+same tasks and apply those rules to its per-task table;
 when neither can run, write "eval: not run" and ship only the tool and drift fixes, not the cuts.
 
 Commit with `Skill-Diet: <name>` and `Skill-Size: <before>→<after> bytes (<file>)` lines, and report tokens per run

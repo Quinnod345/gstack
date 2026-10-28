@@ -63,7 +63,7 @@ When code changes a name or flag a skill teaches, update the skill in the same c
 
 ## 4. Check and record
 
-- Run `gstack-skill-bill` before and after, and put `Skill-Size: <before>→<after> bytes (<file>)` in the commit
+- Run `~/.claude/skills/gstack/bin/gstack-skill-bill` before and after, and put `Skill-Size: <before>→<after> bytes (<file>)` in the commit
   message. DUE means it grew over 10% since its last `Skill-Diet:` commit: diet it instead of adding.
 - In a gstack checkout: `bun test test/skill-bin-drift.test.ts test/parity-suite.test.ts` and the budgets in
   CONTRIBUTING.md. A red context-budget ratchet means diet, not a higher ceiling.

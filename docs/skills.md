@@ -910,7 +910,7 @@ gstack's own templates and for any skill folder you own.
 
 `/write-skill` is not `/skillify`: `/skillify` codifies a browser scrape into a browser-skill. Adapted from
 [nicobailon/skill-diet](https://github.com/nicobailon/skill-diet) (MIT). The first diet, /learn, cut its template from
-5,797 to 2,707 bytes.
+5,797 to 2,955 bytes.
 
 ## `/test-audit`
 
