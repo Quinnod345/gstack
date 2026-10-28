@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 const ROOT = path.resolve(import.meta.dir, '..');
-test.each(['success', 'bash-edit', 'max-turns', 'no-edit', 'no-commit', 'runner', 'retry', 'directory', 'recording', 'late-timeout'])
+test.each(['success', 'bash-edit', 'max-turns', 'no-edit', 'no-commit', 'runner', 'retry', 'directory', 'recording', 'late-timeout', 'slow-setup'])
   ('QA attempt recording and fixture ownership: %s', scenario => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-fix-body-'));
     const script = path.join(dir, 'body.fixture.test.ts');
@@ -21,9 +21,10 @@ const scenario = ${JSON.stringify(scenario)};
 const attempts = [], records = [], servers = [];
 const late = scenario === 'late-timeout';
 const workMs = 1000, drainMs = 80;
-const realNow = Date.now;
-let finalized = false, outerMs, frozenAt;
+const realNow = Date.now, slowSetup = scenario === 'slow-setup';
+let finalized = false, outerMs, frozenAt, clock = realNow();
 if (late) Date.now = () => frozenAt ?? realNow();
+else if (slowSetup) Date.now = () => clock;
 const collector = { addTest: entry => {
   records.push({ ...entry, afterFinalization: finalized });
   if (scenario === 'recording') throw new Error('QA recorder failure');
@@ -38,7 +39,7 @@ Bun.serve = options => {
   return server;
 };
 mock.module(path.join(root, 'test/helpers/aside-available.ts'), () => ({ asideAvailable: () => false }));
-if (late) mock.module(path.join(root, 'test/helpers/eval-budgets.ts'), () => ({
+if (late || slowSetup) mock.module(path.join(root, 'test/helpers/eval-budgets.ts'), () => ({
   JUDGE_MS: 120_000, CAPTURE_MS: 300_000, CAPTURE_LONG_MS: workMs,
 }));
 mock.module(path.join(root, 'test/helpers/e2e-helpers.ts'), () => ({
@@ -54,7 +55,7 @@ mock.module(path.join(root, 'test/helpers/e2e-helpers.ts'), () => ({
     test(id, late ? () => { frozenAt = realNow(); return body(); } : body, late ? budget : 5000);
   },
   copyDirSync: (source, target) => fs.cpSync(source, target, { recursive: true }),
-  setupBrowseShims: cwd => fs.mkdirSync(path.join(cwd, 'browse/bin'), { recursive: true }),
+  setupBrowseShims: cwd => { fs.mkdirSync(path.join(cwd, 'browse/bin'), { recursive: true }); if (slowSetup) clock += 400; },
   logCost: () => {}, createEvalCollector: () => collector, finalizeEvalCollector: async () => {},
   recordE2E: (_collector, name, suite, result, extra) => collector.addTest({
     name, suite, exit_reason: result.exitReason, model: result.model,
@@ -160,6 +161,7 @@ await import(path.join(root, 'test/skill-e2e-qa-workflow.test.ts'));
         expect(records[0].exit_reason).toBe('timeout');
         expect(child.stderr).not.toContain('Unhandled error between tests');
       }
+      if (scenario === 'slow-setup') expect(attempts[0].captureBudgetMs).toBe(1000 - 400);
       if (scenario === 'directory') {
         expect(attempts[0].directoryStatus).toBe(404);
         expect(attempts[0].missingStatus).toBe(404);
