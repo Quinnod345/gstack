@@ -114,13 +114,19 @@ test('a judge aborted mid-stream retains what it had received, as counts without
   ];
   let delivered!: () => void;
   const received = new Promise<void>(resolve => { delivered = resolve; });
-  transport.mockImplementation(async (_url: string, init: RequestInit) => new Response(new ReadableStream({
-    start(stream) {
-      for (const event of partial) stream.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
-      init.signal!.addEventListener('abort', () => stream.error(init.signal!.reason), { once: true });
-      setTimeout(delivered, 20);
-    },
-  }), { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_stalled' } }));
+  transport.mockImplementation(async (_url: string, init: RequestInit) => {
+    const chunks = partial.map(event => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
+    return new Response(new ReadableStream({
+      start(stream) {
+        init.signal!.addEventListener('abort', () => stream.error(init.signal!.reason), { once: true });
+      },
+      pull(stream) {
+        const chunk = chunks.shift();
+        if (chunk) stream.enqueue(chunk);
+        else delivered();
+      },
+    }, { highWaterMark: 0 }), { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_stalled' } });
+  });
   const controller = new AbortController();
   const rejected = callJudge('score the whole bundle', 'claude-fable-5-1', {
     max_tokens: 65_536, stream: true, jsonSchema: WORKFLOW_JUDGE_RESPONSE_SCHEMA, signal: controller.signal,
@@ -137,17 +143,20 @@ test('a judge aborted mid-stream retains what it had received, as counts without
     retryWaitsMs: [], block: 'thinking', thinkingChars: 'PRIVATE_THINKING'.length, textChars: 0,
     messageId: 'msg_stalled', requestId: 'req_stalled', reason: failure.message });
   expect(event.firstEventMs).toBeGreaterThanOrEqual(0);
-  expect(event.lastEventMs).toBeGreaterThanOrEqual(event.firstEventMs);
-  expect(event.elapsedMs).toBeGreaterThanOrEqual(event.lastEventMs);
+  expect(event.lastEventMs).toBeGreaterThanOrEqual(event.firstEventMs); // gstack-timing-ok: ordering of two recorded offsets, not an elapsed-time bound
+  expect(event.elapsedMs).toBeGreaterThanOrEqual(event.lastEventMs); // gstack-timing-ok: ordering of two recorded offsets, not an elapsed-time bound
 });
 
 test('a stream that never sent an event is retained as such, and provider errors without an abort are not', async () => {
+  let sent!: () => void;
+  const requested = new Promise<void>(resolve => { sent = resolve; });
   transport.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
     init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    sent();
   }));
   const controller = new AbortController();
   const rejected = callJudge('score', 'claude-fable-5-1', { max_tokens: 65_536, stream: true, signal: controller.signal }).catch(error => error);
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await requested;
   controller.abort(new Error('deadline'));
   await rejected;
   expect(JSON.parse(diagnostics.mock.calls[0]![0])).toMatchObject({ type: 'llm-judge-aborted', firstEventMs: null,
