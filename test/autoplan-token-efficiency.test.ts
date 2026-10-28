@@ -11,7 +11,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { DEFAULT_MAX_ROUNDS } from '../lib/autoplan-budget';
 import { detectDocsOnly, docsClassPath } from '../lib/autoplan-scope';
 import { ROOT, SMALL_PLAN } from './helpers/autoplan-run-fixture';
 import { capyRunner, phaseVia, readJsonl, readRunJson, writePlan } from './helpers/autoplan-capy';
@@ -81,7 +80,6 @@ describe('a quiet revise after a capped one', () => {
 
 describe('round budget', () => {
   test('a new unattended run defaults to two rounds per phase', () => {
-    expect(DEFAULT_MAX_ROUNDS).toBe(2);
     const s = start();
     expect(s.first.stdout).toMatch(/^ROUNDS: ceo=1\/2 eng=1\/2 max_rounds=2 host_spend=unknown$/m);
     expect(readRunJson(s.out).max_rounds).toBe(2);
