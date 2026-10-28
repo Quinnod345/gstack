@@ -233,6 +233,8 @@ describe('removed paths in lanes (#3529)', () => {
       ['an extensionless path in package.json', 'test/util.test.js', { 'package.json': '{ "name": "fixture", "scripts": { "smoke": "node --test test/util.test" } }\n' }],
       ['a dotted module name in a Makefile', 'tests/test_alpha.py', { 'tests/__init__.py': '', 'tests/test_alpha.py': 'import unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n', 'Makefile': 'smoke:\n\tpython3 -m unittest tests.test_alpha\n' }],
       ['a dotted module name untested code imports at run time', 'app/test_handlers.py', { 'app/__init__.py': '', 'app/test_handlers.py': 'X = 1\n', 'app/registry.py': 'import importlib\nH = importlib.import_module("app.test_handlers")\n' }],
+      ['a JSON-escaped tab before the name', 'alpha.test.js', { 'alpha.test.js': "const test = require('node:test');\ntest('a', () => {});\n", 'package.json': '{ "name": "fixture", "scripts": { "smoke": "node --test\\talpha.test.js" } }\n' }],
+      ['a URL-encoded path', 'test/alpha.test.js', { 'test/alpha.test.js': "const test = require('node:test');\ntest('a', () => {});\n", 'ci/links.txt': 'https://example.test/run?file=test%2Falpha.test.js\n' }],
     ])('a removed test named only by %s that no test covers fails closed', (_how, removed, files) => {
       const repo = fixture({ baseFiles: files });
       commit(repo, { [removed]: null });

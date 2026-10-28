@@ -106,14 +106,14 @@ function readWorkingTree(repoRoot: string, rel: string): { text: string | null; 
 function outputsOf(all: readonly string[], globs: readonly string[]): string[] { return all.filter(f => matchesAny(globs, f)); }
 
 /**
- * Tracked files outside Markdown that mention `file`'s name without its final extension as a whole word, where the import graph
- * cannot see: a curation list, a durations manifest, a script, a workflow, an extensionless path (`node test/alpha.test`) or a
- * dotted module (`tests.test_alpha`).
+ * Tracked files outside Markdown that mention `file`'s name without its final extension anywhere, where the import graph cannot
+ * see: a curation list, a durations manifest, a script, a workflow, an extensionless path (`node test/alpha.test`), a dotted
+ * module (`tests.test_alpha`), or an escaped or encoded path (`\talpha.test.js`, `test%2Falpha.test.js`).
  */
 function namedBy(ctx: PregateContext, file: string): string[] {
   const base = path.posix.basename(file);
   const stem = base.includes('.') ? base.slice(0, base.lastIndexOf('.')) : base;
-  const r = spawnSync('git', ['grep', '--untracked', '-l', '-w', '-F', '-e', stem, '--', '.', ':(exclude)*.md', ':(exclude)*.mdx'], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: ctx.env });
+  const r = spawnSync('git', ['grep', '--untracked', '-l', '-F', '-e', stem, '--', '.', ':(exclude)*.md', ':(exclude)*.mdx'], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: ctx.env });
   if (r.status === 1) return [];
   return r.status === 0 ? (r.stdout ?? '').split('\n').filter(Boolean) : ['(git grep failed)'];
 }

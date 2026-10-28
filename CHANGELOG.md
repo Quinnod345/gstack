@@ -12,7 +12,7 @@
 - Only removed tests are waived. These still fail PREGATE_NO_LANE until a test or a `dependencies` entry covers them: any removed non-test path, a renamed source file's old name included; a removed test that remaining code imports; a deleted or renamed Go or Ruby test (it may define helpers its package still uses); and a deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A remaining test that reads a deleted file or directory is still selected.
 
 ### Gate integrity
-- New `test/pregate-removed-paths.test.ts` (45 cases) covers the waived tests and the fail-closed negative controls; no existing test, threshold or allowlist changed.
+- New `test/pregate-removed-paths.test.ts` (47 cases) covers the waived tests and the fail-closed negative controls; no existing test, threshold or allowlist changed.
 
 ## [1.91.291.0] - 2026-10-28
 
