@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { gateCost, gateCostSentence } from './autoplan-gate-cost';
-import { recHash, type GateItem } from './gate-list';
+import { parseReply, recHash, type GateItem } from './gate-list';
 import { renderUrgentBlock } from './headless-artifacts';
 import { findSection, firstTitle } from './markdown-sections';
 import type { BriefInputs } from './owner-brief';
@@ -75,7 +75,10 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   const missing = sections.filter(s => !s.found || !s.found.body.trim()).map(s => s.title);
   const urgent = inputs.findings.some(r => r.urgent === true || r.outside_plan === true) ? [renderUrgentBlock(inputs.findings).trimEnd(), ''] : [];
   const items = list.items.filter(i => i.id !== 'p1');
-  const recText = (i: GateItem) => plainOption(i.options.find(x => x.key === i.recommended)?.text ?? i.recommended);
+  const rec = parseReply('rec', list).choices;
+  const recKey = (i: GateItem) => rec.find(c => c.id === i.id)?.chosen ?? i.recommended;
+  const recOption = (i: GateItem) => i.options.find(x => x.key === recKey(i));
+  const carried = items.filter(i => i.carried?.chosen === recKey(i));
 
   let header: string[];
   if (!pending) {
@@ -85,7 +88,7 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   } else {
     header = [
       `**Decision needed:** approve the plan "${title}". Reply **rec** to take every recommendation (recommended), or say in words what to change.`,
-      `${items.length ? `${items.length} choice${items.length === 1 ? '' : 's'} below; rec takes the recommended answer for each.` : 'No open choices besides the approval itself.'} Nothing is built until you answer.`,
+      `${items.length ? `${items.length} choice${items.length === 1 ? '' : 's'} below; rec ${carried.length ? `keeps the ${carried.length} decided at an earlier gate and takes the recommended answer for the rest` : 'takes the recommended answer for each'}.` : 'No open choices besides the approval itself.'} Nothing is built until you answer.`,
     ];
   }
 
@@ -94,15 +97,15 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   if (!pending) need.push('Nothing. This gate is answered.', '');
   else {
     need.push(`One decision: approve the plan.`, '');
-    need.push(`- **rec (recommended):** ${p1 ? plainOption(p1.options.find(x => x.key === p1.recommended)?.text ?? 'approve') : 'approve'}${items.length ? ', taking these recommendations:' : '.'}`);
-    items.forEach((i, n) => need.push(`  ${n + 1}. ${stripRef(i.title)}: ${recText(i)}${i.options.find(x => x.key === i.recommended)?.changes_plan ? ' (changes the plan)' : ''}.`));
+    need.push(`- **rec (recommended):** ${p1 ? plainOption(recOption(p1)?.text ?? 'approve') : 'approve'}${items.length ? ', taking these recommendations:' : '.'}`);
+    items.forEach((i, n) => need.push(`  ${n + 1}. ${stripRef(i.title)}: ${plainOption(recOption(i)?.text ?? recKey(i))}${carried.includes(i) ? ` (your answer at gate_rev ${i.carried!.gate_rev}, carried forward)` : recOption(i)?.changes_plan ? ' (changes the plan)' : ''}.`));
     const example = items.find(i => i.options.length > 1);
-    const alt = example?.options.find(x => x.key !== example.recommended);
+    const alt = example?.options.find(x => x.key !== recKey(example));
     need.push(`- **Change something:** say which choice and what you want instead, in words${example && alt ? ` (for example "${clip(stripRef(example.title), 60)}: ${plainOption(alt.text)}")` : ''}. A change that alters the plan reopens its review before anything is built.`);
     need.push('- **Reject:** nothing is built.', '');
     if (!missing.length) need.push(`- **do it:** rec at full scope: every recommendation above, the follow-ons the plan names (docs, trains, cleanups) included, carried through to done with no further ask.`, '', 'Reply: **rec**, or **do it**', '');
   }
-  const tokens = list.items.map(i => `${i.id}${i.recommended}`).join(' ');
+  const tokens = rec.map(c => `${c.id}${c.chosen}`).join(' ');
   const trailer = `_For the relaying agent, not the person:_ run ${list.run}, gate_rev=${list.gate_rev}, rec_hash=${hash}; rec resolves to ${tokens}; plan ${plan.file ?? '(missing)'} (sha256 ${plan.sha}). Answer with ` +
     `\`gstack-autoplan answer --out ${o.outDir} --gate-rev ${list.gate_rev} --reply rec --rec-hash ${hash} --by agent:<id> --owner-reply "<their exact words>"\`, then \`gstack-approvals import --autoplan ${o.outDir} --by <name>\`.`;
   // The price sits above the trailer: the relaying agent sends everything above that line, so the person approving sees it.

@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**The Captain brief now says what `rec` does when a gate carries earlier decisions.** At a gate after the owner already answered some items, such as a round-cap gate, `gstack-owner-brief render --captain` listed each item's recommendation ("keep the plan as written", `rec resolves to d2a`) while `gstack-gate render` and `gstack-autoplan answer --reply rec` keep the carried answer (`d2b`). A Captain relaying the brief told the owner the opposite of what their one-word reply would record (#3546). The brief now takes its choices from the same resolver `gstack-gate render` uses.
+
+### Fixed
+- **Carried choices in the Captain brief**: each choice under "What we need from you", the change-something example and the relaying agent's `rec resolves to` line use the `rec` resolution from `parseReply`, so a carried item shows the owner's earlier answer marked `(your answer at gate_rev N, carried forward)`, and the header says how many earlier decisions `rec` keeps.
+
+### Tests
+- `test/captain-brief.test.ts` drives a fixture autoplan run to a round-cap gate with three carried decisions, renders `gstack-gate render` and `gstack-owner-brief render --captain` for it, and asserts the same `rec` resolution and choice labels; the negative control strips the carried decisions and expects both to fall back to the recommendations.
+
 ## [1.91.295.0] - 2026-10-28
 
 **Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
