@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+**`gstack-pregate sealed` no longer prints a line that reads like a push confirmation.** On gstack-evals#29 the lane read `pushed aeb2413` in the `SEALED:` line as the push landing, while the remote stayed at 9036ab1 (#3565). `sealed` never pushes: it checks the commits a push would publish. `pushed <sha>` was its label for the commit whose `sealed` policy it read beside the base branch's.
+
+### Fixed
+- **`lib/sealed-guard.ts`**: that label now reads `commit <sha12>` (`policy=origin/main + commit aeb2413f0ca1`), in the `SEALED:` line, in the managed pre-push hook's messages and in the unreadable-policy error.
+- **`gstack-pregate --help`** and **docs/pregate.md#sealed** say the command never pushes and that `git ls-remote <remote> <ref>` confirms a push.
+
+### Tests
+- `test/sealed-guard.test.ts`: `gstack-pregate sealed` names the checked commit, prints no `pushed`, and leaves the remote's refs exactly as they were. It failed before the fix on `policy=origin/main + pushed <sha>`.
+
 ## [1.91.299.0] - 2026-10-28
 
 **The Captain brief now says what `rec` does when a gate carries earlier decisions.** At a gate after the owner already answered some items, such as a round-cap gate, `gstack-owner-brief render --captain` listed each item's recommendation ("keep the plan as written", `rec resolves to d2a`) while `gstack-gate render` and `gstack-autoplan answer --reply rec` keep the carried answer (`d2b`). A Captain relaying the brief told the owner the opposite of what their one-word reply would record (#3546). The brief now takes its choices from the same resolver `gstack-gate render` uses.

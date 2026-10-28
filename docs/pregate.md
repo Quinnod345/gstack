@@ -788,7 +788,10 @@ gstack-pregate sealed [--range <a..b>] [--remote origin] [--base <branch>] [--js
   (`/home/<user>/`, `/Users/<user>/`, `C:\Users\<user>\`) check each commit's added
   lines. Findings print rule, `file[:line]` and commit, never the text.
 - **Policy.** The union of the destination base branch's `sealed` and the
-  pushed commit's: a push can tighten it, never relax it. A malformed or
+  pushed commit's: a push can tighten it, never relax it. The `SEALED:` line
+  names both as `policy=<remote>/<base> + commit <sha12>`. `gstack-pregate sealed`
+  only checks and never pushes, so confirm a push with
+  `git ls-remote <remote> <ref>`. A malformed or
   unreadable policy refuses. Waivers come only from the base branch's
   `.gstack/sealed-allow.tsv` (`rule<TAB>path<TAB>sha<TAB>reason`) and are
   listed on every push.
