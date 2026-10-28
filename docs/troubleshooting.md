@@ -3223,7 +3223,8 @@ or Ruby test (deleted or renamed), a file remaining code still imports or whose
 basename a non-Markdown file still mentions, a deleted test whose merge-base
 text cannot be read (a symlink, invalid UTF-8, over 1 MiB), and a modified file
 whose only test the branch deleted. `--explain` prints the reason as
-`<path>: removed, but …`.
+`<path>: removed, but …` (`<path>: removed test whose merge-base text could
+not be read …` for an unreadable deleted test).
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
 for files with no behaviour) under `dependencies` in `.gstack/pregate.json` (or the user-owned file the message names).

@@ -206,10 +206,11 @@ Two stages with separate clocks, both printed:
   left with no test at all (`coverage removed: <file> has no remaining test`,
   and `M subject(s) lost their last test` in the detail). A deleted JS, TS,
   Python or Dart file, or the old name of a renamed one, outside fixture,
-  golden and CI trees reads `nothing in the tree references it` when no
-  remaining file imports it (directly or through a directory it reads), it is
-  not a file a runner loads by name (`*.config.ts`, `.*rc.js`, `conftest.py`,
-  `setup.py`, `noxfile.py`, `sitecustomize.py`, `__init__.py`, `__main__.py`),
+  snapshot, golden, baseline and CI trees and `.gstack/` reads `nothing in
+  the tree references it` when no remaining file imports it (directly or
+  through a directory it reads), it is not a file a runner loads by name
+  (`*.config.ts`, `.*rc.js`, `conftest.py`, `setup.py`, `noxfile.py`,
+  `sitecustomize.py`, `usercustomize.py`, `__init__.py`, `__main__.py`),
   and no remaining non-Markdown file mentions its basename (a config naming it
   relative to itself, `preload = ["./setup.ts"]`, or a computed path such as
   `path.join(__dirname, 'lib', 'value.js')`), so a common basename such as
