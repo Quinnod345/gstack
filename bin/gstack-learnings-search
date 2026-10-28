@@ -33,15 +33,20 @@ LIMIT=10
 CROSS_PROJECT=false
 STATS=false
 
+usage_error() { echo "gstack-learnings-search: $1" >&2; exit 2; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --type) TYPE="${2?--type needs a value}"; shift 2 ;;
-    --query) QUERY="${2?--query needs a value}"; shift 2 ;;
-    --limit) LIMIT="${2?--limit needs a value}"; shift 2 ;;
+    --type|--query|--limit) [[ $# -ge 2 ]] || usage_error "$1 needs a value" ;;
+  esac
+  case "$1" in
+    --type) TYPE="$2"; shift 2 ;;
+    --query) QUERY="$2"; shift 2 ;;
+    --limit) [[ "$2" =~ ^[1-9][0-9]*$ ]] || usage_error "--limit needs a positive integer, got '$2'"; LIMIT="$2"; shift 2 ;;
     --cross-project) CROSS_PROJECT=true; shift ;;
     --stats) STATS=true; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "gstack-learnings-search: unknown argument '$1'; valid: --type --query --limit --cross-project --stats --help" >&2; exit 2 ;;
+    *) usage_error "unknown argument '$1'; valid: --type --query --limit --cross-project --stats --help" ;;
   esac
 done
 

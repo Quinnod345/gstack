@@ -49,6 +49,15 @@ describe('learnings bins explain themselves', () => {
     expect(fs.existsSync(path.join(tmpHome, 'projects'))).toBe(false);
   });
 
+  test('a missing value or a bad --limit exits 2 like an unknown flag, and writes no state', () => {
+    for (const args of [['--limit'], ['--type'], ['--query'], ['--limit', 'abc'], ['--limit', '0'], ['--limit', '-1']]) {
+      const r = run(SEARCH, args);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toStartWith('gstack-learnings-search: ');
+    }
+    expect(fs.existsSync(path.join(tmpHome, 'projects'))).toBe(false);
+  });
+
   test('an empty --query value is still accepted', () => {
     expect(run(SEARCH, ['--query', '', '--limit', '5']).status).toBe(0);
   });

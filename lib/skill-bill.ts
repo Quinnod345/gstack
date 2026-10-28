@@ -38,9 +38,10 @@ export class SkillBillError extends Error {
 
 const GENERATED = "<!-- AUTO-GENERATED from";
 
-function git(cwd: string, args: string[]): { ok: boolean; out: string } {
+function git(cwd: string, args: string[], raw = false): { ok: boolean; out: string } {
   const r = spawnSync("git", args, { cwd, encoding: "utf-8", timeout: 15_000 });
-  return { ok: r.status === 0, out: (r.stdout || "").trim() };
+  const out = r.stdout || "";
+  return { ok: r.status === 0, out: raw ? out : out.trim() };
 }
 
 function isSkillDir(dir: string): boolean {
@@ -48,8 +49,8 @@ function isSkillDir(dir: string): boolean {
 }
 
 function gstackRootOf(dir: string): string | null {
-  const parent = dirname(dir);
-  return existsSync(join(parent, "SKILL.md.tmpl")) && existsSync(join(parent, "VERSION")) && existsSync(join(parent, "bin")) ? parent : null;
+  const isRoot = (d: string) => existsSync(join(d, "SKILL.md.tmpl")) && existsSync(join(d, "VERSION")) && existsSync(join(d, "bin"));
+  return [dir, dirname(dir)].find(isRoot) ?? null;
 }
 
 export function skillSearchRoots(cwd: string, home: string = homedir()): string[] {
@@ -131,7 +132,7 @@ export function findBaseline(dir: string, name: string, authored: string): Basel
   const inside = git(dir, ["rev-parse", "--is-inside-work-tree"]);
   if (!inside.ok) return { status: "unknown", reason: "not a git folder; keep the Skill-Size line yourself" };
   const rel = git(dir, ["ls-files", "--full-name", "--", authored]);
-  const log = git(dir, ["log", "-1", "--format=%H%x09%cs", "-E", `--grep=^Skill-Diet: ${name}\\b`, "--", "."]);
+  const log = git(dir, ["log", "-1", "--format=%H%x09%cs", "-E", `--grep=^Skill-Diet: ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[[:space:]]*$`, "--", "."]);
   if (!log.ok || !log.out) {
     const shallow = git(dir, ["rev-parse", "--is-shallow-repository"]).out === "true";
     return shallow ? { status: "unknown", reason: "shallow history; fetch more to find the last Skill-Diet commit" } : { status: "none", reason: `no commit carries "Skill-Diet: ${name}"` };
@@ -139,9 +140,9 @@ export function findBaseline(dir: string, name: string, authored: string): Basel
   const [sha, date] = log.out.split("\t");
   const top = git(dir, ["rev-parse", "--show-toplevel"]).out;
   const path = rel.out || relative(top, join(dir, authored));
-  const then = git(top, ["show", `${sha}:${path}`]);
+  const then = git(top, ["show", `${sha}:${path}`], true);
   if (!then.ok) return { status: "unknown", reason: `${path} did not exist at ${sha.slice(0, 7)}` };
-  const bytes = Buffer.byteLength(then.out + "\n");
+  const bytes = Buffer.byteLength(then.out);
   const now = statSync(join(dir, authored)).size;
   const growthPct = Math.round(((now - bytes) / bytes) * 1000) / 10;
   return { status: "found", sha, date, bytes, growthPct, due: growthPct > DUE_PCT };

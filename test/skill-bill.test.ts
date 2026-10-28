@@ -113,3 +113,36 @@ describe('gstack-skill-bill', () => {
     expect(bill(tmp, ['--help']).stdout).toContain('Usage: gstack-skill-bill');
   });
 });
+
+describe('gstack-skill-bill baselines and the root skill', () => {
+  test('the gstack root skill is a checkout skill, and Skill-Diet: gstack-upgrade is not its diet', () => {
+    const root = path.join(tmp, 'gstack-root');
+    fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
+    skill(root, 'gstack', 'router\n', 'SKILL.md.tmpl');
+    fs.writeFileSync(path.join(root, 'SKILL.md'), '---\nname: gstack\ndescription: Does gstack things.\n---\n<!-- AUTO-GENERATED from SKILL.md.tmpl -->\nrouter\n');
+    fs.writeFileSync(path.join(root, 'VERSION'), '1.0.0');
+    skill(path.join(root, 'gstack-upgrade'), 'gstack-upgrade', 'up\n');
+    sh(root, 'git', ['init', '-q', '-b', 'main']);
+    sh(root, 'git', ['config', 'user.email', 'test@example.com']);
+    sh(root, 'git', ['config', 'user.name', 'Test']);
+    sh(root, 'git', ['add', '-A']);
+    sh(root, 'git', ['commit', '-qm', 'diet upgrade\n\nSkill-Diet: gstack-upgrade']);
+    const report = JSON.parse(bill(root, ['.', '--json']).stdout);
+    expect(report.kind).toBe('gstack-checkout');
+    expect(report.baseline.status).toBe('none');
+  });
+
+  test('the baseline measures the committed bytes exactly, trailing blank lines included', () => {
+    const repo = path.join(tmp, 'blank-lines');
+    skill(path.join(repo, 'notes'), 'notes', 'body\n\n\n');
+    sh(repo, 'git', ['init', '-q', '-b', 'main']);
+    sh(repo, 'git', ['config', 'user.email', 'test@example.com']);
+    sh(repo, 'git', ['config', 'user.name', 'Test']);
+    sh(repo, 'git', ['add', '-A']);
+    sh(repo, 'git', ['commit', '-qm', 'diet notes\n\nSkill-Diet: notes']);
+    const report = JSON.parse(bill(repo, ['./notes', '--json']).stdout);
+    expect(report.baseline.status).toBe('found');
+    expect(report.baseline.bytes).toBe(fs.statSync(path.join(repo, 'notes', 'SKILL.md')).size);
+    expect(report.baseline.growthPct).toBe(0);
+  });
+});

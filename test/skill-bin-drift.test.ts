@@ -122,18 +122,30 @@ describe('skill-bin-drift: fixtures', () => {
     expect(formatFinding(finding!)).toContain('DRIFT_UNKNOWN_FLAG demo/SKILL.md.tmpl:7');
   });
 
-  test('flags after a pipe, ;, &&, a redirect or $( ) belong to the next command', () => {
+  test('flags after a pipe, ;, && or $( ) belong to the next command', () => {
     const cmds = [
       'bin/gstack-notes-search --type a | grep --count --fixed-strings x',
       'bin/gstack-notes-search --limit 3; git log --oneline',
       'bin/gstack-notes-search && jq --raw-output .x',
-      'bin/gstack-notes-search --type a 2>/dev/null --bogus',
+      'bin/gstack-notes-search --limit 2 2>&1 | grep --count x',
       'X=$(bin/gstack-notes-search --type a) || sort --unique',
     ].join('\n');
     const root = fixture({ 'bin/gstack-notes-search': BASH_BIN, 'demo/SKILL.md.tmpl': skill(fence(cmds)) });
     const report = scanRepo(root);
-    expect(report.calls.map(c => c.flags)).toEqual([['--type'], ['--limit'], [], ['--type'], ['--type']]);
+    expect(report.calls.map(c => c.flags)).toEqual([['--type'], ['--limit'], [], ['--limit'], ['--type']]);
     expect(report.findings).toEqual([]);
+  });
+
+  test('a redirect does not end the command: flags after it are still checked', () => {
+    const cmds = [
+      'bin/gstack-notes-search --type a 2>/dev/null --bogus',
+      'bin/gstack-notes-search >> out.txt --max 3',
+      'bin/gstack-notes-search 2> err.log --limit 1',
+    ].join('\n');
+    const root = fixture({ 'bin/gstack-notes-search': BASH_BIN, 'demo/SKILL.md.tmpl': skill(fence(cmds)) });
+    const report = scanRepo(root);
+    expect(report.calls.map(c => c.flags)).toEqual([['--type', '--bogus'], ['--max'], ['--limit']]);
+    expect(report.findings.map(f => f.flag)).toEqual(['--bogus']);
   });
 
   test('a TS bin with string-literal flags one relative import deep passes; two deep does not count', () => {

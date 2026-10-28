@@ -121,7 +121,15 @@ export function binArgs(rest: string, openQuote: string | null = null): string[]
     if (c === "'" || c === '"') { quote = c; has = true; continue; }
     if (c === '\\') { cur += rest[++i] ?? ''; has = true; continue; }
     if (/\s/.test(c)) { push(); continue; }
-    if ('|;&>`)'.includes(c) || (c === '$' && rest[i + 1] === '(')) break;
+    if (c === '>') {
+      if (/^\d+$/.test(cur)) { cur = ''; has = false; }
+      push();
+      if ('>&|'.includes(rest[i + 1] ?? '')) i++;
+      while (/[ \t]/.test(rest[i + 1] ?? '')) i++;
+      while (i + 1 < rest.length && !/\s/.test(rest[i + 1]!) && !'|;&`)'.includes(rest[i + 1]!)) i++;
+      continue;
+    }
+    if ('|;&`)'.includes(c) || (c === '$' && rest[i + 1] === '(')) break;
     if (c === '#' && !has) break;
     if (c === '<') {
       const ph = /^<[A-Za-z_][^<>\n]*>/.exec(rest.slice(i));
