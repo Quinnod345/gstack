@@ -131,6 +131,12 @@ export interface HostConfig {
      * overwrite a user's own AGENTS.md. See scripts/gen-agents-digest.ts.
      */
     instructionTier?: { rulesFile: string };
+    /**
+     * 'harness': setup's arm for this host is `gstack-harness register <host>`
+     * (lib/harness-register.ts): the host's render copied into the harness's own
+     * skills folder with an ownership ledger, not linked into a host skills dir.
+     */
+    registration?: 'harness';
   };
 
   // --- Host-Specific Behavioral Config ---
@@ -188,6 +194,9 @@ export function validateHostConfig(config: HostConfig, validResolverNames?: Read
     if (caps.browser && !caps.toolExecution) errors.push('capabilities.browser requires toolExecution');
     if (!['native', 'prose'].includes(caps.questions)) errors.push(`capabilities.questions must be 'native' or 'prose'`);
     if (!['enforced', 'advisory'].includes(caps.safetyHooks)) errors.push(`capabilities.safetyHooks must be 'enforced' or 'advisory'`);
+  }
+  if (config.install.registration === 'harness' && config.tier !== 'experimental') {
+    errors.push('install.registration harness needs tier experimental (setup registers it through gstack-harness)');
   }
   if (config.tier === 'instruction-only' && !config.install.instructionTier && config.name !== 'slate' && config.name !== 'gbrain') {
     errors.push('instruction-only hosts must declare install.instructionTier (what setup tells the user to copy)');

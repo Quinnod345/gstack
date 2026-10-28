@@ -30,6 +30,8 @@ export const ROUTER_DESCRIPTION_MAX = 300;
 export const CONTEXT_BLOCK_MAX = 600;
 export const BLOCK_BEGIN = '<!-- gstack:begin harness-routing -->';
 export const BLOCK_END = '<!-- gstack:end harness-routing -->';
+/** Where a Dot keeps its own skills (feder-cr/dots nanobot/dots/skills.py DOT_SKILLS_DIR). */
+export const DOT_SKILLS_DIR = '/home/dot/skills';
 export const ROUTER_DESCRIPTION = 'gstack engineering workflows: code review, QA testing, debugging, security audit, plan and design review, shipping PRs, release docs, retros. Load first for any coding, review, test, plan or release task; it lists every gstack skill and where to read it.';
 
 export interface Target {
@@ -46,8 +48,8 @@ export interface Target {
   inside: (env: Env, ancestry: string[]) => boolean;
   /** Installed on this machine (binary on PATH or its home folder). */
   present: (env: Env, home: string) => boolean;
-  /** The harness's own command that lists the skills it sees, when it has one. */
-  listCommand?: (dest: string) => { argv: string[]; env: Env; expect: RegExp };
+  /** The harness's own command that lists the skills it sees, and how one skill name shows in its output. */
+  listCommand?: (dest: string) => { argv: string[]; env: Env; listed: (name: string) => RegExp };
 }
 
 const onPath = (bin: string, env: Env) => (env.PATH ?? '').split(path.delimiter).some(d => d && fs.existsSync(path.join(d, bin)));
@@ -61,20 +63,20 @@ export const TARGETS: Record<TargetName, Target> = {
   openclaw: {
     name: 'openclaw', displayName: 'OpenClaw', mechanism: 'skill-folder', render: 'host', defaultMode: 'router', modes: ['router', 'all'],
     dest: (env, home) => path.join(env.OPENCLAW_STATE_DIR || path.join(home, '.openclaw'), 'skills'),
-    inside: (env, anc) => !!env.OPENCLAW_SESSION || ancestorIs(anc, 'openclaw'),
+    inside: (env, anc) => env.OPENCLAW_SHELL === 'exec' || ancestorIs(anc, 'openclaw'),
     present: (env, home) => onPath('openclaw', env) || fs.existsSync(env.OPENCLAW_STATE_DIR || path.join(home, '.openclaw')),
-    listCommand: dest => ({ argv: ['openclaw', 'skills', 'list', '--json'], env: { OPENCLAW_STATE_DIR: path.dirname(dest) }, expect: /"name":\s*"gstack(-[a-z0-9-]+)?"/ }),
+    listCommand: dest => ({ argv: ['openclaw', 'skills', 'list', '--json'], env: { OPENCLAW_STATE_DIR: path.dirname(dest) }, listed: name => new RegExp('"name":\\s*"' + name + '"') }),
   },
   hermes: {
     name: 'hermes', displayName: 'Hermes', mechanism: 'skill-folder', render: 'host', defaultMode: 'all', modes: ['all'],
     dest: (env, home) => path.join(env.HERMES_HOME || path.join(home, '.hermes'), 'skills', 'gstack'),
-    inside: (env, anc) => !!env.HERMES_SESSION_KEY || ancestorIs(anc, 'hermes'),
+    inside: (env, anc) => env.HERMES_AGENT === 'true' || env.AI_AGENT === 'hermes-agent' || ancestorIs(anc, 'hermes'),
     present: (env, home) => onPath('hermes', env) || fs.existsSync(env.HERMES_HOME || path.join(home, '.hermes')),
-    listCommand: dest => ({ argv: ['hermes', 'skills', 'list'], env: { HERMES_HOME: path.dirname(path.dirname(dest)) }, expect: /gstack-[a-z0-9-]+/ }),
+    listCommand: dest => ({ argv: ['hermes', 'skills', 'list'], env: { HERMES_HOME: path.dirname(path.dirname(dest)) }, listed: name => new RegExp('\\s' + name + '\\s') }),
   },
   dots: {
     name: 'dots', displayName: 'dots (feder-cr)', mechanism: 'skill-folder', render: 'claude', defaultMode: 'router', modes: ['router', 'all'],
-    dest: (_env, home) => path.join(home, 'skills'),
+    dest: () => DOT_SKILLS_DIR,
     inside: (env) => fs.existsSync('/opt/invisible-dots') && (env.HOME ?? '') === '/home/dot',
     present: () => fs.existsSync('/opt/invisible-dots'),
   },
@@ -93,12 +95,12 @@ export const TARGETS: Record<TargetName, Target> = {
   muse: {
     name: 'muse', displayName: 'Muse Code', mechanism: 'verify-only', render: null, defaultMode: 'all', modes: ['all'],
     dest: () => null, inside: () => false, present: env => onPath('muse', env),
-    listCommand: () => ({ argv: ['muse', 'skills', 'list'], env: {}, expect: /\b(gstack|review|ship|office-hours)\b/ }),
+    listCommand: () => ({ argv: ['muse', 'skills', 'list'], env: {}, listed: name => new RegExp('\\b' + name + '\\b') }),
   },
   grok: {
     name: 'grok', displayName: 'Grok Build', mechanism: 'verify-only', render: null, defaultMode: 'all', modes: ['all'],
     dest: () => null, inside: () => false, present: env => onPath('grok', env),
-    listCommand: () => ({ argv: ['grok', 'inspect'], env: {}, expect: /\b(gstack|review|ship|office-hours)\b/ }),
+    listCommand: () => ({ argv: ['grok', 'inspect'], env: {}, listed: name => new RegExp('\\b' + name + '\\b') }),
   },
 };
 
@@ -184,6 +186,14 @@ export function oneLineUse(description: string): string {
   const d = description.replace(/\s*\(gstack\)\s*$/, '').replace(/\s+/g, ' ').trim();
   const s = (d.match(/^.*?[.!?](\s|$)/)?.[0] ?? d).trim();
   return s.length > 160 ? s.slice(0, 157).trimEnd() + '...' : s;
+}
+
+/** Agent Skills frontmatter in its strictest reading (dots): single-line name equal to the folder, single-line description of at most 1024 characters. */
+export function flatFrontmatter(md: string, name: string): string {
+  const end = md.startsWith('---\n') ? md.indexOf('\n---', 4) : -1;
+  const desc = frontmatterField(md, 'description').replace(/\s+/g, ' ').trim();
+  const body = end < 0 ? md : md.slice(md.indexOf('\n', end + 4) + 1);
+  return '---\nname: ' + name + '\ndescription: ' + (desc.length > 1024 ? desc.slice(0, 1021).trimEnd() + '...' : desc) + '\n---\n' + body;
 }
 
 function skillDirs(root: string): SkillEntry[] {
@@ -324,13 +334,13 @@ function resolveDest(opts: RegisterOptions, id?: string): string | null {
 }
 
 /** Desired files (absolute path -> bytes) and the router path, for a skill-folder or generic target. */
-export function planPayload(opts: RegisterOptions, dest: string, mode: SkillsMode, scratch: string): { files: Map<string, Buffer>; router: string | null; skills: number } {
+export function planPayload(opts: RegisterOptions, dest: string, mode: SkillsMode, scratch: string): { files: Map<string, Buffer>; router: string | null; names: string[] } {
   const t = opts.target;
   const skills = sourceSkills(t, opts.checkout, scratch);
   const files = new Map<string, Buffer>();
   const copyDir = (from: string, to: string) => { for (const f of walkFiles(from)) files.set(path.join(to, path.relative(from, f)), fs.readFileSync(f)); };
   const claudeFiles = (s: SkillEntry, to: string) => {
-    files.set(path.join(to, 'SKILL.md'), fs.readFileSync(path.join(s.dir, 'SKILL.md')));
+    files.set(path.join(to, 'SKILL.md'), Buffer.from(flatFrontmatter(fs.readFileSync(path.join(s.dir, 'SKILL.md'), 'utf8'), path.basename(to))));
     if (fs.existsSync(path.join(s.dir, 'sections'))) copyDir(path.join(s.dir, 'sections'), path.join(to, 'sections'));
   };
   if (mode === 'all') {
@@ -338,7 +348,7 @@ export function planPayload(opts: RegisterOptions, dest: string, mode: SkillsMod
       const to = path.join(dest, path.basename(s.dir));
       if (t.render === 'host') copyDir(s.dir, to); else claudeFiles(s, to);
     }
-    return { files, router: null, skills: skills.length };
+    return { files, router: null, names: skills.map(s => t.render === 'host' ? s.name : path.basename(s.dir)) };
   }
   const routerDir = path.join(dest, 'gstack');
   const entries = skills.map(s => {
@@ -349,7 +359,7 @@ export function planPayload(opts: RegisterOptions, dest: string, mode: SkillsMod
   });
   const router = path.join(routerDir, 'SKILL.md');
   files.set(router, Buffer.from(routerSkill(entries, t)));
-  return { files, router, skills: skills.length };
+  return { files, router, names: ['gstack', ...entries.map(e => e.name)] };
 }
 
 function backupFile(file: string, stateRoot: string, stamp: string): void {
@@ -396,7 +406,9 @@ export function register(opts: RegisterOptions): RegisterResult {
   const prev = readLedger(lfile);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-harness-'));
   try {
-    const { files, router, skills } = planPayload(opts, dest, mode, scratch);
+    const { files, router, names } = planPayload(opts, dest, mode, scratch);
+    const skills = mode === 'router' ? names.length - 1 : names.length;
+    const visible = mode === 'router' ? ['gstack'] : names;
     const prevFiles = new Map((prev?.files ?? []).map(f => [f.path, f.sha]));
     const topOf = (p: string) => path.join(dest, path.relative(dest, p).split(path.sep)[0]);
     const owned = new Set([...prevFiles.keys()].map(topOf));
@@ -406,8 +418,15 @@ export function register(opts: RegisterOptions): RegisterResult {
       if (st.isSymbolicLink()) throw new HarnessError('HARNESS_UNSAFE_DESTINATION', top + ' is a symlink');
       if (!owned.has(top)) throw new HarnessError('HARNESS_UNOWNED_ENTRY', top + ' already exists and gstack did not write it');
     }
+    const ours = new Set([...files.keys()].map(topOf));
+    if (fs.existsSync(dest)) for (const e of fs.readdirSync(dest)) {
+      const md = path.join(dest, e, 'SKILL.md');
+      if (ours.has(path.join(dest, e)) || owned.has(path.join(dest, e)) || !fs.existsSync(md)) continue;
+      const other = frontmatterField(fs.readFileSync(md, 'utf8'), 'name');
+      if (visible.includes(other)) throw new HarnessError('HARNESS_UNOWNED_ENTRY', 'a skill named ' + other + ' already exists at ' + path.join(dest, e) + ' and gstack did not write it');
+    }
     const want = [...files].map(([p, b]) => ({ path: p, sha: sha256(b) }));
-    const same = prev && prev.meta.mode === mode && prev.files.length === want.length
+    const same = prev && prev.meta.mode === mode && prev.meta.names === visible.join(',') && prev.files.length === want.length
       && want.every(w => prevFiles.get(w.path) === w.sha && onDiskSha(w.path) === w.sha);
     const block = opts.context ? contextBlock(router ?? '') : null;
     if (block && block.length > CONTEXT_BLOCK_MAX) throw new HarnessError('HARNESS_BUDGET_EXCEEDED', 'context block is ' + block.length + ' bytes');
@@ -435,7 +454,7 @@ export function register(opts: RegisterOptions): RegisterResult {
         written++;
       }
       writeLedger(lfile, {
-        meta: { id, target: t.name, dest, mode, checkout: opts.checkout, version: opts.version, ...(router ? { router } : {}), ...(opts.context ? { context: path.resolve(opts.context) } : {}) },
+        meta: { id, target: t.name, dest, mode, checkout: opts.checkout, version: opts.version, names: visible.join(','), ...(router ? { router } : {}), ...(opts.context ? { context: path.resolve(opts.context) } : {}) },
         files: want, dirs: [...dirs].sort((a, b) => b.length - a.length), blocks: opts.context ? [path.resolve(opts.context)] : [],
       });
     }
@@ -467,9 +486,9 @@ export function unregister(stateRoot: string, checkout: string, idOrTarget: stri
 }
 
 /** Re-register every file registration this checkout made (setup runs it on every pass, so upgrades refresh them). */
-export function refresh(base: Omit<RegisterOptions, 'target'>): RegisterResult[] {
+export function refresh(base: Omit<RegisterOptions, 'target'>, skip: Set<string> = new Set()): RegisterResult[] {
   return listLedgers(base.stateRoot)
-    .filter(({ ledger: l }) => l.meta.checkout === base.checkout && l.meta.target !== 'qm')
+    .filter(({ ledger: l }) => l.meta.checkout === base.checkout && l.meta.target !== 'qm' && !skip.has(l.meta.id))
     .map(({ ledger: l }) => register({
       ...base, target: getTarget(l.meta.target), mode: l.meta.mode as SkillsMode,
       skillsDir: l.meta.context && l.meta.dest.startsWith(ledgerDir(base.stateRoot)) ? undefined : l.meta.dest,
@@ -477,19 +496,23 @@ export function refresh(base: Omit<RegisterOptions, 'target'>): RegisterResult[]
     }));
 }
 
-export interface StatusRow { id: string; target: string; dest: string; mode: string; files: number; version: string; stale: boolean; visible: 'yes' | 'no' | 'unknown'; checked?: string }
+export interface StatusRow { id: string; target: string; dest: string; mode: string; files: number; version: string; stale: boolean; visible: 'yes' | 'no' | 'unknown'; checked?: string; missing?: string[] }
 
-export function harnessSees(t: Target, dest: string, env: Env): { visible: 'yes' | 'no' | 'unknown'; checked?: string } {
+/** Runs the harness's own skill list: 'yes' when every name shows (or, with any, at least one). */
+export function harnessSees(t: Target, dest: string, env: Env, names: string[], any = false): { visible: 'yes' | 'no' | 'unknown'; checked?: string; missing?: string[] } {
   const lc = t.listCommand?.(dest);
-  if (!lc || !onPath(lc.argv[0], env)) return { visible: 'unknown' };
-  const r = spawnSync(lc.argv[0], lc.argv.slice(1), { env: { ...process.env, ...env, ...lc.env }, encoding: 'utf8', timeout: 60_000 });
-  return { visible: lc.expect.test((r.stdout ?? '') + (r.stderr ?? '')) ? 'yes' : 'no', checked: lc.argv.join(' ') };
+  if (!lc || !names.length || !onPath(lc.argv[0], env)) return { visible: 'unknown' };
+  const r = spawnSync(lc.argv[0], lc.argv.slice(1), { env: { ...process.env, ...env, ...lc.env }, encoding: 'utf8', timeout: 120_000 });
+  const text = (r.stdout ?? '') + (r.stderr ?? '');
+  const missing = names.filter(n => !lc.listed(n).test(text));
+  const ok = any ? missing.length < names.length : missing.length === 0;
+  return { visible: ok ? 'yes' : 'no', checked: lc.argv.join(' '), ...(ok || any ? {} : { missing }) };
 }
 
 export function status(stateRoot: string, version: string, env: Env, check = true): StatusRow[] {
   return listLedgers(stateRoot).map(({ ledger: l }) => {
     const t = (TARGETS as Record<string, Target>)[l.meta.target];
-    const seen = check && t ? harnessSees(t, l.meta.dest, env) : { visible: 'unknown' as const };
+    const seen = check && t ? harnessSees(t, l.meta.dest, env, (l.meta.names ?? '').split(',').filter(Boolean)) : { visible: 'unknown' as const };
     return { id: l.meta.id, target: l.meta.target, dest: l.meta.dest, mode: l.meta.mode, files: l.files.length, version: l.meta.version, stale: l.meta.version !== version, ...seen };
   });
 }

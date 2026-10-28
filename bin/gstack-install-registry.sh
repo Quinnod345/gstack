@@ -182,8 +182,8 @@ gstack_install_render_for() {
 gstack_host_tier() {
   case "$1" in
     claude) echo full ;;
-    codex|kiro|factory|opencode|cursor|copilot|agy) echo experimental ;;
-    slate|openclaw|hermes|gbrain) echo instruction-only ;;
+    codex|kiro|factory|opencode|cursor|copilot|agy|openclaw|hermes) echo experimental ;;
+    slate|gbrain) echo instruction-only ;;
     *) echo unknown ;;
   esac
 }

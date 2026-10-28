@@ -28,13 +28,13 @@ _gstack_harness_cut_block() {
 }
 
 gstack_harness_unregister_ledger() {
-  local ledger="$1" root="${GSTACK_STATE_ROOT:-$HOME/.gstack}" stamp kind a b target="" dest="" backup
+  local ledger="$1" root="${GSTACK_STATE_ROOT:-$HOME/.gstack}" stamp kind a b target="" dest="" pack="" backup
   [ -f "$ledger" ] || return 0
   stamp="$(date -u +%Y-%m-%dT%H-%M-%SZ)-$$"
   backup="$root/backups/harness/$stamp"
   while IFS=$'\t' read -r kind a b; do
     case "$kind" in
-      meta) case "$a" in target) target="$b" ;; dest) dest="$b" ;; esac ;;
+      meta) case "$a" in target) target="$b" ;; dest) dest="$b" ;; qm_pack) pack="$b" ;; esac ;;
       file)
         { [ -f "$b" ] && [ ! -L "$b" ]; } || continue
         if [ "$(_gstack_harness_sha "$b")" = "$a" ]; then rm -f "$b"
@@ -48,6 +48,7 @@ gstack_harness_unregister_ledger() {
   case "$target" in
     openclaw|hermes)
       if command -v gstack_install_registry_remove >/dev/null 2>&1; then gstack_install_registry_remove "$target" "$dest" || true; fi ;;
+    qm) [ -z "$pack" ] || echo "  QM: dropped the local record of pack $pack; the pack stays in your QM org until an org admin archives it (DELETE $dest/v1/admin/skill-packs/$pack)" ;;
   esac
   rm -f "$ledger"
 }
