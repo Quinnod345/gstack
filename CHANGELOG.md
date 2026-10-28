@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.297.0] - 2026-10-28
 
 **The terminal agent on Windows no longer waits on PowerShell to learn its own start time, so it boots in about a second and a slow PowerShell can no longer leave it without an identity.** Every agent boot ran `powershell.exe Get-CimInstance` with a 2 s timeout, twice when started standalone. On a loaded `windows-latest` runner one launch took 0.94 s at the median and up to 10.8 s, so agent boot took 2.4 to 2.8 s at the median and 5.1 s on a runner's first boot, past the owner-watchdog test's 5 s window. Measured again after the change under the same load: 0.86 to 0.91 s at the median, 1.18 s at most, 120 of 120 boots inside the window.
 
@@ -14,6 +14,34 @@
 
 ### Gate integrity
 - Test 5 in `process-liveness-windows.test.ts` expected the PowerShell mock's `fixture-owner-start` as the owner start time on every platform. On Windows that expectation followed the old implementation, so it moved with the product. It now requires the in-process value, equality with a real read, and no PowerShell query for the owner. The Linux and macOS assertion is unchanged.
+
+## [1.91.296.0] - 2026-10-28
+
+**The docsync gate stops failing ship-docsync-current and ship-docsync-store when the agent asks the docs helper for its usage in the middle of a line of reads.** Five red paid trials since 2026-10-27 each failed on a single refused line. In four, the agent ended a line of reads with `gstack-docs-candidate --help` (screen 40558235014, gate 40600731931, and screen 40627127462 twice). In the fifth, gate 40643690306, the line included `git tag`. v1.91.185.0 tried to stop the first slip by moving the "own Bash call" rule into the sentence that names `--help`, and the slip came back four times. The helper's `--help` prints its usage and returns before it touches Git or any file, so refusing it protected nothing. The 2026-10-27 backstop red (40515158924, `toContain`) ran on a tree from before #3516, which had already fixed it.
+
+### Fixed
+- **`test/helpers/docsync-observer.ts`**: a line of reads may now include the installed candidate's `--help`, either alone or after `snapshot` or `compare`, optionally with `2>&1` or `2>/dev/null`. It counts as a neutral read, the same way a joined Git read does, but never when it is fed by a pipe and never in a line that also runs `cd`. `git tag`, `git tag -l` and `git tag --list` are now accepted as Git reads, alongside the branch listings #3516 added. A tag operand or any other option is still refused.
+- **`test/helpers/docsync-interface.ts`**: the fixture interface declares both changes. It names the candidate's `--help` as the one exception to the own-call rule, and it adds tag listings to the Git read list.
+
+### Tests
+- `test/docsync-command-grammar.test.ts` replays the five captured lines, which were refused before this change, and checks that each is now accepted, while the same line with `; git add app.ts` appended is still refused. Negative controls that stay refused: pipe-fed, `| sh`, `>` redirect and `cd` forms; `snapshot` and `compare` joined to reads; `-h`, `--version` and `--help snapshot`; the `~` and foreign helper paths; the lifecycle helpers' `--help` joined to reads; and 13 tag writes or filtered listings.
+
+### Gate integrity
+- This is a gate edit, because the docs detector now accepts more lines. The test that pinned the joined `--help` as refused now expects it to be accepted. Focused paid trials at e967634: ship-docsync-current PASS ($0.84; its agent did join `--help` onto a line of reads) and ship-docsync-store PASS ($0.84).
+
+## [1.91.295.0] - 2026-10-28
+
+**Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
+
+### Fixed
+- **Deleted and renamed tests pass `lanes`**: each removed JS, TS, Python, Dart or bats test that nothing remaining imports prints `removed (no lane owed): <path> — <why>`, and the `lanes` detail counts `N removed path(s)`. A deleted test (or a test renamed to a non-test path) runs its owning suite, the remaining tests that directly exercise the files its merge-base text exercised (`owning suite runs: …`); test helpers and fixtures are not subjects. Any removed test also runs the tests of each remaining non-Markdown file that still names it (`files naming it run: …`), and fails closed when that file has no test.
+- **Lost coverage is named, not hidden**: when a deleted test was the last test of a file, the line says `coverage removed: <file> has no remaining test` and the detail adds `M subject(s) lost their last test`. A modified file whose only test the branch deleted still fails PREGATE_NO_LANE.
+
+### Changed
+- Only removed tests are waived. These still fail PREGATE_NO_LANE until a test or a `dependencies` entry covers them. They are any removed non-test path (a renamed source file's old name included), a removed test that remaining code imports, a deleted or renamed Go or Ruby test (it may define helpers its package still uses), and a deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A remaining test that reads a deleted file or directory is still selected.
+
+### Gate integrity
+- New `test/pregate-removed-paths.test.ts` (47 cases) covers the waived tests and the fail-closed negative controls; no existing test, threshold or allowlist changed.
 
 ## [1.91.294.0] - 2026-10-28
 
