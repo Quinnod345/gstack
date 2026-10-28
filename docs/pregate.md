@@ -805,8 +805,8 @@ gstack-pregate sealed [--range <a..b>] [--remote origin] [--base <branch>] [--js
   `sealed.transcript`, applied after the deny globs and before waivers. They
   are read from the destination base branch only: an exception a push adds
   takes effect once it lands on the base branch, so a branch can never widen
-  its own. They never fold case, and an entry whose last segment is only
-  wildcards (`**`, `sealed/*`) is refused. An exempt file is checked by the
+  its own. They never fold case, and an entry with a wildcard file name
+  (`**`, `sealed/*`, `**/*.json`, `sealed/**.json`) is refused: name the file. An exempt file is checked by the
   text rules only, so configure `answer_markers` when you exempt files next to
   sealed data. Each exempt path is listed on every push (`exempt <rule>
   <file> commit <sha> (sealed.allow_paths <glob>)`) and counted as

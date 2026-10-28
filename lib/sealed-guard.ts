@@ -50,14 +50,13 @@ const MAX_REGEX = 256;
 const LOCAL_PATH_RE = /(?:^|[^A-Za-z0-9_.~-])(?:\/home\/[^/\s'"`]+\/|\/Users\/[^/\s'"`]+\/|[A-Za-z]:\\+Users\\+[^\\\s'"`]+\\)/;
 const PUBLIC_TTL_MS = 24 * 3600_000;
 const PRIVATE_TTL_MS = 3600_000;
-const MAX_EXEMPT_LINES = 20;
 
 /** `<key>: <message>` errors for a `sealed` value; empty when valid. Shared with lib/pregate/config.ts. */
 export function sealedErrors(raw: unknown): Array<{ path: string; message: string }> {
   const errors: Array<{ path: string; message: string }> = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [{ path: 'sealed', message: `must be an object { ${KEYS.join(', ')} }` }];
   const o = raw as Record<string, unknown>;
-  for (const k of Object.keys(o)) if (!KEYS.includes(k)) errors.push({ path: `sealed.${k}`, message: `unknown key; valid keys: ${KEYS.join(', ')} (a key from a newer gstack: upgrade gstack on this machine)` });
+  for (const k of Object.keys(o)) if (!KEYS.includes(k)) errors.push({ path: `sealed.${k}`, message: `unknown key; valid keys: ${KEYS.join(', ')} (if the key comes from a newer gstack, upgrade gstack on this machine)` });
   const list = (key: string, check: (s: string) => string | null) => {
     if (!(key in o)) return;
     const v = o[key];
@@ -67,7 +66,7 @@ export function sealedErrors(raw: unknown): Array<{ path: string; message: strin
   };
   const glob = (g: string) => { const why = containedRelative(g); if (why) return why; try { globToRegExp(g); return null; } catch (e: any) { return e.message; } };
   const regex = (r: string) => { if (!r || r.length > MAX_REGEX) return `must be 1-${MAX_REGEX} characters`; try { new RegExp(r); return null; } catch (e: any) { return `is not a valid regex (${e.message})`; } };
-  const exception = (g: string) => glob(g) ?? (/^[*?]+$/.test(g.split('/').pop()!) ? 'ends in a wildcard-only segment, which would exempt a whole directory; name the file (e.g. **/sealed/*/MANIFEST.json)' : null);
+  const exception = (g: string) => { const name = g.split('/').pop()!; return glob(g) ?? (name.includes('**') || /^[*?]+(\.|$)/.test(name) ? 'has a wildcard file name, which would exempt whole directories or file types; name the file (e.g. **/sealed/*/MANIFEST.json)' : null); };
   list('paths', glob); list('transcripts', glob); list('answer_markers', regex); list('seed_patterns', regex); list('allow_paths', exception);
   for (const k of ['local_paths', 'case_insensitive']) if (k in o && typeof o[k] !== 'boolean') errors.push({ path: `sealed.${k}`, message: 'must be true or false' });
   if ('visibility' in o && o.visibility !== 'public' && o.visibility !== 'private') errors.push({ path: 'sealed.visibility', message: 'must be "public" or "private"' });
@@ -286,8 +285,7 @@ const where = (f: SealedFinding) => `${f.file || '(unknown file)'}${f.line ? `:$
 /** stderr text for a report: findings one per line (`<rule>  <file[:line]>  commit <sha12>`), never the matched text. */
 export function renderSealed(r: SealedReport, context: string): string {
   const lines: string[] = [];
-  for (const e of r.exempt.slice(0, MAX_EXEMPT_LINES)) lines.push(`${context}: exempt ${e.rule}  ${where(e)}  commit ${e.commit.slice(0, 12)} (sealed.allow_paths ${e.glob})`);
-  if (r.exempt.length > MAX_EXEMPT_LINES) lines.push(`${context}: and ${r.exempt.length - MAX_EXEMPT_LINES} more exempt path(s) (sealed.allow_paths)`);
+  for (const e of r.exempt) lines.push(`${context}: exempt ${e.rule}  ${where(e)}  commit ${e.commit.slice(0, 12)} (sealed.allow_paths ${e.glob})`);
   for (const w of r.waived) lines.push(`${context}: waived ${w.rule}  ${where(w)}  commit ${w.commit.slice(0, 12)} (${SEALED_ALLOW_PATH}: ${w.reason})`);
   const vis = `visibility: ${r.visibility}${r.visibility === 'unknown' ? ', counted public' : ''}; ${r.visibilitySource}`;
   const body = r.findings.map(f => `  ${f.rule}  ${where(f)}  commit ${f.commit.slice(0, 12)}`);

@@ -17,7 +17,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { resolveVisibility } from '../lib/sealed-guard';
-import { matchesAny } from '../lib/ship-policy';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const PREPUSH = path.join(ROOT, 'bin', 'gstack-redact-prepush');
@@ -322,15 +321,14 @@ describe('root-anchoring (the docs/pregate.md example)', () => {
     const docs = fs.readFileSync(path.join(ROOT, 'docs', 'pregate.md'), 'utf8');
     expect(docs).toContain('`sealed/**` misses `tasks/x/sealed/a.json`');
     expect(docs).toContain('write `**/sealed/**`');
-    expect(matchesAny(['sealed/**'], 'tasks/x/sealed/a.json')).toBe(false);
-    expect(matchesAny(['**/sealed/**'], 'tasks/x/sealed/a.json')).toBe(true);
-    expect(matchesAny(['**/sealed/**'], 'sealed/a.json')).toBe(true);
     const anchored = scratch({ '.gstack/pregate.json': policy({ paths: ['sealed/**'] }) });
     commit(anchored, { 'tasks/x/sealed/a.json': '{}\n' });
     expect(hook(anchored).code).toBe(0);
     const any = scratch({ '.gstack/pregate.json': policy({ paths: ['**/sealed/**'] }) });
-    commit(any, { 'tasks/x/sealed/a.json': '{}\n' });
-    expect(hook(any).err).toContain('sealed.path  tasks/x/sealed/a.json');
+    commit(any, { 'tasks/x/sealed/a.json': '{}\n', 'sealed/b.json': '{}\n' });
+    const a = hook(any);
+    expect(a.err).toContain('sealed.path  tasks/x/sealed/a.json');
+    expect(a.err).toContain('sealed.path  sealed/b.json');
   });
 });
 
