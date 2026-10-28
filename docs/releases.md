@@ -94,8 +94,8 @@ measure. Finishing a half-done cut (`stable` already at the candidate, release
 missing) is not a new move, and a run without `ref` finishes that cut before
 it considers anything newer.
 
-The floor fails closed when it cannot date the move. These are
-`FLOOR_UNKNOWN`, red on every trigger: a `stable` that no annotated tag dates
+The floor fails closed when it cannot date the move. Three cases are
+`FLOOR_UNKNOWN`, red on every trigger. They are a `stable` that no annotated tag dates
 (only this tool moves `stable` and it tags first, so that state means someone
 moved it by hand), a release that cannot be read (a GitHub API error is not
 "no release"), and a `ref` cut while `stable`'s own release is still
@@ -216,7 +216,7 @@ floor allows it (a security fix uses the security input instead):
 gh workflow run weekly-release.yml -f ref=<full sha on main> -f dry_run=false
 ```
 
-or Actions → **Stable release** → Run workflow, on main (the cut job runs
+or open Actions, pick **Stable release** and press Run workflow, on main (the cut job runs
 only from `refs/heads/main`, with main's tooling; `ref` must be the full
 40-hex SHA). The same green checks apply. The commit is tagged with its VERSION, the release notes say "hotfix release"
 and list every version since the previous release (everything merged in
