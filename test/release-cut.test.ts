@@ -621,6 +621,11 @@ describe('release-cut: the 72-hour floor', () => {
       expect(unknown.message).toBe('no annotated v* tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated; only a --security cut can move it until one does');
       expect(unknown.next).toBe('none until an annotated v* tag dates the release stable points at');
     }
+    // Value: protects=FLOOR_UNKNOWN's promise that a verified --security cut still moves an undatable stable; fails_when=the unknown branch returns before
+    // the security check, stranding a security fix until someone hand-tags stable; why_new=the security test always starts from a dated stable; seam=none;
+    // no_claim=verifySecurity (floorStatus takes the verified flag)
+    expect(floorStatus({ git: f.git, gh: f.gh, repo: f.repo, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.3']!, security: true, scheduled: false, now: pastFloor() }))
+      .toEqual({ verdict: 'security', line: 'FLOOR: bypassed by the security exception (no annotated v* tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated)' });
 
     git(f.seed, 'push', '-q', '--delete', 'origin', 'refs/tags/v1.0.2');
     git(f.work, 'tag', '-d', 'v1.0.2');
@@ -638,11 +643,46 @@ describe('release-cut: the 72-hour floor', () => {
     const base = { git: f.git, gh: f.gh, repo: f.repo, security: false, scheduled: false, now: Date.now() };
     expect(floorStatus({ ...base, prevStable: null, sha: f.shas['1.0.3']! }).verdict).toBe('first');
     expect(floorStatus({ ...base, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.2']! }).verdict).toBe('finishing');
+
+    // Two annotated tags on stable: the newer one dates the move.
+    execFileSync('git', ['tag', '-a', 'v1.0.2-rc', f.shas['1.0.2']!, '-m', 'again'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-10-22T08:00:00Z' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.2-rc');
+    f.refresh();
+    expect(stableMovedAt(f.git, f.gh, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-22T08:00:00Z'), tag: 'v1.0.2-rc' });
   });
 
   // Value: protects=the stable push is conditioned on the stable the floor read, so two overlapping cuts cannot both move it; fails_when=the push is a plain
   // fast-forward that succeeds over a move made after planning; why_new=cuts never raced before the floor made the move time matter; seam=none (real bare origin);
   // no_claim=none beyond protects
+  // Value: protects=a cut whose tag was pushed long before stable moved (a failed stable push, retried later) is still held by the floor and is dated by
+  // its release, not by the old tag; fails_when=the old tag time lets the next cut through early or the retry skips the floor; why_new=the half-done tests
+  // cover a missing release only; seam=gh release view is faked; no_claim=none beyond protects
+  test('a tag pushed earlier without moving stable is held by the floor, and once promoted its release publish time dates the move', () => {
+    const f = fixture();
+    const at = cutFirst(f);
+    const hot = f.release('1.0.4', 'Later work.');
+    execFileSync('git', ['tag', '-a', 'v1.0.4', hot, '-m', 'gstack v1.0.4 (regular release)'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.4');
+    f.refresh();
+    const held = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: () => at + 10 * H });
+    expect(held.ok).toBe(false);
+    if (!held.ok) { expect(held.code).toBe('REFUSED_FLOOR'); expect(held.plan!.tagExists).toBe('same'); }
+    const promo = planRelease({ repo: f.repo, ref: hot, git: f.git, gh: f.gh, now: () => at + 72 * H });
+    expect(promo.ok, JSON.stringify(promo)).toBe(true);
+    if (!promo.ok) return;
+    const cut = cutRelease(promo.plan, { repo: f.repo, git: f.git, gh: f.gh, notesDir: f.base });
+    expect(cut.lines).toEqual(['TAG: v1.0.4 already names ' + hot.slice(0, 12), 'STABLE: ' + f.shas['1.0.3']!.slice(0, 12) + ' -> ' + hot.slice(0, 12), 'RELEASE: v1.0.4 published https://github.com/o/r/releases/tag/v1.0.4']);
+    f.refresh();
+    const published = isoZ(at + 72 * H);
+    const viaRelease: Gh = (args) => args[0] === 'release' && args[1] === 'view' && args[2] === 'v1.0.4' ? { status: 0, stdout: JSON.stringify({ publishedAt: published }), stderr: '' } : f.gh(args);
+    expect(stableMovedAt(f.git, viaRelease, f.repo, hot)).toEqual({ at: Date.parse(published), tag: 'v1.0.4' });
+    f.release('1.0.5', 'Even later.');
+    f.refresh();
+    const next = planRelease({ repo: f.repo, git: f.git, gh: viaRelease, now: () => at + 100 * H });
+    expect(next.ok).toBe(false);
+    if (!next.ok) { expect(next.code).toBe('REFUSED_FLOOR'); expect(next.message).toStartWith('stable moved to v1.0.4 at ' + published + ', 28.0 h ago'); }
+  });
+
   test('a stable that moved after planning fails the push with a lease error and stays where the other cut put it', () => {
     const f = fixture();
     const planned = planRelease({ repo: f.repo, git: f.git, gh: f.gh });
@@ -799,6 +839,12 @@ describe.skipIf(process.platform === 'win32')('release-cut: refusals at the work
     expect(noRef.status).toBe(1);
     expect(noRef.stdout.split('\n')[0]).toBe('REFUSED_SECURITY: --security needs --ref <the fix commit>: a security cut releases up to the fix, never whatever is newest');
     expect(noRef.stdout).toContain('::error title=release-cut REFUSED_SECURITY::');
+    // Value: protects=a refusal annotation stays one workflow command: % CR and LF in the message are escaped as %25 %0D %0A; fails_when=the escaping is
+    // dropped, so caller-supplied text in --ref or a git error splits the ::error:: line and starts a new workflow command; why_new=every other annotation
+    // message here is plain text; seam=none; no_claim=GitHub's rendering of the decoded annotation
+    const escaped = run({ GITHUB_ACTIONS: 'true' }, '--ref', 'no%such\r\nref');
+    expect(escaped.status).toBe(1);
+    expect(escaped.stdout.split('\n').find(l => l.startsWith('::error'))).toStartWith('::error title=release-cut REFUSED::REFUSED: --ref no%25such%0D%0Aref is not a commit here: ');
     expect(run({}, '--security').status).toBe(2);
     expect(run({}, '--security', '--dry-run').status).toBe(2);
 

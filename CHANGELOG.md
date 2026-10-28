@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**Stable moves twice a week, and never twice in 72 hours unless a security fix needs it.** Garry asked, 2026-10-27: "Do we have rules around stable where we update stable except for security fixes at most once every 72 hours?" There were none: the Monday cut and any hand-run cut moved team installs whenever someone ran it. Now the release cut runs Monday and Thursday at 14:00 UTC ("Ok twice a week"), refuses any move inside 72 hours of the last one, and lets a security fix through only when it can tie the fix to the commits being released.
+
+### Added
+- **The 72-hour floor in `scripts/release-cut.ts`.** Every cut, scheduled or by hand, measures stable's last move from the newest annotated `v*` tag on stable (or its GitHub Release's publish time when later) and refuses inside 72 hours. The refusal's first two lines are `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; …` and `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run`, followed by the plan it would have run. Scheduled runs alone get 3 hours of grace for GitHub's late cron starts, so a Thursday run after a late Monday cut still cuts. A stable no annotated tag dates is `FLOOR_UNKNOWN`. A refused hand cut exits 1 with an error annotation; a refused scheduled run or dry run exits 0 with a notice, since the policy is working.
+- **Security cuts: `--security "<reason>"` with `--ref <fix sha>`** (workflow inputs `security` and `ref`). The reason must name a `GHSA-…`, `CVE-…` or `#<n>`, and the cut passes the floor only when a commit in the span names that GHSA or CVE, `#<n>` carries the `security` label and a commit references it, or the GitHub Advisory Database lists a package that changes in the span's `package.json` or `bun.lock`. Anything else is `REFUSED_SECURITY`. The reason (one public line) goes into the tag message and the release notes as `**Security release:** …`, a retry reads it back from the tag, and the plan's `RIDING_ALONG:` line counts the other versions that ship with the fix.
+
+### Changed
+- **`.github/workflows/weekly-release.yml` is now "Stable release" and runs Monday and Thursday** (`0 14 * * 1,4`). The file keeps its name so its run history and every `gh workflow run weekly-release.yml` stay valid. The cut job can read issue and pull-request labels for the security check.
+- **Release notes say `(regular release)`, `(hotfix release)` or `(security release)`** instead of "weekly release", and the next regular cut after a security release lists only the versions since it.
+- **The stable push is pinned to the stable the plan read** (`--force-with-lease=refs/heads/stable:<sha>`), so two overlapping cuts cannot both move it.
+- **Docs:** `docs/releases.md` gains "The 72-hour floor" and "Security releases" (what is verified and what is attested) and the new outcome codes; the cadence sentence in `docs/install.md` and the release section of `docs/recommended-harness.md` follow.
+
 ## [1.91.284.0] - 2026-10-27
 
 **Five small takes from tstack, in gstack's words.** Theo Browne's tstack (MIT, 2026-10-24) is nine short PR-landing skills; its best ideas that gstack lacked were a verb for an aging pull request, a Codex picker that says what each skill is for, a written grant for unattended sessions, a repo-level rule for porting a contributor's PR, and a visible author line on agent-posted comments. Each lands here as gstack prose and gstack code; no sentence is copied (NOTICE.md). Approved by Garry, 2026-10-26: "Do it, send" (yes to the opt-in attribution callout, off by default).
