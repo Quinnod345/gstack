@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**`gstack-restamp` no longer cuts a four-part package.json version to three parts in a repo whose convention is four.** On garrytan/gbrain#7878, `/ship` restamped gbrain's `package.json` to `"0.60.483"` beside `VERSION` `0.60.483.0`; gbrain requires the two to match and its CI version gate fails when they drift, so the stamp had to be reverted by hand. The version stage called `gstack-version-bump write`, which always stores the npm-valid three-part form in the manifest (decision 11, which is why gstack's own `package.json` reads `1.91.298`).
+
+### Fixed
+- **`lib/restamp.ts`**: the version stage keeps the full version in the manifest when the policy lists it in `stamp_paths` or `stamp_files` and it already holds four parts, and the stage detail says so (`wrote 0.60.483.0 (package.json keeps four parts: …)`). Every other repo, gstack included, still gets the npm-valid form, and a four-part manifest the policy does not list still migrates to three parts as decision 11 says.
+- **`bin/gstack-version-bump write`**: new `--manifest-form npm|full` (default `npm`); `full` writes the version as given to the manifest and its npm lockfiles.
+
+### Tests
+- `test/restamp-four-part-manifest.test.ts`: a gbrain-shaped fixture (four-part `VERSION` and `package.json`, the manifest in `stamp_files`, bun, no npm lockfile) restamped from an unstamped branch and from a branch already carrying its stamp; both failed before the fix with `"0.60.483"`. gstack's shape (three-part manifest and lockfile) and an unlisted four-part manifest keep their current results.
+- `test/gstack-version-bump.test.ts`: `--manifest-form full` keeps four parts in the manifest and lockfile; an unknown form exits 2 before anything is written.
+
 ## [1.91.298.0] - 2026-10-28
 
 **Dia is gone from gstack.** `/setup-browser-cookies` and `cookie-import-browser` no longer list Dia as a cookie source, and the Dia qualification harness is deleted. That harness was a set of macOS campaigns that never qualified a native import, and its `dia-launch-comparison` free test was failing the merge train on Ubicloud runners. Cookie import from Comet, Chrome, Chromium, Arc, Brave, Edge, Opera and Opera GX is unchanged.
