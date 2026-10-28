@@ -105,7 +105,7 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
     const alt = example?.options.find(x => x.key !== recKey(example));
     need.push(`- **Change something:** say which choice and what you want instead, in words${example && alt ? ` (for example "${clip(stripRef(example.title), 60)}: ${plainOption(alt.text)}")` : ''}. A change that alters the plan reopens its review before anything is built.`);
     need.push('- **Reject:** nothing is built.', '');
-    if (!missing.length) need.push(`- **do it:** rec at full scope: every recommendation above, the follow-ons the plan names (docs, trains, cleanups) included, carried through to done with no further ask.`, '', 'Reply: **rec**, or **do it**', '');
+    if (!missing.length) need.push(`- **do it:** rec at full scope: every ${kept.length ? 'choice' : 'recommendation'} above, the follow-ons the plan names (docs, trains, cleanups) included, carried through to done with no further ask.`, '', 'Reply: **rec**, or **do it**', '');
   }
   const tokens = rec.map(c => `${c.id}${c.chosen}`).join(' ');
   const trailer = `_For the relaying agent, not the person:_ run ${list.run}, gate_rev=${list.gate_rev}, rec_hash=${hash}; rec resolves to ${tokens}; plan ${plan.file ?? '(missing)'} (sha256 ${plan.sha}). Answer with ` +
