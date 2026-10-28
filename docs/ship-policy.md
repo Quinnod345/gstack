@@ -830,15 +830,18 @@ construction:
    fix-range`) or in the diff is `scope: fix`; nothing below the floor earns a
    pass. `NO FINDINGS` is the expected reviewer result for a clean range, never a
    failed review.
-3. **Three passes is the cap.** A pass that applied no edits continues to Step 10:
-   the loop ships with its deferred and noted items named in the PR body. A
-   blocking finding still in `fix` scope on pass 3 stops the run and names the
-   finding (path, severity, problem) for the owner instead of a fourth pass.
+3. **Two full passes plus one fix-check is the cap**, stepped by the
+   [transition table](review-policy.md#transitions). A pass that applied no edits
+   continues to Step 10: the loop ships with its deferred and noted items named in
+   the PR body. A blocking finding still open after the last allowed step stops
+   the run and names the finding (path, severity, problem) for the owner instead
+   of a third full pass.
 
 `gstack-review-scope summary --since <REVIEW_SINCE>` reads the branch's review-log
 rows for this invocation and writes the counters the ship receipt carries
 (`gstack-ship-receipt write … --review-loop @<file>`): `review_loop: { passes,
-blocking_found, deferred, noted, fixed, scope }`, printed on the receipt summary
+blocking_found, deferred, noted, fixed, scope }`, plus `fix_checks`, `dispatches`
+and `est_input_tokens` when the run recorded them, printed on the receipt summary
 line as `passes=<n> blocking_found=<k> deferred=<m>`, so a scorecard can track
 passes per PR.
 

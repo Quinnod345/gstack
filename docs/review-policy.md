@@ -121,6 +121,10 @@ test results and the callers of every changed symbol, at full effort. It is
 logged as a `review-fix-check` row, so it never counts as a pass. No army, no
 Red Team and no outside voice run on it.
 
+The same floor and the same `NO FINDINGS` rule apply to `/review` on its own;
+its re-review loop keeps its three-cycle fix cap (`CYCLES`), and a pass that
+applies no edits is its exit too.
+
 <a id="review-depth"></a>
 ## Review depth by diff class
 
