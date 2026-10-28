@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.291.0] - 2026-10-28
 
 **/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.
 
