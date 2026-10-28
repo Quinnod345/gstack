@@ -134,7 +134,7 @@ describe('gstack-pr-shots CLI', () => {
     fs.writeFileSync(browse, `#!/usr/bin/env bash\nexec ${JSON.stringify(process.execPath)} --no-env-file --config=/dev/null ${JSON.stringify(path.join(stubDir, 'state-dir.ts'))}\n`, { mode: 0o755 });
     const before = wtreeFingerprint({ cwd: dir });
     expect('tree' in before).toBe(true);
-    const r = cli(['--path', 'doc.md', '--caption', 'c'], dir, { GSTACK_STATE_ROOT: tmp('shots-state-'), GSTACK_BROWSE_BIN: browse });
+    const r = cli(['--path', 'doc.md', '--caption', 'c'], dir, { GSTACK_STATE_ROOT: tmp('shots-state-'), GSTACK_BROWSE_BIN: browse, BROWSE_STATE_FILE: '' });
     expect(r.out).toMatch(/^SHOT_PNG: failed /m);
     expect(fs.existsSync(path.join(dir, '.gstack', '.gitignore'))).toBe(true);
     expect(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8')).toBe('node_modules/\n.gstack/tmp/\n');
