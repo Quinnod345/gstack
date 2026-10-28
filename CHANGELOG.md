@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**Three flaky gate cases from the 2026-10-28 daily flaky pass are repaired: shared-libs-review-index-flags, ship-exploratory-late-input (with ship-exploratory-plan-checks, which failed the same way), and the real-Chromium cookie-auth positive case.** Each red was diagnosed from its captured run before the fix, and each repair has a free test that fails without it.
+
+### Fixed
+- **Shared-code reuse no longer lets a review rewrite the index flags it checks.** In train gate 40619718717, the reviewer ran `git update-index --really-refresh` while gathering evidence. That cleared the assume-unchanged flag the checker reads, so the trial's prerequisites went stale. Step 1 of the /review and /ship shared-code reuse section now says evidence gathering is read-only and names that command. Nearby wording was tightened so the section keeps its exact size.
+- **The /ship exploratory-QA cases follow Step 9's review plan again.** Since #3527, Step 9 runs `gstack-review-plan --base main`. The fixture refused that command (paid screen 40707142223, both ship-exploratory-plan-checks trials) and never said that the plan's adversarial-native and outside-voice lines belong to Step 11, which is outside the fixture's Steps 8–9 excerpt. In gate 40664336141, ship-exploratory-late-input reported pass while listing that Step 11 pass as remaining work.
+- **The real-browser cookie-auth checks no longer time out under load.** The positive case and the rejection cases that return early now use the product's default 15 s limit instead of a 400 ms test-only value. That value timed out twice on Windows and once on a Ubicloud VM.
+
+### Gate integrity
+- `test/helpers/qa-callers-fixture.ts`: the caller command interface now admits the `gstack-review-plan` forms ship Step 9 names (`--base main` with its `--pass`, `--last` and finding flags, or `--fix-check-prompt` with literal file arguments), only at the fixture's installed helper path. Pipes, other arguments, other binaries and calls without the fixture's runtime are refused, and `test/qa-caller-review-plan.test.ts` checks these as negative controls. The ship prompt names the Step 11 boundary. No threshold, trial count, case kind or timeout changed.
+- `browse/test/cookie-auth-verification.test.ts`: GStack Minder approved dropping the shared `timeoutMs: 400`, which came from a84b0b5b6 (#2964) as a fixture value no product path uses (`--verify-auth` callers run under `MAX_TIMEOUT_MS` 15000). The identity mismatch, missing and ambiguous cases keep 400 ms because they resolve only at the deadline, and the 15 s default would exceed bun's 5 s test timeout. The explicit 100 ms, 30 ms, 60 s-cap and invalid-timeout tests are unchanged.
+- New free tests: `test/qa-caller-review-plan.test.ts` (replays both 40707142223 captures and runs the real plan for all four ship cases) and `test/shared-libs-index-flags-readonly.test.ts` (replays the captured refresh against the assume-unchanged fixture, with a read-only control).
+- `scripts/lib/windows-curation.ts`: `test/shared-libs-index-flags-readonly.test.ts` is curated off the Windows subset. Its fixture starts the review through `bin/gstack-review-log`, a bash script, which windows-latest cannot launch (Windows Free Tests run 40727825859, shard 5).
+
 ## [1.91.295.0] - 2026-10-28
 
 **Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
