@@ -5066,3 +5066,61 @@ a registered, unlocked worktree whose directory is already gone (`git worktree
 prune`); a locked one, or a `broken` row whose `.git` link is missing, reads
 `review` instead. `clean,ignored:<n>` means the tree is clean but holds
 gitignored entries (`.env`, build output) that go with the worktree.
+
+
+## Agent harnesses (gstack-harness)
+
+`bin/gstack-harness` registers gstack's skills with the agent harness gstack is installed into (OpenClaw, Hermes, a Dot, QM, any other) and records every file it writes in `$GSTACK_STATE_ROOT/harness/<id>.ledger`. Each error line ends with its code and a link here. Per-harness install, verify and uninstall steps: [docs/hosts.md](hosts.md#agent-harnesses).
+
+<a id="harness-unknown-target"></a>
+### `gstack-harness: unknown harness "<name>"` (HARNESS_UNKNOWN_TARGET)
+
+The name is not one of openclaw, hermes, dots, generic, qm, muse or grok. For a harness gstack does not know, use `generic` with `--skills-dir` or `--context`, or `--print` to get the router and block to paste in.
+
+<a id="harness-no-destination"></a>
+### `gstack-harness: <harness> has no default skills folder` (HARNESS_NO_DESTINATION)
+
+`generic` has no default location, and gstack never guesses at your context files. Pass `--skills-dir <dir>` (an Agent Skills folder the harness reads) or `--context <file>` (a file it loads every session), or `--print` to write nothing.
+
+<a id="harness-mode-unsupported"></a>
+### `gstack-harness: Hermes does not support --skills router` (HARNESS_MODE_UNSUPPORTED)
+
+Hermes opens only skills it has indexed, so a router that points at unlisted files would not load. Drop `--skills` to take the harness's default (Hermes: all; OpenClaw, dots and generic: router).
+
+<a id="harness-unsafe-destination"></a>
+### `gstack-harness: refusing to write into <dir>: <why>` (HARNESS_UNSAFE_DESTINATION)
+
+The destination is your home folder, the filesystem root, inside the gstack checkout, a symlink (or holds one where gstack's own folders were), or a path with a tab or newline. Nothing was written. Pick the harness's own skills folder, for example `--skills-dir ~/.openclaw/skills`.
+
+<a id="harness-unowned-entry"></a>
+### `gstack-harness: <path> already exists and gstack did not write it` / `a skill named <name> already exists at <path>` (HARNESS_UNOWNED_ENTRY)
+
+gstack only replaces files its ledger says it wrote. A folder or a skill with the same name is yours (or another tool's), and harnesses resolve skills by name, so gstack stops instead of shadowing it. Rename or move that entry, then register again.
+
+The same code stops `register generic --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
+
+<a id="harness-render-failed"></a>
+### `gstack-harness: could not render <harness> skills: ...` (HARNESS_RENDER_FAILED)
+
+The harness's skills are rendered from this checkout with `scripts/gen-skill-docs.ts`. Run `bun install` in the checkout and register again; the last lines of the generator's output are in the message.
+
+<a id="harness-budget-exceeded"></a>
+### `gstack-harness: router description is <n> bytes` / `context block is <n> bytes` (HARNESS_BUDGET_EXCEEDED)
+
+The router's description (at most 300 bytes) and the context block (at most 600 bytes) go into every session, so gstack refuses to grow them. This is a gstack bug: report it with the byte count.
+
+<a id="harness-not-registered"></a>
+### `gstack-harness: no registration named "<name>"` (HARNESS_NOT_REGISTERED)
+
+There is no ledger for that harness or id under `$GSTACK_STATE_ROOT/harness`. `gstack-harness status` lists every registration on this machine with its id.
+
+<a id="harness-qm-credentials"></a>
+### `gstack-harness: no QM admin credential in the environment` / `... needs --yes` (HARNESS_QM_CREDENTIALS)
+
+Registering gstack in QM publishes an org skill pack, so it needs an org admin's credential and an explicit `--yes`. Set `GSTACK_QM_URL` and `GSTACK_QM_ADMIN_TOKEN` (or `GSTACK_QM_SIGNING_SECRET` with `GSTACK_QM_ADMIN_ACTOR`) in the environment and run `gstack-harness register qm --yes`. gstack never prompts for, prints or stores the credential; the message shows the exact request instead.
+
+<a id="harness-qm-api"></a>
+### `gstack-harness: <METHOD> /v1/admin/skill-packs... returned HTTP <code>` / `... failed: timed out after 60 s` (HARNESS_QM_API)
+
+QM's admin API refused or did not answer. gstack lists packs before it creates one and retries once, so rerunning never makes a second pack. Check the URL is QM core and the credential is an org admin; `gstack-harness status` shows whether a pack id was recorded.
+

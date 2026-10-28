@@ -1,0 +1,148 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+/**
+ * gstack-harness — register gstack's skills with the agent harness it is
+ * installed into (OpenClaw, Hermes, dots, QM, any other), the harness's own
+ * way, and take them back out. lib/harness-register.ts holds the targets and
+ * the ledger; docs/hosts.md has the per-harness install, verify and uninstall
+ * blocks.
+ *
+ * Usage:
+ *   gstack-harness detect [--json]
+ *   gstack-harness register <target> [--skills router|all] [--skills-dir <dir>] [--context <file>] [--print] [--yes] [--no-registry]
+ *   gstack-harness unregister <target|registration id> [--remote]
+ *   gstack-harness status [--json] [--no-check]
+ *   gstack-harness refresh
+ *   gstack-harness auto
+ *   gstack-harness manifest <target> [--skills-dir <dir>]
+ */
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { resolveStateRoot } from '../lib/state-root';
+import {
+  HarnessError, TARGETS, detect, getTarget, harnessSees, listLedgers, printPayload, refresh, register, sourceSkills, status, unregister,
+  type RegisterResult, type SkillsMode, type TargetName,
+} from '../lib/harness-register';
+import { registerQm, removeQmPack } from '../lib/harness-qm';
+
+const argv = process.argv.slice(2);
+const flag = (name: string) => { const i = argv.indexOf(name); if (i < 0) return undefined; const v = argv[i + 1]; argv.splice(i, 2); return v; };
+const bool = (name: string) => { const i = argv.indexOf(name); if (i < 0) return false; argv.splice(i, 1); return true; };
+
+const checkout = path.resolve(fs.realpathSync(process.argv[1]), '..', '..');
+const version = (() => { try { return fs.readFileSync(path.join(checkout, 'VERSION'), 'utf8').trim(); } catch { return 'unknown'; } })();
+const stateRoot = resolveStateRoot(process.env);
+const env = process.env;
+const home = os.homedir();
+const self = path.join(checkout, 'bin', 'gstack-harness');
+
+function receiptLines(r: RegisterResult): string[] {
+  const t = TARGETS[r.target];
+  return [
+    'gstack-harness: ' + t.displayName + ': ' + r.skills + ' gstack skills ' + (r.mode === 'router' ? 'reachable through one router skill' : 'registered') + ' at ' + r.dest + ' (' + r.status + (r.written ? ', ' + r.written + ' files written' : '') + ')',
+    ...(r.router ? ['  router: ' + r.router + (r.mode === 'router' ? ' (register with --skills all to list every skill natively)' : '')] : []),
+    ...r.kept.map(k => '  kept your edit: ' + k),
+    '  ledger: ' + r.ledger,
+    '  remove: ' + self + ' unregister ' + r.id,
+  ];
+}
+const receipt = (r: RegisterResult) => console.log(receiptLines(r).join('\n'));
+
+function usage(code: number): never {
+  const text = fs.readFileSync(process.argv[1], 'utf8').split('\n').slice(1).filter(l => l.startsWith(' *')).map(l => l.slice(3)).join('\n');
+  (code ? console.error : console.log)(text);
+  process.exit(code);
+}
+
+async function main(): Promise<number> {
+  const json = bool('--json');
+  const sub = argv.shift();
+  const base = { checkout, stateRoot, env, home, version };
+  switch (sub) {
+    case 'detect': {
+      const d = detect(env, home);
+      if (json) console.log(JSON.stringify(d));
+      else console.log('inside: ' + (d.inside.join(', ') || 'none') + '\npresent: ' + (d.present.join(', ') || 'none'));
+      return 0;
+    }
+    case 'register': {
+      const mode = flag('--skills') as SkillsMode | undefined;
+      const skillsDir = flag('--skills-dir'); const context = flag('--context');
+      const print = bool('--print'); const yes = bool('--yes'); const noRegistry = bool('--no-registry');
+      const t = getTarget(argv.shift() ?? '');
+      if (print) { console.log(printPayload(checkout)); return 0; }
+      if (t.name === 'qm') {
+        const r = await registerQm({ ...base, yes });
+        console.log('gstack-harness: QM: pack ' + r.packId + ' at ' + r.ref + ' (' + r.status + '); imported: ' + JSON.stringify(r.imported).slice(0, 300));
+        console.log('  detach locally: ' + self + ' unregister ' + r.id + '   archive the org pack: ' + self + ' unregister ' + r.id + ' --remote');
+        return 0;
+      }
+      if (t.mechanism === 'verify-only') {
+        const seen = harnessSees(t, '', env, ['review', 'gstack-review'], true);
+        if (seen.visible === 'yes') { console.log('gstack-harness: ' + t.displayName + ': discovered gstack skills through ~/.claude/skills (Claude-rendered, unverified in a live session); checked: ' + seen.checked); return 0; }
+        console.log('gstack-harness: ' + t.displayName + ': unverified (' + (seen.checked ? seen.checked + ' did not list gstack' : t.name + ' is not on PATH') + '). Install gstack for Claude Code (./setup), or paste the block from: ' + self + ' register generic --print');
+        return 3;
+      }
+      const r = register({ ...base, target: t, mode, skillsDir, context, registry: !noRegistry });
+      if (json) console.log(JSON.stringify({ ...r, receipt: receiptLines(r).map(l => l.trim()).join('; ') }));
+      else receipt(r);
+      return 0;
+    }
+    case 'unregister': {
+      const remote = bool('--remote');
+      const name = argv.shift() ?? '';
+      const matches = listLedgers(stateRoot).filter(l => l.ledger.meta.id === name || l.ledger.meta.target === name);
+      if (!matches.length) throw new HarnessError('HARNESS_NOT_REGISTERED', 'no registration named ' + JSON.stringify(name));
+      for (const l of matches) {
+        if (remote && l.ledger.meta.target === 'qm') {
+          console.log('gstack-harness: archived QM pack ' + await removeQmPack(stateRoot, env, l.ledger.meta.id));
+          fs.rmSync(l.file);
+          console.log('gstack-harness: removed ' + l.ledger.meta.id);
+        } else for (const id of unregister(stateRoot, checkout, l.ledger.meta.id, env)) console.log('gstack-harness: removed ' + id);
+      }
+      return 0;
+    }
+    case 'status': {
+      const check = !bool('--no-check');
+      const rows = status(stateRoot, version, env, check);
+      const extra = (['muse', 'grok'] as TargetName[]).filter(n => TARGETS[n].present(env, home)).map(n => ({ target: n, ...(check ? harnessSees(TARGETS[n], '', env, ['review', 'gstack-review'], true) : { visible: 'unknown' as const }) }));
+      if (json) { console.log(JSON.stringify({ registrations: rows, detected: extra })); return 0; }
+      if (!rows.length && !extra.length) console.log('gstack-harness: no harness registrations on this machine');
+      for (const r of rows) console.log(r.target + '\t' + r.mode + '\t' + r.dest + '\t' + r.files + ' files\t' + (r.stale ? 'stale (' + r.version + '; refresh: ' + self + ' refresh)' : r.version) + '\tvisible to harness: ' + r.visible + (r.checked ? ' (' + r.checked + ')' : '') + (r.missing?.length ? ' missing: ' + r.missing.slice(0, 5).join(', ') : '') + '\t' + r.id);
+      for (const x of extra) console.log(x.target + '\tdetect\t~/.claude/skills\t' + (x.visible === 'yes' ? 'discovered (Claude-rendered, unverified)' : 'unverified') + (x.checked ? ' (' + x.checked + ')' : ''));
+      return 0;
+    }
+    case 'refresh': {
+      for (const r of refresh(base)) if (r.status !== 'unchanged') receipt(r);
+      return 0;
+    }
+    case 'auto': {
+      const d = detect(env, home);
+      let failed = 0;
+      const done = new Set<string>();
+      for (const n of d.inside.filter(n => TARGETS[n].mechanism === 'skill-folder')) {
+        try { const r = register({ ...base, target: TARGETS[n], registry: true }); done.add(r.id); receipt(r); }
+        catch (e) { if (e instanceof HarnessError) { console.error(e.line()); failed = 1; } else throw e; }
+      }
+      try { for (const r of refresh(base, done)) if (r.status !== 'unchanged') receipt(r); }
+      catch (e) { if (e instanceof HarnessError) { console.error(e.line()); failed = 1; } else throw e; }
+      for (const n of d.present.filter(n => !d.inside.includes(n) && TARGETS[n].mechanism === 'skill-folder' && !listLedgers(stateRoot).some(l => l.ledger.meta.target === n))) {
+        console.log('gstack-harness: ' + TARGETS[n].displayName + ' is installed here; to give it gstack skills: ' + self + ' register ' + n);
+      }
+      return failed;
+    }
+    case 'manifest': {
+      const t = getTarget(argv.shift() ?? 'generic');
+      const skills = sourceSkills(t.render ? t : TARGETS.generic, checkout, fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-harness-')));
+      console.log(JSON.stringify({ schema: 1, gstack_version: version, target: t.name, skills: skills.map(s => ({ name: s.name, use: s.use, path: path.join(s.dir, 'SKILL.md') })) }, null, 2));
+      return 0;
+    }
+    case '--help': case '-h': case 'help': return usage(0);
+    default: return usage(2);
+  }
+}
+
+main().then(code => process.exit(code), (e) => {
+  if (e instanceof HarnessError) { console.error(e.line()); process.exit(1); }
+  throw e;
+});

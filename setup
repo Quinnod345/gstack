@@ -23,8 +23,8 @@ Usage: ./setup [options]
 Options:
   --host <name>     Install for one host. Default: claude. Hosts by tier:
                       full:             claude
-                      experimental:     codex, kiro, factory, opencode, cursor, copilot, agy
-                      instruction-only: slate, openclaw, hermes, gbrain
+                      experimental:     codex, kiro, factory, opencode, cursor, copilot, agy, openclaw, hermes
+                      instruction-only: slate, gbrain
                       auto:             every installed agent that setup detects
                     An explicit --host never changes another host's install.
   --global          Allow this checkout to replace an existing global install
@@ -42,6 +42,11 @@ Options:
                     installs Chromium later, on the first browser skill run;
                     bin/gstack-capy-install passes --no-browser unless it is
                     given --with-browser.
+  --no-harness-auto Do not register gstack's skills with the agent harness this
+                    setup runs inside (OpenClaw, Hermes, a Dot). Same as
+                    GSTACK_HARNESS_AUTO=0. Registration only happens without
+                    --host (or with --host auto); bin/gstack-harness registers
+                    with any harness by hand (docs/hosts.md).
   --refresh-registered
                     Refresh every install registered for this checkout (what
                     /gstack-upgrade runs), then print one row per install.
@@ -179,12 +184,13 @@ CLAUDE_MODEL_ARG=""
 CLAUDE_MODEL_SET=0
 REFRESH_REGISTERED=0
 HOST_FLAG_SET=0
+HARNESS_AUTO=1; [ "${GSTACK_HARNESS_AUTO:-1}" = 0 ] && HARNESS_AUTO=0
 # Reject unknown options before anything is written, with the closest flag.
 _setup_unknown_option() {
   local bad="$1" next="${2:-}" best="" best_d=99 flag d value=""
   for flag in --host --model --claude-model --global --local --prefix --no-prefix --team --no-team \
     --plan-tune-hooks --no-plan-tune-hooks --timeline-stop-hook --no-timeline-stop-hook \
-    --refresh-registered --status --no-browser --quiet --help; do
+    --refresh-registered --status --no-browser --no-harness-auto --quiet --help; do
     d="$(awk -v a="${bad%%=*}" -v b="$flag" 'BEGIN {
       n = length(a); m = length(b)
       for (i = 0; i <= n; i++) d[i, 0] = i
@@ -226,31 +232,15 @@ while [ $# -gt 0 ]; do
     --timeline-stop-hook=*)  TIMELINE_STOP_HOOK_MODE="${1#--timeline-stop-hook=}"; shift ;;
     --refresh-registered) REFRESH_REGISTERED=1; shift ;;
     --no-browser) export GSTACK_SKIP_PLAYWRIGHT=1 GSTACK_SKIP_FONTS=1; shift ;;
+    --no-harness-auto) HARNESS_AUTO=0; shift ;;
     -q|--quiet) QUIET=1; shift ;;
     *) _setup_unknown_option "$@"; exit 2 ;;
   esac
 done
 
-# Shared by the instruction-tier explainer arms (openclaw, hermes). The digest
-# path is anchored to the script's own directory — $(pwd) would print a
-# nonexistent path when setup is invoked from anywhere else.
-print_instruction_tier() {
-  local source_dir
-  source_dir="$(cd "$(dirname "$0")" && pwd -P)"
-  echo ""
-  echo "Instruction-only tier (no install): copy the 2KB rules digest into a"
-  echo "location your agent reads (e.g. append to your project's AGENTS.md)."
-  echo "It carries gstack's ethos, reuse ladder, and voice rules:"
-  echo ""
-  echo "  $source_dir/agents-digest/gstack-AGENTS.md"
-  echo ""
-  echo "Re-copy it after upgrading gstack — the digest's first line shows its version."
-  echo ""
-}
-
 [ "$HOST" = "antigravity" ] && HOST="agy"  # Antigravity CLI is named after its binary
 case "$HOST" in
-  claude|codex|kiro|factory|opencode|cursor|copilot|agy|auto) ;;
+  claude|codex|kiro|factory|opencode|cursor|copilot|agy|openclaw|hermes|auto) ;;
   slate)
     echo ""
     echo "Slate is not yet a first-class install target (docs/designs/SLATE_HOST.md —"
@@ -260,33 +250,6 @@ case "$HOST" in
     echo ""
     echo "  ./setup --host claude"
     echo ""
-    exit 0 ;;
-  openclaw)
-    echo ""
-    echo "OpenClaw integration uses a different model — OpenClaw spawns Claude Code"
-    echo "sessions natively via ACP. gstack provides methodology artifacts, not a"
-    echo "full skill installation."
-    echo ""
-    echo "To integrate gstack with OpenClaw:"
-    echo "  1. Tell your OpenClaw agent: 'install gstack for openclaw'"
-    echo "  2. Or generate artifacts: bun run gen:skill-docs --host openclaw"
-    echo "     (in an install, add 'openclaw' to .gstack-installed-hosts first, or ./setup prunes them)"
-    echo "  3. See docs/OPENCLAW.md for the full architecture"
-    print_instruction_tier
-    exit 0 ;;
-  hermes)
-    echo ""
-    echo "Hermes is an instruction-only gstack host: setup installs nothing for"
-    echo "Hermes and changed nothing on this machine."
-    echo ""
-    echo "To use gstack with Hermes:"
-    echo "  1. Copy the rules digest below into a file Hermes reads, or"
-    echo "  2. Render Hermes-flavoured skills yourself (not certified; #2826):"
-    echo "       bun run gen:skill-docs --host hermes"
-    echo "     then point a Hermes profile's skills.external_dirs at .hermes/skills."
-    echo "     Add 'hermes' to .gstack-installed-hosts in this checkout first: ./setup"
-    echo "     prunes renders of hosts that file does not name (#1694)."
-    print_instruction_tier
     exit 0 ;;
   gbrain)
     echo ""
@@ -465,6 +428,7 @@ if [ "$REFRESH_REGISTERED" -eq 1 ] && [ -z "${GSTACK_SETUP_REFRESH_CHILD:-}" ]; 
   _RF_TARGETS=""
   _RF_SKIPPED=""
   _rf_add() {
+    case "$1" in openclaw|hermes) return 0 ;; esac
     case "
 $_RF_TARGETS" in *"
 $1	$2	$3
@@ -553,6 +517,9 @@ claude	"*) _persist_claude_model ;;
 $_RF_TARGETS
 EOF
   grep -q '	failed	' "$_RF_SUMMARY" && _RF_FAILED=1
+  if [ "$HARNESS_AUTO" -eq 1 ] && [ -d "$GSTACK_STATE_ROOT/harness" ]; then
+    bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$SOURCE_GSTACK_DIR/bin/gstack-harness" refresh || _RF_FAILED=1
+  fi
   echo ""
   if [ "$_RF_FAILED" -eq 1 ]; then
     echo "Upgrade summary (NOT every install was refreshed; see failed rows):"
@@ -1414,6 +1381,7 @@ INSTALL_OPENCODE=0
 INSTALL_CURSOR=0
 INSTALL_COPILOT=0
 INSTALL_AGY=0
+INSTALL_HARNESS=""
 if [ "$HOST" = "auto" ]; then
   command -v claude >/dev/null 2>&1 && INSTALL_CLAUDE=1
   command -v codex >/dev/null 2>&1 && INSTALL_CODEX=1
@@ -1450,13 +1418,15 @@ elif [ "$HOST" = "copilot" ]; then
   INSTALL_COPILOT=1
 elif [ "$HOST" = "agy" ]; then
   INSTALL_AGY=1
+elif [ "$HOST" = "openclaw" ] || [ "$HOST" = "hermes" ]; then
+  INSTALL_HARNESS="$HOST"
 fi
 
 # A host that passes --host validation but sets no INSTALL_* flag would
 # silently configure nothing and exit 0 (the #2361 slate failure class).
 # Fail loudly if a future host lands in the accept-list without a dispatch arm.
-if [ "$HOST" != "auto" ] && [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ] && [ "$INSTALL_OPENCODE" -eq 0 ] && [ "$INSTALL_CURSOR" -eq 0 ] && [ "$INSTALL_COPILOT" -eq 0 ] && [ "$INSTALL_AGY" -eq 0 ]; then
-  echo "Error: no install arm exists for host '$HOST' — it passed --host validation but sets no INSTALL_* flag, so setup would configure nothing and exit 0. This is a setup bug. Valid install targets: claude, codex, kiro, factory, opencode, cursor, copilot, agy (informational: slate, openclaw, hermes, gbrain)." >&2
+if [ "$HOST" != "auto" ] && [ -z "$INSTALL_HARNESS" ] && [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ] && [ "$INSTALL_OPENCODE" -eq 0 ] && [ "$INSTALL_CURSOR" -eq 0 ] && [ "$INSTALL_COPILOT" -eq 0 ] && [ "$INSTALL_AGY" -eq 0 ]; then
+  echo "Error: no install arm exists for host '$HOST' — it passed --host validation but sets no INSTALL_* flag, so setup would configure nothing and exit 0. This is a setup bug. Valid install targets: claude, codex, kiro, factory, opencode, cursor, copilot, agy, openclaw, hermes (informational: slate, gbrain)." >&2
   exit 1
 fi
 
@@ -2353,6 +2323,25 @@ fi
 
 # 3. Ensure ~/.gstack global state directory exists
 mkdir -p "$HOME/.gstack/projects"
+
+# OpenClaw and Hermes: gstack-harness copies this checkout's render for the
+# harness into the harness's own skills folder, records every file in a ledger
+# (bin/gstack-uninstall removes exactly those) and never edits harness config
+# (lib/harness-register.ts). Nothing else in this run applies to them.
+_gstack_harness() { bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$SOURCE_GSTACK_DIR/bin/gstack-harness" "$@"; }
+if [ -n "$INSTALL_HARNESS" ]; then
+  _setup_arm_begin "$INSTALL_HARNESS" global "$INSTALL_HARNESS"
+  if ! _HARNESS_JSON="$(_gstack_harness register "$INSTALL_HARNESS" --json --no-registry)"; then
+    _SETUP_REFUSED="gstack-harness could not register $INSTALL_HARNESS (reason above); nothing was changed for it"
+    exit 1
+  fi
+  _HARNESS_DEST="$(printf '%s\n' "$_HARNESS_JSON" | sed -n 's/.*"dest":"\([^"]*\)".*/\1/p')"
+  _setup_arm_publish "$INSTALL_HARNESS" global - "$_HARNESS_DEST" "$SOURCE_GSTACK_DIR" - -
+  log "$(printf '%s\n' "$_HARNESS_JSON" | sed -n 's/.*"receipt":"\([^"]*\)".*/\1/p')"
+  _setup_print_summary
+  printf '%s' "$_SETUP_ROWS" | _setup_ready_line
+  exit 0
+fi
 
 # ─── Helper: link a skill's runtime assets into its installed dir ────────────
 # Installs EVERY runtime asset a skill ships next to its SKILL.md (#2317,
@@ -4810,4 +4799,11 @@ if [ -n "${_HOOK_REFUSED:-}" ]; then
 fi
 # The final line names every host this run installed, from the same rows as
 # the summary table; instruction-only hosts write no row and print none.
+# Inside an agent harness (OpenClaw, Hermes, a Dot) with no --host naming
+# another host, register gstack's skills with that harness too, and refresh the
+# harness registrations this checkout made before (docs/hosts.md).
+if [ "$HARNESS_AUTO" -eq 1 ] && [ "$LOCAL_INSTALL" -eq 0 ] && { [ "$HOST_FLAG_SET" -eq 0 ] || [ "$HOST" = auto ]; }; then
+  _HARNESS_OUT="$(_gstack_harness auto 2>&1)" || log "gstack-harness: registration with the harness failed; everything else is installed. Retry: $SOURCE_GSTACK_DIR/bin/gstack-harness auto"
+  [ -z "$_HARNESS_OUT" ] || { log ""; log "$_HARNESS_OUT"; log "  Turn this off: ./setup --no-harness-auto (or GSTACK_HARNESS_AUTO=0)"; }
+fi
 printf '%s' "$_SETUP_ROWS" | _setup_ready_line

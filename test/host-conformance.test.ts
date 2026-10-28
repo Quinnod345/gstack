@@ -35,7 +35,8 @@ const DISCOVERY: Record<string, string> = {
 /** Every directory any host (or a shared agents layout) reads; .gemini/skills is Gemini CLI's. */
 const ALL_DISCOVERY_DIRS = [...Object.values(DISCOVERY), '.agents/skills', '.copilot/skills', '.hermes/skills', '.gemini/skills'];
 
-const installable = ALL_HOST_CONFIGS.filter(c => c.tier !== 'instruction-only').map(c => c.name);
+/** Harness hosts (install.registration 'harness') register through gstack-harness: test/harness-register.test.ts certifies them. */
+const installable = ALL_HOST_CONFIGS.filter(c => c.tier !== 'instruction-only' && c.install.registration !== 'harness').map(c => c.name);
 const instructionOnly = ALL_HOST_CONFIGS.filter(c => c.tier === 'instruction-only').map(c => c.name);
 
 function skillNames(dir: string): string[] {

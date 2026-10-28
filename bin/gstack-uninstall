@@ -24,6 +24,10 @@
 #   ~/.config/opencode/skills/gstack* — OpenCode skill install + per-skill symlinks
 #   ~/.copilot/skills/gstack*     — GitHub Copilot CLI skill install + per-skill symlinks
 #   ~/.gemini/antigravity-cli/skills/gstack* — Antigravity CLI skill install + per-skill symlinks
+#   harness registrations         — every file gstack-harness wrote into OpenClaw,
+#                                   Hermes, a Dot or another harness (from its
+#                                   ledger; edited files move to a backup), and
+#                                   its gstack:begin/end context block
 #   installs.tsv rows             — install registry rows for removed installs
 #   ~/.gstack/                    — global state (config, analytics, sessions, projects,
 #                                   repos, installation-id, browse error logs)
@@ -255,6 +259,18 @@ if [ -x "$GSTACK_CONFIG" ] && [ "$("$GSTACK_CONFIG" get memorable_recall 2>/dev/
   else
     echo "WARNING: could not set memorable_recall off; run: $GSTACK_CONFIG set memorable_recall off" >&2
   fi
+fi
+
+# ─── Remove harness registrations (bin/gstack-harness) ──────
+# Each ledger names exactly the files gstack-harness wrote into a harness's own
+# skills folder; read before the checkout and the state root go. A QM org pack
+# is left alone: `gstack-harness unregister qm --remote` archives it.
+if [ -d "$RESOLVED_ROOT/harness" ] && [ -f "$(dirname "$0")/gstack-harness-ledger.sh" ]; then
+  while IFS= read -r _HARNESS_LINE; do
+    case "$_HARNESS_LINE" in harness:*) REMOVED+=("$_HARNESS_LINE") ;; ?*) echo "$_HARNESS_LINE" ;; esac
+  done <<EOF
+$(GSTACK_STATE_ROOT="$RESOLVED_ROOT"; . "$(dirname "$0")/gstack-harness-ledger.sh" && gstack_harness_unregister_all)
+EOF
 fi
 
 # ─── Remove global Claude skills ────────────────────────────

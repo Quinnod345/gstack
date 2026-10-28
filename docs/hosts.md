@@ -1,10 +1,52 @@
 # Running gstack on other agents
 
 The README has the host matrix: one row per agent with its tier, install
-command and first invocation. This page has the rest: OpenClaw, how a checkout
+command and first invocation. This page has the rest: agent harnesses (OpenClaw,
+Hermes, dots, QM, Muse Code, Grok and any other), how a checkout
 decides which agents it renders for, the per-host notes, outside-review
 providers, the Codex behavioral profile, model tiers, and the design binary's
 models.
+
+## Agent harnesses
+
+Installing gstack inside an agent harness registers its skills the harness's
+own way, in the same `./setup` run. `bin/gstack-harness` does the work and
+`lib/harness-register.ts` holds one target per harness.
+
+**When it is automatic.** `./setup` with no `--host` (or `--host auto`)
+registers with the harness it runs inside: OpenClaw (its exec tool sets
+`OPENCLAW_SHELL=exec`), Hermes (`HERMES_AGENT=true`) or a Dot (`HOME=/home/dot`
+on a Dot's computer), or a harness found among setup's parent processes. It
+prints every path it wrote and the command that removes them. An explicit
+`--host claude` (or any other host) never writes under a harness folder, and
+neither does `./setup --local`.
+`./setup --no-harness-auto` or `GSTACK_HARNESS_AUTO=0` turns the automatic step off.
+
+**What it writes.** Copies in the harness's own skills folder, never edits to
+`openclaw.json`, Hermes's `config.yaml` or any context file you did not name.
+Every file goes into a ledger, `$GSTACK_STATE_ROOT/harness/<id>.ledger`, with
+its sha256. Registering again changes only what changed; a folder or skill name
+gstack did not write stops it (`HARNESS_UNOWNED_ENTRY`); `gstack-uninstall`
+and `gstack-harness unregister` remove exactly the ledger's files, never
+through a symlink, and rename any file you edited to `<file>.edited-<time>`
+beside itself, where uninstall cannot take it. A context block is cut only
+when it is the one gstack wrote; an edited block is left for you. `./setup
+--refresh-registered` (what `/gstack-upgrade` runs) refreshes every registration.
+`gstack-harness status` lists them and runs the harness's own skill list where
+it has one (`visible to harness: yes`). Errors: [troubleshooting](troubleshooting.md#agent-harnesses-gstack-harness).
+
+| Harness | What gstack registers | Install | Verify | Remove |
+|---|---|---|---|---|
+| OpenClaw | one `gstack` router skill (one description line in every request; its body lists every skill and its path) in `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills/gstack`; `--skills all` registers every skill as its own top-level folder | `./setup --host openclaw`, or `./setup` inside OpenClaw | `openclaw skills list --json` shows `gstack` (source `openclaw-managed`, eligible) | `gstack-harness unregister openclaw` |
+| Hermes | every skill, as `gstack-<skill>` in one `gstack` category, in `${HERMES_HOME:-~/.hermes}/skills/gstack` (Hermes opens only skills it has indexed) | `./setup --host hermes`, or `./setup` inside Hermes | `hermes skills list` shows the `gstack-*` skills in category `gstack` | `gstack-harness unregister hermes` |
+| dots (feder-cr) | the `gstack` router in `/home/dot/skills/gstack`, which the Dot lists every turn | `./setup` on the Dot's computer, or `gstack-harness register dots` | the Dot's Skills page, or `GET /skills` | `gstack-harness unregister dots` |
+| QM | an org skill pack: `github.com/garrytan/gstack` at the installed commit, every skill imported (instruction-only there: discovery, no gstack runtime) | an org admin, with `GSTACK_QM_URL` and `GSTACK_QM_ADMIN_TOKEN` set: `gstack-harness register qm --yes` | QM's skill list for the org | `gstack-harness unregister qm --remote` archives the pack; without `--remote` only the local record goes |
+| Muse Code, Grok Build | nothing: both read `~/.claude/skills`, so the Claude install (`./setup`) is what they see, with Claude tool names | `./setup` | `gstack-harness status` runs `muse skills list` / `grok inspect` and reports *discovered (Claude-rendered, unverified)* | `gstack-uninstall` |
+| Grok Bot, any chat-only skill library | nothing on disk | `gstack-harness register generic --print`, then paste the router and block into the app | ask it for a gstack skill | delete the pasted text |
+| any other harness | the router in an Agent Skills folder you name, and/or a 600-byte routing block between `<!-- gstack:begin harness-routing -->` markers in a context file you name | `gstack-harness register generic --skills-dir <dir>` and/or `--context <file>`; `gstack-harness manifest generic` prints every skill as JSON | the harness's own skill list | `gstack-harness unregister generic` |
+
+OpenClaw's ACP route below is unchanged: native registration gives OpenClaw's
+own agent gstack's skills; ACP spawns Claude Code with the full install.
 
 ## OpenClaw
 
@@ -79,7 +121,7 @@ Outside reviews require the selected CLI to be installed and authenticated: Clau
 
 ## Instruction-only agents
 
-**Instruction-only tier (any rules-reading agent — Zed, Amp, Jules, side projects):**
+**Instruction-only tier (any rules-reading agent that loads no skills — Zed, Amp, Jules, side projects):**
 copy the 2KB digest at [`agents-digest/gstack-AGENTS.md`](../agents-digest/gstack-AGENTS.md)
 into a location your agent reads (for example, append it to your project's `AGENTS.md`).
 It carries gstack's ethos, reuse ladder, and voice rules — no install required. The

@@ -135,9 +135,11 @@ generator's exact `openai.yaml` shape, byte identity with the checkout) is
 moved to `$GSTACK_STATE_ROOT/backups/host-renders/<ts>-<id>/`; every other file
 stays where it is, and only directories left empty are removed. The backup's
 `prune.log` lists every path. A gstack-upgrade migration runs
-the same prune for an install upgraded without a setup run. Instruction-only
-hosts (Hermes, OpenClaw, GBrain) are never installed by setup, so a user who
-renders one by hand inside an install adds its name to the record first.
+the same prune for an install upgraded without a setup run. Harness hosts
+(OpenClaw, Hermes) render into a scratch directory and copy into the harness's
+own folder, so they never add a render to the checkout; GBrain is never
+installed by setup, so a user who renders it by hand inside an install adds its
+name to the record first.
 
 ## Host tiers and capabilities
 
@@ -149,7 +151,7 @@ rows, host errors, and the README host matrix, all checked against
 | Tier | Meaning |
 |---|---|
 | `full` | Installs, renders, passes the conformance kit, and has a dated certification record below. |
-| `experimental` | Installs and renders and passes the conformance kit; no certification record yet. |
+| `experimental` | Installs and renders and passes the conformance kit; no certification record yet. A harness host (`install.registration: 'harness'`: OpenClaw, Hermes) installs through `gstack-harness register` and is certified by `test/harness-register.test.ts` instead of the per-directory kit. |
 | `instruction-only` | No install arm. `./setup --host X` prints what to copy and changes nothing. |
 
 Rendering alone never certifies `full`.
@@ -275,13 +277,24 @@ root's extra markdown files (`ETHOS.md`, `review/*.md`) as skills, the
 partial-read behavior of `view_file` on long skills, `ask_question` option
 handling, and an upgrade from an existing install.
 
-## Instruction-only hosts
+## Instruction-only hosts and agent harnesses
 
-OpenClaw, Hermes, Slate and GBrain have no install arm. Hermes stays
-instruction-only until someone certifies a native install (#2826 measured one
-on Hermes 0.21.0): `./setup --host hermes` prints the digest path and the
-generator command, and the Hermes render writes `name: gstack-<skill>` so
-Hermes, which indexes skills by frontmatter name, cannot shadow them (#2825).
+Slate and GBrain have no install arm. OpenClaw and Hermes are harness hosts:
+`./setup --host openclaw|hermes` (and `./setup` run inside either) calls
+`bin/gstack-harness register`, which renders the host into a scratch
+directory and copies it into the harness's own skills folder with an ownership
+ledger (`lib/harness-register.ts`). The Hermes render writes `name:
+gstack-<skill>` so Hermes, which indexes skills by frontmatter name, cannot
+shadow them (#2825).
+
+A harness that needs no render of its own (QM, dots, any other) is a row in
+`TARGETS` in `lib/harness-register.ts`, not a host file: give it a mechanism,
+a default destination, an inside-the-harness marker (an environment variable
+the harness sets for the commands its agent runs, never a guess), a presence
+check and, when it has one, the command that lists the skills it sees. Add its
+reason codes to `HARNESS_CODES` with a `docs/troubleshooting.md` section, a
+case to `test/harness-register.test.ts`, and a row to the table in
+[hosts.md](hosts.md#agent-harnesses).
 
 ## How it works
 

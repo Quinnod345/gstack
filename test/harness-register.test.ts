@@ -1,0 +1,356 @@
+/**
+ * gstack-harness (GSTA-135): registering gstack's skills with the agent harness
+ * it is installed into, and taking them back out. Unit cases call the registrar
+ * in-process against temporary harness folders; setup cases run the real
+ * ./setup and bin/gstack-uninstall in the install fixture (test/helpers/install-fixture.ts).
+ */
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  BLOCK_BEGIN, BLOCK_END, CONTEXT_BLOCK_MAX, DOT_SKILLS_DIR, HARNESS_CODES, HarnessError, ROUTER_DESCRIPTION, ROUTER_DESCRIPTION_MAX, TARGETS,
+  contextBlock, detect, listLedgers, readLedger, register, unregister, type RegisterOptions,
+} from '../lib/harness-register';
+import { qmRequest, registerQm, removeQmPack } from '../lib/harness-qm';
+import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, registryRows, runSetup, tree } from './helpers/install-fixture';
+
+const ROOT = path.resolve(import.meta.dir, '..');
+const VERSION = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
+const temps: string[] = [];
+const tmp = () => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-harness-test-'))); temps.push(d); return d; };
+afterEach(() => { cleanupFixtures(); for (const d of temps.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
+afterAll(cleanupSeed);
+
+function opts(dir: string, target: keyof typeof TARGETS, extra: Partial<RegisterOptions> = {}): RegisterOptions {
+  return { target: TARGETS[target], checkout: ROOT, stateRoot: path.join(dir, 'state'), env: {}, home: path.join(dir, 'home'), version: VERSION, ...extra };
+}
+const files = (dir: string): string[] => fs.existsSync(dir)
+  ? fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => path.relative(dir, path.join(e.parentPath, e.name))).sort() : [];
+
+/** feder-cr/dots nanobot/dots/skills.py parse_skill: single-line fields, name equal to its folder, description 1..1024. */
+function dotsAccepts(md: string, folder: string): boolean {
+  const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(md);
+  if (!m) return false;
+  const fields: Record<string, string> = {};
+  for (const line of m[1].split(/\r?\n/)) { const f = /^([a-z]+):[ \t]*(.*?)[ \t]*$/.exec(line); if (f) fields[f[1]] = f[2].replace(/^["']+|["']+$/g, ''); }
+  const name = fields.name ?? ''; const description = fields.description ?? '';
+  return name === folder && /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name) && description.length >= 1 && description.length <= 1024;
+}
+
+describe('gstack-harness budgets and reason codes', () => {
+  test('every-session text stays within its budget', () => {
+    expect(ROUTER_DESCRIPTION.length).toBeLessThanOrEqual(ROUTER_DESCRIPTION_MAX);
+    const block = contextBlock('/home/someone/.local/share/agent-harness/skills/gstack/SKILL.md');
+    expect(block.length).toBeLessThanOrEqual(CONTEXT_BLOCK_MAX);
+    expect(block.startsWith(BLOCK_BEGIN) && block.endsWith(BLOCK_END)).toBe(true);
+  });
+
+  test('every reason code has a section in docs/troubleshooting.md', () => {
+    const doc = fs.readFileSync(path.join(ROOT, 'docs/troubleshooting.md'), 'utf8');
+    for (const [code, c] of Object.entries(HARNESS_CODES)) {
+      const at = doc.indexOf('<a id="' + c.anchor + '"></a>');
+      expect(at, code).toBeGreaterThan(-1);
+      expect(doc.slice(at).split('\n')[1], code).toMatch(/^#{2,4} /);
+    }
+  });
+
+  test('inside-harness detection reads the markers each harness sets for its commands', () => {
+    const home = tmp();
+    expect(detect({ OPENCLAW_SHELL: 'exec' }, home, []).inside).toEqual(['openclaw']);
+    expect(detect({ HERMES_AGENT: 'true' }, home, []).inside).toEqual(['hermes']);
+    expect(detect({ AI_AGENT: 'hermes-agent' }, home, []).inside).toEqual(['hermes']);
+    expect(detect({}, home, ['bash -c', 'node openclaw.mjs']).inside).toEqual(['openclaw']);
+    expect(detect({}, home, ['python3 hermes']).inside).toEqual(['hermes']);
+    expect(detect({ OPENCLAW_SHELL: 'interactive' }, home, ['node server.js', 'vim openclaw.json']).inside).toEqual([]);
+  });
+});
+
+describe('gstack-harness register and unregister (skill folders)', () => {
+  test('OpenClaw router: one top-level skill, idempotent, removed exactly, user skills survive', () => {
+    const d = tmp();
+    const skills = path.join(d, 'oc', 'skills');
+    fs.mkdirSync(path.join(skills, 'mine'), { recursive: true });
+    fs.writeFileSync(path.join(skills, 'mine', 'SKILL.md'), '---\nname: mine\ndescription: my own\n---\nmine\n');
+    const r = register(opts(d, 'openclaw', { env: { OPENCLAW_STATE_DIR: path.join(d, 'oc') } }));
+    expect(r.mode).toBe('router');
+    expect(r.skills).toBeGreaterThan(20);
+    expect(fs.readdirSync(skills).sort()).toEqual(['gstack', 'mine']);
+    const router = fs.readFileSync(path.join(skills, 'gstack', 'SKILL.md'), 'utf8');
+    expect(router).toContain('description: ' + ROUTER_DESCRIPTION);
+    for (const [, p] of router.matchAll(/Read \x60([^\x60]+)\x60/g)) expect(fs.existsSync(p), p).toBe(true);
+    expect(register(opts(d, 'openclaw', { env: { OPENCLAW_STATE_DIR: path.join(d, 'oc') } })).status).toBe('unchanged');
+    unregister(path.join(d, 'state'), ROOT, r.id);
+    expect(files(skills)).toEqual(['mine/SKILL.md']);
+    expect(listLedgers(path.join(d, 'state'))).toEqual([]);
+  }, 60_000);
+
+  test('OpenClaw all: every skill a top-level folder with a unique name', () => {
+    const d = tmp();
+    const r = register(opts(d, 'openclaw', { mode: 'all', skillsDir: path.join(d, 'skills') }));
+    const names = fs.readdirSync(path.join(d, 'skills')).map(n => fs.readFileSync(path.join(d, 'skills', n, 'SKILL.md'), 'utf8').match(/^name:\s*(\S+)/m)![1]);
+    expect(names.length).toBe(r.skills);
+    expect(new Set(names).size).toBe(names.length);
+    expect(readLedger(r.ledger)!.meta.names.split(',').sort()).toEqual([...names].sort());
+  }, 60_000);
+
+  test('Hermes: every skill in one gstack category, no runtime folder a scan could take for a skill', () => {
+    const d = tmp();
+    const r = register(opts(d, 'hermes', { env: { HERMES_HOME: path.join(d, 'hermes') } }));
+    const dest = path.join(d, 'hermes', 'skills', 'gstack');
+    expect(r.dest).toBe(dest);
+    const mds = files(dest).filter(f => f.endsWith('SKILL.md'));
+    expect(mds.every(f => f.split('/').length === 2), mds.filter(f => f.split('/').length !== 2).join(', ')).toBe(true);
+    for (const f of mds) expect(fs.readFileSync(path.join(dest, f), 'utf8')).toMatch(new RegExp('^---\\nname: ' + path.dirname(f) + '\\n'));
+    expect(mds.length).toBe(r.skills);
+  }, 60_000);
+
+  test('refuses an entry gstack did not write, a same-named skill, a symlinked folder, and unsafe destinations', () => {
+    const d = tmp();
+    const skills = path.join(d, 'skills');
+    fs.mkdirSync(path.join(skills, 'gstack'), { recursive: true });
+    const code = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return e instanceof HarnessError ? e.code : String(e); } };
+    expect(code(() => register(opts(d, 'dots', { skillsDir: skills })))).toBe('HARNESS_UNOWNED_ENTRY');
+    expect(files(skills)).toEqual([]);
+    fs.rmSync(path.join(skills, 'gstack'), { recursive: true });
+    fs.mkdirSync(path.join(skills, 'other'));
+    fs.writeFileSync(path.join(skills, 'other', 'SKILL.md'), '---\nname: gstack\ndescription: x\n---\nx\n');
+    expect(code(() => register(opts(d, 'dots', { skillsDir: skills })))).toBe('HARNESS_UNOWNED_ENTRY');
+    fs.rmSync(path.join(skills, 'other'), { recursive: true });
+    fs.symlinkSync(d, path.join(skills, 'gstack'));
+    expect(code(() => register(opts(d, 'dots', { skillsDir: skills })))).toBe('HARNESS_UNSAFE_DESTINATION');
+    expect(code(() => register(opts(d, 'dots', { skillsDir: path.join(ROOT, '.agents', 'skills') })))).toBe('HARNESS_UNSAFE_DESTINATION');
+    expect(code(() => register(opts(d, 'dots', { skillsDir: path.join(d, 'home') })))).toBe('HARNESS_UNSAFE_DESTINATION');
+    expect(code(() => register(opts(d, 'generic')))).toBe('HARNESS_NO_DESTINATION');
+    expect(code(() => register(opts(d, 'hermes', { mode: 'router', env: { HERMES_HOME: path.join(d, 'h') } })))).toBe('HARNESS_MODE_UNSUPPORTED');
+  }, 60_000);
+
+  test('dots: router and every skill pass the engine\'s skill parser', () => {
+    expect(TARGETS.dots.dest({}, '/root')).toBe(DOT_SKILLS_DIR);
+    const d = tmp();
+    register(opts(d, 'dots', { skillsDir: path.join(d, 'router') }));
+    expect(dotsAccepts(fs.readFileSync(path.join(d, 'router', 'gstack', 'SKILL.md'), 'utf8'), 'gstack')).toBe(true);
+    register(opts(d, 'dots', { mode: 'all', skillsDir: path.join(d, 'all') }));
+    for (const name of fs.readdirSync(path.join(d, 'all'))) {
+      const md = path.join(d, 'all', name, 'SKILL.md');
+      expect(dotsAccepts(fs.readFileSync(md, 'utf8'), name), name).toBe(true);
+      expect(fs.statSync(md).size).toBeLessThanOrEqual(256 * 1024);
+    }
+  }, 60_000);
+
+  test('generic: the context block is replaced in place, then cut out; the user\'s lines and edits survive', () => {
+    const d = tmp();
+    const ctx = path.join(d, 'agent', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(ctx), { recursive: true });
+    fs.writeFileSync(ctx, '# my rules\nbe kind\n');
+    const r = register(opts(d, 'generic', { context: ctx }));
+    expect(fs.readFileSync(ctx, 'utf8').split(BLOCK_BEGIN).length).toBe(2);
+    register(opts(d, 'generic', { context: ctx }));
+    expect(fs.readFileSync(ctx, 'utf8').split(BLOCK_BEGIN).length).toBe(2);
+    fs.appendFileSync(r.router!, '\nmy note\n');
+    unregister(path.join(d, 'state'), ROOT, 'generic');
+    expect(fs.readFileSync(ctx, 'utf8')).toBe('# my rules\nbe kind\n\n');
+    expect(fs.existsSync(r.router!)).toBe(false);
+    const kept = files(path.dirname(r.router!));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/^SKILL\.md\.edited-/);
+    expect(fs.readFileSync(path.join(path.dirname(r.router!), kept[0]), 'utf8')).toEndWith('\nmy note\n');
+  }, 60_000);
+
+  test('generic: a lone, repeated or edited marker block is never cut or rewritten; prose that names a marker is left alone', () => {
+    const d = tmp();
+    const ctx = path.join(d, 'AGENTS.md');
+    const code = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return e instanceof HarnessError ? e.code : String(e); } };
+    const lone = '# mine\n' + BLOCK_BEGIN + '\n## Important\nkeep me\n';
+    fs.writeFileSync(ctx, lone);
+    expect(code(() => register(opts(d, 'generic', { context: ctx })))).toBe('HARNESS_UNOWNED_ENTRY');
+    expect(fs.readFileSync(ctx, 'utf8')).toBe(lone);
+    const prose = '# mine\nthe markers look like ' + BLOCK_BEGIN + ' and ' + BLOCK_END + '\n';
+    fs.writeFileSync(ctx, prose);
+    register(opts(d, 'generic', { context: ctx }));
+    unregister(path.join(d, 'state'), ROOT, 'generic');
+    expect(fs.readFileSync(ctx, 'utf8')).toBe(prose + '\n');
+    for (const edit of [(s: string) => s.replace(BLOCK_END + '\n', ''), (s: string) => s.replace('## gstack skills', '## gstack skills\nmy own line')]) {
+      fs.writeFileSync(ctx, '# mine\n');
+      register(opts(d, 'generic', { context: ctx }));
+      const edited = edit(fs.readFileSync(ctx, 'utf8')) + '## after\nkeep me too\n';
+      fs.writeFileSync(ctx, edited);
+      const un = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', path.join(ROOT, 'bin', 'gstack-harness-ledger.sh')], { env: { PATH: '/usr/bin:/bin', GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 30_000 });
+      expect(un.status, un.stderr).toBe(0);
+      expect(un.stdout).toContain('left ' + ctx + ' as it is');
+      expect(fs.readFileSync(ctx, 'utf8')).toBe(edited);
+    }
+  }, 60_000);
+
+  test('generic: adding or moving --context is recorded, and the old block is cut', () => {
+    const d = tmp();
+    const [a, b] = [path.join(d, 'a.md'), path.join(d, 'b.md')];
+    fs.writeFileSync(a, '# a\n');
+    fs.writeFileSync(b, '# b\n');
+    const skills = path.join(d, 'skills');
+    register(opts(d, 'dots', { skillsDir: skills }));
+    expect(register(opts(d, 'dots', { skillsDir: skills, context: a })).status).toBe('updated');
+    expect(fs.readFileSync(a, 'utf8')).toContain(BLOCK_BEGIN);
+    const r = register(opts(d, 'dots', { skillsDir: skills, context: b }));
+    expect(fs.readFileSync(a, 'utf8')).toBe('# a\n\n');
+    expect(readLedger(r.ledger)!.blocks.map(x => x.path)).toEqual([b]);
+    unregister(path.join(d, 'state'), ROOT, r.id);
+    expect(fs.readFileSync(b, 'utf8')).toBe('# b\n\n');
+  }, 60_000);
+
+  test('a folder swapped for a symlink below the destination is never followed', () => {
+    const d = tmp();
+    const skills = path.join(d, 'skills');
+    const r = register(opts(d, 'openclaw', { skillsDir: skills }));
+    const review = path.join(skills, 'gstack', 'skills', fs.readdirSync(path.join(skills, 'gstack', 'skills')).sort()[0]);
+    const outside = path.join(d, 'outside');
+    fs.cpSync(review, outside, { recursive: true });
+    fs.rmSync(review, { recursive: true });
+    fs.symlinkSync(outside, review);
+    const code = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return e instanceof HarnessError ? e.code : String(e); } };
+    expect(code(() => register(opts(d, 'openclaw', { skillsDir: skills })))).toBe('HARNESS_UNSAFE_DESTINATION');
+    unregister(path.join(d, 'state'), ROOT, r.id);
+    expect(fs.existsSync(path.join(outside, 'SKILL.md'))).toBe(true);
+    expect(fs.lstatSync(review).isSymbolicLink()).toBe(true);
+  }, 60_000);
+});
+
+describe('bin/gstack-harness-ledger.sh (the bun-free reader gstack-uninstall sources)', () => {
+  const ledgerSh = path.join(ROOT, 'bin', 'gstack-harness-ledger.sh');
+  test('removes every registration with only bash and coreutils on PATH, and refuses without a state root', () => {
+    const d = tmp();
+    const r = register(opts(d, 'dots', { skillsDir: path.join(d, 'skills') }));
+    const bare = { PATH: '/usr/bin:/bin', HOME: path.join(d, 'home') };
+    const refused = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', ledgerSh], { env: bare, encoding: 'utf8', timeout: 30_000 });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('GSTACK_STATE_ROOT is not set');
+    expect(fs.existsSync(r.router!)).toBe(true);
+    const ok = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', ledgerSh], { env: { ...bare, GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 30_000 });
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('harness: ' + r.id);
+    expect(files(path.join(d, 'skills'))).toEqual([]);
+    expect(fs.existsSync(path.join(d, 'skills'))).toBe(false);
+    expect(listLedgers(path.join(d, 'state'))).toEqual([]);
+  }, 60_000);
+
+  test('a ledger with no destination row touches nothing and still finishes', () => {
+    const d = tmp();
+    const victim = path.join(d, 'mine.md');
+    fs.writeFileSync(victim, 'x');
+    const ledger = path.join(d, 'state', 'harness', 'broken.ledger');
+    fs.mkdirSync(path.dirname(ledger), { recursive: true });
+    fs.writeFileSync(ledger, 'meta\ttarget\tdots\nfile\t' + require('node:crypto').createHash('sha256').update('x').digest('hex') + '\t' + victim + '\n');
+    const r = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_ledger "$1"', ledgerSh, ledger], { env: { PATH: '/usr/bin:/bin', GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 10_000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(fs.readFileSync(victim, 'utf8')).toBe('x');
+  }, 30_000);
+});
+
+describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
+  function fakeQm(failImports = 0) {
+    const packs: Array<{ id: string; url: string; ref: string; config: unknown }> = [];
+    const calls: string[] = [];
+    let fails = failImports;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const u = new URL(req.url);
+        calls.push(req.method + ' ' + u.pathname);
+        if (req.headers.get('authorization') !== 'Bearer t0k') return new Response('{"error":"unauthorized"}', { status: 401 });
+        if (req.method === 'GET' && u.pathname === '/v1/admin/skill-packs') return Response.json({ packs });
+        if (req.method === 'POST' && u.pathname === '/v1/admin/skill-packs') {
+          const b = await req.json() as { url: string; ref: string; config: unknown };
+          const pack = { id: 'pk' + (packs.length + 1), url: b.url, ref: b.ref, config: b.config };
+          packs.push(pack);
+          return Response.json({ pack });
+        }
+        if (req.method === 'POST' && u.pathname.endsWith('/import')) {
+          if (fails-- > 0) return new Response('{"error":"boom"}', { status: 502 });
+          return Response.json({ imported: ['review', 'ship'], excluded: [] });
+        }
+        if (req.method === 'DELETE') { packs.splice(packs.findIndex(p => u.pathname.endsWith(p.id)), 1); return Response.json({ removed: true }); }
+        return new Response('not found', { status: 404 });
+      },
+    });
+    return { server, packs, calls, env: { GSTACK_QM_URL: 'http://127.0.0.1:' + server.port, GSTACK_QM_ADMIN_TOKEN: 't0k' } };
+  }
+
+  test('without a credential or --yes it refuses and prints the request, never a token', async () => {
+    const d = tmp();
+    const err = await registerQm({ checkout: ROOT, stateRoot: path.join(d, 'state'), env: {}, version: VERSION, yes: true }).catch(e => e);
+    expect(err.code).toBe('HARNESS_QM_CREDENTIALS');
+    expect(err.message).toContain('/v1/admin/skill-packs');
+    const noYes = await registerQm({ checkout: ROOT, stateRoot: path.join(d, 'state'), env: { GSTACK_QM_URL: 'http://127.0.0.1:9', GSTACK_QM_ADMIN_TOKEN: 'sekret' }, version: VERSION, yes: false }).catch(e => e);
+    expect(noYes.code).toBe('HARNESS_QM_CREDENTIALS');
+    expect(noYes.message).not.toContain('sekret');
+    expect(qmRequest('abc')).toContain('"ref":"abc"');
+  });
+
+  test('registers once, a retry after a failed import reuses the pack, two machines share it, --remote archives it', async () => {
+    const q = fakeQm(1);
+    try {
+      const a = tmp(); const b = tmp();
+      const r1 = await registerQm({ checkout: ROOT, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true });
+      expect(q.packs.length).toBe(1);
+      expect(q.calls.filter(c => c === 'POST /v1/admin/skill-packs').length).toBe(1);
+      expect(q.calls.filter(c => c.endsWith('/import')).length).toBe(2);
+      const ledger = fs.readFileSync(path.join(a, 'state', 'harness', r1.id + '.ledger'), 'utf8');
+      expect(ledger).toContain('qm_pack\tpk1');
+      expect(ledger).not.toContain('t0k');
+      expect((await registerQm({ checkout: ROOT, stateRoot: path.join(a, 'state'), env: q.env, version: VERSION, yes: true })).status).toBe('unchanged');
+      await registerQm({ checkout: ROOT, stateRoot: path.join(b, 'state'), env: q.env, version: VERSION, yes: true });
+      expect(q.packs.length).toBe(1);
+      expect(await removeQmPack(path.join(a, 'state'), q.env, r1.id)).toBe('pk1');
+      expect(q.packs.length).toBe(0);
+    } finally { q.server.stop(true); }
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('setup and uninstall with harnesses', () => {
+  const harnessDirs = ['.openclaw', '.hermes'];
+  for (const [host, dest, probe] of [['openclaw', '.openclaw/skills', 'gstack/SKILL.md'], ['hermes', '.hermes/skills/gstack', 'gstack-review/SKILL.md']] as const) {
+    test(host + ': ./setup --host ' + host + ' registers, reruns unchanged, and gstack-uninstall removes it', () => {
+      const f = makeFixture();
+      const src = makeSource(f, path.join(f.dir, 'gstack'));
+      const r = runSetup(f, path.join(src, 'setup'), ['--host', host]);
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      expect(fs.existsSync(path.join(f.home, dest, probe))).toBe(true);
+      for (const other of ['.claude/skills', '.codex/skills', ...harnessDirs.filter(h => !dest.startsWith(h))]) expect(fs.existsSync(path.join(f.home, other)), other).toBe(false);
+      expect(registryRows(f).map(row => [row[0], row[3], row[5]])).toEqual([[host, path.join(f.home, dest), fs.realpathSync(src)]]);
+      expect(r.stdout.trim().split('\n').at(-1)).toBe('gstack ready (' + host + ')');
+      const again = runSetup(f, path.join(src, 'setup'), ['--host', host]);
+      expect(again.stdout + again.stderr).toMatch(new RegExp('\\b' + host + '\\s+experimental\\s+global\\s+unchanged'));
+      const status = runSetup(f, path.join(src, 'setup'), ['--status']);
+      expect(status.stdout).toMatch(new RegExp('\\b' + host + '\\s+experimental\\s+global\\s+current'));
+      expect(status.stdout).not.toContain('move it first');
+      fs.appendFileSync(path.join(f.home, dest, probe), '\nmy note\n');
+      const un = spawnSync('bash', [path.join(src, 'bin/gstack-uninstall'), '--force'], { cwd: f.home, env: { ...f.env, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 60_000 });
+      expect(un.status, un.stdout + un.stderr).toBe(0);
+      const left = files(path.join(f.home, dest)).filter(p => !p.startsWith('.'));
+      expect(left).toHaveLength(1);
+      expect(left[0]).toStartWith(probe + '.edited-');
+      expect(fs.readFileSync(path.join(f.home, dest, left[0]), 'utf8')).toEndWith('\nmy note\n');
+    }, 120_000);
+  }
+
+  test('setup inside OpenClaw registers it too; --host claude or the off switch writes nothing under OpenClaw', () => {
+    const f = makeFixture();
+    const src = makeSource(f, path.join(f.dir, 'gstack'));
+    const inside = { OPENCLAW_SHELL: 'exec' };
+    const off = runSetup(f, path.join(src, 'setup'), [], { env: { ...inside, GSTACK_HARNESS_AUTO: '0' } });
+    expect(off.status, off.stdout + off.stderr).toBe(0);
+    expect(fs.existsSync(path.join(f.home, '.openclaw'))).toBe(false);
+    const explicit = runSetup(f, path.join(src, 'setup'), ['--host', 'claude'], { env: inside });
+    expect(explicit.status).toBe(0);
+    expect(fs.existsSync(path.join(f.home, '.openclaw'))).toBe(false);
+    const before = tree(path.join(f.home, '.claude'));
+    const auto = runSetup(f, path.join(src, 'setup'), [], { env: inside });
+    expect(auto.status, auto.stdout + auto.stderr).toBe(0);
+    expect(fs.existsSync(path.join(f.home, '.openclaw/skills/gstack/SKILL.md'))).toBe(true);
+    expect(auto.stdout).toContain('gstack-harness: OpenClaw:');
+    expect(auto.stdout).toContain('--no-harness-auto');
+    expect(auto.stdout.trim().split('\n').at(-1)).toBe('gstack ready (claude)');
+    expect(tree(path.join(f.home, '.claude'))).toEqual(before);
+  }, 180_000);
+});

@@ -261,7 +261,9 @@ keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
    up with the same hosts, model and browser flag (recorded in the git dir
    after a successful setup) and `gstack-doctor --check` passes; a warm rerun
    takes about a second. Each setup ends with its own `gstack ready (<host>)`;
-   the installer then prints `gstack ready (claude, codex)`.
+   the installer then prints `gstack ready (claude, codex)`. Both name a
+   `--host`, so setup's agent-harness step ([hosts.md](hosts.md#agent-harnesses))
+   never runs on a Capy machine.
 4. `gstack-doctor --check` for the requested workflow (`--for <skill>`,
    `--only <skill>`, or `--require <id,id>`; default `claude,codex,patch`),
    run with the launch PATH, so the trailer certifies the Bun workflows run.
