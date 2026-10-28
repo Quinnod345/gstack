@@ -151,7 +151,8 @@ describe('process liveness probe (Windows terminal-agent leak)', () => {
       if (process.platform === 'win32') {
         expect(captured.env.BROWSE_OWNER_START_TIME).toMatch(/^\/Date\(\d+\)\/$/);
         expect(captured.env.BROWSE_OWNER_START_TIME).toBe(readAgentStartTime(process.pid));
-        expect(powershellCalls).toEqual([]);
+        expect(powershellCalls.filter(call => call.includes(`ProcessId = ${process.pid}'`))).toEqual([]);
+        expect(powershellCalls.every(call => call.includes("ProcessId = 2147483647'"))).toBe(true);
       } else {
         expect(captured.env.BROWSE_OWNER_START_TIME).toBe('fixture-owner-start');
       }
@@ -252,9 +253,19 @@ describe('win32 terminal-agent identity (GSTA-139)', () => {
         expect(calls.signals).toEqual([]);
       });
     }
-    onWin32({ ffi: '/Date(1761600000124)/', powershell: { status: 0, creationDate: birth, commandLine: ownedCommand } }, calls => {
+    onWin32({ ffi: '/Date(1761600000124)/', powershell: { status: 0, creationDate: birth, commandLine: 'bun run unrelated.ts' } }, calls => {
       expect(isAgentRecordGone(record())).toBe(true);
       expect(calls.signals).toEqual([]);
+    });
+  });
+
+  test('a start time that disagrees across readers still identifies the live agent by its generation, so no second agent starts', () => {
+    const daemonRecorded = '/Date(1761596400123)/';
+    onWin32({ ffi: birth, powershell: { status: 0, creationDate: daemonRecorded, commandLine: ownedCommand } }, calls => {
+      expect(isAgentRecordGone(record(daemonRecorded))).toBe(false);
+      expect(isOurAgent(record(daemonRecorded))).toBe(true);
+      expect(stopAgentByRecord(record(daemonRecorded), 0)).toBe(true);
+      expect(calls.signals).toEqual(['SIGTERM']);
     });
   });
 

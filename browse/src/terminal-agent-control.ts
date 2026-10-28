@@ -368,7 +368,8 @@ function agentStatus(record: AgentRecord, ownerPid?: number): 'owned' | 'gone' |
   if (ownerPid !== undefined && (record.ownerPid !== ownerPid || record.ownerStartTime !== readAgentStartTime(ownerPid))) return 'unknown';
   const actual = agentProcessInfo(record.pid);
   if (!actual.startTime) return isAgentRecordLive(record) ? 'unknown' : 'gone';
-  if (actual.startTime !== record.startTime) return 'gone';
+  const ownsGeneration = actual.commandLine.split(/\s+/).some(arg => arg.replace(/^['"]|['"]$/g, '') === `--agent-gen=${record.gen}`);
+  if (actual.startTime !== record.startTime && !(process.platform === 'win32' && ownsGeneration)) return 'gone';
   try {
     let state: string | undefined;
     if (process.platform === 'linux') {
@@ -380,8 +381,7 @@ function agentStatus(record: AgentRecord, ownerPid?: number): 'owned' | 'gone' |
     if (state === 'Z') return 'gone';
   } catch {}
   if (!isAgentRecordLive(record)) return 'gone';
-  return actual.commandLine.split(/\s+/).some(arg => arg.replace(/^['"]|['"]$/g, '') === `--agent-gen=${record.gen}`)
-    ? 'owned' : 'unknown';
+  return ownsGeneration ? 'owned' : 'unknown';
 }
 
 export function isOurAgent(record: AgentRecord, ownerPid?: number): boolean {
