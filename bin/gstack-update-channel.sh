@@ -6,7 +6,7 @@
 #
 # Channels (docs/releases.md):
 #   main    every merge to main (a version per merge, a dozen a day)
-#   stable  the weekly tagged release: refs/heads/stable on origin, moved only
+#   stable  the twice-weekly tagged release: refs/heads/stable on origin, moved only
 #           forward along main's first-parent history by the release workflow
 #
 # The config key update_channel (bin/gstack-config) is auto | stable | main.
@@ -77,7 +77,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     _uc_err=$(_receipted_git open gstack-upgrade "${_uc_host:-unknown}" gstack-self-update-pull "user ran /gstack-upgrade" git -C "$_uc_root" fetch -q origin "$(gstack_update_channel_refspec stable)" 2>&1 >/dev/null) \
       && { printf 'origin/stable\n'; exit 0; }
     if gstack_update_channel_missing "$_uc_err"; then
-      echo "gstack-update-channel: origin has no stable release yet; following origin/main until the first weekly release is cut" >&2
+      echo "gstack-update-channel: origin has no stable release yet; following origin/main until the first stable release is cut" >&2
     else
       echo "gstack-update-channel: fetching origin/stable failed ($(printf '%s' "$_uc_err" | head -1 | head -c 200)); staying on origin/stable as last fetched" >&2
       printf 'origin/stable\n'; exit 0

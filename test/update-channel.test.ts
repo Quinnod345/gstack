@@ -224,7 +224,7 @@ describe.skipIf(process.platform === 'win32')('gstack-update-channel.sh as the /
     const fallback = cli(early, '--fetch-ref');
     expect(fallback.status).toBe(0);
     expect(fallback.stdout.trim()).toBe('origin/main');
-    expect(fallback.stderr).toContain('origin has no stable release yet; following origin/main until the first weekly release is cut');
+    expect(fallback.stderr).toContain('origin has no stable release yet; following origin/main until the first stable release is cut');
     expect(git(early.install, 'rev-parse', 'refs/remotes/origin/main')).toBe(early.shas.C);
     expect(early.head()).toBe(early.shas.A);
 

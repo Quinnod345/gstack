@@ -20,7 +20,8 @@ commit on main and:
 
 A tag and its release never change. `stable` is a moving pointer: always a
 commit on main's first-parent history, moved only by this workflow, only
-forward, and at most once every 72 hours except for a security fix (below).
+forward, and at most once every 72 hours except for a security or regression
+fix (below).
 
 **Green** means, on that exact commit: the `free-tests` check run succeeded
 (the status main requires), the commit was gated (below), every check run on
@@ -74,7 +75,7 @@ extra tag can neither date the move nor stall later cuts.
 A cut inside the floor changes nothing and prints, as its first two lines:
 
 ```
-REFUSED_FLOOR: stable moved to v1.91.300.0 at 2026-11-02T14:04:51Z, 47.2 h ago; a hand-run cut needs 72 h; a security fix passes with --security "<GHSA-…|CVE-…|#n>: why" --ref <fix sha>
+REFUSED_FLOOR: stable moved to v1.91.300.0 at 2026-11-02T14:04:51Z, 47.2 h ago; a hand-run cut needs 72 h; a security fix passes with --security "<GHSA-…|CVE-…|#n>: why" --ref <fix sha>, a regression fix with --regression "#n: worked in v<X>: why" --ref <fix sha>
 NEXT_ALLOWED: 2026-11-05T14:04:51Z for a hand-run cut; 2026-11-05T11:04:51Z for a scheduled run
 ```
 
@@ -87,8 +88,8 @@ always needs the full 72. Thursday to Monday is 96 hours.
 
 A refused hand cut exits 1 with an error annotation. A refused scheduled run
 exits 0 with a notice annotation and the same lines in the step summary: that
-is the policy working (a security cut on Wednesday holds Thursday, and
-Monday's cut carries everything), not a fault. A dry run prints the plan and
+is the policy working (a security or regression cut on Wednesday restarts the
+floor and holds Thursday, and Monday's cut carries everything), not a fault. A dry run prints the plan and
 the floor verdict (`FLOOR:` line) and exits 0.
 
 Two cases are not held. The first cut, before `stable` exists, has nothing to
@@ -98,7 +99,7 @@ it considers anything newer.
 
 The floor fails closed when it cannot date the move. Three cases are
 `FLOOR_UNKNOWN`, red on every trigger, and only a verified security cut gets
-past them, as it gets past the floor. They are a `stable` that no annotated `v<VERSION>` tag dates
+past them (a regression cut passes a dated floor only). They are a `stable` that no annotated `v<VERSION>` tag dates
 (only this tool moves `stable` and it tags first, so that state means someone
 moved it by hand), a release that cannot be read (a GitHub API error is not
 "no release"), and a `ref` cut while `stable`'s own release is still
@@ -107,14 +108,15 @@ future holds the floor from now, not from that date. The floor binds the
 release tool, not a writer pushing `stable` directly; that would take a branch
 ruleset limiting `stable` to the Actions bot.
 
-The floor applies to non-security breakage too. If a cut breaks team
-installs, the fix waits for the floor; an affected install can follow main
-meanwhile (`gstack-config set update_channel main`) and the next scheduled
-cut brings it back.
+Breakage that is not a regression of an earlier stable release (a new
+feature that misbehaves, say) waits for the floor; an affected install can
+follow main meanwhile (`gstack-config set update_channel main`) and the next
+scheduled cut brings it back.
 
 ## Security releases
 
-A security fix is the one exception to the floor. Run the workflow by hand
+A security fix is one of the two exceptions to the floor (the other is a
+regression fix, below); a cut carries one exception, never both. Run the workflow by hand
 with `ref` set to the fix commit on main and `security` set to a reason that
 names what it fixes:
 
@@ -157,14 +159,60 @@ A security cut that stopped half-way after moving `stable` is finished by
 the next run with the reason and evidence its tag recorded, without checking
 them again. A tag that records a security cut but never moved `stable` gets
 no such pass: the cut is refused (`REFUSED_SECURITY`) until it runs again
-with `security` and `ref` and verifies. The floor then counts from the security
+with `security`, `ref` and the reason its tag recorded, and verifies. The floor then counts from the security
 release, and the next regular cut's notes list only the versions after it.
+
+## Regression releases
+
+A regression fix is the other exception (Garry, 2026-10-28: "Regression"). A
+regression is a fix for behavior that worked in an earlier stable release and
+is broken on the current one. A maintainer declares it by putting the
+`regression` label on the issue or pull request (labelling needs triage
+access; create the label once if the repository lacks it), and the person
+running the cut names it in the `regression` input, with `ref` set to the
+fix commit on main:
+
+```bash
+gh workflow run weekly-release.yml -f ref=<full sha of the fix> -f regression="#3601: worked in v1.91.300.0: the update check stopped running" -f dry_run=false
+```
+
+The reason must name exactly one release `v<X>` and at least one `#<n>`.
+All of these must hold, or the cut is `REFUSED_REGRESSION` with what it
+checked:
+
+1. `v<X>` is an annotated release tag strictly behind the current `stable`
+   whose GitHub Release is published (not a draft): an earlier stable release
+   team installs actually ran, which a tag left behind by a half-done cut is
+   not. The current stable
+   itself does not count, since a fix for something it still does right needs
+   no exception.
+2. `#<n>` carries the `regression` label (a `security` label does not count,
+   nor the reverse) and a commit in `stable`..`ref` references it (the squash
+   subject `(#<n>)` does).
+
+**Verified:** the release tag, its place behind `stable` and its published
+release, the label, and
+that the labelled issue or PR is in the released span. **Attested, not
+verified:** that the behavior really worked in `v<X>` and that this change
+restores it; the label and the public reason carry that claim.
+
+Everything else matches a security cut. `ref` is required, `regression` and
+`security` together are refused, every version between `stable` and the fix
+rides along (`RIDING_ALONG:`), and the sanitized reason and evidence go into
+the tag message (`Regression:` / `Verified:`) and the notes
+(``**Regression release:** `<reason>` (verified: <evidence>)``). A half-done
+regression cut finishes from its tag's record, and a regression tag that never
+moved `stable` is refused until it runs again with `regression` and the reason
+its tag recorded, and verifies.
+Unlike a security cut, a regression cut does not pass `FLOOR_UNKNOWN`. The
+floor counts from the regression release, so the next scheduled cut may be
+held.
 
 ## Channels
 
 | Channel | Follows | Who |
 |---|---|---|
-| `stable` | `refs/heads/stable`: the twice-weekly release (at most once per 72 hours), plus any security cut off-cycle | team mode (`./setup --team`) by default |
+| `stable` | `refs/heads/stable`: the twice-weekly release (at most once per 72 hours), plus any security or regression cut off-cycle | team mode (`./setup --team`) by default |
 | `main` | every merge to main | plain `./setup`, contributors, Capy crew machines |
 
 The config key is `update_channel` (`bin/gstack-config`):
@@ -213,7 +261,7 @@ still holds and nothing about version stamping changed.
 A hotfix is an ordinary PR: it merges to main through a train and gets its
 version like any other change. To put it on stable before the next scheduled
 cut, run the workflow by hand with the merge commit's SHA, once the 72-hour
-floor allows it (a security fix uses the security input instead):
+floor allows it (a security or regression fix uses its input instead):
 
 ```bash
 gh workflow run weekly-release.yml -f ref=<full sha on main> -f dry_run=false
@@ -263,7 +311,8 @@ is exercised against real check runs before it merges.
 | `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; ...` | inside the 72-hour floor; nothing changed. Exit 1 by hand, 0 on the schedule or a dry run |
 | `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
 | `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated `v<VERSION>` tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
-| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
-| `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
-| ``SECURITY: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |
+| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, a security tag that never moved stable run without `security`, or a rerun whose reason differs from the one its unmoved tag recorded; exit 1 on every trigger (the workflow stops `security` without `ref` before the script runs) |
+| `REFUSED_REGRESSION: ...` | `regression` without `ref` or beside `security`, a reason without one earlier stable `v<X>` and a regression-labelled `#<n>` in the span, a regression tag that never moved stable run without `regression`, or a rerun whose reason differs from the one its unmoved tag recorded; exit 1 on every trigger (the workflow stops `regression` without `ref` before the script runs) |
+| `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security|regression exception (...)` | the floor verdict, in every plan |
+| ``SECURITY: `<reason>` (verified: <evidence>)`` or ``REGRESSION: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | an exception cut's plan |
 | `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |

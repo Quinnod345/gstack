@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.293.0] - 2026-10-28
 
 **`gstack-harness` errors print again, and `register qm` says plainly that QM cannot import gstack yet.** Every refused `gstack-harness` command crashed with `TypeError: e.line is not a function` instead of printing its reason, because Bun gives each thrown error its own numeric `line` property. Harness Evals then found that QM registration never worked: QM imports a skill pack by cloning the whole repository and stops at 32 MiB and 5,000 files, and gstack's repository is about 73 MiB in 4,300 files.
 
@@ -13,6 +13,17 @@
 
 ### Tests
 - `test/harness-register.test.ts`: the CLI error path prints the code and fix with no TypeError; `register qm` against the real checkout refuses with zero requests and no ledger; a QM that answers `pack exceeds max bytes` gets the cap code; the pack reuse and retry case now runs against a small committed repository.
+
+## [1.91.292.0] - 2026-10-28
+
+**A fix for a regression on stable can skip the 72-hour wait, like a security fix.** Garry, asked whether non-security breakage on stable may bypass the twice-weekly cadence and the floor, answered on 2026-10-28: "Regression". Until now a fix for something the last stable release did right, and the current one breaks, waited up to 72 hours on every team install. Now `--regression "#n: worked in v<X>: why"` with `--ref` passes the floor once the tool ties it to the release, and the claim is public in the tag and the notes.
+
+### Added
+- **Regression cuts in `scripts/release-cut.ts`: `--regression "<reason>"` with `--ref <fix sha>`** (workflow input `regression`). The reason must name exactly one earlier stable release `v<X>` and at least one `#<n>`. The cut is refused with `REFUSED_REGRESSION`, red on every trigger, unless `v<X>` is an annotated release tag strictly behind the current stable with a published GitHub Release (the current stable itself never counts, nor a tag a half-done cut left behind), `#<n>` carries the `regression` label (a maintainer's declaration; a `security` label does not count, nor the reverse) and a released commit references `#<n>`. That the behavior really worked in `v<X>` stays attested. The record matches a security cut. The sanitized reason and evidence go into the tag (`Regression:` / `Verified:`), the notes (`(regression release)`, `**Regression release:** …`) and the plan (`REGRESSION:`, `RIDING_ALONG:`); a half-done cut finishes from its tag; an unmoved exception tag must verify again with the reason it recorded (this now holds for security cuts too).
+
+### Changed
+- **One exception per cut.** `--security` and `--regression` together are `REFUSED_REGRESSION`. A regression cut passes a dated floor only; `FLOOR_UNKNOWN` (an undatable or unpublished stable) still yields to a security cut alone. The floor counts from any exception release, so the next scheduled cut may be held. `REFUSED_FLOOR` names both ways past it.
+- **"Weekly" wording follows the twice-weekly cadence** in README.md, `bin/gstack-update-channel.sh` (its comment and the no-stable-yet message, now "until the first stable release is cut"), the /gstack-upgrade skill's `AHEAD_OF_STABLE` line and the main-backstop workflow comments. docs/releases.md and docs/recommended-harness.md describe the regression exception.
 
 ## [1.91.291.0] - 2026-10-28
 

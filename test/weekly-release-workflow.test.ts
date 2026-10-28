@@ -4,8 +4,8 @@
  * scoped to the tag, the stable branch and the release; a pull request that
  * touches the release tooling runs the dry run against main read-only; a
  * dispatched hotfix ref is a full SHA and the dry_run input, true by default,
- * never reaches the scheduled run; the security input reaches the script only
- * through an env var, beside a ref. The release-cut CLI the jobs call is
+ * never reaches the scheduled run; the security and regression inputs reach the
+ * script only through env vars, beside a ref. The release-cut CLI the jobs call is
  * covered by test/release-cut.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
@@ -24,13 +24,14 @@ describe('weekly-release.yml', () => {
   // Value: protects=Garry's "twice a week" (2026-10-27): Monday and Thursday at 14:00 UTC, 72 h then 96 h apart, so a scheduled Thursday cut clears the
   // floor once the grace absorbs a late Monday start; fails_when=the cron drifts off Mon/Thu 14:00 or the gap and floor stop matching; why_new=the cadence was
   // weekly; seam=none; no_claim=GitHub's cron start times
-  test('Monday and Thursday schedule, a dispatch with dry_run (default true), a full-SHA ref and a security reason, and a pull request only for the release tooling', () => {
+  test('Monday and Thursday schedule, a dispatch with dry_run (default true), a full-SHA ref, a security or regression reason, and a pull request only for the release tooling', () => {
     expect((wf as { name?: string }).name).toBe('Stable release');
     expect(Object.keys(wf.on).sort()).toEqual(['pull_request', 'schedule', 'workflow_dispatch']);
     expect(wf.on.schedule).toEqual([{ cron: '0 14 * * 1,4' }]);
     expect((4 - 1) * 24).toBe(FLOOR_HOURS);
     expect(SCHEDULED_GRACE_HOURS).toBeLessThan(FLOOR_HOURS / 12);
     expect(wf.on.workflow_dispatch.inputs.security).toMatchObject({ type: 'string', default: '' });
+    expect(wf.on.workflow_dispatch.inputs.regression).toMatchObject({ type: 'string', default: '' });
     expect(wf.on.workflow_dispatch.inputs.dry_run).toMatchObject({ type: 'boolean', default: true });
     expect(wf.on.workflow_dispatch.inputs.ref).toMatchObject({ type: 'string', default: '' });
     expect(wf.on.pull_request).toEqual({ paths: ['.github/workflows/weekly-release.yml', 'scripts/release-cut.ts'] });
@@ -56,6 +57,10 @@ describe('weekly-release.yml', () => {
     expect(plan.run).toContain('if [ -n "$SECURITY_REASON" ] && [ -z "$RELEASE_REF" ]; then');
     expect(plan.run).toContain('[ -n "$SECURITY_REASON" ] && args+=(--security "$SECURITY_REASON")');
     expect(plan.run).not.toContain('inputs.security');
+    expect(plan.env!.REGRESSION_REASON).toBe("${{ github.event_name == 'workflow_dispatch' && inputs.regression || '' }}");
+    expect(plan.run).toContain('if [ -n "$REGRESSION_REASON" ] && [ -z "$RELEASE_REF" ]; then');
+    expect(plan.run).toContain('[ -n "$REGRESSION_REASON" ] && args+=(--regression "$REGRESSION_REASON")');
+    expect(plan.run).not.toContain('inputs.regression');
     expect(plan.run).toContain(BUN_RUN + ' "${args[@]}"');
     expect(cut.steps.find(s => s.name === 'Fetch stable and the tags')!.run).toContain("git fetch --quiet origin '+refs/heads/stable:refs/remotes/origin/stable'");
   });
