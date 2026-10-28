@@ -93,14 +93,14 @@ row() {
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # clamp CHARSET MAX — stdin's first line reduced to CHARSET, at most MAX chars.
-# Builtins only, bytewise like tr and cut: every caller pipes into it, and on
+# Builtins only, bytewise like tr and cut: every caller feeds it stdin, and on
 # Windows a head | tr | cut chain costs three process starts (~60 ms).
 clamp() { local LC_ALL=C line pat="[^$1]"; IFS= read -r line; line=${line//$pat/}; printf '%s' "${line:0:$2}"; }
 
 # cfg KEY DEFAULT — sets _cfg to KEY as `gstack-config get` reads it, or DEFAULT
 # (gstack-config's own default) when unset. In-process through
 # gstack-state-root.sh, sourced below: a gstack-config start costs ~200 ms on Windows.
-cfg() { gstack_config_select "$1" 2>/dev/null; _cfg="${_gstack_cfg_value:-$2}"; }
+cfg() { local sr_var=${_gstack_sr_var-}; gstack_config_select "$1" 2>/dev/null; _gstack_sr_var=$sr_var; _cfg="${_gstack_cfg_value:-$2}"; }
 
 # epoch_of VALUE — epoch seconds for an epoch or an ISO-8601 UTC time; "" otherwise.
 epoch_of() {
