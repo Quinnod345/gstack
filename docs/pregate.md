@@ -198,8 +198,8 @@ Two stages with separate clocks, both printed:
   A removed path (a deleted file, or a rename's old name) that no remaining
   test selects owes no lane when one of these holds, and prints
   `removed (no lane owed): <path> — <why>` (the `lanes` detail adds
-  `N removed path(s)`). A test renamed to another test path defers to its new
-  name (`old name of <new>`). A deleted JS, TS, Python, Dart or bats test, or a
+  `N removed path(s)`). A JS, TS, Python, Dart or bats test renamed to another
+  test path defers to its new name (`old name of <new>`). A deleted JS, TS, Python, Dart or bats test, or a
   test renamed to a non-test path, runs its owning suite, the remaining tests
   that directly exercise the files its merge-base text exercised (`owning suite
   runs: …`; test helpers and fixtures are not subjects), and names each file
@@ -210,16 +210,19 @@ Two stages with separate clocks, both printed:
   remaining file imports it (directly or through a directory it reads), it is
   not a file a runner loads by name (`*.config.ts`, `.*rc.js`, `conftest.py`,
   `setup.py`, `noxfile.py`, `sitecustomize.py`, `__init__.py`, `__main__.py`),
-  and no remaining non-Markdown file names it by its repo path or by its path
-  relative to a directory that file sits under (`preload = ["./setup.ts"]`).
+  and no remaining non-Markdown file mentions its basename (a config naming it
+  relative to itself, `preload = ["./setup.ts"]`, or a computed path such as
+  `path.join(__dirname, 'lib', 'value.js')`), so a common basename such as
+  `index.ts` needs a `dependencies` entry.
   Every other removal owes what an edit owes, so it is still `PREGATE_NO_LANE`
   until a test or a `dependencies` entry covers it: a deleted or renamed
   manifest, lockfile, config, fixture, golden or workflow (renaming one into a
   waived path such as Markdown does not waive the old name), a Go, Ruby, shell,
   Rust or bin file (the graph does not resolve their importers file by file),
-  a Go or Ruby test (it may define helpers its package still uses), a file
+  a deleted or renamed Go or Ruby test (it may define helpers its package
+  still uses), a file
   remaining code still imports (`still imported by …`, even by a relative or
-  dotted import) or a config or script still names (`still named by …`), and a
+  dotted import) or a non-Markdown file still names (`still named by …`), and a
   deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8,
   over 1 MiB). A modified file whose only test the branch deleted still has no
   lane, a remaining test that reads a deleted file or directory is selected,

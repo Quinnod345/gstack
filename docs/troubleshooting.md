@@ -3219,8 +3219,8 @@ removed: <file> has no remaining test`). A removal owes what an edit owes, so
 these are still this error: a deleted or renamed manifest, lockfile, config,
 fixture, golden or workflow, a file a runner loads by name (`*.config.ts`,
 `conftest.py`, `sitecustomize.py`), a Go, Ruby, shell, Rust or bin file, a Go
-or Ruby test, a file remaining code still imports or a config or script still
-names (by repo path or relative to the config), a deleted test whose merge-base
+or Ruby test (deleted or renamed), a file remaining code still imports or whose
+basename a non-Markdown file still mentions, a deleted test whose merge-base
 text cannot be read (a symlink, invalid UTF-8, over 1 MiB), and a modified file
 whose only test the branch deleted. `--explain` prints the reason as
 `<path>: removed, but …`.

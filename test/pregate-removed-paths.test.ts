@@ -252,6 +252,27 @@ describe('removed paths in lanes (#3529)', () => {
       expect(explain.out + explain.err).toContain('lib/plugins/a.js: removed, but still imported by bin/load.js');
     });
 
+    test('a deleted file a tested loader reaches by a computed path fails closed', () => {
+      const loader = "const path = require('node:path');\nexports.value = () => require(path.join(__dirname, 'lib', 'value.js')).value;\n";
+      const loaderTest = "const test = require('node:test');\nconst { value } = require('../loader.js');\ntest('loads', () => value());\n";
+      const repo = fixture({ baseFiles: { 'lib/value.js': 'exports.value = 1;\n', 'loader.js': loader, 'test/loader.test.js': loaderTest } });
+      commit(repo, { 'lib/value.js': null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.removed).toEqual([]);
+      const explain = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(explain.out + explain.err).toContain('lib/value.js: removed, but still named by loader.js');
+    });
+
+    test('a Go test renamed into another directory is refused: its old package may still call its helpers', () => {
+      const repo = fixture({ baseFiles: { 'go.mod': 'module example.com/demo\n\ngo 1.22\n', 'pkg/a.go': 'package pkg\n', 'pkg/a_test.go': 'package pkg\n\nfunc helper() {}\n', 'pkg/b_test.go': 'package pkg\n\nfunc TestB(t *testing.T) { helper() }\n', 'isolated/keep.go': 'package isolated\n' } });
+      move(repo, 'pkg/a_test.go', 'isolated/a_test.go');
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain('pkg/a_test.go');
+      expect(r.removed).toEqual([]);
+    });
+
     test('a modified file whose only test was deleted still fails PREGATE_NO_LANE', () => {
       const repo = fixture();
       commit(repo, { 'test/util.test.js': null, 'lib/util.js': "exports.add = (a, b) => b + a;\n" });
