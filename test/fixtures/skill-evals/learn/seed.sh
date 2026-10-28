@@ -1,6 +1,10 @@
 #!/bin/sh
 # Seeds a /learn eval work dir: a git repo plus a gstack state root at ./.gstack-home.
 # Usage (from a task's setup, cwd = the run's work dir): sh "$SKILL_EVAL_FIXTURES/seed.sh" full|empty|cross
+# Heredoc delivery guard: bash 5.2+ pipes heredoc bodies <=64KiB, and on
+# macOS a starved 512-byte pipe hangs bodies >=512B at startup. Compat level
+# 50 restores the tempfile path (test/heredoc-pipe-deadlock.test.ts).
+BASH_COMPAT=50
 set -eu
 mode="${1:-full}"
 git init -q -b main
