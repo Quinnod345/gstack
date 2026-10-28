@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**Dia is gone from gstack.** `/setup-browser-cookies` and `cookie-import-browser` no longer list Dia as a cookie source, and the Dia qualification harness is deleted. That harness was a set of macOS campaigns that never qualified a native import, and its `dia-launch-comparison` free test was failing the merge train on Ubicloud runners. Cookie import from Comet, Chrome, Chromium, Arc, Brave, Edge, Opera and Opera GX is unchanged.
+
+### Removed
+- **Dia as a cookie source**: the registry entry, the `dia` alias, and every Dia mention in the `cookie-import-browser` description, the browse and setup-browser-cookies skills, README, BROWSER.md, ARCHITECTURE.md and docs/skills.md.
+- The `dia-native`, `dia-launch-comparison` and `dia-gui-readiness` modes are gone from `native-qualification.yml`, along with their job, the four `.github/scripts` files behind them, and their three `browse/test` files. Those tests also leave the free-test duration seed and the test typecheck baseline.
+- **`clang` on the Ubicloud free-suite VM**: only the Dia GUI readiness test compiled C on Linux.
+
+### Tests
+- The cookie tests that used Dia as their macOS fixture browser now use Arc, which has the same `User Data` layout and Keychain shape: numbered-profile discovery, Keychain denial, the credential deadline, the Node bundle import and the picker UI. The historical cookie-workflow approval fixture adds one reverse edit so it still rebuilds the approved prompt byte for byte. No threshold or allowlist changed.
+
 ## [1.91.295.0] - 2026-10-28
 
 **Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.

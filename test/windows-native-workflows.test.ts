@@ -113,11 +113,10 @@ test('native qualification is dispatch-only with one exclusive mode per run', ()
   expect(Object.keys(native.on)).toEqual(['workflow_dispatch']);
   const mode = native.on.workflow_dispatch.inputs.mode;
   expect(mode).toMatchObject({ type: 'choice', required: true });
-  expect(mode.options).toEqual(['cookie-native', 'windows-native-diagnostics', 'dia-native', 'dia-launch-comparison', 'dia-gui-readiness']);
+  expect(mode.options).toEqual(['cookie-native', 'windows-native-diagnostics']);
   expect(native.permissions).toEqual({ contents: 'read' });
   expect(native.jobs['cookie-native-qualification'].if).toBe("inputs.mode == 'cookie-native'");
   expect(native.jobs['windows-native-diagnostics'].if).toBe("inputs.mode == 'windows-native-diagnostics'");
-  expect(native.jobs['dia-native-qualification'].if).toBe("startsWith(inputs.mode, 'dia-')");
   for (const job of ['cookie-native-qualification', 'windows-native-diagnostics']) {
     const setup = native.jobs[job].steps.find((step: any) => step.uses?.startsWith('actions/setup-node@'));
     expect(setup.with['node-version']).toBe('24.18.0');
@@ -133,36 +132,4 @@ test('focused Windows diagnostics include the repaired lock and close cases with
   for (const name of ['native Windows launch diagnostics > observer', 'native Windows process qualification > a locked real Edge profile leaves its existing owner alive',
     'native Windows process qualification > real Edge synthetic profile: normal-close', 'native Windows process qualification > real Edge synthetic profile: stalled-close']) expect(selected.test(name)).toBe(true);
   expect(selected.test('native Windows process qualification > an exclusively created default Edge profile persists v20')).toBe(false);
-});
-
-test('Dia comparison uses separate pinned runtime jobs and retains diagnostic failures', () => {
-  const job = native.jobs['dia-native-qualification'];
-  expect(job['runs-on']).toBe('macos-15');
-  expect(job.strategy['fail-fast']).toBe(false);
-  expect(job.strategy.matrix.runtime).toBe(`\${{ fromJSON(inputs.mode == 'dia-launch-comparison' && '["bun","node"]' || '["bun"]') }}`);
-  const node = job.steps.find((step: any) => step.uses?.startsWith('actions/setup-node@'));
-  expect(node.if).toBe("inputs.mode == 'dia-launch-comparison'");
-  expect(node.with).toEqual({ 'node-version': '24.18.0', architecture: 'arm64' });
-  const comparison = job.steps.find((step: any) => step.name === 'Compare protected native Dia launch without qualification credit');
-  expect(comparison.if).toBe("inputs.mode == 'dia-launch-comparison'");
-  expect(comparison.run).toContain('--launch-comparison "$COMPARISON_RUNTIME"');
-  expect(comparison['continue-on-error']).toBeUndefined();
-  const upload = job.steps.find((step: any) => step.uses?.startsWith('actions/upload-artifact@'));
-  expect(upload.if).toBe('always()');
-  expect(upload.with.name).toContain("format('dia-launch-comparison-{0}', matrix.runtime)");
-});
-
-test('Dia GUI readiness runs alone, without dependency or browser installation', () => {
-  const job = native.jobs['dia-native-qualification'];
-  const probe = job.steps.find((step: any) => step.name === 'Inspect GUI readiness without browser or Keychain access');
-  expect(probe.if).toBe("inputs.mode == 'dia-gui-readiness'");
-  expect(probe.run).toEndWith('.github/scripts/run-dia-native-qualification.ts --gui-readiness-only');
-  expect(probe.env).toEqual({ GSTACK_DIA_NATIVE_QUALIFY: '1' });
-  for (const name of ['Install pinned dependencies', 'Install the synthetic destination browser']) {
-    expect(job.steps.find((step: any) => step.name === name).if).toBe("inputs.mode != 'dia-gui-readiness'");
-  }
-  expect(job.steps.find((step: any) => step.name === 'Qualify native Dia discovery, decryption, and import').if).toBe("inputs.mode == 'dia-native'");
-  const upload = job.steps.find((step: any) => step.uses?.startsWith('actions/upload-artifact@'));
-  expect(upload.with.name).toContain("inputs.mode == 'dia-gui-readiness' && 'dia-gui-readiness'");
-  expect(upload.with.path).toBe('${{ runner.temp }}/dia-native-qualification.json');
 });
