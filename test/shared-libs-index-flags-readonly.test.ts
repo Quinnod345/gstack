@@ -7,15 +7,16 @@ import { afterAll, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { generateSharedCodeReuse } from '../scripts/resolvers/review-scope';
+import { HOST_PATHS, type TemplateContext } from '../scripts/resolvers/types';
 import { fixtureGit, type SharedLibsFixture } from './helpers/shared-libs-eval-fixture';
 import { checkPathReviewPrerequisites, preparePathEligibilityFixture } from './helpers/shared-libs-path-fixture';
 
-const ROOT = path.resolve(import.meta.dir, '..');
 const fixtures: SharedLibsFixture[] = [];
 afterAll(() => { for (const f of fixtures) fs.rmSync(f.root, { recursive: true, force: true }); });
 
-test.each(['review', 'ship'])('%s: the shared-code evidence step forbids the index refresh the captured actor ran', skill => {
-  const section = fs.readFileSync(path.join(ROOT, skill, 'sections/shared-code-reuse.md'), 'utf8');
+test.each((['review', 'ship'] as const).flatMap(skill => (Object.keys(HOST_PATHS) as TemplateContext['host'][]).map(host => [skill, host] as const)))('%s on %s: the shared-code evidence step forbids the index refresh the captured actor ran', (skillName, host) => {
+  const section = generateSharedCodeReuse({ skillName, tmplPath: '', host, paths: HOST_PATHS[host] });
   const step = section.slice(section.indexOf('1. **Read the evidence.**'), section.indexOf('2. **Run the checker.**')).replace(/\s+/g, ' ');
   expect(step).toContain('read-only: `git update-index`, even `--really-refresh`, clears the index flags the checker reads');
 });
