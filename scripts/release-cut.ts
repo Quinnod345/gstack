@@ -37,9 +37,9 @@
  * and exits 0.
  *
  * The floor: stable moves at most once per FLOOR_HOURS (72). The last move is
- * the newest annotated v* tag pointing at stable, or its GitHub Release's
+ * the annotated v<VERSION> tag pointing at stable, or its GitHub Release's
  * publish time when that is later; a cut inside the floor is REFUSED_FLOOR
- * with NEXT_ALLOWED, and a stable with no annotated tag is FLOOR_UNKNOWN. A
+ * with NEXT_ALLOWED, and a stable without that tag is FLOOR_UNKNOWN. A
  * scheduled run (GITHUB_EVENT_NAME=schedule) gets SCHEDULED_GRACE_HOURS (3) of
  * slack for cron start jitter; nothing else does. Finishing a half-done cut is
  * not a new move. The one exception is a security cut: --security <reason>
@@ -224,23 +224,27 @@ export function releaseNotes(n: NotesInput): string {
 const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /**
- * When stable last moved: the newest annotated v* tag on it, or that tag's
- * release publish time when later. Lightweight tags do not count. published is
- * false when the release does not exist yet (a half-done cut, whose tag may
- * predate the stable push); a release that cannot be read leaves the move undated.
+ * When stable last moved: the annotated v<VERSION> tag a cut made on it (VERSION
+ * read at stable), or that tag's release publish time when later. Any other tag
+ * on that commit is ignored, so a hand-made extra tag cannot date the move or
+ * pin later runs to stable. published is false when the release does not exist
+ * yet (a half-done cut, whose tag may predate the stable push); a release that
+ * cannot be read leaves the move undated.
  */
 export function stableMovedAt(git: Git, gh: Gh, repo: string, stable: string): { at: number; tag: string; published: boolean } | { at: null; why: string } {
-  const listed = git(['for-each-ref', '--points-at=' + stable, '--format=%(refname:short)%09%(objecttype)%09%(creatordate:unix)', 'refs/tags/v[0-9]*']);
-  const newest = (listed.ok && listed.out ? listed.out.split('\n') : []).map(l => l.split('\t')).filter(p => p[1] === 'tag')
-    .map(p => ({ tag: p[0]!, at: Number(p[2]) * 1000 })).sort((a, b) => b.at - a.at)[0];
-  if (!newest) return { at: null, why: 'no annotated v* tag points at stable ' + stable.slice(0, 12) + ', so its last move cannot be dated' };
-  const view = gh(['release', 'view', newest.tag, '--repo', repo, '--json', 'publishedAt']);
+  const version = git(['show', stable + ':VERSION']);
+  const tag = 'v' + (version.ok ? version.out.trim() : '<VERSION>');
+  const listed = version.ok ? git(['for-each-ref', '--points-at=' + stable, '--format=%(objecttype)%09%(creatordate:unix)', 'refs/tags/' + tag]) : null;
+  const [type, created] = listed?.ok && listed.out ? listed.out.split('\t') : [];
+  if (type !== 'tag') return { at: null, why: 'no annotated ' + tag + ' tag points at stable ' + stable.slice(0, 12) + ', so its last move cannot be dated' };
+  const at = Number(created) * 1000;
+  const view = gh(['release', 'view', tag, '--repo', repo, '--json', 'publishedAt']);
   if (view.status !== 0) {
-    if (/not found|HTTP 404/i.test(view.stderr)) return { tag: newest.tag, at: newest.at, published: false };
-    return { at: null, why: 'cannot read the release for ' + newest.tag + ' (' + (view.stderr.trim().slice(0, 120) || 'gh exit ' + view.status) + '), so its last move cannot be dated' };
+    if (/not found|HTTP 404/i.test(view.stderr)) return { tag, at, published: false };
+    return { at: null, why: 'cannot read the release for ' + tag + ' (' + (view.stderr.trim().slice(0, 120) || 'gh exit ' + view.status) + '), so its last move cannot be dated' };
   }
   const published = Date.parse(parseJson<{ publishedAt?: string }>(view)?.publishedAt ?? '');
-  return { tag: newest.tag, at: Number.isFinite(published) ? Math.max(newest.at, published) : newest.at, published: true };
+  return { tag, at: Number.isFinite(published) ? Math.max(at, published) : at, published: true };
 }
 
 /** The floor verdict for moving stable from prevStable to sha. A refusal carries the message and the NEXT_ALLOWED text. */
@@ -252,7 +256,7 @@ export function floorStatus(o: { git: Git; gh: Gh; repo: string; prevStable: str
   const moved = stableMovedAt(o.git, o.gh, o.repo, o.prevStable);
   if (moved.at === null) {
     if (o.security) return { verdict: 'security', line: 'FLOOR: bypassed by the security exception (' + moved.why + ')' };
-    return { verdict: 'unknown', line: 'FLOOR: unknown', message: moved.why + '; only a --security cut can move it until one does', next: 'none until an annotated v* tag dates the release stable points at' };
+    return { verdict: 'unknown', line: 'FLOOR: unknown', message: moved.why + '; only a --security cut can move it until one does', next: 'none until an annotated v<VERSION> tag dates the release stable points at' };
   }
   if (!moved.published && !o.security) {
     return { verdict: 'unknown', line: 'FLOOR: unknown', message: 'stable moved to ' + moved.tag + ' but its release is not published, so the tag cannot date the move; finish that cut first (a run without --ref finishes it)', next: 'once the release for ' + moved.tag + ' is published' };

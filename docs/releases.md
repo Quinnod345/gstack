@@ -66,9 +66,11 @@ tag before it.
 
 `stable` moves at most once every 72 hours (Garry, 2026-10-27). Every cut,
 scheduled or by hand, with or without `ref`, checks when `stable` last moved:
-the creation time of the newest annotated `v*` tag pointing at `stable`, or
-the publish time of that tag's GitHub Release when it is later (a cut whose
-`stable` push was retried after the tag was pushed is dated by its release).
+the creation time of the annotated `v<VERSION>` tag (VERSION read at `stable`)
+pointing at `stable`, or the publish time of that tag's GitHub Release when it
+is later (a cut whose `stable` push was retried after the tag was pushed is
+dated by its release). Any other tag on that commit is ignored, so a hand-made
+extra tag can neither date the move nor stall later cuts.
 A cut inside the floor changes nothing and prints, as its first two lines:
 
 ```
@@ -96,7 +98,7 @@ it considers anything newer.
 
 The floor fails closed when it cannot date the move. Three cases are
 `FLOOR_UNKNOWN`, red on every trigger, and only a verified security cut gets
-past them, as it gets past the floor. They are a `stable` that no annotated tag dates
+past them, as it gets past the floor. They are a `stable` that no annotated `v<VERSION>` tag dates
 (only this tool moves `stable` and it tags first, so that state means someone
 moved it by hand), a release that cannot be read (a GitHub API error is not
 "no release"), and a `ref` cut while `stable`'s own release is still
@@ -260,7 +262,7 @@ is exercised against real check runs before it merges.
 | `REFUSED: tag v<X> already names <other sha>` | a version was stamped twice; needs a look before anything is cut |
 | `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; ...` | inside the 72-hour floor; nothing changed. Exit 1 by hand, 0 on the schedule or a dry run |
 | `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
-| `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
+| `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated `v<VERSION>` tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
 | `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
 | `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
 | ``SECURITY: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |

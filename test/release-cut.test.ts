@@ -606,9 +606,9 @@ describe('release-cut: the 72-hour floor', () => {
     if (!handInGrace.ok) expect(handInGrace.code).toBe('REFUSED_FLOOR');
   });
 
-  // Value: protects=the floor's anchor is the newest annotated v* tag on stable or its later release publish time, a stable it cannot date fails closed,
-  // and the first cut and a finishing cut are not held; fails_when=a lightweight tag or the commit date stands in for the move, a delayed release is ignored,
-  // or FLOOR_UNKNOWN passes; why_new=no floor existed; seam=gh release view is faked; no_claim=none beyond protects
+  // Value: protects=the floor's anchor is the annotated v<VERSION> tag on stable or its later release publish time, a stable it cannot date fails closed,
+  // and the first cut and a finishing cut are not held; fails_when=a lightweight tag, an extra tag or the commit date stands in for the move, a delayed
+  // release is ignored, or FLOOR_UNKNOWN passes; why_new=no floor existed; seam=gh release view is faked; no_claim=none beyond protects
   test('stableMovedAt: annotated tags only, the later release publish time wins; an undatable stable is FLOOR_UNKNOWN; the first and a finishing cut skip the floor', () => {
     const f = fixture();
     git(f.seed, 'tag', 'v1.0.2', f.shas['1.0.2']!);
@@ -618,14 +618,14 @@ describe('release-cut: the 72-hour floor', () => {
     expect(unknown.ok).toBe(false);
     if (!unknown.ok) {
       expect(unknown.code).toBe('FLOOR_UNKNOWN');
-      expect(unknown.message).toBe('no annotated v* tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated; only a --security cut can move it until one does');
-      expect(unknown.next).toBe('none until an annotated v* tag dates the release stable points at');
+      expect(unknown.message).toBe('no annotated v1.0.2 tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated; only a --security cut can move it until one does');
+      expect(unknown.next).toBe('none until an annotated v<VERSION> tag dates the release stable points at');
     }
     // Value: protects=FLOOR_UNKNOWN's promise that a verified --security cut still moves an undatable stable; fails_when=the unknown branch returns before
     // the security check, stranding a security fix until someone hand-tags stable; why_new=the security test always starts from a dated stable; seam=none;
     // no_claim=verifySecurity (floorStatus takes the verified flag)
     expect(floorStatus({ git: f.git, gh: f.gh, repo: f.repo, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.3']!, security: true, scheduled: false, now: pastFloor() }))
-      .toEqual({ verdict: 'security', line: 'FLOOR: bypassed by the security exception (no annotated v* tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated)' });
+      .toEqual({ verdict: 'security', line: 'FLOOR: bypassed by the security exception (no annotated v1.0.2 tag points at stable ' + f.shas['1.0.2']!.slice(0, 12) + ', so its last move cannot be dated)' });
 
     git(f.seed, 'push', '-q', '--delete', 'origin', 'refs/tags/v1.0.2');
     git(f.work, 'tag', '-d', 'v1.0.2');
@@ -644,11 +644,14 @@ describe('release-cut: the 72-hour floor', () => {
     expect(floorStatus({ ...base, prevStable: null, sha: f.shas['1.0.3']! }).verdict).toBe('first');
     expect(floorStatus({ ...base, prevStable: f.shas['1.0.2']!, sha: f.shas['1.0.2']! }).verdict).toBe('finishing');
 
-    // Two annotated tags on stable: the newer one dates the move.
+    // A newer hand-made annotated tag on stable, with no release, neither dates the move nor pins later runs to stable (a silent NOTHING_NEW stall).
     execFileSync('git', ['tag', '-a', 'v1.0.2-rc', f.shas['1.0.2']!, '-m', 'again'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_COMMITTER_DATE: '2026-10-22T08:00:00Z' } });
     git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.2-rc');
     f.refresh();
-    expect(stableMovedAt(f.git, f.gh, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-22T08:00:00Z'), tag: 'v1.0.2-rc', published: false });
+    expect(stableMovedAt(f.git, late, f.repo, f.shas['1.0.2']!)).toEqual({ at: Date.parse('2026-10-21T09:30:00Z'), tag: 'v1.0.2', published: true });
+    const pastStray = planRelease({ repo: f.repo, git: f.git, gh: late, now: () => Date.parse('2026-10-25T10:00:00Z') });
+    expect(pastStray.ok, JSON.stringify(pastStray)).toBe(true);
+    if (pastStray.ok) expect(pastStray.plan.tag).toBe('v1.0.3');
   });
 
   // Value: protects=the stable push is conditioned on the stable the floor read, so two overlapping cuts cannot both move it; fails_when=the push is a plain
@@ -940,7 +943,7 @@ describe.skipIf(process.platform === 'win32')('release-cut: refusals at the work
     f.refresh();
     const unknown = run({ GITHUB_EVENT_NAME: 'schedule' });
     expect(unknown.status).toBe(1);
-    expect(unknown.stdout.split('\n')[0]).toStartWith('FLOOR_UNKNOWN: no annotated v* tag points at stable ' + f.shas['1.0.4']!.slice(0, 12));
+    expect(unknown.stdout.split('\n')[0]).toStartWith('FLOOR_UNKNOWN: no annotated v1.0.4 tag points at stable ' + f.shas['1.0.4']!.slice(0, 12));
     expect(stable()).toBe(f.shas['1.0.4']);
   });
 });
