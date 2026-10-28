@@ -4,7 +4,7 @@
  * that moved out of it.
  */
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { collectFreeTestFiles, createFreeCiPlan, curateWindowsSafe, parseCliOptions, validateFreeCiPlan } from '../scripts/test-free-shards';
 import { windowsCurationLine } from '../scripts/lib/free-ci-health';
@@ -122,6 +122,12 @@ test('native qualification is dispatch-only with one exclusive mode per run', ()
     expect(setup.with['node-version']).toBe('24.18.0');
     expect(setup.if).toBeUndefined();
   }
+});
+
+test('the removed Dia qualification harness has no mode and no scripts', () => {
+  expect(Object.keys(native.jobs)).toEqual(['cookie-native-qualification', 'windows-native-diagnostics']);
+  for (const file of [path.join(import.meta.dir, '..', '.github/scripts', 'dia-gui-readiness.c'), path.join(import.meta.dir, '..', '.github/scripts', 'dia-launch-driver.mjs'),
+    path.join(import.meta.dir, '..', '.github/scripts', 'qualify-dia-macos.ts'), path.join(import.meta.dir, '..', '.github/scripts', 'run-dia-native-qualification.ts')]) expect(existsSync(file)).toBe(false);
 });
 
 test('focused Windows diagnostics include the repaired lock and close cases without default-profile qualification', () => {
