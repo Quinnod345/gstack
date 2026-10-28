@@ -112,7 +112,7 @@ incomplete coverage, which blocks until the reviewer is rerun.
 | a full pass whose fix touched a gate-class path, below the cap | full pass on the range |
 | a full pass that fixed only below-floor findings | one fix-check |
 | a full pass at the cap that fixed a blocking finding | one fix-check |
-| a full pass at the cap, or with no fix, leaving a blocking finding open | stop: name it for the owner |
+| a full pass that leaves a blocking finding open (fixed or not) | stop: name it for the owner |
 | a fix-check that found nothing blocking | done |
 | a fix-check that found a blocking finding | stop: name it for the owner |
 
@@ -134,7 +134,7 @@ to code, and code with the gate scan unavailable fails closed to gate.
 |---|---|---|
 | **docs** | markdown no agent or gate reads: README, CHANGELOG, TODOS, how-to and explanation docs | the parent's core checklist only |
 | **tests** | test files and fixtures only | core plus the testing specialist |
-| **code** | everything else, including every `SKILL.md` and template, `*/sections/**`, `scripts/resolvers/**`, `docs/*-policy.md`, checklists, specialists and bins | specialists by scope (as before), the native adversarial pass, the outside voice; the Red Team past 200 lines or after a CRITICAL |
+| **code** | everything else, including every `SKILL.md` and template, any markdown in a skill directory, `*/sections/**`, `scripts/resolvers/**`, `docs/*-policy.md`, `docs/captain.md`, `docs/unattended.md`, `docs/pregate.md`, checklists, specialists and bins | specialists by scope (as before), the native adversarial pass, the outside voice; the Red Team past 200 lines or after a CRITICAL |
 | **gate** | code plus auth or migration scope, a hunk the gate scan tags (an RH rule: a relaxed threshold, a skipped test), a deleted code file, CI workflows, credential or state-root paths | code's set, plus the Red Team always, at full effort, and no hit-rate gating |
 
 **Numbers keep the outside voice.** On a docs or tests diff the outside voice is
@@ -145,8 +145,11 @@ claim always dispatches it. The claims' fingerprint (`fingerprint=`) is passed
 back as `--reviewed-numbers`; when a later fix changes a claim, only the
 outside voice reruns, on the numbers.
 
-**The adversarial and outside voices run once**, on pass 1's diff (Step 11).
-Later full passes rerun the specialists on the range only.
+**The adversarial and outside voices run once per invocation** (Step 11, on the
+final tree), as the last full-pass plan lists them; after they ran, decision 2
+passes `--adversarial-ran` so a repeat lists them no more. Later full passes rerun the
+specialists on the range only. Step 11.5 binds a planned skip through the Step 9
+record's `CURRENT` freshness instead of a native record.
 
 **Effort.** Every reviewer that can block a ship (the core checklist,
 specialists, the Red Team, the native adversarial pass, fix-checks) runs at

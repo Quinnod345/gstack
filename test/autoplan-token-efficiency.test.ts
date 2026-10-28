@@ -182,7 +182,7 @@ describe('ESCALATE at the round cap', () => {
 
 describe('docs-only', () => {
   test('docs-class paths', () => {
-    for (const p of ['README.md', 'CHANGELOG.md', 'TODOS.md', 'docs/howto-retry.md', 'docs/designs/x/PLAN.md', 'notes.md', './README.md']) expect(docsClassPath(p, ROOT), p).toBe(true);
+    for (const p of ['README.md', 'CHANGELOG.md', 'TODOS.md', 'docs/howto-retry.md', 'docs/designs/x/PLAN.md', 'notes.md', './README.md', 'docs/images/flow.png', 'docs/designs']) expect(docsClassPath(p, ROOT), p).toBe(true);
     for (const p of ['docs/review-policy.md', 'autoplan/SKILL.md.tmpl', 'autoplan/SKILL.md', 'review/sections/army.md', 'scripts/resolvers/autoplan-driver.ts', 'autoplan/DRIVER.md',
       'captain/templates/brief.md', 'autoplan/notes.md', 'AGENTS.md', 'CLAUDE.md', 'lib/worker.ts', 'bin/gstack-autoplan']) expect(docsClassPath(p, ROOT), p).toBe(false);
     expect(detectDocsOnly('Rewrite README.md and docs/howto.md.', ROOT)).toMatchObject({ docsOnly: true, code: [] });

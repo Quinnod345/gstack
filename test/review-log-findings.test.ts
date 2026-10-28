@@ -178,6 +178,19 @@ describe('lib: deriveFromFindings, bindReview order and reviewFreshness', () => 
     expect(fs.existsSync(path.join(dir, `${token}.json`))).toBe(false);
   });
 
+  test('a review-fix-check record binds like a pass, so Step 11.5 can read its CURRENT freshness', () => {
+    const dir = path.join(home, 'starts', '.review-starts');
+    fs.mkdirSync(dir, { recursive: true });
+    const token = '66666666-2222-3333-4444-555555555555';
+    const w = 'c'.repeat(64);
+    fs.writeFileSync(path.join(dir, `${token}.json`), JSON.stringify({ skill: 'review-fix-check', repo: '/r', branch: 'b', wtree: w, started_at: 't' }));
+    const env = { GSTACK_REVIEW_DIR: path.join(home, 'starts'), GSTACK_REVIEW_REPO: '/r', GSTACK_REVIEW_BRANCH: 'b', GSTACK_STAMP_WTREE: w };
+    const bound = bindReview({ skill: 'review-fix-check', status: 'clean', completed: true, converged: true }, token, env);
+    expect(bound.review_binding).toMatchObject({ state: 'verified', start_wtree: w, end_wtree: w });
+    expect(reviewFreshness(bound, w)?.status).toBe('CURRENT');
+    expect(reviewFreshness(bound, 'd'.repeat(64))?.status).toBe('STALE');
+  });
+
   test('reviewFreshness reads findings_open: resolved criticals are CURRENT, claimed issues_found stays conservative', () => {
     const w = 'b'.repeat(64);
     const base = { skill: 'review', completed: true, converged: true, wtree: w, review_binding: { state: 'verified', start_wtree: w, end_wtree: w } };

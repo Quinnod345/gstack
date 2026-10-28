@@ -206,8 +206,8 @@ not a commit ID. Use `git diff <old-tree> <new-tree>` to compare these snapshots
 only when it would fail a test, break production, or lose data or secrets;
 everything below that floor ships as a named note in the PR body. Pass 1 reviews
 the diff; a later pass reads only the range; two full passes plus one fix-check
-is the cap. `NO FINDINGS` is a complete reviewer result. The ship receipt's
-`review_loop` counters record the outcome; `ship: review_scope` (Step 3) is the knob.
+is the cap. `NO FINDINGS` is a complete reviewer result. `ship: review_scope` (Step 3)
+is the knob; the receipt's `review_loop` records the outcome.
 
 ### Ship control flow
 
@@ -328,12 +328,11 @@ repository-landing asks, including on Apple repos.
    `git log origin/<base>..HEAD --oneline`.
 
 4. **Carry check.** If `gh pr list --head <branch-name> --state open --json number`
-   names a PR, run `$GSTACK_ROOT/bin/gstack-ship-receipt carry --pr <n> --base <base>`.
-   `CARRY: carried` means the product diff against `origin/<base>` has the same
-   patch-id as the reviewed head's (only a base merge, tests or release metadata
-   changed; the receipt's `carry` object holds the range-diff evidence): the receipt
-   now binds HEAD and the run is complete at its `GSTACK_RESULT` line, so stop.
-   `CARRY: refused` or `current` continues; a product change always re-runs Steps 2–16.
+   names a PR, run `$GSTACK_ROOT/bin/gstack-ship-receipt carry --pr <n> --base <base> --dry-run`.
+   `CARRY: would carry` (same product patch-id): skip review, fix what the merge broke
+   (CHANGELOG, size caps), run `gstack-pregate --allow-repo-commands`, then carry without
+   `--dry-run` plus `--pregate .gstack/tmp/pregate.json`. `CARRY: carried` binds HEAD: stop.
+   A failed check, HEAD moving after pregate, `refused` or `current` re-runs Steps 2–16.
 
 5. Display historical readiness using the dashboard below, then finish Step 1.
    Prior CLEAR reviews or dashboard skips never replace Step 9's gates.
@@ -507,11 +506,13 @@ repeat Step 2 (decisions included) on the merged content, then Step 4.
 ## Step 11.5: Bind the reviews
 
 1. **Select the two reviews.** Run `$GSTACK_ROOT/bin/gstack-review-read`.
-   Select this invocation's final Step 9.4 record (`skill:"review"`, `via:"ship"`)
-   and Step 11 native record (`skill:"adversarial-review"`). Match each to its saved
+   Select this invocation's final Step 9 record (`skill:"review"`, `via:"ship"`, or a
+   last 3.5 `review-fix-check`) and Step 11 native record (`skill:"adversarial-review"`;
+   none after `ADVERSARIAL: skipped`). Match each to its saved
    handle, original token and source; reject outside-provider or older records.
 2. **Compare their content.** Require the native record's `review_binding.state`
-   to be `verified`. All three snapshots must match: its `wtree`, Step 9.4's
+   to be `verified`. All three snapshots must match: its `wtree` (none: `review_freshness`
+   `CURRENT`), the Step 9 record's
    `review_binding.start_wtree` and `review_binding.end_wtree`. A mismatch or missing
    record/field blocks release preparation: report **Review records missing or mismatched**
    and insert `9 → 10 → 11 → 11.5` before Step 12. Bind the new records at 11.5.

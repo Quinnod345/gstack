@@ -128,8 +128,8 @@ export interface NextStep { step: Step; reason: string }
 /**
  * The transition table (docs/review-policy.md#transitions). Pass 1 is full. A fixed
  * blocking finding earns a second full pass on the range; any other fix earns one
- * fix-check; two full passes is the cap; a blocker still open after the last
- * allowed step stops for the owner.
+ * fix-check; two full passes is the cap; a blocker still open after any step
+ * stops for the owner.
  */
 export function nextStep(h: History): NextStep {
   if (h.last === 'none') return { step: 'full', reason: 'pass 1 reviews the whole diff' };

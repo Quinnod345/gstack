@@ -162,13 +162,12 @@ function main(argv: string[]): number {
   for (const r of rows) lines.push(`| ${r.fixture} | ${r.class} | ${r.scenario} | ${r.legacy_dispatches} → ${r.new_dispatches} | ${r.legacy_tokens} → ${r.new_tokens} | ${r.ratio} | ${r.ending} |`);
   lines.push('', '| fixture | /autoplan scenario | voice dispatches legacy → new |', '|---|---|---|');
   for (const a of ap) for (const r of a.runs) lines.push(`| ${a.fixture} | ${r.scenario} | ${r.legacy} → ${r.next} |`);
+  const median = (v: number[]) => { const m = Math.floor(v.length / 2); return v.length % 2 ? v[m]! : Math.round(((v[m - 1]! + v[m]!) / 2) * 100) / 100; };
   const ratios = rows.map(r => Number(r.ratio)).sort((a, b) => a - b);
-  const mid = Math.floor(ratios.length / 2);
-  const median = ratios.length % 2 ? ratios[mid]! : Math.round(((ratios[mid - 1]! + ratios[mid]!) / 2) * 100) / 100;
-  lines.push('', `SHIP_TOKEN_RATIO: median=${median} min=${ratios[0]} max=${ratios[ratios.length - 1]} (n=${ratios.length})`);
+  lines.push('', `SHIP_TOKEN_RATIO: median=${median(ratios)} min=${ratios[0]} max=${ratios[ratios.length - 1]} (n=${ratios.length})`);
   const byClass = new Map<string, number[]>();
   for (const r of rows) byClass.set(String(r.class), [...(byClass.get(String(r.class)) ?? []), Number(r.ratio)].sort((x, y) => x - y));
-  lines.push(`SHIP_TOKEN_RATIO_BY_CLASS: ${[...byClass].map(([c, v]) => `${c} median=${v[Math.floor(v.length / 2)]} (n=${v.length})`).join('; ')}`);
+  lines.push(`SHIP_TOKEN_RATIO_BY_CLASS: ${[...byClass].map(([c, v]) => `${c} median=${median(v)} (n=${v.length})`).join('; ')}`);
   process.stdout.write(lines.join('\n') + '\n');
   return 0;
 }

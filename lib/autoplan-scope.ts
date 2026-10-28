@@ -50,7 +50,7 @@ export function detectUiScope(implementationPlan: string): UiScope {
 /** Docs-class: what /ship's review classifies as docs (lib/review-depth.ts classifyPath: README, CHANGELOG, TODOS and prose markdown outside agent-read and skill-directory paths), plus a docs directory named without a file. */
 export function docsClassPath(file: string, root: string): boolean {
   const p = file.replace(/^\.\//, '');
-  if (/^docs\/[^.]*$/.test(p)) return true;
+  if (p.startsWith('docs/') && !/\.mdx?$/i.test(p)) return true;
   return classifyPath(p, root) === 'docs';
 }
 

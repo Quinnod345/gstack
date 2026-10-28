@@ -92,4 +92,20 @@ describe('gstack-review-plan', () => {
     expect(spawnSync(BIN, [], { encoding: 'utf8', timeout: 10_000 }).status).toBe(2);
     expect(run(repo({ 'a.md': 'x' }), ['--last', 'later']).status).toBe(2);
   });
+  test('scratch under .gstack/tmp/ is ignored, a subdirectory run plans the whole repository, and --adversarial-ran drops the repeat adversarial pass', () => {
+    const r = repo({ 'docs/a.md': '# a\n' });
+    fs.mkdirSync(path.join(r.dir, '.gstack', 'tmp'), { recursive: true });
+    fs.writeFileSync(path.join(r.dir, '.gstack', 'tmp', 'fix-check-list.ts'), 'export const x = 1;\n');
+    const plan = JSON.parse(run(r, ['--json']).stdout);
+    expect(plan.class).toBe('docs');
+    expect(plan.paths).toEqual(['docs/a.md']);
+    const sub = spawnSync(BIN, ['--base', 'main', '--gate-tagged', '0', '--json'], { cwd: path.join(r.dir, 'docs'), encoding: 'utf8', timeout: 60_000, env: { ...process.env, GSTACK_STATE_ROOT: r.state } });
+    expect(JSON.parse(sub.stdout).paths).toEqual(['docs/a.md']);
+    const code = repo({ 'src/a.ts': Array.from({ length: 80 }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n' });
+    const repeat = ['--pass', '1', '--last', 'full', '--fixed-blocking'];
+    expect(run(code, repeat).stdout).toContain('DISPATCH: adversarial-native adversarial effort=full');
+    const ran = run(code, [...repeat, '--adversarial-ran']).stdout;
+    expect(ran).not.toContain('DISPATCH: adversarial-native');
+    expect(ran).toContain('SKIP: adversarial-native and outside-voice (run once per invocation)');
+  });
 });
