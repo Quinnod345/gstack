@@ -507,6 +507,7 @@ describe('cookie authentication and storage with isolated Chromium profiles', ()
     test(`rejects ${path} with a safe ${reason} result`, async () => {
       await page.goto(`${origin}${path === '/login-hop' ? '/identity' : path}`);
       if (path === '/login-hop') await page.evaluate(() => history.replaceState({}, '', '/login-hop'));
+      // identity_mismatch/missing/ambiguous keep the 400 ms options (GStack Minder, 2026-10-28): they resolve only when the deadline fires (browse/src/cookie-auth-verification.ts:105-120), so the 15 s default would exceed bun's 5 s test timeout.
       const result = await verifyCookieAuthentication(page, reason.startsWith('identity_') ? options : browserOptions, origin);
       expect(result.verified).toBe(false);
       expect(result.reason).toBe(reason);

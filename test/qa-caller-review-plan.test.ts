@@ -18,6 +18,7 @@ import {
 } from './helpers/qa-callers-fixture';
 
 const captured = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/qa-caller-review-plan-40707142223.json'), 'utf8'));
+const specialistDiff = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'fixtures/qa-caller-merge-base-diff-40737741454.json'), 'utf8'));
 const SHIP_CASES: QaCallerCase[] = ['ship-exploratory-small-cli', 'ship-exploratory-unavailable', 'ship-exploratory-plan-checks', 'ship-exploratory-late-input'];
 const fixtures: QaCallerFixture[] = [];
 afterEach(async () => {
@@ -92,5 +93,45 @@ describe('ship Step 9 review plan through the qa-callers transport', () => {
       expect(validate(receipt.remaining)).toContain('blocked, failing or incomplete coverage reported green');
       expect(validate([])).not.toContain('blocked, failing or incomplete coverage reported green');
     } finally { fs.rmSync(reportRoot, { recursive: true, force: true }); }
+  });
+});
+
+/**
+ * Paid screen 40737741454 (ship-exploratory-unavailable, slice 11 and its rerun): the plan dispatched the
+ * state-machines specialist, review-army tells the parent to write the merge-base sha into the specialist's
+ * diff command, and the only refused call in both trials was that child's `git diff <merge-base sha>`.
+ */
+describe('review-army specialist diff at the literal merge base', () => {
+  const mergeBase = (fixture: QaCallerFixture) => spawnSync('git', ['merge-base', 'origin/main', 'HEAD'], { cwd: fixture.cwd, encoding: 'utf8', timeout: 5000 }).stdout.trim();
+
+  for (const [run, trial] of Object.entries(specialistDiff.runs) as [string, { root: string; mergeBase: string; commands: { command: string }[] }][]) {
+    test(`captured ${run}: every Bash call, the specialist child's included, is inside the declared interface`, () => {
+      const fixture = fixtureFor('ship-exploratory-unavailable', true);
+      const base = mergeBase(fixture).slice(0, trial.mergeBase.length);
+      const commands = trial.commands.map(({ command }) => command.replaceAll(trial.root, fixture.root).replaceAll(trial.mergeBase, base));
+      expect(commands).toContain(`git diff ${base}`);
+      expect(commands.filter(command => !qaCallerCommandAllowed(command, fixture.workflowCommands, context(fixture)))).toEqual([]);
+    });
+  }
+
+  test('only the fixture merge base is admitted, bare or in the specialist DIFF_BASE form, and the prompt declares it', () => {
+    const fixture = fixtureFor('ship-exploratory-unavailable');
+    const base = mergeBase(fixture);
+    const allowed = (command: string) => qaCallerCommandAllowed(command, fixture.workflowCommands, context(fixture));
+    for (const command of [`git diff ${base}`, `git diff ${base.slice(0, 7)}`, `git diff --stat ${base.slice(0, 12)}`, `git diff ${base} -- scale.ts`,
+      `DIFF_BASE=${base} && git diff "$DIFF_BASE"`, `DIFF_BASE=${base.slice(0, 9)} && git diff --name-status "$DIFF_BASE"`]) {
+      expect(allowed(command), command).toBe(true);
+    }
+    const other = base.replace(/^./, base[0] === '0' ? '1' : '0');
+    for (const command of [`git diff ${other}`, `git diff ${base.slice(0, 6)}`, `git diff ${base} --output=reports/x`, `git diff --stat ${base} --numstat`,
+      `DIFF_BASE=${other} && git diff "$DIFF_BASE"`, `DIFF_BASE=${base} && git diff ${base}`, `DIFF_BASE=${base}; git diff "$DIFF_BASE"`,
+      `git diff "$DIFF_BASE"`, `DIFF_BASE=${base} && git diff "$DIFF_BASE" && git status --short`, `git diff ${base.toUpperCase()}`]) {
+      expect(allowed(command), command).toBe(false);
+    }
+    expect(qaCallerCommandAllowed(`git diff ${base}`, fixture.workflowCommands)).toBe(false);
+    for (const caseId of ['ship-exploratory-unavailable', 'review-exploratory-small-cli'] as QaCallerCase[]) {
+      expect(qaCallerSessionOptions(fixtureFor(caseId), 'free-review-plan').prompt).toContain(
+        'The merge base itself, the sha git merge-base origin/main HEAD prints (at least 7 characters), may replace origin/main as a literal diff base');
+    }
   });
 });
