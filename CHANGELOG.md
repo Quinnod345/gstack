@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.91.292.0] - 2026-10-28
+
+**Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed path the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and a deleted JS, TS, Python or Dart file nothing still imports or names is waived. Every waived path is printed on its own line, so the reason is visible in the gate output.
+
+### Fixed
+- **Deleted and renamed tests pass `lanes`**: each removed path that owes no lane prints `removed (no lane owed): <path> — <why>`, and the `lanes` detail counts `N removed path(s)`. A deleted JS, TS, Python, Dart or bats test (or a test renamed to a non-test path) runs its owning suite, the remaining tests that directly exercise the files its merge-base text exercised (`owning suite runs: …`); test helpers and fixtures are not subjects.
+- **Lost coverage is named, not hidden**: when a deleted test was the last test of a file, the line says `coverage removed: <file> has no remaining test` and the detail adds `M subject(s) lost their last test`. A modified file whose only test the branch deleted still fails PREGATE_NO_LANE.
+
+### Changed
+- A removal owes what an edit owes. These still fail PREGATE_NO_LANE until a test or a `dependencies` entry covers them. That covers a deleted or renamed manifest, lockfile, config, fixture, golden or workflow (renaming `package.json` into Markdown does not waive it), a file a runner loads by name (`*.config.ts`, `conftest.py`, `sitecustomize.py`, `__init__.py`), a Go, Ruby, shell, Rust or bin file and a deleted or renamed Go or Ruby test (the graph cannot see their importers or shared helpers), a file remaining code still imports, including by a relative, extensionless or dotted import or through a directory it reads (`removed, but still imported by …`), a file whose basename a remaining non-Markdown file mentions (a config's `preload = ["./setup.ts"]`, a computed `path.join(__dirname, 'lib', 'value.js')`), and a deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A remaining test that reads a deleted file or directory is still selected.
+
+### Gate integrity
+- New `test/pregate-removed-paths.test.ts` (38 cases) covers the waived paths and the fail-closed negative controls; no existing test, threshold or allowlist changed.
+
 ## [1.91.291.0] - 2026-10-28
 
 **/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.
