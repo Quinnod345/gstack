@@ -20,6 +20,7 @@
 ### Gate integrity
 - Ship's union growth is a +1,877-byte entry in GSTA-132's size ledger (test/size-ledger/ship/garrytan-gsta131-token-efficiency.json; measured 330,901 bytes, SIZE_LEDGER: ok), and the ship skeleton cap in test/helpers/carve-guards.ts moves 60,913 → 60,960 bytes, pinned at the measured size. The five /review size pins in test/fixtures/skill-md-size-allowlist.json go down by 2 bytes each.
 - `test/autoplan-token-efficiency.test.ts` gives its subprocess-driven cases a 30-second timeout; its resumed-run case persists `max_rounds: 1` instead of 3, a value inside the new cap of 2.
+- `test/ship-receipt-carry-pregate.test.ts` joins `KNOWN_WINDOWS_INCOMPATIBLE` in `scripts/lib/windows-curation.ts`, like the four other tests that pass `--pregate` to the receipt CLI: on a Windows host the fixture's Linux lane is a requires-remote obligation, so `write` refuses the pregate (windows-free-shard run 40611810409). It still runs on Linux and macOS.
 
 ## [1.91.286.0] - 2026-10-28
 
