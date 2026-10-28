@@ -152,9 +152,67 @@ describe('gstack-harness register and unregister (skill folders)', () => {
     unregister(path.join(d, 'state'), ROOT, 'generic');
     expect(fs.readFileSync(ctx, 'utf8')).toBe('# my rules\nbe kind\n\n');
     expect(fs.existsSync(r.router!)).toBe(false);
-    const kept = files(path.join(d, 'state', 'backups', 'harness'));
-    expect(kept.length).toBe(1);
-    expect(kept[0].endsWith('gstack/SKILL.md')).toBe(true);
+    const kept = files(path.dirname(r.router!));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/^SKILL\.md\.edited-/);
+    expect(fs.readFileSync(path.join(path.dirname(r.router!), kept[0]), 'utf8')).toEndWith('\nmy note\n');
+  }, 60_000);
+
+  test('generic: a lone, repeated or edited marker block is never cut or rewritten; prose that names a marker is left alone', () => {
+    const d = tmp();
+    const ctx = path.join(d, 'AGENTS.md');
+    const code = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return e instanceof HarnessError ? e.code : String(e); } };
+    const lone = '# mine\n' + BLOCK_BEGIN + '\n## Important\nkeep me\n';
+    fs.writeFileSync(ctx, lone);
+    expect(code(() => register(opts(d, 'generic', { context: ctx })))).toBe('HARNESS_UNOWNED_ENTRY');
+    expect(fs.readFileSync(ctx, 'utf8')).toBe(lone);
+    const prose = '# mine\nthe markers look like ' + BLOCK_BEGIN + ' and ' + BLOCK_END + '\n';
+    fs.writeFileSync(ctx, prose);
+    register(opts(d, 'generic', { context: ctx }));
+    unregister(path.join(d, 'state'), ROOT, 'generic');
+    expect(fs.readFileSync(ctx, 'utf8')).toBe(prose + '\n');
+    for (const edit of [(s: string) => s.replace(BLOCK_END + '\n', ''), (s: string) => s.replace('## gstack skills', '## gstack skills\nmy own line')]) {
+      fs.writeFileSync(ctx, '# mine\n');
+      register(opts(d, 'generic', { context: ctx }));
+      const edited = edit(fs.readFileSync(ctx, 'utf8')) + '## after\nkeep me too\n';
+      fs.writeFileSync(ctx, edited);
+      const un = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', path.join(ROOT, 'bin', 'gstack-harness-ledger.sh')], { env: { PATH: '/usr/bin:/bin', GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 30_000 });
+      expect(un.status, un.stderr).toBe(0);
+      expect(un.stdout).toContain('left ' + ctx + ' as it is');
+      expect(fs.readFileSync(ctx, 'utf8')).toBe(edited);
+    }
+  }, 60_000);
+
+  test('generic: adding or moving --context is recorded, and the old block is cut', () => {
+    const d = tmp();
+    const [a, b] = [path.join(d, 'a.md'), path.join(d, 'b.md')];
+    fs.writeFileSync(a, '# a\n');
+    fs.writeFileSync(b, '# b\n');
+    const skills = path.join(d, 'skills');
+    register(opts(d, 'dots', { skillsDir: skills }));
+    expect(register(opts(d, 'dots', { skillsDir: skills, context: a })).status).toBe('updated');
+    expect(fs.readFileSync(a, 'utf8')).toContain(BLOCK_BEGIN);
+    const r = register(opts(d, 'dots', { skillsDir: skills, context: b }));
+    expect(fs.readFileSync(a, 'utf8')).toBe('# a\n\n');
+    expect(readLedger(r.ledger)!.blocks.map(x => x.path)).toEqual([b]);
+    unregister(path.join(d, 'state'), ROOT, r.id);
+    expect(fs.readFileSync(b, 'utf8')).toBe('# b\n\n');
+  }, 60_000);
+
+  test('a folder swapped for a symlink below the destination is never followed', () => {
+    const d = tmp();
+    const skills = path.join(d, 'skills');
+    const r = register(opts(d, 'openclaw', { skillsDir: skills }));
+    const review = path.join(skills, 'gstack', 'skills', fs.readdirSync(path.join(skills, 'gstack', 'skills')).sort()[0]);
+    const outside = path.join(d, 'outside');
+    fs.cpSync(review, outside, { recursive: true });
+    fs.rmSync(review, { recursive: true });
+    fs.symlinkSync(outside, review);
+    const code = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return e instanceof HarnessError ? e.code : String(e); } };
+    expect(code(() => register(opts(d, 'openclaw', { skillsDir: skills })))).toBe('HARNESS_UNSAFE_DESTINATION');
+    unregister(path.join(d, 'state'), ROOT, r.id);
+    expect(fs.existsSync(path.join(outside, 'SKILL.md'))).toBe(true);
+    expect(fs.lstatSync(review).isSymbolicLink()).toBe(true);
   }, 60_000);
 });
 
@@ -254,9 +312,13 @@ describe.skipIf(process.platform === 'win32')('setup and uninstall with harnesse
       const status = runSetup(f, path.join(src, 'setup'), ['--status']);
       expect(status.stdout).toMatch(new RegExp('\\b' + host + '\\s+experimental\\s+global\\s+current'));
       expect(status.stdout).not.toContain('move it first');
+      fs.appendFileSync(path.join(f.home, dest, probe), '\nmy note\n');
       const un = spawnSync('bash', [path.join(src, 'bin/gstack-uninstall'), '--force'], { cwd: f.home, env: { ...f.env, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 60_000 });
       expect(un.status, un.stdout + un.stderr).toBe(0);
-      expect(files(path.join(f.home, dest)).filter(p => !p.startsWith('.'))).toEqual([]);
+      const left = files(path.join(f.home, dest)).filter(p => !p.startsWith('.'));
+      expect(left).toHaveLength(1);
+      expect(left[0]).toStartWith(probe + '.edited-');
+      expect(fs.readFileSync(path.join(f.home, dest, left[0]), 'utf8')).toEndWith('\nmy note\n');
     }, 120_000);
   }
 

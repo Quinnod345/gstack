@@ -5077,12 +5077,14 @@ Hermes opens only skills it has indexed, so a router that points at unlisted fil
 <a id="harness-unsafe-destination"></a>
 ### `gstack-harness: refusing to write into <dir>: <why>` (HARNESS_UNSAFE_DESTINATION)
 
-The destination is your home folder, the filesystem root, inside the gstack checkout, a symlink, or a path with a tab or newline. Nothing was written. Pick the harness's own skills folder, for example `--skills-dir ~/.openclaw/skills`.
+The destination is your home folder, the filesystem root, inside the gstack checkout, a symlink (or holds one where gstack's own folders were), or a path with a tab or newline. Nothing was written. Pick the harness's own skills folder, for example `--skills-dir ~/.openclaw/skills`.
 
 <a id="harness-unowned-entry"></a>
 ### `gstack-harness: <path> already exists and gstack did not write it` / `a skill named <name> already exists at <path>` (HARNESS_UNOWNED_ENTRY)
 
 gstack only replaces files its ledger says it wrote. A folder or a skill with the same name is yours (or another tool's), and harnesses resolve skills by name, so gstack stops instead of shadowing it. Rename or move that entry, then register again.
+
+The same code stops `register generic --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
 
 <a id="harness-render-failed"></a>
 ### `gstack-harness: could not render <harness> skills: ...` (HARNESS_RENDER_FAILED)

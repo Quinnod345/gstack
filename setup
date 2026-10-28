@@ -428,6 +428,7 @@ if [ "$REFRESH_REGISTERED" -eq 1 ] && [ -z "${GSTACK_SETUP_REFRESH_CHILD:-}" ]; 
   _RF_TARGETS=""
   _RF_SKIPPED=""
   _rf_add() {
+    case "$1" in openclaw|hermes) return 0 ;; esac
     case "
 $_RF_TARGETS" in *"
 $1	$2	$3

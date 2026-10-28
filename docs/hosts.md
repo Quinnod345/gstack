@@ -26,8 +26,10 @@ prints every path it wrote and the command that removes them. An explicit
 Every file goes into a ledger, `$GSTACK_STATE_ROOT/harness/<id>.ledger`, with
 its sha256. Registering again changes only what changed; a folder or skill name
 gstack did not write stops it (`HARNESS_UNOWNED_ENTRY`); `gstack-uninstall`
-and `gstack-harness unregister` remove exactly the ledger's files and move any
-file you edited to `$GSTACK_STATE_ROOT/backups/harness/`. `./setup
+and `gstack-harness unregister` remove exactly the ledger's files, never
+through a symlink, and rename any file you edited to `<file>.edited-<time>`
+beside itself, where uninstall cannot take it. A context block is cut only
+when it is the one gstack wrote; an edited block is left for you. `./setup
 --refresh-registered` (what `/gstack-upgrade` runs) refreshes every registration.
 `gstack-harness status` lists them and runs the harness's own skill list where
 it has one (`visible to harness: yes`). Errors: [troubleshooting](troubleshooting.md#agent-harnesses-gstack-harness).

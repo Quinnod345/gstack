@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bunIsolationArgs } from './bun-isolation';
+import { runBashSync } from './script-invocation';
 
 export type SkillsMode = 'router' | 'all';
 export type TargetName = 'openclaw' | 'hermes' | 'dots' | 'generic' | 'qm' | 'muse' | 'grok';
@@ -241,7 +242,7 @@ export function contextBlock(routerPath: string): string {
 
 // --- ledger ----------------------------------------------------------------
 
-export interface Ledger { meta: Record<string, string>; files: Array<{ sha: string; path: string }>; dirs: string[]; blocks: string[] }
+export interface Ledger { meta: Record<string, string>; files: Array<{ sha: string; path: string }>; dirs: string[]; blocks: Array<{ sha: string; path: string }> }
 
 export const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 export const ledgerDir = (stateRoot: string) => path.join(stateRoot, 'harness');
@@ -257,7 +258,7 @@ export function readLedger(file: string): Ledger | null {
     if (kind === 'meta') l.meta[a] = b;
     else if (kind === 'file') l.files.push({ sha: a, path: b });
     else if (kind === 'dir') l.dirs.push(b);
-    else if (kind === 'block') l.blocks.push(b);
+    else if (kind === 'block') l.blocks.push({ sha: a, path: b });
   }
   return l;
 }
@@ -267,7 +268,7 @@ export function writeLedger(file: string, l: Ledger): void {
     ...Object.entries(l.meta).map(([k, v]) => 'meta\t' + k + '\t' + v),
     ...l.files.map(f => 'file\t' + f.sha + '\t' + f.path),
     ...l.dirs.map(d => 'dir\t-\t' + d),
-    ...l.blocks.map(b => 'block\t-\t' + b)];
+    ...l.blocks.map(b => 'block\t' + b.sha + '\t' + b.path)];
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file + '.tmp', rows.join('\n') + '\n', { mode: 0o600 });
   fs.renameSync(file + '.tmp', file);
@@ -299,7 +300,7 @@ export interface RegisterOptions {
 }
 export interface RegisterResult {
   id: string; target: TargetName; dest: string; mode: SkillsMode;
-  status: 'installed' | 'updated' | 'unchanged'; written: number; skills: number; router: string | null; ledger: string;
+  status: 'installed' | 'updated' | 'unchanged'; written: number; skills: number; router: string | null; ledger: string; kept: string[];
 }
 
 const PLAIN = /^[^\t\n\r]+$/;
@@ -362,32 +363,65 @@ export function planPayload(opts: RegisterOptions, dest: string, mode: SkillsMod
   return { files, router, names: ['gstack', ...entries.map(e => e.name)] };
 }
 
-function backupFile(file: string, stateRoot: string, stamp: string): void {
-  const to = path.join(stateRoot, 'backups', 'harness', stamp, file.replace(/^\/+/, ''));
-  fs.mkdirSync(path.dirname(to), { recursive: true });
+/** An edited file stays beside itself under a name no harness loads, so no uninstall step that removes gstack's folders can take it. */
+function keepEdit(file: string, stamp: string): string {
+  const to = file + '.edited-' + stamp;
   fs.renameSync(file, to);
+  return to;
+}
+
+/** Refuses a path outside dest, or one reached through a symlink below dest. */
+function assertOwnedPath(dest: string, p: string): void {
+  if (!p.startsWith(dest + path.sep)) throw new HarnessError('HARNESS_UNSAFE_DESTINATION', p + ' is outside ' + dest);
+  for (let d = p; d !== dest; d = path.dirname(d)) {
+    let st: fs.Stats;
+    try { st = fs.lstatSync(d); } catch { continue; }
+    if (st.isSymbolicLink()) throw new HarnessError('HARNESS_UNSAFE_DESTINATION', d + ' is a symlink');
+  }
 }
 
 function onDiskSha(file: string): string | null {
   try { return sha256(fs.readFileSync(file)); } catch { return null; }
 }
 
-export function insertBlock(file: string, block: string): void {
+/** The ledger's hash of a context block: its lines, each ending in a newline, as the bash reader's awk prints them. */
+export const blockSha = (block: string) => sha256(block + '\n');
+
+/**
+ * The text of file with the block in it: replaces the one gstack block there (whole-line markers) when it is the block
+ * gstack wrote (ownedSha) or already current, else appends. A lone or repeated marker, or a block someone
+ * edited, is refused so nothing outside gstack's own lines is ever rewritten.
+ */
+export function withBlock(file: string, block: string, ownedSha?: string): string {
   const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const a = text.indexOf(BLOCK_BEGIN);
-  const b = text.indexOf(BLOCK_END, a);
-  const next = a >= 0 && b > a
-    ? text.slice(0, a) + block + text.slice(b + BLOCK_END.length)
-    : text + (text && !text.endsWith('\n') ? '\n' : '') + (text ? '\n' : '') + block + '\n';
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, next);
+  const lines = text.split('\n');
+  const at = (m: string) => lines.flatMap((l, i) => l === m ? [i] : []);
+  const [bs, es] = [at(BLOCK_BEGIN), at(BLOCK_END)];
+  let next: string;
+  if (!bs.length && !es.length) next = text + (text && !text.endsWith('\n') ? '\n' : '') + (text ? '\n' : '') + block + '\n';
+  else if (bs.length === 1 && es.length === 1 && es[0] > bs[0]) {
+    const cur = sha256(lines.slice(bs[0], es[0] + 1).join('\n') + '\n');
+    if (cur !== blockSha(block) && cur !== ownedSha) throw new HarnessError('HARNESS_UNOWNED_ENTRY', 'the gstack block in ' + file + ' was edited or gstack did not write it; delete the lines from ' + BLOCK_BEGIN + ' to ' + BLOCK_END);
+    lines.splice(bs[0], es[0] - bs[0] + 1, ...block.split('\n'));
+    next = lines.join('\n');
+  } else throw new HarnessError('HARNESS_UNOWNED_ENTRY', file + ' has a gstack harness-routing marker line without exactly one partner; fix or delete the marker lines');
+  return next;
+}
+
+/** Runs fn from one of the checkout's sourced bash libraries, passing args through the environment. */
+function sourcedBash(checkout: string, lib: string, fn: string, args: string[], stateRoot: string, env: Env) {
+  const argEnv = Object.fromEntries(args.map((a, i) => ['GSTACK_HARNESS_ARG' + i, a]));
+  return runBashSync('. "$GSTACK_HARNESS_LIB" && ' + fn + args.map((_, i) => ' "$GSTACK_HARNESS_ARG' + i + '"').join(''),
+    { env: { ...process.env, ...env, ...argEnv, GSTACK_HARNESS_LIB: path.join(checkout, 'bin', lib), GSTACK_STATE_ROOT: stateRoot }, encoding: 'utf8', timeout: 60_000 });
+}
+
+/** Cuts a block this ledger recorded through the bash reader, so register and uninstall share one cutter. */
+function cutBlock(opts: RegisterOptions, file: string, sha: string): void {
+  process.stdout.write(sourcedBash(opts.checkout, 'gstack-harness-ledger.sh', '_gstack_harness_cut_block', [file, sha], opts.stateRoot, opts.env).stdout || '');
 }
 
 function shellRegistry(opts: RegisterOptions, fn: string, args: string[]): boolean {
-  const lib = path.join(opts.checkout, 'bin', 'gstack-install-registry.sh');
-  const r = spawnSync('bash', ['-c', '. "$0" && ' + fn + ' "$@"', lib, ...args],
-    { env: { ...process.env, ...opts.env, GSTACK_STATE_ROOT: opts.stateRoot }, encoding: 'utf8', timeout: 30_000 });
-  return r.status === 0;
+  return sourcedBash(opts.checkout, 'gstack-install-registry.sh', fn, args, opts.stateRoot, opts.env).status === 0;
 }
 
 export function register(opts: RegisterOptions): RegisterResult {
@@ -425,42 +459,50 @@ export function register(opts: RegisterOptions): RegisterResult {
       const other = frontmatterField(fs.readFileSync(md, 'utf8'), 'name');
       if (visible.includes(other)) throw new HarnessError('HARNESS_UNOWNED_ENTRY', 'a skill named ' + other + ' already exists at ' + path.join(dest, e) + ' and gstack did not write it');
     }
+    for (const p of new Set([...files.keys(), ...prevFiles.keys()])) assertOwnedPath(dest, p);
     const want = [...files].map(([p, b]) => ({ path: p, sha: sha256(b) }));
-    const same = prev && prev.meta.mode === mode && prev.meta.names === visible.join(',') && prev.files.length === want.length
-      && want.every(w => prevFiles.get(w.path) === w.sha && onDiskSha(w.path) === w.sha);
+    const ctx = opts.context ? path.resolve(opts.context) : '';
     const block = opts.context ? contextBlock(router ?? '') : null;
     if (block && block.length > CONTEXT_BLOCK_MAX) throw new HarnessError('HARNESS_BUDGET_EXCEEDED', 'context block is ' + block.length + ' bytes');
+    const blocks = block ? [{ sha: blockSha(block), path: ctx }] : [];
+    const ctxText = block ? withBlock(ctx, block, prev?.blocks.find(b => b.path === ctx)?.sha) : null;
+    const same = prev && prev.meta.mode === mode && prev.meta.names === visible.join(',') && prev.files.length === want.length
+      && (prev.meta.context ?? '') === ctx && prev.blocks.every(b => blocks.some(n => n.path === b.path && n.sha === b.sha))
+      && want.every(w => prevFiles.get(w.path) === w.sha && onDiskSha(w.path) === w.sha);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const kept: string[] = [];
     let written = 0;
     if (!same) {
+      const dirs = new Set(prev?.dirs ?? []);
+      for (const p of files.keys()) for (let d = path.dirname(p); !fs.existsSync(d) && path.dirname(d) !== d; d = path.dirname(d)) dirs.add(d);
+      const record = (recorded: typeof want) => writeLedger(lfile, {
+        meta: { id, target: t.name, dest, mode, checkout: opts.checkout, version: opts.version, names: visible.join(','), ...(router ? { router } : {}), ...(ctx ? { context: ctx } : {}) },
+        files: recorded, dirs: [...dirs].sort((a, b) => b.length - a.length), blocks,
+      });
+      record([...want, ...(prev?.files ?? []).filter(f => !files.has(f.path))]);
+      for (const b of prev?.blocks ?? []) if (b.path !== ctx) cutBlock(opts, b.path, b.sha);
       for (const [p, sha] of prevFiles) {
         if (files.has(p)) continue;
         const disk = onDiskSha(p);
-        if (disk === sha) fs.rmSync(p, { force: true }); else if (disk) backupFile(p, opts.stateRoot, stamp);
+        if (disk === sha) fs.rmSync(p, { force: true }); else if (disk) kept.push(keepEdit(p, stamp));
       }
-      const dirs = new Set(prev?.dirs ?? []);
       for (const [p, b] of files) {
         const disk = onDiskSha(p);
-        const sha = sha256(b);
-        if (disk === sha) continue;
-        if (disk && prevFiles.get(p) !== disk) backupFile(p, opts.stateRoot, stamp);
-        let d = path.dirname(p);
-        const made: string[] = [];
-        while (!fs.existsSync(d)) { made.push(d); d = path.dirname(d); }
+        if (disk === sha256(b)) continue;
+        if (disk && prevFiles.get(p) !== disk) kept.push(keepEdit(p, stamp));
         fs.mkdirSync(path.dirname(p), { recursive: true });
-        made.forEach(m => dirs.add(m));
         fs.writeFileSync(p + '.gstack-new', b);
         fs.renameSync(p + '.gstack-new', p);
         written++;
       }
-      writeLedger(lfile, {
-        meta: { id, target: t.name, dest, mode, checkout: opts.checkout, version: opts.version, names: visible.join(','), ...(router ? { router } : {}), ...(opts.context ? { context: path.resolve(opts.context) } : {}) },
-        files: want, dirs: [...dirs].sort((a, b) => b.length - a.length), blocks: opts.context ? [path.resolve(opts.context)] : [],
-      });
+      record(want);
     }
-    if (block) insertBlock(path.resolve(opts.context!), block);
+    if (ctxText !== null && ctxText !== (fs.existsSync(ctx) ? fs.readFileSync(ctx, 'utf8') : null)) {
+      fs.mkdirSync(path.dirname(ctx), { recursive: true });
+      fs.writeFileSync(ctx, ctxText);
+    }
     if (opts.registry && t.render === 'host') shellRegistry(opts, 'gstack_install_registry_upsert', [t.name, 'global', '-', dest, opts.checkout, opts.checkout, opts.version, '-', '-']);
-    return { id, target: t.name, dest, mode, status: !prev ? 'installed' : same ? 'unchanged' : 'updated', written, skills, router, ledger: lfile };
+    return { id, target: t.name, dest, mode, status: !prev ? 'installed' : same ? 'unchanged' : 'updated', written, skills, router, ledger: lfile, kept };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -478,8 +520,8 @@ export function unregister(stateRoot: string, checkout: string, idOrTarget: stri
   const all = listLedgers(stateRoot).filter(l => l.ledger.meta.id === idOrTarget || l.ledger.meta.target === idOrTarget);
   if (!all.length) throw new HarnessError('HARNESS_NOT_REGISTERED', 'no registration named ' + JSON.stringify(idOrTarget));
   for (const { file } of all) {
-    const r = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_ledger "$1"', path.join(checkout, 'bin', 'gstack-harness-ledger.sh'), file],
-      { env: { ...process.env, ...env, GSTACK_STATE_ROOT: stateRoot }, encoding: 'utf8', timeout: 60_000 });
+    const r = sourcedBash(checkout, 'gstack-harness-ledger.sh', 'gstack_harness_unregister_ledger', [file], stateRoot, env);
+    process.stdout.write(r.stdout || '');
     if (r.status !== 0) throw new HarnessError('HARNESS_NOT_REGISTERED', 'could not remove ' + file + ': ' + (r.stderr || '').trim());
   }
   return all.map(l => l.ledger.meta.id);

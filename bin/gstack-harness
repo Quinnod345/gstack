@@ -41,6 +41,7 @@ function receiptLines(r: RegisterResult): string[] {
   return [
     'gstack-harness: ' + t.displayName + ': ' + r.skills + ' gstack skills ' + (r.mode === 'router' ? 'reachable through one router skill' : 'registered') + ' at ' + r.dest + ' (' + r.status + (r.written ? ', ' + r.written + ' files written' : '') + ')',
     ...(r.router ? ['  router: ' + r.router + (r.mode === 'router' ? ' (register with --skills all to list every skill natively)' : '')] : []),
+    ...r.kept.map(k => '  kept your edit: ' + k),
     '  ledger: ' + r.ledger,
     '  remove: ' + self + ' unregister ' + r.id,
   ];
