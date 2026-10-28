@@ -204,16 +204,33 @@ describe('carried decisions at a cap gate (#3546)', () => {
       expect(briefText).toContain(`  ${n + 1}. ${item.title.replace(/\s*\[[^\]]*\]\s*$/, '')}: ${WORDS[text] ?? text}`);
     });
     expect(briefText).toContain("Use a queue table: make the reviewer's change (your answer at gate_rev 1, carried forward).");
-    expect(briefText).toContain('rec keeps the 3 decided at an earlier gate and takes the recommended answer for the rest.');
+    expect(briefText).toContain('rec keeps the 3 you already answered and takes the recommended answer for the rest.');
+    expect(briefText).toContain('Reply **rec** to keep the answers you already gave and take every other recommendation (recommended)');
   });
 
-  test('negative control: without carried decisions both resolve rec to the recommendations', () => {
+  test('an answer already given at this gate is what rec keeps, as gstack-autoplan answer --reply rec records it', () => {
+    const copy = path.join(r.host.base, 'prior');
+    fs.cpSync(out, copy, { recursive: true });
+    const partial = r.ap(['answer', '--by', 'human', '--out', copy, '--gate-rev', '2', '--reply', 'd2a']);
+    expect(partial.stdout).toMatch(/^GATE_PENDING: /m);
+    const { briefText, briefRec } = renders(copy);
+    expect(briefRec).toMatchObject({ d1: 'b', d2: 'a', d3: 'b' });
+    expect(briefText).toContain('Add metrics: keep the plan as written (a reviewer suggested changing it) (your answer at this gate).');
+    const answered = r.ap(['answer', '--by', 'human', '--out', copy, '--gate-rev', '2', '--reply', 'rec']);
+    expect(answered.stdout).toMatch(/^APPROVED: gate_rev=2/m);
+    const recorded = fs.readFileSync(path.join(copy, 'decisions.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(d => d.gate_rev === 2);
+    expect(Object.fromEntries(recorded.map(d => [d.label.toLowerCase(), d.chosen]))).toEqual(briefRec);
+  });
+
+  test('negative control: without carried decisions (gate items and their decision rows) both resolve rec to the recommendations', () => {
     const copy = path.join(r.host.base, 'uncarried');
     fs.cpSync(out, copy, { recursive: true });
     const gate = JSON.parse(fs.readFileSync(path.join(copy, 'gate.json'), 'utf8')) as GateList;
     expect(Object.fromEntries(gate.items.map(i => [i.id, i.recommended]))).not.toEqual(renders(out).gateRec);
     for (const item of gate.items) delete item.carried;
     fs.writeFileSync(path.join(copy, 'gate.json'), JSON.stringify(gate));
+    const rows = fs.readFileSync(path.join(copy, 'decisions.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+    fs.writeFileSync(path.join(copy, 'decisions.jsonl'), rows.map(d => JSON.stringify(d.carried_from ? { ...d, status: 'pending', chosen: undefined, answered_at: undefined, reply: undefined, carried_from: undefined } : d)).join('\n') + '\n');
     const { briefText, gateRec, briefRec } = renders(copy);
     expect(briefRec).toEqual(gateRec);
     expect(gateRec).toEqual(Object.fromEntries(gate.items.map(i => [i.id, i.recommended])));

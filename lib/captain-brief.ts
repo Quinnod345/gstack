@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { gateCost, gateCostSentence } from './autoplan-gate-cost';
+import { gateCost, gateCostSentence, priorChoices } from './autoplan-gate-cost';
 import { parseReply, recHash, type GateItem } from './gate-list';
 import { renderUrgentBlock } from './headless-artifacts';
 import { findSection, firstTitle } from './markdown-sections';
@@ -75,10 +75,12 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   const missing = sections.filter(s => !s.found || !s.found.body.trim()).map(s => s.title);
   const urgent = inputs.findings.some(r => r.urgent === true || r.outside_plan === true) ? [renderUrgentBlock(inputs.findings).trimEnd(), ''] : [];
   const items = list.items.filter(i => i.id !== 'p1');
-  const rec = parseReply('rec', list).choices;
+  const prior = priorChoices(o.outDir, list.gate_rev);
+  const rec = parseReply('rec', list, undefined, prior).choices;
   const recKey = (i: GateItem) => rec.find(c => c.id === i.id)?.chosen ?? i.recommended;
   const recOption = (i: GateItem) => i.options.find(x => x.key === recKey(i));
-  const carried = items.filter(i => i.carried?.chosen === recKey(i));
+  const kept = items.filter(i => rec.find(c => c.id === i.id)?.prior);
+  const keptNote = (i: GateItem) => i.carried?.chosen === recKey(i) ? ` (your answer at gate_rev ${i.carried.gate_rev}, carried forward)` : ' (your answer at this gate)';
 
   let header: string[];
   if (!pending) {
@@ -87,8 +89,8 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
     header = [`**Not ready for approval:** the plan "${title}" is missing ${missing.join(', ')}. The thread will add them and send this again; do not approve from this draft.`];
   } else {
     header = [
-      `**Decision needed:** approve the plan "${title}". Reply **rec** to take every recommendation (recommended), or say in words what to change.`,
-      `${items.length ? `${items.length} choice${items.length === 1 ? '' : 's'} below; rec ${carried.length ? `keeps the ${carried.length} decided at an earlier gate and takes the recommended answer for the rest` : 'takes the recommended answer for each'}.` : 'No open choices besides the approval itself.'} Nothing is built until you answer.`,
+      `**Decision needed:** approve the plan "${title}". Reply **rec** to ${kept.length ? 'keep the answers you already gave and take every other recommendation' : 'take every recommendation'} (recommended), or say in words what to change.`,
+      `${items.length ? `${items.length} choice${items.length === 1 ? '' : 's'} below; rec ${kept.length ? `keeps the ${kept.length} you already answered and takes the recommended answer for the rest` : 'takes the recommended answer for each'}.` : 'No open choices besides the approval itself.'} Nothing is built until you answer.`,
     ];
   }
 
@@ -97,8 +99,8 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   if (!pending) need.push('Nothing. This gate is answered.', '');
   else {
     need.push(`One decision: approve the plan.`, '');
-    need.push(`- **rec (recommended):** ${p1 ? plainOption(recOption(p1)?.text ?? 'approve') : 'approve'}${items.length ? ', taking these recommendations:' : '.'}`);
-    items.forEach((i, n) => need.push(`  ${n + 1}. ${stripRef(i.title)}: ${plainOption(recOption(i)?.text ?? recKey(i))}${carried.includes(i) ? ` (your answer at gate_rev ${i.carried!.gate_rev}, carried forward)` : recOption(i)?.changes_plan ? ' (changes the plan)' : ''}.`));
+    need.push(`- **rec (recommended):** ${p1 ? plainOption(recOption(p1)?.text ?? 'approve') : 'approve'}${items.length ? `, taking these ${kept.length ? 'answers' : 'recommendations'}:` : '.'}`);
+    items.forEach((i, n) => need.push(`  ${n + 1}. ${stripRef(i.title)}: ${plainOption(recOption(i)?.text ?? recKey(i))}${kept.includes(i) ? keptNote(i) : recOption(i)?.changes_plan ? ' (changes the plan)' : ''}.`));
     const example = items.find(i => i.options.length > 1);
     const alt = example?.options.find(x => x.key !== recKey(example));
     need.push(`- **Change something:** say which choice and what you want instead, in words${example && alt ? ` (for example "${clip(stripRef(example.title), 60)}: ${plainOption(alt.text)}")` : ''}. A change that alters the plan reopens its review before anything is built.`);
