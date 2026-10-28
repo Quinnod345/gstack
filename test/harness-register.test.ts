@@ -232,6 +232,9 @@ describe.skipIf(process.platform === 'win32')('setup and uninstall with harnesse
       expect(r.stdout.trim().split('\n').at(-1)).toBe('gstack ready (' + host + ')');
       const again = runSetup(f, path.join(src, 'setup'), ['--host', host]);
       expect(again.stdout + again.stderr).toMatch(new RegExp('\\b' + host + '\\s+experimental\\s+global\\s+unchanged'));
+      const status = runSetup(f, path.join(src, 'setup'), ['--status']);
+      expect(status.stdout).toMatch(new RegExp('\\b' + host + '\\s+experimental\\s+global\\s+current'));
+      expect(status.stdout).not.toContain('move it first');
       const un = spawnSync('bash', [path.join(src, 'bin/gstack-uninstall'), '--force'], { cwd: f.home, env: { ...f.env, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 60_000 });
       expect(un.status, un.stdout + un.stderr).toBe(0);
       expect(files(path.join(f.home, dest)).filter(p => !p.startsWith('.'))).toEqual([]);
