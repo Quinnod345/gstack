@@ -195,44 +195,29 @@ Two stages with separate clocks, both printed:
   no lane, and a workspace-only Cargo.toml or Cargo.lock needs a `dependencies` entry),
   transitively through
   non-test files; deleted and renamed files select the tests that named them.
-  A removed path (a deleted file, or a rename's old name) that no remaining
-  test selects owes no lane when one of these holds, and prints
-  `removed (no lane owed): <path> — <why>` (the `lanes` detail adds
-  `N removed path(s)`). A JS, TS, Python, Dart or bats test renamed to another
-  test path defers to its new name (`old name of <new>`). A deleted JS, TS, Python, Dart or bats test, or a
-  test renamed to a non-test path, runs its owning suite, the remaining tests
-  that directly exercise the files its merge-base text exercised (`owning suite
-  runs: …`; test helpers and fixtures are not subjects), and names each file
-  left with no test at all (`coverage removed: <file> has no remaining test`,
-  and `M subject(s) lost their last test` in the detail). Either kind of
-  removed test also runs the tests of each remaining non-Markdown file that
-  mentions its basename, such as a curation list (`files naming it run: …`),
-  and fails closed when such a file has no test (`still named by …, which no
-  test covers`). A deleted JS, TS,
-  Python or Dart file, or the old name of a renamed one, outside fixture,
-  snapshot, golden, baseline and CI trees and `.gstack/` reads `nothing in
-  the tree references it` when no remaining file imports it (directly or
-  through a directory it reads), it is not a file a runner loads by name
-  (`*.config.ts`, `.*rc.js`, `conftest.py`, `setup.py`, `noxfile.py`,
-  `sitecustomize.py`, `usercustomize.py`, `__init__.py`, `__main__.py`),
-  and no remaining non-Markdown file mentions its basename (a config naming it
-  relative to itself, `preload = ["./setup.ts"]`, or a computed path such as
-  `path.join(__dirname, 'lib', 'value.js')`), so a common basename such as
-  `index.ts` needs a `dependencies` entry.
-  Every other removal owes what an edit owes, so it is still `PREGATE_NO_LANE`
-  until a test or a `dependencies` entry covers it: a deleted or renamed
-  manifest, lockfile, config, fixture, golden or workflow (renaming one into a
-  waived path such as Markdown does not waive the old name), a Go, Ruby, shell,
-  Rust or bin file (the graph does not resolve their importers file by file),
-  a deleted or renamed Go or Ruby test (it may define helpers its package
-  still uses), a file
-  remaining code still imports (`still imported by …`, even by a relative or
-  dotted import) or a non-Markdown file still names (`still named by …`), and a
-  deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8,
-  over 1 MiB). A modified file whose only test the branch deleted still has no
-  lane, a remaining test that reads a deleted file or directory is selected,
-  and a deleted Rust module selects its crate's tests. /review lists a deleted
-  test as a gate edit (RH-1) either way.
+  A removed test (a deleted one, or a rename's old name) that no remaining
+  test selects owes no lane, and prints `removed (no lane owed): <path> —
+  <why>` (the `lanes` detail adds `N removed path(s)`), when it is a JS, TS,
+  Python, Dart or bats test and no remaining file imports it (directly or
+  through a directory it reads; otherwise `still imported by …`). It runs
+  the tests of each remaining non-Markdown file that mentions its basename,
+  such as a curation list (`files naming it run: …`), and fails closed when
+  such a file has no test (`still named by …, which no test covers`). A test
+  renamed to another test path then defers to its new name (`old name of
+  <new>`). A deleted test, or one renamed to a non-test path, also runs its
+  owning suite, the remaining tests that directly exercise the files its
+  merge-base text exercised (`owning suite runs: …`; test helpers and
+  fixtures are not subjects), and names each file left with no test at all
+  (`coverage removed: <file> has no remaining test`, and `M subject(s) lost
+  their last test` in the detail). Every other removal owes what an edit
+  owes, as before: a deleted or renamed Go or Ruby test (it may define
+  helpers its package still uses), a deleted test whose merge-base text
+  cannot be read (a symlink, invalid UTF-8, over 1 MiB), and any removed
+  non-test path, a renamed source file's old name included, are still
+  `PREGATE_NO_LANE` until a test or a `dependencies` entry covers them. A
+  modified file whose only test the branch deleted still has no lane, and a
+  remaining test that reads a deleted file or directory is selected. /review
+  lists a deleted test as a gate edit (RH-1) either way.
   An extensionless JS/TS import (relative, a tsconfig/jsconfig `paths` alias or
   `baseUrl`) tries the exact path, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
   `.cjs`, `.mts`, `.cts`, then `index.ts`, `index.tsx`, `index.js`, `index.jsx`

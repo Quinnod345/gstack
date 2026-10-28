@@ -493,8 +493,8 @@ export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
     for (const { target, via } of referencesIn(files, dirs, rel, source, config, graph.tests.has(rel) ? unresolved : undefined, packages)) addEdge(graph, target, rel, via);
     if (unresolved.length) graph.unresolved!.set(rel, unresolved);
   }
-  const rust = rustEdges([...files], rel => readRepoFile(repoRoot, rel, maxBytes));
-  for (const t of rust.tests) if (!gone.has(t)) graph.tests.add(t);
+  const rust = rustEdges(all, rel => readRepoFile(repoRoot, rel, maxBytes));
+  for (const t of rust.tests) graph.tests.add(t);
   for (const e of rust.edges) addEdge(graph, e.dependency, e.dependent, e.via);
   const django = djangoEdges({ files: [...files], tests: graph.tests, read: rel => pySources.get(rel) ?? readRepoFile(repoRoot, rel, maxBytes), code: pythonCode, resolveDotted: dotted => pythonPatchTarget(files, dotted) });
   for (const e of django) addEdge(graph, e.dependency, e.dependent, 'framework');
