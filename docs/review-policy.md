@@ -248,6 +248,13 @@ specialist stats they record). The summary line appends `fix_checks=`,
 `dispatches=` and `est_input_tokens=` only when they were recorded, so an old
 loop prints the old line.
 
+Beside the counters, `write` records `review_depth` (the depth, runtime lines,
+rules hash, base and registry commits, and the gate scan bound to the head) and
+the queue refuses a receipt below the depth its head needs
+([ship-policy.md#ship-receipt](ship-policy.md#ship-receipt)). A stop the owner
+accepted after a fix-check edit goes in `review_loop_exception`, never in prose
+under `REVIEW_LOOP:`.
+
 The receipt's summary line prints `passes=<n> blocking_found=<k> deferred=<m>`,
 which is what a scorecard tracks (target: a median of 1 pass per PR). A
 receipt carried across a base merge or a test-only fix

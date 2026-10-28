@@ -777,7 +777,8 @@ written by the pr-body section of `/ship` after the body is composed.
 
 The ```` ```gstack-ship-receipt ```` block is the handoff record: identifiers
 first (`pr`, `head`, `version`, `base`), then the evidence (`gate`, `ci`,
-`pregate`, `issues`, `approval`, `docs`, `review_loop`, `carry`), validated
+`pregate`, `issues`, `approval`, `docs`, `review_loop`, `review_depth`,
+`review_loop_exception`, `carry`), validated
 against the `ship-receipt` schema (`gstack-artifact schema ship-receipt`) and
 read back by `gstack-ship-receipt read`, `result`, `carry` and the queue.
 
@@ -811,6 +812,39 @@ unreadable base policy is `POLICY_SOURCE_UNAVAILABLE`); one
 `DOCS_CAP: <path> <bytes>/<max> ok|over` line per cap
 (`absent/<max> over` for a path the tree lacks), exit 1 on any `over`, whose
 repair is trimming the file, never raising the cap in the same PR.
+
+**`review_depth` and `gstack_version`.** `write` records the gstack that
+wrote the receipt and the review depth at the checked-out head
+([review-policy.md#review-depth](review-policy.md#review-depth)):
+`{ depth, class, runtime_lines, rules, base, registry, gate_scan: { tagged, head }, reasons }`,
+computed from git objects for the range against `origin/<base>`, with the
+gate scan run on that head. `--head` must be the checked-out HEAD
+(`RECEIPT_INVALID` otherwise), so the record and `head_tree` describe the
+tree the review read. `gstack-ship-queue ready` and `train build` recompute
+the depth the head needs and print `REVIEW_DEPTH: receipt=<d> required=<d>
+runtime_lines=<n> class=<c> reasons=<…> inputs=base@<sha>,registry@<sha>,gate_scan@<sha|missing>`;
+a recorded gate scan counts only when it names the bound head, otherwise the
+scan is unavailable and the head needs `full`. A receipt below the required
+depth, or one whose writer records `gstack_version` but no `review_depth`, is
+[`QUEUE_RECEIPT_DEPTH_RAISED`](troubleshooting.md#queue-receipt-depth-raised):
+the receipt is left unchanged and the fix is /ship on that head. A receipt with
+neither field predates depth receipts and is accepted as legacy. A carry
+recomputes the depth at the new head, rebinds the gate scan, and refuses when
+the new head needs a deeper review than the receipt records (a test change that
+skips a test raises the diff to gate class).
+
+**`review_loop_exception`.** The owner's acceptance of a stop after a
+fix-check edit under frozen scope (#3559), from `write --review-loop-exception
+<json|@file>`: `{ accepted_by, date, via, reason, fix_check: { head, findings[, files] } }`.
+It needs `--review-loop` with `fix_checks` of 1 or more, a `fix_check.head`
+that is the receipt head or its ancestor, and, with `--body`, the line
+`Review-loop exception: accepted by <owner> <date> via <ref>: <reason> (fix-check at <sha12>, <n> findings)`
+word for word; otherwise
+[`REVIEW_LOOP_EXCEPTION_INVALID`](troubleshooting.md#review-loop-exception-invalid)
+and nothing is written. The queue checks both owner exceptions the same way
+before READY and train build: the record must parse and the body must still
+carry its line, or the receipt is
+[`QUEUE_RECEIPT_EXCEPTION_INVALID`](troubleshooting.md#queue-receipt-exception-invalid).
 
 **Prose against the receipt.** `gstack-ship-receipt read --pr <n> --check-prose`
 (or `--body <file>`) compares every counter the body quotes with the receipt's

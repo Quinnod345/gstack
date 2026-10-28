@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+**/ship now reviews in proportion to what the diff can break: light, standard or full depth.** A diff with 50 or fewer runtime lines gets one batched specialist plus the native adversarial pass, a larger runtime diff gets the class's specialists scoped to their hunks, and gate code or any classifier error gets the full review as before. The receipt records the depth and the queue refuses a receipt below what the head needs. Before this, a 12-line fix paid for the same reviewer fan-out as a change to the merge gate. The backtest that would have let light depth drop the adversarial pass was inconclusive (9 light-eligible PRs, 5 with attributable findings, below the 15 the plan required), so light keeps it.
+
+### Added
+- **Review depth** (`lib/review-depth.ts`, `lib/review-collect.ts`, `gstack-review-plan`): `REVIEW_DEPTH:` (depth, runtime lines, the rules hash, reasons), `GATE_SCAN:` bound to HEAD, one `DEPTH_ERROR:` per input that fails closed to full (with the input, the cause and the repair), and per-reviewer `DIFF_CMD:` pathspecs. Runtime lines leave out docs, tests and outputs registered with a command in the base branch's `.gstack/generated.json`, read at the base commit. `--depth-floor standard|full` only raises the depth. A fixed blocker or a CRITICAL raises light to standard for the rest of the invocation.
+- **Receipt fields**: `gstack_version` and `review_depth` (`{ depth, class, runtime_lines, rules, base, registry, gate_scan: { tagged, head }, reasons }`), computed at the checked-out head. `write --head` must be HEAD. `review_loop_exception` (`write --review-loop-exception`) records an owner-accepted stop after a fix-check edit with the fix-check's head and findings, and the PR body repeats its line word for word (Fixes #3559).
+- **Queue checks** (`gstack-ship-queue ready`, `train build`): the depth the head needs is recomputed from git and a lower receipt is `QUEUE_RECEIPT_DEPTH_RAISED`, with the receipt's depth, the required depth, reasons and inputs on a `REVIEW_DEPTH:` line. A malformed owner exception, or a body that dropped its line, is `QUEUE_RECEIPT_EXCEPTION_INVALID`. A receipt with neither new field predates depth receipts and is accepted as legacy.
+
+### Changed
+- **Carry and depth**: a carry recomputes the depth at the new head, rebinds the gate scan, and refuses when the new head needs more (a test change that skips a test is gate class).
+- **`.gstack/ship-policy.json`**: `min_gstack_version` rises from 1.91.146.0 to 1.91.299.0.
+
+### Tests
+- `test/ship-receipt-depth.test.ts`: write records the depth bound to HEAD and refuses another `--head`. The queue refuses light on a standard head, a current receipt with no depth and an unbound gate scan, and accepts a legacy receipt. A plain test change carries and rebinds the scan, while a skipped test refuses the carry. The review-loop exception is refused without a fix-check, with a foreign head or without its body line, and the queue refuses a body that dropped the line.
+- `test/review-depth.test.ts`, `test/review-collect.test.ts`, `test/review-plan-cli.test.ts`: the depth matrix, the fixed light set, fail-closed errors and the registry read at the base commit.
+
 **A /ship receipt now survives a base merge that only regenerates outputs, and a rebase onto the tree it reviewed.** On gstack-evals, two full /ship reruns came from a merge of main that changed a generated file's diff (U1 paid about 28M tokens for its rerun), and one came from a rebase whose tree was byte-identical to the reviewed one (about 60M). Each re-reviewed code the receipt already covered. For crews the rule is now a single line. Merge main into a reviewed branch, and never rebase it.
 
 ### Changed
