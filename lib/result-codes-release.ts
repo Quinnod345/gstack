@@ -127,6 +127,11 @@ export const RELEASE_RESULT_CODES = {
     summary: 'main’s tree is neither the train’s prefix before this PR nor after it (modulo stamps), so the merge does not publish what the gate tested',
     fix: 'stop merging; if earlier PRs of the train merged, the queue is frozen (QUEUE_TRAIN_FROZEN); otherwise rebuild the train on current main',
   },
+  QUEUE_TRAIN_STALE: {
+    anchor: 'queue-train-stale',
+    summary: 'every slot of this train already merged on GitHub and main is a prefix another train verified, so the record is stale; comparing today’s main to its prefixes proves nothing and does not freeze the queue',
+    fix: 'settle the record with train prune --stale --train <nonce>; no backstop is needed',
+  },
   QUEUE_TRAIN_FROZEN: {
     anchor: 'queue-train-frozen',
     summary: 'a train stopped partway through publication, so main holds a prefix no gate covered on its own; ordinary trains are refused until a repair lands',

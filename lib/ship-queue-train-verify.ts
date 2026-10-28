@@ -19,7 +19,7 @@ import type { QueueContext } from './ship-queue';
 import { git } from './ship-queue-gate';
 import { bindReceipt } from './ship-receipt';
 import { checkRun, execFor, prInfo, repoSlug } from './ship-queue-train-github';
-import { activeFreeze, attemptsOf, nowIso, persist, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
+import { activeFreeze, attemptsOf, listTrains, nowIso, persist, rebuildFromNotes, trainFile, type FreezeRecord, type TrainRecord } from './ship-queue-train-record';
 import {
   effect, fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outRefused, pinList, prState, prsArgs, save, trainEnv, type TrainEnv, type TrainOut,
 } from './ship-queue-train';
@@ -114,9 +114,10 @@ function published(env: TrainEnv, t: TrainRecord, i: number, main: string): { sa
  * anything remote, then the backstop gate is dispatched on main's sha.
  * `states` is the one GitHub read of every unverified slot, made by the
  * caller: a slot that read MERGED is merged, verified tree or not, and a slot
- * that could not be read is left out of `unmerged` and named in the reason
- * (nothing reads it again; the operator seats it by hand once gh answers), so
- * the rebuild after the repair never seats a PR that may already be in.
+ * that could not be read is left out of `unmerged`, recorded under
+ * `unreadable` and named in the reason and in the NEXT after the repair (the
+ * operator seats it by hand once gh answers), so the rebuild after the repair
+ * never seats a PR that may already be in.
  */
 async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSha: string, states: ReadonlyMap<string, string>): Promise<FreezeRecord> {
   const now = nowIso();
@@ -127,6 +128,7 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
   const f: FreezeRecord = {
     schema: 1, kind: 'freeze', repo_key: env.repo.key, train: t.nonce, merged: [...t.merged.map(m => m.pr), ...landed],
     unmerged: unverified.filter(s => !landed.includes(s.pr) && !unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
+    unreadable: unverified.filter(s => unreadable.includes(s.pr)).map(s => ({ pr: s.pr, head: s.head })),
     main: { sha: mainSha, tree: git(env.ctx.repoRoot, ['rev-parse', `${mainSha}^{tree}`]).out },
     reason: [reason, landed.length ? `${prs(landed)} merged on GitHub without a verified tree` : '', unreadable.length ? `${prs(unreadable)} unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers` : ''].filter(Boolean).join('; '),
     backstop: null, repair: null,
@@ -147,13 +149,28 @@ async function freezeQueue(env: TrainEnv, t: TrainRecord, reason: string, mainSh
 }
 
 /**
+ * Where another train's verify confirmed main's exact sha as one of its merged
+ * prefixes, read from local records after the notes ref (a machine that never
+ * ran that train still sees it). Null when none did.
+ */
+function verifiedElsewhere(env: TrainEnv, t: TrainRecord, mainSha: string): string | null {
+  rebuildFromNotes(env.ctx.repoRoot, env.remote);
+  for (const other of listTrains(env.repo.keys)) {
+    if (other.nonce === t.nonce) continue;
+    const m = other.merged.find(x => x.sha === mainSha);
+    if (m) return `T${other.prefixes.find(p => p.pr === m.pr)?.index ?? '?'} of train ${other.nonce} (#${m.pr}, verified at ${m.at})`;
+  }
+  return null;
+}
+
+/**
  * Interrupted publication: freeze when a slot merged, verified or merged on
  * GitHub without a verified tree (slot 1's own squash failing the post-merge
  * check leaves main unverified with nothing in `merged` yet); otherwise a
  * plain refusal (nothing was published). A GitHub state that cannot be read
  * is neither: the verify refuses and asks to be rerun, never "nothing merged".
  */
-async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[]): Promise<TrainOut> {
+async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MISMATCH' | 'QUEUE_TRAIN_MOVED', message: string, mainSha: string, lines: string[], fetched: boolean): Promise<TrainOut> {
   const run = trainFile(t.nonce);
   // One GitHub read per unverified slot decides both the freeze and its record.
   const states = new Map(t.slots.filter(s => !t.merged.some(m => m.pr === s.pr)).map(s => [s.pr, prState(env.ctx, s.pr)] as const));
@@ -161,6 +178,11 @@ async function stopped(env: TrainEnv, t: TrainRecord, code: 'QUEUE_TRAIN_TREE_MI
   const unreadable = landed ? [] : [...states].filter(([, state]) => state === 'unreadable').map(([pr]) => `#${pr}`);
   if (unreadable.length) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `${message}; whether ${unreadable.join(', ')} merged on GitHub could not be read, so whether the queue must freeze is unknown` }, lines, `${Q} verify --pr ${t.slots[0]!.pr} --train ${t.nonce} (once gh pr view answers)`, run);
   if (!landed) return outFailed({ code, message: `${message}; nothing of train ${t.nonce} merged, so the queue is not frozen` }, lines, `${Q} train build ${prsArgs(t.slots, t.explicit_order)} (a new train on current main)`, run);
+  const later = fetched && t.slots.every(s => t.merged.some(m => m.pr === s.pr) || states.get(s.pr) === 'MERGED') ? verifiedElsewhere(env, t, mainSha) : null;
+  if (later) {
+    const held = activeFreeze(env.repo.keys);
+    return outRefused({ code: 'QUEUE_TRAIN_STALE', message: `${message}; every slot of train ${t.nonce} merged on GitHub and main ${mainSha.slice(0, 12)} is ${later}, so this record is stale and ${held ? `freezes nothing (the queue is already frozen by train ${held.train})` : 'the queue is not frozen'}` }, held ? [...lines, ...frozenLines(held)] : lines, `${Q} train prune --stale --train ${t.nonce}`, run);
+  }
   const f = activeFreeze(env.repo.keys) ?? await freezeQueue(env, t, message, mainSha, states);
   return outFailed({ code, message: `${message}; the queue is frozen` }, [...lines, ...frozenLines(f)], `${Q} train build --repair --prs <repair-pr>@<sha>`, run);
 }
@@ -192,13 +214,13 @@ export async function verifyTrain(ctx: QueueContext, o: { pr: string; train: str
   if (post.same) return confirmMerged(env, t, o.pr, main, after.index, [...lines, `main: ${main} = T${after.index} (${post.detail})`]);
   const pre = sameModuloStamps(env, before.commit, main);
   if (!pre.same) {
-    return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main ${main.slice(0, 12)} is neither T${before.index} nor T${after.index} modulo stamps (vs T${after.index}: ${post.detail})`, main, lines);
+    return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main ${main.slice(0, 12)} is neither T${before.index} nor T${after.index} modulo stamps (vs T${after.index}: ${post.detail})`, main, lines, !o.noFetch);
   }
   const headRef = o.noFetch ? '' : (git(ctx.repoRoot, ['fetch', '--no-tags', '-q', env.remote, `+refs/pull/${o.pr}/head:refs/gstack/queue/pr-${o.pr}`]).ok ? `refs/gstack/queue/pr-${o.pr}` : '');
   const head = headRef ? git(ctx.repoRoot, ['rev-parse', headRef]).out : t.slots[i]!.head;
   const pinned = head === t.slots[i]!.head ? { same: true, detail: 'the pinned head' } : sameModuloStamps(env, t.slots[i]!.head, head);
   const stampOnly = pinned.same ? pinned : mergedIn(env, t, i, head, main);
-  if (!stampOnly.same) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr} moved past its pinned head ${t.slots[i]!.head.slice(0, 12)} and is not T${after.index} modulo stamps (${head.slice(0, 12)}: ${stampOnly.detail}; against the pin it ${pinned.detail})`, main, lines);
+  if (!stampOnly.same) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr} moved past its pinned head ${t.slots[i]!.head.slice(0, 12)} and is not T${after.index} modulo stamps (${head.slice(0, 12)}: ${stampOnly.detail}; against the pin it ${pinned.detail})`, main, lines, !o.noFetch);
   const info = prInfo(ctx, o.pr);
   if ('error' in info) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: info.error }, lines, `${Q} verify --pr ${o.pr} --train ${t.nonce}`, run);
   const shipped = bindReceipt(info.body, o.pr, [t.slots[i]!.head, head]);
@@ -222,7 +244,10 @@ function confirmMerged(env: TrainEnv, t: TrainRecord, pr: string, main: string, 
     freeze.updated_at = freeze.cleared_at;
     persist(env.ctx.repoRoot, [freeze], { remote: env.remote });
     lines.push(`FREEZE: cleared (${freeze.cleared_by})`);
-    return outOk(lines, freeze.unmerged.length ? `${Q} train build --prs ${pinList(freeze.unmerged)}` : 'none', run);
+    const rebuild = freeze.unmerged.length ? `${Q} train build --prs ${pinList(freeze.unmerged)}` : '';
+    const unread = freeze.unreadable ?? [];
+    const check = unread.length ? `${unread.map(u => `gh pr view ${u.pr} --json state,headRefOid`).join(' && ')} (unreadable at the freeze: ${unread.map(u => `#${u.pr}@${u.head.slice(0, 12)}`).join(', ')}); seat each that is OPEN in a train` : '';
+    return outOk(lines, [rebuild, check].filter(Boolean).join('; then ') || 'none', run);
   }
   return outOk(lines, nextFor(t), run);
 }
