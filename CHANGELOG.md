@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.292.0] - 2026-10-28
 
 **A fix for a regression on stable can skip the 72-hour wait, like a security fix.** Garry, asked whether non-security breakage on stable may bypass the twice-weekly cadence and the floor, answered on 2026-10-28: "Regression". Until now a fix for something the last stable release did right, and the current one breaks, waited up to 72 hours on every team install. Now `--regression "#n: worked in v<X>: why"` with `--ref` passes the floor once the tool ties it to the release, and the claim is public in the tag and the notes.
 
