@@ -444,7 +444,7 @@ Claude: [Runs full 80-item visual audit on the live site]
         Design Score: C → B+  |  AI Slop Score: D → A
         9 fixes applied (8 verified, 1 best-effort). 3 deferred.
 
-        [Report with before/after screenshots saved to .gstack/design-reports/]
+        [Report with before/after screenshots saved to ~/.gstack/projects/<slug>/designs/design-audit-<date>/]
 ```
 
 Nine commits, each touching one concern. The AI Slop score went from D to A because the three most recognizable patterns (gradient hero, 3-column grid, uniform radius) are gone.
