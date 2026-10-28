@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$RELEASE_REF" ] && ! [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::ref must be the full 40-hex SHA of a commit on main, not '$RELEASE_REF'"
+            echo "::error::ref must be the full 40-hex SHA of a commit on main"
             exit 1
           fi
           if [ -n "$SECURITY_REASON" ] && [ -z "$RELEASE_REF" ]; then

@@ -91,9 +91,16 @@ the floor verdict (`FLOOR:` line) and exits 0.
 
 Two cases are not held. The first cut, before `stable` exists, has nothing to
 measure. Finishing a half-done cut (`stable` already at the candidate, release
-missing) is not a new move. A `stable` that no annotated tag dates is
-`FLOOR_UNKNOWN`, red on every trigger: only this tool moves `stable` and it
-tags first, so that state means someone moved it by hand. The floor binds the
+missing) is not a new move, and a run without `ref` finishes that cut before
+it considers anything newer.
+
+The floor fails closed when it cannot date the move. These are
+`FLOOR_UNKNOWN`, red on every trigger: a `stable` that no annotated tag dates
+(only this tool moves `stable` and it tags first, so that state means someone
+moved it by hand), a release that cannot be read (a GitHub API error is not
+"no release"), and a `ref` cut while `stable`'s own release is still
+unpublished (its tag may be days older than the push). A tag dated in the
+future holds the floor from now, not from that date. The floor binds the
 release tool, not a writer pushing `stable` directly; that would take a branch
 ruleset limiting `stable` to the Actions bot.
 
@@ -120,8 +127,11 @@ The reason must name a `GHSA-…`, a `CVE-…` or an issue or pull request
 2. issue or pull request `#<n>` carries the `security` label and a commit in
    the span references `#<n>` (the squash subject `(#<n>)` does);
 3. the GitHub Advisory Database entry for the GHSA or CVE (the data OSV
-   imports) lists a package whose line changes in the span's `package.json`
-   or `bun.lock`: a dependency bump that fixes a known advisory.
+   imports) lists an npm package whose own entry changes in the span's
+   `package.json` or `bun.lock` (a dependency line or a lockfile package key,
+   never a name listed inside another package's entry): a dependency bump that
+   fixes a known advisory. The direction of the bump and the patched range are
+   not checked.
 
 **Verified:** the identifier exists in the reason, the label exists on the
 issue, and the link between the identifier and a released commit or bumped
@@ -140,8 +150,11 @@ notes: `**Security release:** <reason> (verified: <evidence>)`. For an
 embargoed fix, use path 2 with a neutral commit subject and a labelled issue
 whose title says no more than the fix does, and keep advisory details out of
 the reason until disclosure.
-A security cut that stopped half-way is finished by the next run with the
-same reason, read back from its tag. The floor then counts from the security
+A security cut that stopped half-way after moving `stable` is finished by
+the next run with the reason and evidence its tag recorded, without checking
+them again. A tag that records a security cut but never moved `stable` gets
+no such pass: the cut is refused (`REFUSED_SECURITY`) until it runs again
+with `security` and `ref` and verifies. The floor then counts from the security
 release, and the next regular cut's notes list only the versions after it.
 
 ## Channels
@@ -246,8 +259,8 @@ is exercised against real check runs before it merges.
 | `REFUSED: tag v<X> already names <other sha>` | a version was stamped twice; needs a look before anything is cut |
 | `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; ...` | inside the 72-hour floor; nothing changed. Exit 1 by hand, 0 on the schedule or a dry run |
 | `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
-| `FLOOR_UNKNOWN: no annotated v* tag points at stable <sha> ...` | stable's last move cannot be dated; exit 1 on every trigger |
-| `REFUSED_SECURITY: ...` | `security` without `ref`, or a reason the tool cannot tie to the released commits; exit 1 on every trigger |
+| `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
+| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
 | `FLOOR: clear|refused|none|not applied|bypassed by the security exception (...)` | the floor verdict, in every plan |
 | `SECURITY: <reason> (verified: <evidence>)`, `RIDING_ALONG: <n> other versions ship with the fix` | a security cut's plan |
 | `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |

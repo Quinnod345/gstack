@@ -223,15 +223,24 @@ export function releaseNotes(n: NotesInput): string {
 
 const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-/** When stable last moved: the newest annotated v* tag on it, or that tag's release publish time when later. Lightweight tags do not count. */
-export function stableMovedAt(git: Git, gh: Gh, repo: string, stable: string): { at: number; tag: string } | { at: null; why: string } {
+/**
+ * When stable last moved: the newest annotated v* tag on it, or that tag's
+ * release publish time when later. Lightweight tags do not count. published is
+ * false when the release does not exist yet (a half-done cut, whose tag may
+ * predate the stable push); a release that cannot be read leaves the move undated.
+ */
+export function stableMovedAt(git: Git, gh: Gh, repo: string, stable: string): { at: number; tag: string; published: boolean } | { at: null; why: string } {
   const listed = git(['for-each-ref', '--points-at=' + stable, '--format=%(refname:short)%09%(objecttype)%09%(creatordate:unix)', 'refs/tags/v[0-9]*']);
   const newest = (listed.ok && listed.out ? listed.out.split('\n') : []).map(l => l.split('\t')).filter(p => p[1] === 'tag')
     .map(p => ({ tag: p[0]!, at: Number(p[2]) * 1000 })).sort((a, b) => b.at - a.at)[0];
   if (!newest) return { at: null, why: 'no annotated v* tag points at stable ' + stable.slice(0, 12) + ', so its last move cannot be dated' };
-  const release = parseJson<{ publishedAt?: string }>(gh(['release', 'view', newest.tag, '--repo', repo, '--json', 'publishedAt']));
-  const published = Date.parse(release?.publishedAt ?? '');
-  return { tag: newest.tag, at: Number.isFinite(published) ? Math.max(newest.at, published) : newest.at };
+  const view = gh(['release', 'view', newest.tag, '--repo', repo, '--json', 'publishedAt']);
+  if (view.status !== 0) {
+    if (/not found|HTTP 404/i.test(view.stderr)) return { tag: newest.tag, at: newest.at, published: false };
+    return { at: null, why: 'cannot read the release for ' + newest.tag + ' (' + (view.stderr.trim().slice(0, 120) || 'gh exit ' + view.status) + '), so its last move cannot be dated' };
+  }
+  const published = Date.parse(parseJson<{ publishedAt?: string }>(view)?.publishedAt ?? '');
+  return { tag: newest.tag, at: Number.isFinite(published) ? Math.max(newest.at, published) : newest.at, published: true };
 }
 
 /** The floor verdict for moving stable from prevStable to sha. A refusal carries the message and the NEXT_ALLOWED text. */
@@ -245,6 +254,11 @@ export function floorStatus(o: { git: Git; gh: Gh; repo: string; prevStable: str
     if (o.security) return { verdict: 'security', line: 'FLOOR: bypassed by the security exception (' + moved.why + ')' };
     return { verdict: 'unknown', line: 'FLOOR: unknown', message: moved.why + '; only a --security cut can move it until one does', next: 'none until an annotated v* tag dates the release stable points at' };
   }
+  if (!moved.published && !o.security) {
+    return { verdict: 'unknown', line: 'FLOOR: unknown', message: 'stable moved to ' + moved.tag + ' but its release is not published, so the tag cannot date the move; finish that cut first (a run without --ref finishes it)', next: 'once the release for ' + moved.tag + ' is published' };
+  }
+  // A tag dated in the future holds the floor from now, not from that date.
+  moved.at = Math.min(moved.at, o.now);
   const need = FLOOR_HOURS - (o.scheduled ? SCHEDULED_GRACE_HOURS : 0);
   const since = 'stable moved to ' + moved.tag + ' at ' + iso(moved.at) + ', ' + ((o.now - moved.at) / HOUR).toFixed(1) + ' h ago';
   const next = iso(moved.at + FLOOR_HOURS * HOUR) + ' for a hand-run cut; ' + iso(moved.at + (FLOOR_HOURS - SCHEDULED_GRACE_HOURS) * HOUR) + ' for a scheduled run';
@@ -275,17 +289,19 @@ export function verifySecurity(o: { reason: string; git: Git; gh: Gh; repo: stri
   const range = o.from ? [o.from + '..' + o.to] : ['--max-count=' + WINDOW_COMMITS, o.to];
   const log = o.git(['log', '--format=%H%x1f%B%x1e', ...range]);
   const commits = (log.ok ? log.out.split('\x1e') : []).map(c => c.trim().split('\x1f')).filter(c => c[0]).map(c => ({ sha: c[0]!.slice(0, 12), body: c[1] ?? '' }));
-  const changed = o.from ? o.git(['diff', '--unified=0', o.from, o.to, '--', 'package.json', 'bun.lock']).out.split('\n').filter(l => /^[+-](?![+-])/.test(l)) : [];
+  // Package names whose own entry changed: a package.json dependency line or a bun.lock package key, never a name listed inside another package's entry.
+  const changed = new Set((o.from ? o.git(['diff', '--unified=0', o.from, o.to, '--', 'package.json', 'bun.lock']).out.split('\n') : [])
+    .flatMap(l => { const m = /^[+-](?![+-])\s*"([^"]+)":\s*(?:"[^"]*"|\[\s*"([^"]+)@)/.exec(l); return m && (!m[2] || m[2] === m[1]) ? [m[1]!] : []; }));
   const why: string[] = [];
   for (const id of advisories) {
     const named = commits.find(c => c.body.toUpperCase().includes(id.toUpperCase()));
     if (named) return { ok: true, evidence: 'commit ' + named.sha + ' names ' + id };
     const read = parseJson<unknown>(o.gh(['api', id.startsWith('GHSA') ? 'advisories/' + id : 'advisories?cve_id=' + id]));
-    const entries = (Array.isArray(read) ? read : read ? [read] : []) as Array<{ vulnerabilities?: Array<{ package?: { name?: string } }> }>;
-    const packages = [...new Set(entries.flatMap(e => e.vulnerabilities ?? []).map(v => v.package?.name).filter((n): n is string => Boolean(n)))];
-    const bumped = packages.find(p => changed.some(l => l.includes('"' + p + '"') || l.includes('"' + p + '@')));
+    const entries = (Array.isArray(read) ? read : read ? [read] : []) as Array<{ vulnerabilities?: Array<{ package?: { name?: string; ecosystem?: string } }> }>;
+    const packages = [...new Set(entries.flatMap(e => e.vulnerabilities ?? []).filter(v => v.package?.ecosystem?.toLowerCase() === 'npm').map(v => v.package?.name).filter((n): n is string => Boolean(n)))];
+    const bumped = packages.find(p => changed.has(p));
     if (bumped) return { ok: true, evidence: 'advisory ' + id + ' lists ' + bumped + ', which changes in package.json/bun.lock' };
-    why.push(id + ': no commit names it' + (read ? ' and none of its ' + packages.length + ' advisory packages changes in package.json/bun.lock' : ' and the advisory database has no entry for it'));
+    why.push(id + ': no commit names it' + (read ? ' and none of its ' + packages.length + ' npm advisory packages changes in package.json/bun.lock' : ' and the advisory database has no entry for it'));
   }
   for (const n of issues) {
     const ref = commits.find(c => new RegExp('(?<![\\w&])#' + n + '\\b').test(c.body));
@@ -297,11 +313,12 @@ export function verifySecurity(o: { reason: string; git: Git; gh: Gh; repo: stri
   return { ok: false, why: 'nothing in ' + (o.from ? o.from.slice(0, 12) + '..' : 'up to ') + o.to.slice(0, 12) + ' ties the reason to the release: ' + why.join('; ') };
 }
 
-/** The security reason an earlier run wrote into this release's annotated tag, so a retry publishes the same notes. */
-export function securityFromTag(git: Git, tag: string): string | null {
+/** The security reason and evidence an earlier run wrote into this release's annotated tag, so a retry publishes the same notes. */
+export function securityFromTag(git: Git, tag: string): Security | null {
   const body = git(['for-each-ref', '--format=%(contents)', 'refs/tags/' + tag]);
-  const m = body.ok ? /^Security: (.+)$/m.exec(body.out) : null;
-  return m ? m[1]!.trim() : null;
+  const reason = body.ok ? /^Security: (.+)$/m.exec(body.out) : null;
+  if (!reason) return null;
+  return { reason: reason[1]!.trim(), evidence: /^Verified: (.+)$/m.exec(body.out)?.[1]!.trim() ?? 'recorded in tag ' + tag };
 }
 
 export interface Plan {
@@ -351,6 +368,9 @@ export function planRelease(o: PlanOptions): PlanResult {
     const list = git(['rev-list', '--first-parent', '--max-count=' + (o.windowCommits ?? WINDOW_COMMITS), '--since=' + since, 'refs/remotes/origin/main']);
     candidates = list.ok && list.out ? list.out.split('\n') : [];
     if (candidates.length === 0) return { ok: false, code: 'NOTHING_NEW', message: 'no commit on origin/main in the last ' + windowDays + ' days' };
+    // A cut that moved stable but never published its release is finished before stable moves again.
+    const moved = prevStable ? stableMovedAt(git, gh, repo, prevStable) : null;
+    if (prevStable && moved && moved.at !== null && !moved.published) candidates = [prevStable];
   }
 
   // stable itself stays a candidate so a cut that stopped half-way (tag and
@@ -400,10 +420,13 @@ export function planRelease(o: PlanOptions): PlanResult {
     const older = git(['rev-list', '--first-parent', '-1', '--before=' + before, sha]);
     if (older.ok && older.out) prevVersion = git(['show', older.out + ':VERSION']).out.trim() || null;
   }
-  // A retry of a security cut takes the reason from the tag the first run wrote.
-  const reason = (tagExists === 'same' ? securityFromTag(git, tag) : null) ?? (o.security === undefined ? null : sanitizeReason(o.security));
-  let security: Security | null = null;
-  if (reason !== null) {
+  // Finishing a security cut keeps the reason and evidence its tag recorded; a tag
+  // that recorded one but never moved stable needs --security verified again.
+  const recorded = tagExists === 'same' ? securityFromTag(git, tag) : null;
+  let security: Security | null = recorded && prevStable === sha ? recorded : null;
+  if (recorded && !security && o.security === undefined) return { ok: false, code: 'REFUSED_SECURITY', message: 'tag ' + tag + ' records a security cut that has not moved stable; run it again with --security and --ref ' + sha.slice(0, 12) + ' so the reason is verified' };
+  if (!security && o.security !== undefined) {
+    const reason = sanitizeReason(o.security);
     const verified = verifySecurity({ reason, git, gh, repo, from: before, to: sha });
     if (!verified.ok) return { ok: false, code: 'REFUSED_SECURITY', message: verified.why };
     security = { reason, evidence: verified.evidence };
@@ -412,7 +435,7 @@ export function planRelease(o: PlanOptions): PlanResult {
   const date = git(['show', '-s', '--format=%cs', sha]).out;
   const notes = releaseNotes({ repo, version, date, prevVersion, prevTag, entries: changelog.ok ? changelogEntries(changelog.out) : [], hotfix: Boolean(o.ref), first: !before, security });
   const floor = floorStatus({ git, gh, repo, prevStable, sha, security: Boolean(security), scheduled: Boolean(o.scheduled), now: o.now?.() ?? Date.now() });
-  const ridingAlong = Math.max(0, notes.split('\n').filter(l => l.startsWith('- ')).length - 1);
+  const ridingAlong = Math.max(0, notes.split('\n').filter(l => l.startsWith('- **')).length - 1);
   const plan: Plan = { sha, version, tag, date, hotfix: Boolean(o.ref), via, prevStable, prevVersion, prevTag, tagExists, stableAt: prevStable === sha, notes, skipped, security, floor, ridingAlong };
   if (floor.verdict === 'refused' || floor.verdict === 'unknown') return { ok: false, code: floor.verdict === 'refused' ? 'REFUSED_FLOOR' : 'FLOOR_UNKNOWN', message: floor.message!, next: floor.next, plan };
   return { ok: true, plan };
@@ -437,6 +460,7 @@ export function cutRelease(p: Plan, o: { repo: string; git: Git; gh: Gh; notesDi
     lines.push('TAG: ' + p.tag + ' already names ' + p.sha.slice(0, 12));
   }
   if (!p.stableAt) {
+    if (p.prevStable && !git(['merge-base', '--is-ancestor', p.prevStable, p.sha]).ok) return { ok: false, lines: [...lines, 'STABLE: refused: ' + p.sha.slice(0, 12) + ' does not descend from stable ' + p.prevStable.slice(0, 12)] };
     // The lease pins origin's stable to the commit the floor and the ancestry check read; a move in between fails the push.
     const push = git(['push', '--force-with-lease=refs/heads/stable:' + (p.prevStable ?? ''), 'origin', p.sha + ':refs/heads/stable']);
     if (!push.ok) return { ok: false, lines: [...lines, 'STABLE: push failed (stable moved since this plan read it, or the push was rejected): ' + push.out] };
@@ -466,7 +490,7 @@ export function describePlan(p: Plan, dryRun: boolean): string[] {
     'NOTES: ' + p.notes.split('\n').filter(l => l.startsWith('- ')).length + ' version lines, ' + p.notes.length + ' chars',
     p.floor.line,
   ];
-  if (p.security) lines.push('SECURITY: ' + p.security.reason + ' (verified: ' + p.security.evidence + ')', 'RIDING_ALONG: ' + p.ridingAlong + ' other version' + (p.ridingAlong === 1 ? '' : 's') + ' ship with the fix');
+  if (p.security) lines.push('SECURITY: `' + p.security.reason + '` (verified: ' + p.security.evidence + ')', 'RIDING_ALONG: ' + p.ridingAlong + ' other version' + (p.ridingAlong === 1 ? '' : 's') + ' ship with the fix');
   for (const s of p.skipped) lines.push('SKIPPED: ' + s);
   if (dryRun) {
     lines.push('DRY_RUN: nothing pushed, nothing created. The cut would run:',
