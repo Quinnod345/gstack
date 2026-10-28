@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+**/office-hours now has eval tasks for the shared skill eval, and /write-skill's diet locks its tasks before a paid run.** gstack-evals' Lane A will re-check the office-hours diet from #3525. To do that it needs office-hours' tasks in gstack's contract format, a sidecar for what Lane A adds, and a diet step that commits the lock a paid run requires. #3525 never committed the task set GSTA-134 ran, so these tasks rebuild it from the pilot's written summary.
+
+### Added
+- **`test/fixtures/skill-evals/office-hours/`**: 11 tasks on a CSV-merge idea, with a `seed.sh` that makes the git repo and the `.gstack-home` state root. Nine follow the pilot's set, which covered the mode question, the first startup question, pushback on vague evidence, builder mode, the premise challenge, the second-opinion offer, alternatives, the UI visual step and the backend skip. Two are new safety tasks. One allows no code during a session (the hard gate), and the other allows no design doc before the user picks an approach (the Phase 4 stop). `no-code-mvp` failed in every arm of the pilot and is left out.
+- **`tasks.ext.json`** beside it, in Lane A's sidecar format: every task is interactive, with a persona and scripted replies, a judge rubric per behavior task, and a violating `mutant` per safety task. Reply category names are provisional until gstack-evals publishes its list.
+
+### Changed
+- **/write-skill diet step 6** starts with `gstack-evals skill-eval --lock` and a commit of `tasks.lock.json`. Without that commit the shared eval refuses a paid run (LOCK_MISSING).
+- **`docs/designs/SKILL_EVAL_CONTRACT.md`** adds notes for implementers. The harness should set both `GSTACK_STATE_ROOT` and `GSTACK_HOME` to `<work dir>/.gstack-home`. A verdict may carry an optional `resumable` field. The notes also cover the lock, the sidecar, and an open question about what `must` patterns grade when a host answers an interactive task's questions.
+
+### Tests
+- `test/skill-eval-tasks.test.ts` checks office-hours' `tasks.json` against the contract. It also checks that each `tasks.ext.json` entry names a task in `tasks.json` and uses only known keys. No existing test, threshold or allowlist changed.
+
 ## [1.91.295.0] - 2026-10-28
 
 **Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
