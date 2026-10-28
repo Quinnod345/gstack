@@ -18,7 +18,8 @@ registers with the harness it runs inside: OpenClaw (its exec tool sets
 `OPENCLAW_SHELL=exec`), Hermes (`HERMES_AGENT=true`) or a Dot (`HOME=/home/dot`
 on a Dot's computer), or a harness found among setup's parent processes. It
 prints every path it wrote and the command that removes them. An explicit
-`--host claude` (or any other host) never writes under a harness folder.
+`--host claude` (or any other host) never writes under a harness folder, and
+neither does `./setup --local`.
 `./setup --no-harness-auto` or `GSTACK_HARNESS_AUTO=0` turns the automatic step off.
 
 **What it writes.** Copies in the harness's own skills folder, never edits to

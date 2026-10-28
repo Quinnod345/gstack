@@ -2,7 +2,7 @@
 
 The README covers the two-step install. This page holds the details: what
 setup needs and how long it takes, the team-mode hook, the hooks setup
-registers in Claude Code, and how to remove gstack.
+registers in Claude Code, agent harness registration, and how to remove gstack.
 
 ## How long setup takes
 
@@ -51,9 +51,9 @@ writing a backup beside the file) only when it changed something.
 
 Run inside OpenClaw, Hermes or a Dot, `./setup` also registers gstack's skills
 with that harness, in the harness's own skills folder, and prints every path
-it wrote. It never does this when `--host` names another host. Turn it off
-with `./setup --no-harness-auto` or `GSTACK_HARNESS_AUTO=0`. Per-harness
-details, QM and any other harness: [hosts.md](hosts.md#agent-harnesses).
+it wrote. It never does this when `--host` names another host or with
+`--local`. Turn it off with `./setup --no-harness-auto` or
+`GSTACK_HARNESS_AUTO=0`. Per-harness details, QM and any other harness: [hosts.md](hosts.md#agent-harnesses).
 
 ## Uninstall
 
