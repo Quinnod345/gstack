@@ -31,7 +31,8 @@
 //       version as written instead of the npm-valid translation (default
 //       npm). For repos whose declared convention is a four-part manifest
 //       (gbrain); gstack-restamp passes it only when the policy lists the
-//       manifest as a stamp file and it already holds four parts.
+//       manifest as a stamp file and the base's copy holds four parts. No
+//       effect when the version path is itself a JSON manifest.
 //       --changelog <p> (opt-in): re-head the branch's `## [Unreleased]`
 //       entry in <p> as `## [<version>] - <UTC date>` at the top, with
 //       lib/changelog-check's reheadChangelog — the same function
@@ -460,6 +461,8 @@ function cmdWrite(args: string[], cwd: string): void {
   if (!VERSION_RE.test(version!)) {
     fail(`NEW_VERSION (${version}) does not match MAJOR.MINOR.PATCH[.MICRO]. Aborting.`, 2);
   }
+  const manifestForm = argVal(args, "--manifest-form") ?? "npm";
+  if (manifestForm !== "npm" && manifestForm !== "full") fail("write: --manifest-form needs npm|full", 2);
   const src = versionSource(cwd, argVal(args, "--version-path"));
   if (src.outcome === "broken") failBroken(src, "write");
   if (src.outcome !== "valid") {
@@ -523,8 +526,6 @@ function cmdWrite(args: string[], cwd: string): void {
     return;
   }
 
-  const manifestForm = argVal(args, "--manifest-form") ?? "npm";
-  if (manifestForm !== "npm" && manifestForm !== "full") fail("write: --manifest-form needs npm|full", 2);
   const pkgPath = resolvePkgPath(cwd, argVal(args, "--package-json-path"));
   const hasPkg = existsSync(pkgPath);
   const changelogPlan = planChangelog(cwd, args, version!);

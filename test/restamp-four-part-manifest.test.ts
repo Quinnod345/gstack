@@ -67,6 +67,26 @@ describe('gstack-restamp keeps the repo\'s manifest width', () => {
     expect(pkgVersion(repo)).toBe('0.60.483.0');
   });
 
+  test('a branch an older restamp cut to three parts heals: the base\'s four-part manifest sets the form', () => {
+    const repo = fixture({ policy: GBRAIN_POLICY, version: '0.60.482.0' });
+    fourPartManifest(repo, '0.60.482.0');
+    makePr(repo, 'feat-a');
+    setPkgVersion(repo, '0.60.482');
+    repo.git('commit', '-q', '-am', 'old restamp cut the manifest');
+    const r = restamp(repo, ['--next']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(pkgVersion(repo)).toBe('0.60.483.0');
+  });
+
+  test('a manifest listed through stamp_paths keeps four parts too', () => {
+    const repo = fixture({ policy: { ...GBRAIN_POLICY, stamp_files: [], stamp_paths: ['package.json'] }, version: '0.60.482.0' });
+    fourPartManifest(repo, '0.60.482.0');
+    makePr(repo, 'feat-a');
+    const r = restamp(repo, ['--next']);
+    expect(r.status).toBe(EXIT.ok);
+    expect(pkgVersion(repo)).toBe('0.60.483.0');
+  });
+
   test('gstack-shaped repo: the three-part manifest and its lockfile still get the npm-valid form', () => {
     const repo = fixture();
     makePr(repo, 'feat-a');

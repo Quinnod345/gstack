@@ -225,15 +225,16 @@ export function versionFiles(root: string, versionRel: string): string[] {
 }
 /**
  * The manifest's path when the repo's convention is a four-part manifest: the policy lists it as a
- * stamp file and it already holds a four-part version (gbrain). Otherwise null, and the writer
+ * stamp file and the base's copy holds a four-part version (gbrain). Read at the base, like the
+ * policy, so a branch an older restamp cut to three parts heals. Otherwise null, and the writer
  * stores the npm-valid three-part form (decision 11; gstack's own manifest).
  */
 function manifestKeepsFourParts(plan: Plan, root: string): string | null {
   const pkgRel = versionFiles(root, plan.versionRel)[1]!;
   if (pkgRel === plan.versionRel || !matchesAny([...plan.policy.stamp_paths, ...plan.policy.stamp_files], pkgRel)) return null;
-  const file = path.join(root, pkgRel);
-  const current = fs.existsSync(file) ? extractVersion(fs.readFileSync(file, 'utf8'), pkgRel) : '';
-  return current && versionWidth(current) === 4 ? pkgRel : null;
+  const atBase = git(root, ['show', `${plan.baseSha}:${pkgRel}`]);
+  const version = atBase.ok ? extractVersion(atBase.out, pkgRel) : '';
+  return version && versionWidth(version) === 4 ? pkgRel : null;
 }
 function allowedOutput(plan: Plan, root: string, rel: string): boolean {
   const p = plan.policy;
@@ -470,7 +471,7 @@ function runStages(o: RestampOptions, plan: Plan, staging: string, since: string
     const full = manifestKeepsFourParts(plan, staging);
     const w = spawnSync(process.execPath, [...bunIsolationArgs(), path.join(BIN_DIR, 'gstack-version-bump'), 'write', '--version', plan.newVersion, ...(full ? ['--manifest-form', 'full'] : [])], { cwd: staging, encoding: 'utf8', timeout: 120_000, env });
     if (w.status !== 0) { v.status = 'failed'; v.detail = (w.stderr ?? '').trim().slice(0, 300); throw new Refusal('RESTAMP_VERSION_SOURCE', `gstack-version-bump write failed: ${v.detail}; nothing written`); }
-    v.status = 'done'; v.detail = `wrote ${plan.newVersion}` + (full ? ` (${full} keeps four parts: a policy stamp file that already holds four)` : '');
+    v.status = 'done'; v.detail = `wrote ${plan.newVersion}` + (full ? ` (${full} keeps four parts: a policy stamp file the base holds in four)` : '');
   }
   injected('version');
 
