@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.296.0] - 2026-10-28
 
 **The docsync gate stops failing ship-docsync-current and ship-docsync-store when the agent asks the docs helper for its usage in the middle of a line of reads.** Five red paid trials since 2026-10-27 each failed on a single refused line. In four, the agent ended a line of reads with `gstack-docs-candidate --help` (screen 40558235014, gate 40600731931, and screen 40627127462 twice). In the fifth, gate 40643690306, the line included `git tag`. v1.91.185.0 tried to stop the first slip by moving the "own Bash call" rule into the sentence that names `--help`, and the slip came back four times. The helper's `--help` prints its usage and returns before it touches Git or any file, so refusing it protected nothing. The 2026-10-27 backstop red (40515158924, `toContain`) ran on a tree from before #3516, which had already fixed it.
 
@@ -13,6 +13,20 @@
 
 ### Gate integrity
 - This is a gate edit, because the docs detector now accepts more lines. The test that pinned the joined `--help` as refused now expects it to be accepted. Focused paid trials at e967634: ship-docsync-current PASS ($0.84; its agent did join `--help` onto a line of reads) and ship-docsync-store PASS ($0.84).
+
+## [1.91.295.0] - 2026-10-28
+
+**Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
+
+### Fixed
+- **Deleted and renamed tests pass `lanes`**: each removed JS, TS, Python, Dart or bats test that nothing remaining imports prints `removed (no lane owed): <path> — <why>`, and the `lanes` detail counts `N removed path(s)`. A deleted test (or a test renamed to a non-test path) runs its owning suite, the remaining tests that directly exercise the files its merge-base text exercised (`owning suite runs: …`); test helpers and fixtures are not subjects. Any removed test also runs the tests of each remaining non-Markdown file that still names it (`files naming it run: …`), and fails closed when that file has no test.
+- **Lost coverage is named, not hidden**: when a deleted test was the last test of a file, the line says `coverage removed: <file> has no remaining test` and the detail adds `M subject(s) lost their last test`. A modified file whose only test the branch deleted still fails PREGATE_NO_LANE.
+
+### Changed
+- Only removed tests are waived. These still fail PREGATE_NO_LANE until a test or a `dependencies` entry covers them. They are any removed non-test path (a renamed source file's old name included), a removed test that remaining code imports, a deleted or renamed Go or Ruby test (it may define helpers its package still uses), and a deleted test whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A remaining test that reads a deleted file or directory is still selected.
+
+### Gate integrity
+- New `test/pregate-removed-paths.test.ts` (47 cases) covers the waived tests and the fail-closed negative controls; no existing test, threshold or allowlist changed.
 
 ## [1.91.294.0] - 2026-10-28
 
