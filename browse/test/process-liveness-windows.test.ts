@@ -267,6 +267,11 @@ describe('win32 terminal-agent identity (GSTA-139)', () => {
       expect(stopAgentByRecord(record(daemonRecorded), 0)).toBe(true);
       expect(calls.signals).toEqual(['SIGTERM']);
     });
+    onWin32({ ffi: birth, powershell: { status: null } }, calls => {
+      expect(isAgentRecordGone(record(daemonRecorded))).toBe(false);
+      expect(stopAgentByRecord(record(daemonRecorded), 0)).toBe(false);
+      expect(calls.signals).toEqual([]);
+    });
   });
 
   test('an unreadable start time is unknown: never signalled and never treated as gone', () => {
