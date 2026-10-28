@@ -21,6 +21,23 @@ type Env = Record<string, string | undefined>;
 export const GSTACK_REPO_URL = 'https://github.com/garrytan/gstack';
 /** Only the top-level skills: the committed renders at the repository root, not fixtures or the openclaw/ folder. */
 export const QM_PACK_CONFIG = { skillGlobs: ['*/SKILL.md'] };
+/** QM's git fetcher reads the whole tree before it applies skillGlobs, and refuses past these defaults (QM src/skills/pack-fetcher.ts). */
+export const QM_PACK_LIMITS = { files: 5000, bytes: 32 * 1024 * 1024 };
+
+const mib = (n: number) => (n / 1024 / 1024).toFixed(1) + ' MiB';
+const tooLarge = (what: string) => new HarnessError('HARNESS_QM_PACK_TOO_LARGE', what + '. QM imports the whole repository and caps a pack at ' + mib(QM_PACK_LIMITS.bytes) + ' and ' + QM_PACK_LIMITS.files + ' files by default, so it cannot import gstack yet');
+
+/** Files and bytes QM would read from the repository at ref. */
+export function packSize(checkout: string, ref: string): { files: number; bytes: number } {
+  const r = spawnSync('git', ['-C', checkout, 'ls-tree', '-r', '-l', ref], { encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  let files = 0; let bytes = 0;
+  for (const line of (r.stdout ?? '').split('\n')) {
+    const size = Number(line.split(/\s+/)[3]);
+    if (line.split(/\s+/)[1] !== 'blob' || !Number.isFinite(size)) continue;
+    files++; bytes += size;
+  }
+  return { files, bytes };
+}
 
 export interface QmAuth { url: string; headers: (method: string, pathname: string, body: string) => Record<string, string> }
 
@@ -54,6 +71,8 @@ async function call(auth: QmAuth, method: string, pathname: string, payload?: un
       headers: { 'content-type': 'application/json', ...auth.headers(method, pathname, body) },
     });
     const text = await res.text();
+    const cap = /pack exceeds max (bytes|files) \(\d+\)/.exec(text);
+    if (!res.ok && cap) throw tooLarge('QM refused the pack: ' + cap[0]);
     if (!res.ok) throw new HarnessError('HARNESS_QM_API', method + ' ' + pathname + ' returned HTTP ' + res.status + ': ' + text.slice(0, 200));
     return text ? JSON.parse(text) : {};
   } catch (e) {
@@ -81,6 +100,8 @@ export async function registerQm(opts: { checkout: string; stateRoot: string; en
   if (!auth || !opts.yes) {
     throw new HarnessError('HARNESS_QM_CREDENTIALS', (auth ? 'registering a QM pack publishes skills to the whole organization, so it needs --yes' : 'no QM admin credential in the environment') + '. The request is:\n' + qmRequest(ref));
   }
+  const size = packSize(opts.checkout, ref);
+  if (size.files > QM_PACK_LIMITS.files || size.bytes > QM_PACK_LIMITS.bytes) throw tooLarge('gstack at ' + ref.slice(0, 12) + ' is ' + mib(size.bytes) + ' in ' + size.files + ' files; nothing was sent to QM');
   const id = registrationId('qm', auth.url);
   const lfile = ledgerPath(opts.stateRoot, id);
   const prev = readLedger(lfile);

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**`gstack-harness` errors print again, and `register qm` says plainly that QM cannot import gstack yet.** Every refused `gstack-harness` command crashed with `TypeError: e.line is not a function` instead of printing its reason, because Bun gives each thrown error its own numeric `line` property. Harness Evals then found that QM registration never worked: QM imports a skill pack by cloning the whole repository and stops at 32 MiB and 5,000 files, and gstack's repository is about 73 MiB in 4,300 files.
+
+### Fixed
+- **Error lines from `bin/gstack-harness`**: a refused command prints `gstack-harness: <reason>. Fix: <what to do> (<CODE>; docs/troubleshooting.md#<anchor>)` and exits 1, as documented. The printer is now `HarnessError.report()`.
+- **`gstack-harness register qm --yes`** measures the repository at the installed commit first and stops with `HARNESS_QM_PACK_TOO_LARGE` before sending anything to QM. A QM that refuses with its own cap message gets the same code with QM's words, and no blind retry.
+
+### Docs
+- docs/hosts.md lists QM as not available yet, with the paste-in route (`gstack-harness register generic --print`) meanwhile; docs/troubleshooting.md has the `harness-qm-pack-too-large` section.
+
+### Tests
+- `test/harness-register.test.ts`: the CLI error path prints the code and fix with no TypeError; `register qm` against the real checkout refuses with zero requests and no ledger; a QM that answers `pack exceeds max bytes` gets the cap code; the pack reuse and retry case now runs against a small committed repository.
+
 ## [1.91.291.0] - 2026-10-28
 
 **/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.

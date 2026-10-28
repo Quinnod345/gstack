@@ -117,12 +117,14 @@ export const HARNESS_CODES = {
   HARNESS_NOT_REGISTERED: { anchor: 'harness-not-registered', fix: 'run gstack-harness status to see the registrations on this machine' },
   HARNESS_QM_CREDENTIALS: { anchor: 'harness-qm-credentials', fix: 'set GSTACK_QM_URL and either GSTACK_QM_ADMIN_TOKEN, or GSTACK_QM_SIGNING_SECRET with GSTACK_QM_ADMIN_ACTOR, then rerun with --yes' },
   HARNESS_QM_API: { anchor: 'harness-qm-api', fix: 'check that the QM core URL is reachable and the credential is an org admin; gstack-harness status shows whether a pack was left half-registered' },
+  HARNESS_QM_PACK_TOO_LARGE: { anchor: 'harness-qm-pack-too-large', fix: 'QM registration is not available yet; give a QM agent gstack with gstack-harness register generic --print pasted into its instructions' },
 } as const;
 export type HarnessCode = keyof typeof HARNESS_CODES;
 
 export class HarnessError extends Error {
   constructor(readonly code: HarnessCode, message: string) { super(message); }
-  line(): string {
+  /** Not named line(): Bun gives every thrown Error an own numeric line property, which would shadow it. */
+  report(): string {
     const c = HARNESS_CODES[this.code];
     return 'gstack-harness: ' + this.message + '. Fix: ' + c.fix + ' (' + this.code + '; docs/troubleshooting.md#' + c.anchor + ')';
   }
