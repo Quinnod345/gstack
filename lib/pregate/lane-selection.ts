@@ -20,9 +20,14 @@ import { stampFileKind, versionStampOnly } from './stamp-only';
 import type { PregateContext, RemoteObligation } from './types';
 import type { Lane } from './workflows';
 
+/** A path the branch removed (deleted, or a rename's old name) that owes no lane, with why (`note`) and the files that lost their last test. */
+export interface Removed { file: string; note: string; lostCoverage: string[] }
+
 export interface Selection {
   /** Touched files with no lane and no `[]` declaration. */
   noLane: string[];
+  /** Removed paths no remaining test selects: each owes no lane and is named on its own line (issue #3529). */
+  removed: Removed[];
   /** Markdown (and `empty_lanes` paths) with no import-graph test: the docs/no-tests empty lane. */
   emptyLane: string[];
   /** Assets and dotfile tool config with no import-graph test: files no runner loads, also an empty lane. */
@@ -82,10 +87,10 @@ function strictText(bytes: Buffer | null | undefined): string | null {
   if (!bytes || bytes.length > STAMP_FILE_CAP) return null;
   try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return null; }
 }
-/** The file's text at the merge base when it is a regular blob there of mode `mode` (null when absent, a symlink or submodule, another mode, unreadable, invalid UTF-8 or over 1 MiB). */
-function readAtMergeBase(ctx: PregateContext, rel: string, mode: string): string | null {
+/** The file's text at the merge base when it is a regular blob there of one of `modes` (null when absent, a symlink or submodule, another mode, unreadable, invalid UTF-8 or over 1 MiB). */
+function readAtMergeBase(ctx: PregateContext, rel: string, modes: readonly string[]): string | null {
   const ls = spawnSync('git', ['ls-tree', ctx.mergeBase, '--', rel], { cwd: ctx.repoRoot, encoding: 'utf8', timeout: 60_000, env: ctx.env });
-  if (ls.status !== 0 || !(ls.stdout ?? '').startsWith(`${mode} blob `)) return null;
+  if (ls.status !== 0 || !modes.some(mode => (ls.stdout ?? '').startsWith(`${mode} blob `))) return null;
   const r = spawnSync('git', ['show', `${ctx.mergeBase}:${rel}`], { cwd: ctx.repoRoot, timeout: 60_000, maxBuffer: STAMP_FILE_CAP + 1, env: ctx.env });
   return r.status === 0 ? strictText(r.stdout as Buffer) : null;
 }
@@ -100,14 +105,47 @@ function readWorkingTree(repoRoot: string, rel: string): { text: string | null; 
 /** Tracked files matching a registry entry's output globs. */
 function outputsOf(all: readonly string[], globs: readonly string[]): string[] { return all.filter(f => matchesAny(globs, f)); }
 
+/**
+ * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects: a rename's old name defers
+ * to the new path; a deleted test selects the remaining tests of the files it exercised and names those that lost their last
+ * test; any other removed file has nothing left to test. Null when a deleted test's merge-base text could not be read: it fails closed.
+ */
+function removedPath(ctx: PregateContext, graph: Graph, file: string): { removed: Removed; suite: string[] } | null {
+  const renamedTo = ctx.touched.find(t => t.renamedFrom === file)?.path;
+  if (renamedTo) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
+  if (!isTestFile(file)) return { removed: { file, note: 'no remaining test references it', lostCoverage: [] }, suite: [] };
+  const subjects = graph.goneSubjects?.get(file);
+  if (!subjects) return null;
+  if (!subjects.length) return { removed: { file, note: 'it exercised no file still in the tree', lostCoverage: [] }, suite: [] };
+  const suite = new Set<string>();
+  const lostCoverage: string[] = [];
+  for (const subject of subjects) {
+    const m = testsFor(graph, subject, ctx.config.dependencies);
+    for (const t of m.tests) suite.add(t);
+    if (!m.tests.length && !m.declaredNone) lostCoverage.push(subject);
+  }
+  const notes = [
+    suite.size ? `owning suite runs: ${[...suite].sort().join(' ')}` : '',
+    lostCoverage.length ? `coverage removed: ${lostCoverage.join(' ')} ${lostCoverage.length === 1 ? 'has' : 'have'} no remaining test` : '',
+  ].filter(Boolean);
+  return { removed: { file, note: notes.join('; ') || 'it exercised only files declared no lane needed', lostCoverage }, suite: [...suite] };
+}
+
 export function selectLanes(ctx: PregateContext): Selection {
   const touched = ctx.touched;
   const gone = touched.flatMap(t => [t.status === 'D' ? t.path : null, t.renamedFrom ?? null]).filter((p): p is string => !!p);
-  const graph: Graph = buildGraph(ctx.repoRoot, { declarations: ctx.config.dependencies, extraFiles: gone });
+  const goneSources = new Map<string, string>();
+  for (const t of touched) {
+    if (t.status !== 'D' || !isTestFile(t.path)) continue;
+    const text = readAtMergeBase(ctx, t.path, ['100644', '100755']);
+    if (text !== null) goneSources.set(t.path, text);
+  }
+  const graph: Graph = buildGraph(ctx.repoRoot, { declarations: ctx.config.dependencies, extraFiles: gone, goneSources });
   const all = listRepoFiles(ctx.repoRoot);
   const provenance: string[] = [];
   const tests = new Set<string>();
   const noLane: string[] = [];
+  const removed: Removed[] = [];
   const emptyLane: string[] = [];
   const inert: string[] = [];
   const stampOnly: string[] = [];
@@ -151,13 +189,23 @@ export function selectLanes(ctx: PregateContext): Selection {
     const entry = touchedByPath.get(file);
     if (entry && entry.status === 'M' && !entry.renamedFrom && stampFileKind(file) && !isProtectedTree(file)) {
       const after = readWorkingTree(ctx.repoRoot, file);
-      const verdict = versionStampOnly(file, after.text === null ? null : readAtMergeBase(ctx, file, after.mode), after.text);
+      const verdict = versionStampOnly(file, after.text === null ? null : readAtMergeBase(ctx, file, [after.mode]), after.text);
       if (verdict.stampOnly) {
         stampOnly.push(file);
         provenance.push(`${file}: version-stamp-only against ${ctx.mergeBase.slice(0, 12)} (${verdict.changed.join('; ')}); no lane needed`);
         continue;
       }
       provenance.push(`${file}: not version-stamp-only (${verdict.reason})`);
+    }
+    if (gone.includes(file)) {
+      const r = removedPath(ctx, graph, file);
+      if (r) {
+        removed.push(r.removed);
+        for (const t of r.suite) tests.add(t);
+        provenance.push(`${file}: removed (no lane owed) — ${r.removed.note}`);
+        continue;
+      }
+      provenance.push(`${file}: removed test whose merge-base text could not be read (not a regular file there, invalid UTF-8 or over 1 MiB); no lane until declared`);
     }
     noLane.push(file);
   }
@@ -182,7 +230,7 @@ export function selectLanes(ctx: PregateContext): Selection {
   if (anyLocalAll || ctx.lanes.filter(l => l.runsTests && !l.manual && l.tier !== 'platform').length === 0) for (const t of selected) local.add(t);
   for (const t of selected) if (!local.has(t) && !remote.some(r => r.tests.includes(t))) local.add(t);
   if (local.size && tiers.size === 0) tiers.add('unit');
-  return { noLane: noLane.sort(), emptyLane: emptyLane.sort(), inert: inert.sort(), stampOnly: stampOnly.sort(), tests: selected, localTests: [...local].sort(), remote, tiersRan: [...tiers].sort(), laneSets, provenance };
+  return { noLane: noLane.sort(), removed: removed.sort((a, b) => a.file.localeCompare(b.file)), emptyLane: emptyLane.sort(), inert: inert.sort(), stampOnly: stampOnly.sort(), tests: selected, localTests: [...local].sort(), remote, tiersRan: [...tiers].sort(), laneSets, provenance };
 }
 
 export function isTest(file: string): boolean { return isTestFile(file); }

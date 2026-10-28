@@ -195,6 +195,19 @@ Two stages with separate clocks, both printed:
   no lane, and a workspace-only Cargo.toml or Cargo.lock needs a `dependencies` entry),
   transitively through
   non-test files; deleted and renamed files select the tests that named them.
+  A removed path (a deleted file, or a rename's old name) that no remaining
+  test selects owes no lane: it prints `removed (no lane owed): <path> — <why>`
+  and the `lanes` detail adds `N removed path(s)`. A rename's old name defers to
+  the new path (`old name of <new>`); a deleted test runs its owning suite, the
+  remaining tests of the files its merge-base text exercised (`owning suite
+  runs: …`; test helpers and fixtures are not subjects), and names each file
+  left with no test (`coverage removed: <file> has no remaining test`, and
+  `M subject(s) lost their last test` in the detail); any other deleted file
+  has nothing left to test (`no remaining test references it`). A deleted test
+  whose merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB)
+  fails closed with `PREGATE_NO_LANE`, and a modified file whose only test the
+  branch deleted still has no lane. /review lists the deletion as a gate edit
+  (RH-1) either way.
   An extensionless JS/TS import (relative, a tsconfig/jsconfig `paths` alias or
   `baseUrl`) tries the exact path, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
   `.cjs`, `.mts`, `.cts`, then `index.ts`, `index.tsx`, `index.js`, `index.jsx`
