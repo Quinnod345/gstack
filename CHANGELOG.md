@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
+
+### Fixed
+- **`bin/gstack-capy-install`**: an ok run keeps what an earlier ok install certified for the same checkout, project, HEAD and Bun. The verdict's `required` list becomes the union, pins count as planning-only only when both runs skipped them, and `for` lists every workflow (`for=ship,document-release`). The installer says so in one line. A failing run, a new HEAD or another Bun still replaces the verdict, and the review-voice profile still never narrows a fuller one.
+
+### Tests
+- `test/gstack-capy-install.test.ts`: `--for ship` then `--for document-release` leaves one ok verdict that admits both workflows through `verdictProblem`; a `--check --for ship` keeps it; after a new commit, `--for document-release` replaces it and ship is refused again. It failed before this change.
+
 ## [1.91.298.0] - 2026-10-28
 
 **Dia is gone from gstack.** `/setup-browser-cookies` and `cookie-import-browser` no longer list Dia as a cookie source, and the Dia qualification harness is deleted. That harness was a set of macOS campaigns that never qualified a native import, and its `dia-launch-comparison` free test was failing the merge train on Ubicloud runners. Cookie import from Comet, Chrome, Chromium, Arc, Brave, Edge, Opera and Opera GX is unchanged.
