@@ -18,7 +18,7 @@
 - Specialist prompts cap findings at 400 words. `docs/unattended.md` adds report-length limits (READY at most 150 words plus required lines, reports at most 300).
 
 ### Gate integrity
-- Ship union cap 1.7529 → 1.7631 and ship skeleton cap 60,913 → 60,960 bytes in `test/helpers/carve-guards.ts`, each pinned at the measured size (330,941 / 187,706 = 1.76308; 60,960 bytes). GSTA-132's size ledger replaces these re-pins once it lands.
+- Ship's union growth is a +1,877-byte entry in GSTA-132's size ledger (test/size-ledger/ship/garrytan-gsta131-token-efficiency.json; measured 330,901 bytes, SIZE_LEDGER: ok), and the ship skeleton cap in test/helpers/carve-guards.ts moves 60,913 → 60,960 bytes, pinned at the measured size. The five /review size pins in test/fixtures/skill-md-size-allowlist.json go down by 2 bytes each.
 - `test/autoplan-token-efficiency.test.ts` gives its subprocess-driven cases a 30-second timeout; its resumed-run case persists `max_rounds: 1` instead of 3, a value inside the new cap of 2.
 
 ## [1.91.286.0] - 2026-10-28
