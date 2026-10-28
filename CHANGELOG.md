@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+**A fix for a regression on stable can skip the 72-hour wait, like a security fix.** Garry, asked whether non-security breakage on stable may bypass the twice-weekly cadence and the floor, answered on 2026-10-28: "Regression". Until now a fix for something the last stable release did right, and the current one breaks, waited up to 72 hours on every team install. Now `--regression "#n: worked in v<X>: why"` with `--ref` passes the floor once the tool ties it to the release, and the claim is public in the tag and the notes.
+
+### Added
+- **Regression cuts in `scripts/release-cut.ts`: `--regression "<reason>"` with `--ref <fix sha>`** (workflow input `regression`). The reason must name exactly one earlier stable release `v<X>` and at least one `#<n>`. The cut is refused with `REFUSED_REGRESSION`, red on every trigger, unless `v<X>` is an annotated release tag strictly behind the current stable (the current stable itself never counts), `#<n>` carries the `regression` label (a maintainer's declaration; a `security` label does not count, nor the reverse) and a released commit references `#<n>`. That the behavior really worked in `v<X>` stays attested. The record matches a security cut. The sanitized reason and evidence go into the tag (`Regression:` / `Verified:`), the notes (`(regression release)`, `**Regression release:** …`) and the plan (`REGRESSION:`, `RIDING_ALONG:`); a half-done cut finishes from its tag; an unmoved regression tag must verify again.
+
+### Changed
+- **One exception per cut.** `--security` and `--regression` together are `REFUSED_REGRESSION`. A regression cut passes a dated floor only; `FLOOR_UNKNOWN` (an undatable or unpublished stable) still yields to a security cut alone. The floor counts from any exception release, so the next scheduled cut may be held. `REFUSED_FLOOR` names both ways past it.
+- **"Weekly" wording follows the twice-weekly cadence** in README.md, `bin/gstack-update-channel.sh` (its comment and the no-stable-yet message, now "until the first stable release is cut"), the /gstack-upgrade skill's `AHEAD_OF_STABLE` line and the main-backstop workflow comments. docs/releases.md and docs/recommended-harness.md describe the regression exception.
+
 ## [1.91.291.0] - 2026-10-28
 
 **/ship and /autoplan size their review to the diff.** A /ship review used to send the same specialist army, Red Team, adversarial pass and outside voice at every diff and repeat the whole army after any fix, up to three passes. Now `gstack-review-plan` classifies the diff (docs, tests, code or gate) and plans the next step through one transition table, so a README edit gets the core checklist and a gate change still gets everything. Measured on two captured diffs across five loop scenarios with measured reviewer output (`scripts/review-dispatch-compare.ts`), estimated review tokens fall to a median 0.26x of before on docs-only diffs and 0.85x on code diffs (0.52x over all ten runs, range 0.23–0.99). Every reviewer that can block a ship stays at full effort on the lane's model; a paid replay showed a medium-effort fix-check miss a fail-open that the full-effort check caught.

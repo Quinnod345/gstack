@@ -11,7 +11,7 @@ name: Main backstop gate
 # The verdict is published on the commit as the main-backstop check run
 # (success when a green train covers the tree or the backstop gated it green,
 # neutral when the push was superseded or deferred, failure when it froze the
-# queue or could not finish); the weekly release reads it (docs/releases.md).
+# queue or could not finish); the stable release reads it (docs/releases.md).
 on:
   push:
     branches: [main]
@@ -72,7 +72,7 @@ jobs:
           bun --no-env-file --config=/dev/null --no-install run scripts/train-backstop.ts run --repo "$GITHUB_REPOSITORY" --branch "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" \
             --summary "$GITHUB_STEP_SUMMARY" --outputs "$GITHUB_OUTPUT"
 
-  # The per-commit verdict the weekly release reads (scripts/release-cut.ts).
+  # The per-commit verdict the stable release reads (scripts/release-cut.ts).
   # Its own job with checks: write and no repository code (the same split as
   # evals.yml's train-check): only the action word the gate step recorded.
   backstop-check:

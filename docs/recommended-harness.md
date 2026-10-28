@@ -225,8 +225,8 @@ one place, and run it once by hand before enabling it.
 
 `.github/workflows/weekly-release.yml` ("Stable release") runs
 `scripts/release-cut.ts` every Monday and Thursday at 14:00 UTC, and never moves
-`stable` more than once in 72 hours except for a verified security fix
-(`--security` with `--ref`): it takes the newest green commit on main's first-parent history
+`stable` more than once in 72 hours except for a verified security or regression
+fix (`--security` or `--regression`, with `--ref`): it takes the newest green commit on main's first-parent history
 (its required check succeeded, the backstop check succeeded, every check run
 completed and none failed, no active freeze), tags it `v<VERSION>`, publishes a
 GitHub Release whose notes are one line per CHANGELOG version since the
