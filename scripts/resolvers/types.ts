@@ -142,10 +142,6 @@ export interface ModuleFilter {
   preambleTierMax?: number;
 }
 
-export function moduleExcluded(ctx: TemplateContext, id: string): boolean {
-  return ctx.modules?.excluded.has(id) ?? false;
-}
-
 /** Resolver function signature. args is populated for parameterized placeholders like {{INVOKE_SKILL:name}}. */
 export type ResolverFn = (ctx: TemplateContext, args?: string[]) => string;
 

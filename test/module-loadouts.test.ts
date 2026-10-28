@@ -65,6 +65,7 @@ describe('modules/loadouts.json', () => {
     expect(rungFor(manifest, 'zai/glm-5.3')).toBe('mid');
     expect(rungFor(manifest, 'haiku')).toBe('mid');
     expect(rungFor(manifest, 'some-new-model')).toBe('unknown');
+    expect(rungFor(manifest, 'constructor')).toBe('unknown');
     for (const model of MODEL_CATALOG) expect(rungFor(manifest, model.model)).not.toBe('unknown');
   });
 
@@ -72,12 +73,17 @@ describe('modules/loadouts.json', () => {
     const bad = structuredClone(manifest);
     bad.loadouts.lean = { base: 'missing', exclude: ['preamble:bash', 'section:nope/none'] };
     bad.default.mid = 'ghost';
+    bad.default.light = 'toString';
+    bad.loadouts.noship = { base: 'constructor', exclude: ['skill:ship'] };
     bad.rungs.light.push('claude-opus-5*');
     const problems = validateLoadouts(bad, catalog, CORPUS).join('\n');
     expect(problems).toContain('loadouts.lean.base names no loadout');
     expect(problems).toContain('excludes pinned preamble:bash');
     expect(problems).toContain('"section:nope/none", which is not a module');
     expect(problems).toContain('default.mid names no loadout');
+    expect(problems).toContain('default.light names no loadout');
+    expect(problems).toContain('loadouts.noship.base names no loadout');
+    expect(problems).toContain('excludes skill:ship, which holds pinned section:ship/');
     expect(problems).toContain('matches more than one rung');
   });
 });
@@ -105,6 +111,9 @@ describe('selectModules', () => {
     expect(codeOf(() => selectModules({ modules: 'full,-skill:nope' }))).toBe('MODULE_UNKNOWN');
     expect(codeOf(() => selectModules({ modules: 'full,-preamble:bash' }))).toBe('MODULE_PINNED');
     expect(codeOf(() => selectModules({ modules: 'full,-section:ship/adversarial' }))).toBe('MODULE_PINNED');
+    expect(codeOf(() => selectModules({ modules: 'full,-skill:ship' }))).toBe('MODULE_PINNED');
+    expect(codeOf(() => selectModules({ modules: 'full,-skill:autoplan' }))).toBe('MODULE_PINNED');
+    expect(codeOf(() => selectModules({ loadout: 'constructor' }))).toBe('LOADOUT_UNKNOWN');
   });
 
   test('every error code has a troubleshooting section', () => {
@@ -144,7 +153,7 @@ describe('render filter units', () => {
     expect(preambleSections({ ...tier1, modules: filter([], 1) })).toEqual(preambleSections(tier1));
   });
 
-  test('excluding a base overlay drops the text that inherits it', () => {
+  test('excluding a base overlay drops its text from the overlay that inherits it', () => {
     const astra = ctx({ model: 'gpt-6-astra' as TemplateContext['model'] });
     const withBase = preambleSections(astra).join('\n');
     const withoutBase = preambleSections({ ...astra, modules: filter(['overlay:gpt']) }).join('\n');
@@ -175,6 +184,7 @@ describe('gstack-modules render', () => {
     expect(preamble).not.toContain('Model-Specific Behavioral Patch');
     expect(preamble).toContain('## AskUserQuestion Format');
     expect(fs.existsSync(path.join(out, 'design-shotgun'))).toBe(false);
+    expect(fs.readFileSync(path.join(out, 'gstack/llms.txt'), 'utf-8')).not.toContain('design-shotgun/SKILL.md');
     expect(fs.readFileSync(path.join(out, 'SKILL.md'), 'utf-8')).toContain('Disabled on this install (never invoke or suggest them): `/design-shotgun`');
     expect(lock).toMatchObject({ loadout: 'adhoc', spec, host: 'claude', model: 'claude' });
     expect(lock.excluded).toEqual(spec.split(',').slice(1).map(t => t.slice(1)).sort());
@@ -200,6 +210,7 @@ describe('gstack-modules render', () => {
     const unsafe = renderLoadout({ host: 'claude', selection: selectModules({ modules: 'full,-section:plan-design-review/review-sections' }), outDir: out });
     await expect(unsafe).rejects.toMatchObject({ code: 'MODULE_EXCLUSION_UNSAFE' });
     await expect(unsafe).rejects.toThrow('referenced by plan-design-review/sections/checklist.md');
+    await expect(renderLoadout({ host: 'claude', selection: selectModules({ modules: 'full,-skill:qa' }), outDir: out })).rejects.toThrow(/skill:qa: referenced by qa-only\//);
     expect(readLock(out)).toEqual(before);
     expect(fs.readdirSync(tmp).filter(n => n.includes('.stage-'))).toEqual([]);
   });
@@ -272,9 +283,11 @@ describe('bin/gstack-modules', () => {
 
   test('gen:skill-docs refuses an exclusion render into the committed tree', () => {
     const before = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 }).stdout;
-    const result = spawnSync(process.execPath, [...bunIsolationArgs(), path.join(ROOT, 'scripts/gen-skill-docs.ts'), '--host', 'claude', '--modules', 'full,-skill:design-shotgun'], { cwd: ROOT, encoding: 'utf-8', timeout: 120_000 });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr + result.stdout).toContain('MODULE_SPEC_INVALID');
+    for (const extra of [[], ['--out-dir', '.']]) {
+      const result = spawnSync(process.execPath, [...bunIsolationArgs(), path.join(ROOT, 'scripts/gen-skill-docs.ts'), '--host', 'claude', '--modules', 'full,-skill:design-shotgun', ...extra], { cwd: ROOT, encoding: 'utf-8', timeout: 120_000 });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain('MODULE_SPEC_INVALID');
+    }
     expect(spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 }).stdout).toBe(before);
   });
 

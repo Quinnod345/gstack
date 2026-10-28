@@ -59,7 +59,8 @@ function walk(dir: string, base = dir): string[] {
  * file, so resolver-inlined cross-skill pointers count), an installed-relative
  * pointer naming its skill, or, inside its own skill's directory, a bare
  * `sections/<file>` or the inline-host "section inlined" phrase. An excluded
- * skill counts as referenced by another skill naming its SKILL.md.
+ * skill counts as referenced by another skill naming its SKILL.md or one of
+ * its section files.
  */
 export function danglingReferences(stage: string, selection: ModuleSelection): string[] {
   const checks: Array<{ id: string; scope: string | null; test: (line: string) => boolean }> = [];
@@ -77,6 +78,15 @@ export function danglingReferences(stage: string, selection: ModuleSelection): s
     } else if (id.startsWith('skill:')) {
       const skill = id.slice('skill:'.length);
       checks.push({ id, scope: null, test: line => line.includes(`/${skill}/SKILL.md`) || line.includes(`gstack-${skill}/SKILL.md`) });
+      const manifestPath = path.join(ROOT, skill, 'sections', 'manifest.json');
+      if (fs.existsSync(manifestPath)) {
+        for (const { file } of JSON.parse(fs.readFileSync(manifestPath, 'utf-8')).sections as Array<{ file: string }>) {
+          checks.push(
+            { id, scope: null, test: line => line.includes(`/${skill}/sections/${file}`) },
+            { id, scope: null, test: line => line.includes(`sections/${file}\` relative to the installed`) && line.includes(`${skill}\``) },
+          );
+        }
+      }
     }
   }
   if (!checks.length) return [];
@@ -148,6 +158,9 @@ export async function renderLoadout(request: RenderRequest): Promise<LoadoutLock
       files,
     };
     fs.writeFileSync(path.join(stage, LOCK_FILE), JSON.stringify(lock, null, 2) + '\n');
+    if (!owned(final)) {
+      throw new ModuleError('RENDER_DEST_NOT_OWNED', `${final} changed during the render and now holds no ${LOCK_FILE}`, 'pass an empty or new --out-dir, or one an earlier gstack-modules render wrote');
+    }
     if (fs.existsSync(final)) fs.renameSync(final, retired);
     try {
       fs.renameSync(stage, final);

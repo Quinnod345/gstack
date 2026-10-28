@@ -150,8 +150,8 @@ function parseGenerationArgs(args: string[]): GenerationOptions {
   const badDisabled = disabledSkills.find(n => !/^\/?[a-z0-9-]+$/.test(n));
   if (badDisabled) throw new Error(`--disabled-skills takes skill names (got ${JSON.stringify(badDisabled)})`);
   const modules = selectModules({ loadout: value('--loadout'), modules: value('--modules') });
-  if (modules && outDir === undefined) {
-    throw new ModuleError('MODULE_SPEC_INVALID', `--${value('--modules') === undefined ? 'loadout' : 'modules'} with exclusions needs --out-dir; the committed tree is always the full render`, 'bin/gstack-modules render --host <host> --modules <spec> --out-dir <dir>');
+  if (modules && (outDir === undefined || path.resolve(outDir) === ROOT)) {
+    throw new ModuleError('MODULE_SPEC_INVALID', `--${value('--modules') === undefined ? 'loadout' : 'modules'} with exclusions needs an --out-dir outside the checkout root; the committed tree is always the full render`, 'bin/gstack-modules render --host <host> --modules <spec> --out-dir <dir>');
   }
   const installRoot = value('--install-root');
   if (installRoot !== undefined && !INSTALL_ROOT_PATTERN.test(installRoot)) {
@@ -1151,7 +1151,7 @@ export async function runGeneration(settings: GenerationOptions = {}): Promise<G
   // Shared artifacts are awaited in both modes. A failure must reach the CLI
   // exit code, never disappear in a fire-and-forget auxiliary writer.
   try {
-    const index = await generateLlmsTxt();
+    const index = await generateLlmsTxt({ excludedSkills: excludedSkillDirs(options.modules) });
     emit(path.join(options.outputRoot, 'gstack', 'llms.txt'), index.content, 'index');
     for (const warning of index.warnings) diagnostics.push({ kind: 'warning', message: `[gen-llms-txt] ${warning}` });
   } catch (error) {
@@ -1196,6 +1196,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     }
     return result.exitCode;
   } catch (error) {
+    if (error instanceof ModuleError) {
+      console.error(`${error.code}: ${error.message}`);
+      return 2;
+    }
     console.error(`ERROR: ${(error as Error).message}`);
     return 1;
   }

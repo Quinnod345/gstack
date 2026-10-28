@@ -111,7 +111,7 @@ const matches = (pattern: string, id: string) => (pattern.endsWith('*') ? id.sta
 /** The rung a model id belongs to: aliases first, then the first rung whose pattern matches. */
 export function rungFor(manifest: LoadoutsManifest, raw: string): Rung {
   const id = normalizeModelId(raw);
-  if (manifest.aliases[id]) return manifest.aliases[id];
+  if (Object.hasOwn(manifest.aliases, id)) return manifest.aliases[id];
   for (const rung of RUNGS) if (manifest.rungs[rung].some(p => matches(p, id))) return rung;
   return 'unknown';
 }
@@ -128,23 +128,28 @@ export function validateLoadouts(manifest: LoadoutsManifest, catalog: ModuleEntr
   }
   for (const id of manifest.pinned ?? []) if (!ids.has(id)) problems.push(`pinned id ${clamp(id)} is not a module`);
   const loadouts = manifest.loadouts ?? {};
-  if (!loadouts[FULL] || loadouts[FULL].include !== '*') problems.push('loadouts.full must exist with include "*"');
+  const has = (name: string | undefined) => name !== undefined && Object.hasOwn(loadouts, name);
+  if (!has(FULL) || loadouts[FULL].include !== '*') problems.push('loadouts.full must exist with include "*"');
   for (const [name, def] of Object.entries(loadouts)) {
     if (!NAME_RE.test(name)) problems.push(`loadout name ${clamp(name)} must match ^[a-z0-9-]+$`);
-    if (def.base !== undefined && !loadouts[def.base]) problems.push(`loadouts.${name}.base names no loadout (${clamp(def.base)})`);
+    if (def.base !== undefined && !has(def.base)) problems.push(`loadouts.${name}.base names no loadout (${clamp(def.base)})`);
     for (const id of [...(def.exclude ?? []), ...(Array.isArray(def.include) ? def.include : [])]) {
       if (!ids.has(id)) problems.push(`loadouts.${name} names ${clamp(id)}, which is not a module`);
     }
-    for (const id of def.exclude ?? []) if (pinned.has(id)) problems.push(`loadouts.${name} excludes pinned ${id}`);
+    for (const id of def.exclude ?? []) {
+      if (pinned.has(id)) problems.push(`loadouts.${name} excludes pinned ${id}`);
+      const child = id.startsWith('skill:') ? [...pinned].find(p => p.startsWith(`section:${id.slice('skill:'.length)}/`)) : undefined;
+      if (child) problems.push(`loadouts.${name} excludes ${id}, which holds pinned ${child}`);
+    }
     if (def.preamble_tier_max !== undefined && ![1, 2, 3, 4].includes(def.preamble_tier_max)) problems.push(`loadouts.${name}.preamble_tier_max must be 1-4`);
     const seen = new Set<string>();
-    for (let at: string | undefined = name; at && loadouts[at]; at = loadouts[at].base) {
+    for (let at: string | undefined = name; at && has(at); at = loadouts[at].base) {
       if (seen.has(at)) { problems.push(`loadouts.${name} has a base cycle through ${at}`); break; }
       seen.add(at);
     }
   }
   for (const rung of [...RUNGS, 'unknown'] as const) {
-    if (!loadouts[manifest.default?.[rung]]) problems.push(`default.${rung} names no loadout (${clamp(String(manifest.default?.[rung]))})`);
+    if (!has(manifest.default?.[rung])) problems.push(`default.${rung} names no loadout (${clamp(String(manifest.default?.[rung]))})`);
   }
   for (const raw of corpus) {
     const id = normalizeModelId(raw);
@@ -188,7 +193,7 @@ export function selectModules(input: { loadout?: string; modules?: string }, roo
   assertValid(manifest, catalog);
   const [base, ...edits] = text.split(',').map(t => t.trim());
   const names = Object.keys(manifest.loadouts).sort().join(', ');
-  if (!manifest.loadouts[base]) {
+  if (!Object.hasOwn(manifest.loadouts, base)) {
     throw new ModuleError('LOADOUT_UNKNOWN', `${clamp(base)} is not a loadout (valid: ${names})`, 'gstack-modules list');
   }
   if (input.loadout !== undefined && edits.length) {
@@ -206,6 +211,10 @@ export function selectModules(input: { loadout?: string; modules?: string }, roo
     if (!entry) throw new ModuleError('MODULE_UNKNOWN', `${clamp(id)} is not a module`, 'gstack-modules list');
     if (op === '-' && entry.pinned) {
       throw new ModuleError('MODULE_PINNED', `${id} is pinned and can never be excluded`, `drop -${id} from the spec (pinned ids: gstack-modules list --pinned)`);
+    }
+    const pinnedChild = op === '-' && id.startsWith('skill:') ? catalog.find(e => e.pinned && e.id.startsWith(`section:${id.slice('skill:'.length)}/`)) : undefined;
+    if (pinnedChild) {
+      throw new ModuleError('MODULE_PINNED', `${id} holds pinned ${pinnedChild.id} and can never be excluded`, `drop -${id} from the spec (pinned ids: gstack-modules list --pinned)`);
     }
     if (op === '-') excluded.add(id); else excluded.delete(id);
   }

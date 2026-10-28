@@ -8,7 +8,7 @@ Install-time model detection, which picks a loadout for the model you run, ships
 
 | Term | Meaning |
 |---|---|
-| Module | One of four kinds. `skill:<dir>` is a whole skill. `section:<skill>/<id>` is one entry of `<skill>/sections/manifest.json`. `overlay:<name>` is one `model-overlays/<name>.md`; excluding a base overlay also drops the text that inherits it. `preamble:<id>` is one piece of the shared preamble (`PREAMBLE_PIECES` in `scripts/resolvers/preamble.ts`). |
+| Module | One of four kinds. `skill:<dir>` is a whole skill. `section:<skill>/<id>` is one entry of `<skill>/sections/manifest.json`. `overlay:<name>` is one `model-overlays/<name>.md`; excluding a base overlay also removes the base's text from every overlay that inherits it; the inheriting overlay's own text stays. `preamble:<id>` is one piece of the shared preamble (`PREAMBLE_PIECES` in `scripts/resolvers/preamble.ts`). |
 | Pinned | A module no loadout can remove where `full` renders it: the start command, plan-mode rules, the question format, completion status, the unattended profile, /ship's review army and adversarial pass, the router and `/gstack-upgrade`. A skill's `preamble-tier` still applies, so a tier-1 skill has no question-format section in any loadout. |
 | Rung | How much scaffolding a model gets: `frontier`, `strong`, `mid`, `light`, or `unknown`. Model ids are matched after lowercasing and stripping a `provider/` prefix (`anthropic/claude-haiku-5-5` is `mid`). Rungs are separate from the frontier/smart tiers in `lib/model-catalog.ts`, which choose which model runs a role. |
 | Loadout | `{ base, exclude, include, preamble_tier_max, note }`. `full` (include `*`) is always present. An unknown model gets `default.unknown`, which is `full`. |
