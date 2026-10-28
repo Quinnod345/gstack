@@ -15,7 +15,7 @@ to one schema.
 
 Nothing is built yet.
 EOF
+printf '.gstack-home/\n' >> .git/info/exclude
 git add -A
 git commit -qm init
-printf '.gstack-home/\n' >> .git/info/exclude
 mkdir -p .gstack-home/projects
