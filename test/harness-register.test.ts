@@ -311,7 +311,7 @@ describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
     return dir;
   }
 
-  test('refuses before sending anything when the repository is over QM\'s pack cap, and names the cap when QM refuses', async () => {
+  test('refuses before sending anything when the repository is over QM\'s pack cap, and names the cap QM recorded when it refuses, without a retry', async () => {
     const q = fakeQm();
     try {
       const d = tmp();
@@ -322,14 +322,26 @@ describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
       expect(q.calls).toEqual([]);
       expect(fs.existsSync(path.join(d, 'state', 'harness'))).toBe(false);
     } finally { q.server.stop(true); }
-    const capped = Bun.serve({ port: 0, fetch: (req) => new URL(req.url).pathname.endsWith('/import')
-      ? new Response('{"error":"internal","message":"pack exceeds max bytes (33554432)"}', { status: 500 })
-      : req.method === 'GET' ? Response.json({ packs: [] }) : Response.json({ pack: { id: 'pk1' } }) });
+    const recorded: Array<Record<string, unknown>> = [];
+    const imports: string[] = [];
+    const capped = Bun.serve({ port: 0, fetch: async (req) => {
+      const u = new URL(req.url);
+      if (req.method === 'GET') return Response.json({ packs: recorded });
+      if (u.pathname.endsWith('/import')) {
+        imports.push(u.pathname);
+        recorded[0].lastImport = { status: 'error', error: 'pack exceeds max bytes (33554432)' };
+        return Response.json({ error: 'internal', message: 'internal server error' }, { status: 500 });
+      }
+      const b = await req.json() as Record<string, unknown>;
+      recorded.push({ id: 'pk1', url: b.url, ref: b.ref });
+      return Response.json({ pack: recorded[0] });
+    } });
     try {
       const d = tmp();
       const err = await registerQm({ checkout: smallCheckout(), stateRoot: path.join(d, 'state'), env: { GSTACK_QM_URL: 'http://127.0.0.1:' + capped.port, GSTACK_QM_ADMIN_TOKEN: 't0k' }, version: VERSION, yes: true }).catch(e => e);
       expect(err.code).toBe('HARNESS_QM_PACK_TOO_LARGE');
       expect(err.message).toContain('pack exceeds max bytes (33554432)');
+      expect(imports).toHaveLength(1);
     } finally { capped.stop(true); }
   });
 

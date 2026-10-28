@@ -30,11 +30,12 @@ const tooLarge = (what: string) => new HarnessError('HARNESS_QM_PACK_TOO_LARGE',
 /** Files and bytes QM would read from the repository at ref. */
 export function packSize(checkout: string, ref: string): { files: number; bytes: number } {
   const r = spawnSync('git', ['-C', checkout, 'ls-tree', '-r', '-l', ref], { encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0 || !ref) throw new HarnessError('HARNESS_QM_API', 'could not read the gstack checkout at ' + (ref || 'HEAD') + ' to size the pack (QM imports a git commit, so register qm needs a git checkout of gstack)');
   let files = 0; let bytes = 0;
   for (const line of (r.stdout ?? '').split('\n')) {
-    const size = Number(line.split(/\s+/)[3]);
-    if (line.split(/\s+/)[1] !== 'blob' || !Number.isFinite(size)) continue;
-    files++; bytes += size;
+    const [mode, type, , size] = line.split(/\s+/);
+    if (type !== 'blob' || mode === '120000' || !Number.isFinite(Number(size))) continue;
+    files++; bytes += Number(size);
   }
   return { files, bytes };
 }
@@ -71,8 +72,6 @@ async function call(auth: QmAuth, method: string, pathname: string, payload?: un
       headers: { 'content-type': 'application/json', ...auth.headers(method, pathname, body) },
     });
     const text = await res.text();
-    const cap = /pack exceeds max (bytes|files) \(\d+\)/.exec(text);
-    if (!res.ok && cap) throw tooLarge('QM refused the pack: ' + cap[0]);
     if (!res.ok) throw new HarnessError('HARNESS_QM_API', method + ' ' + pathname + ' returned HTTP ' + res.status + ': ' + text.slice(0, 200));
     return text ? JSON.parse(text) : {};
   } catch (e) {
@@ -111,7 +110,11 @@ export async function registerQm(opts: { checkout: string; stateRoot: string; en
     const pack = existing ?? (await call(auth, 'POST', '/v1/admin/skill-packs', { url: GSTACK_REPO_URL, ref, config: QM_PACK_CONFIG, trustTier: 'third-party' })).pack;
     if (!pack?.id) throw new HarnessError('HARNESS_QM_API', 'QM did not return a pack id');
     writeLedger(lfile, { meta: { id, target: 'qm', dest: auth.url, mode: 'all', checkout: opts.checkout, version: opts.version, qm_pack: pack.id, qm_ref: ref }, files: [], dirs: [], blocks: [] });
-    const imported = await call(auth, 'POST', '/v1/admin/skill-packs/' + encodeURIComponent(pack.id) + '/import', { selected: 'all' });
+    const imported = await call(auth, 'POST', '/v1/admin/skill-packs/' + encodeURIComponent(pack.id) + '/import', { selected: 'all' }).catch(async (e) => {
+      const recorded = ((await call(auth, 'GET', '/v1/admin/skill-packs').catch(() => ({}))).packs ?? []).find((p: any) => p.id === pack.id)?.lastImport;
+      const cap = /pack exceeds max (bytes|files) \(\d+\)/.exec(String(recorded?.error ?? ''));
+      throw cap ? tooLarge('QM refused the pack: ' + cap[0]) : e;
+    });
     return { pack, existing: !!existing, imported };
   };
   let out;
