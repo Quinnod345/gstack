@@ -200,8 +200,9 @@ Two stages with separate clocks, both printed:
   <why>` (the `lanes` detail adds `N removed path(s)`), when it is a JS, TS,
   Python, Dart or bats test and no remaining file imports it (directly or
   through a directory it reads; otherwise `still imported by …`). It runs
-  the tests of each remaining non-Markdown file that mentions its basename,
-  such as a curation list (`files naming it run: …`), and fails closed when
+  the tests of each remaining non-Markdown file that mentions its name
+  without the final extension as a whole word (`alpha.test`, `test_alpha`:
+  a path with or without the extension, or a dotted module), such as a curation list (`files naming it run: …`), and fails closed when
   such a file has no test (`still named by …, which no test covers`). A test
   renamed to another test path then defers to its new name (`old name of
   <new>`). A deleted test, or one renamed to a non-test path, also runs its

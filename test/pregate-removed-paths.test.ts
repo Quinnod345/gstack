@@ -229,6 +229,20 @@ describe('removed paths in lanes (#3529)', () => {
       expect(r.removed[0]).toContain('files naming it run: test/curation.test.js');
     });
 
+    test.each([
+      ['an extensionless path in package.json', 'test/util.test.js', { 'package.json': '{ "name": "fixture", "scripts": { "smoke": "node --test test/util.test" } }\n' }],
+      ['a dotted module name in a Makefile', 'tests/test_alpha.py', { 'tests/__init__.py': '', 'tests/test_alpha.py': 'import unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n', 'Makefile': 'smoke:\n\tpython3 -m unittest tests.test_alpha\n' }],
+      ['a dotted module name untested code imports at run time', 'app/test_handlers.py', { 'app/__init__.py': '', 'app/test_handlers.py': 'X = 1\n', 'app/registry.py': 'import importlib\nH = importlib.import_module("app.test_handlers")\n' }],
+    ])('a removed test named only by %s that no test covers fails closed', (_how, removed, files) => {
+      const repo = fixture({ baseFiles: files });
+      commit(repo, { [removed]: null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.removed).toEqual([]);
+      const explain = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(explain.out + explain.err).toContain(`${removed}: removed, but still named by`);
+    });
+
     test('a removed test a file no test covers still names fails closed', () => {
       const repo = fixture({ baseFiles: { 'scripts/skip-list.txt': 'test/util.test.js\n' } });
       commit(repo, { 'test/util.test.js': null });
