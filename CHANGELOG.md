@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+**The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
+
+### Fixed
+- **`/review` Step 5.8**: an unresolved non-gate defect (an unanswered question) is recorded as `open`, so every finding has a record action. A repeat pass's reruns of superseded probes are revalidation, so they run after smoke expiry, in the same probe directory; earlier provisional QA sections link checkpoints and only the final pass runs the once-only `materialize`.
+- **`/plan-eng-review`**: the shared Voice now loads once. Eng no longer carries a near-copy whose only difference was its em-dash clause; the Scope gate's format precedence says required formats keep their em dashes.
+- **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
+
+### Changed
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, requests and 429 waits, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason. Counts only, never content. Deadlines, effort, samples and thresholds are unchanged.
+
+### Tests
+- `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events and a cancelled 429 wait, with no-abort controls; all three fail with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
+
+### Gate integrity
+- No threshold, sample, trial, deadline or case-kind change. Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
 ## [1.91.294.0] - 2026-10-28
 
 **`gstack-doctor` and setup's hook check start far fewer processes, so the doctor tests fit the Windows CI lane again.** On Windows Git Bash each process start costs 12 to 77 ms, and the doctor spent most of its time starting them: about 3.3 s per `--check` and 6 s per dashboard run. `windows-free-shard (1)` was red on main because `test/gstack-doctor.test.ts` took 553 to 647 s there. Every doctor row, fix line and JSON field prints the same as before.
