@@ -5,7 +5,7 @@
 **Dia is gone from gstack.** `/setup-browser-cookies` and `cookie-import-browser` no longer list Dia as a cookie source, and the Dia qualification harness is deleted. That harness was a set of macOS campaigns that never qualified a native import, and its `dia-launch-comparison` free test was failing the merge train on Ubicloud runners. Cookie import from Comet, Chrome, Chromium, Arc, Brave, Edge, Opera and Opera GX is unchanged.
 
 ### Removed
-- **Dia as a cookie source**: the registry entry, the `dia` alias, and every Dia mention in the `cookie-import-browser` description, the browse and setup-browser-cookies skills, README, BROWSER.md, ARCHITECTURE.md and docs/skills.md.
+- **Dia as a cookie source**: the registry entry, the `dia` alias, and every Dia mention in the `cookie-import-browser` description, the browse and setup-browser-cookies skills, `gstack/llms.txt`, README, BROWSER.md, ARCHITECTURE.md, CONTRIBUTING.md, docs/skills.md and docs/TESTING_INTERNALS.md.
 - The `dia-native`, `dia-launch-comparison` and `dia-gui-readiness` modes are gone from `native-qualification.yml`, along with their job, the four `.github/scripts` files behind them, and their three `browse/test` files. Those tests also leave the free-test duration seed and the test typecheck baseline.
 - **`clang` on the Ubicloud free-suite VM**: only the Dia GUI readiness test compiled C on Linux.
 
