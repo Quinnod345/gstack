@@ -23,6 +23,7 @@ import * as path from 'path';
 import type { ParityBaseline, SkillBaselineEntry } from './capture-parity-baseline';
 import { captureBaseline } from './capture-parity-baseline';
 import { CARVE_GUARDS } from './carve-guards';
+import { ledgerFailure, readSizeLedger } from './size-ledger';
 
 export interface ParityInvariant {
   skill: string;
@@ -50,6 +51,8 @@ export interface ParityInvariant {
   sectioned?: boolean;
   /** Max bytes for the always-loaded skeleton SKILL.md (carved skills only). */
   maxSkeletonBytes?: number;
+  /** Size ledger directory (test/helpers/size-ledger.ts): union bytes must equal its total; replaces maxSizeRatio. */
+  sizeLedger?: string;
 }
 
 export interface ParityCheckResult {
@@ -121,7 +124,10 @@ export function checkSkillParity(
   }
 
   // SIZE checks (union bytes for carved skills, skeleton bytes for monoliths)
-  if (invariant.maxSizeRatio !== undefined && baseline) {
+  if (invariant.sizeLedger !== undefined) {
+    const failure = ledgerFailure(invariant.skill, checkBytes, readSizeLedger(repoRoot, invariant.sizeLedger), baseline?.skillMdBytes);
+    if (failure) failures.push(failure);
+  } else if (invariant.maxSizeRatio !== undefined && baseline) {
     const ratio = checkBytes / baseline.skillMdBytes;
     if (ratio > invariant.maxSizeRatio) {
       failures.push(`size ratio ${ratio.toFixed(3)} > maxSizeRatio ${invariant.maxSizeRatio}`);
@@ -230,7 +236,7 @@ const CARVED_INVARIANTS: ParityInvariant[] = Object.values(CARVE_GUARDS).map((g)
   // CSO's helper trust boundary requires its private startup; demanding the
   // shared Preamble here would silently reintroduce conflicting policy.
   mustHaveHeadings: g.skill === 'cso' ? [] : ['## Preamble'],
-  maxSizeRatio: g.maxSizeRatio ?? 1.05,
+  ...(g.sizeLedger ? { sizeLedger: g.sizeLedger } : { maxSizeRatio: g.maxSizeRatio ?? 1.05 }),
 }));
 
 export const PARITY_INVARIANTS: ParityInvariant[] = [

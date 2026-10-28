@@ -1070,9 +1070,9 @@ describe('verify, freeze, repair and clear', () => {
   }, 300_000);
 
   // Value: protects=a slot unreadable on GitHub beside a merged one is left out of unmerged and named in the reason, so the rebuild after the repair never seats a PR that may already be in; fails_when=freezeQueue files an unreadable slot under unmerged, or drops it without naming it; why_new=the test above keeps slot 2 readable; seam=the fixture's gh pr view vanishing for slot 2; no_claim=the backstop's outcome
-  test("a slot unreadable on GitHub beside a merged one is left out of unmerged and named in the freeze reason", () => {
+  test("a slot unreadable on GitHub beside a merged one is left out of unmerged, recorded as unreadable and named by the NEXT after the repair", () => {
     const fx = make();
-    const { nonce } = twoPrTrain(fx);
+    const { h2, nonce } = twoPrTrain(fx);
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
     const t = trainJson(fx, nonce);
     const coord = coordinatorClone(fx.repo);
@@ -1082,7 +1082,72 @@ describe('verify, freeze, repair and clear', () => {
     const frozen = queue(fx, ['verify', '--pr', '1', '--train', nonce], {}, coord);
     expect(frozen.status).toBe(EXIT.fail);
     expect(line(frozen.out, 'freeze:')).toMatch(/; #1 merged on GitHub without a verified tree; #2 unreadable on GitHub, left out of unmerged; seat it in a train by hand once gh pr view answers; unmerged \(none\); repair none admitted$/);
-    expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [] });
+    expect(JSON.parse(fs.readFileSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`), 'utf8'))).toMatchObject({ merged: ['1'], unmerged: [], unreadable: [{ pr: '2', head: h2 }] });
+    expect(line(frozen.out, 'unreadable:')).toBe(`unreadable: #2@${h2.slice(0, 12)} (GitHub did not answer at the freeze; neither merged nor unmerged)`);
+    // The repair clears the freeze, and the NEXT names the unreadable slot instead of omitting it (#3519 b).
+    const h3 = openPr(fx, '3');
+    readyReceipt(fx, '3', h3);
+    const rn = nonceOf(queue(fx, ['train', 'build', '--repair', '--prs', `3@${h3}`]).out);
+    expect(queue(fx, ['train', 'verdict', '--train', rn]).status).toBe(EXIT.ok);
+    publishMain(fx, trainJson(fx, rn).prefixes[1].commit, '1.2.6.0');
+    const cleared = queue(fx, ['verify', '--pr', '3', '--train', rn], {}, coord);
+    expect(cleared.out).toMatch(/^FREEZE: cleared /m);
+    expect(next(cleared.out)).toBe(`NEXT: gh pr view 2 --json state,headRefOid (unreadable at the freeze: #2@${h2.slice(0, 12)}); seat each that is OPEN in a train`);
+  }, 300_000);
+
+  // Value: protects=verify on a train whose every slot already merged, against a main another train verified, refuses as stale instead of freezing the queue and dispatching a backstop (#3519 c: train 24's record froze the queue at 9ccb5233, T1 of verified train 28, run 40586582766); fails_when=stopped() freezes when every slot merged and main's sha is another train's verified prefix, or refuses without that proof; why_new=every freeze test above has an unmerged or unverified main; seam=a second train record written into the state root; no_claim=what prune --stale then does (covered by the prune tests)
+  test("verify on a train whose every slot merged, against a main another train verified, refuses as stale and freezes nothing", () => {
+    const fx = make();
+    const { nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    const coord = coordinatorClone(fx.repo);
+    const v = (pr: string) => queue(fx, ['verify', '--pr', pr, '--train', nonce], {}, coord);
+    publishMain(fx, t.prefixes[1].commit, '1.2.4.0');
+    expect(v('1').status).toBe(EXIT.ok);
+    const later = publishMain(fx, t.prefixes[2].commit, '1.2.5.0', { file: 'stray.txt', text: 'a later train\n' });
+    fx.write(d => { (d.prs['2'] as any).state = 'MERGED'; });
+    const freezeFile = path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`);
+    const tree = fx.repo.git('rev-parse', `${later}^{tree}`);
+    const otherNonce = `${nonce}-later`;
+    const other = { ...t, nonce: otherNonce, state: 'merging', prefixes: [t.prefixes[0], { index: 1, commit: later, tree, pr: '9' }], merged: [{ pr: '9', sha: later, tree, at: '2026-10-18T13:00:00.000Z' }] };
+    fs.mkdirSync(path.join(fx.state, 'ship-queue', 'trains', otherNonce), { recursive: true });
+    fs.writeFileSync(path.join(fx.state, 'ship-queue', 'trains', otherNonce, 'train.json'), JSON.stringify(other));
+    const stale = v('2');
+    expect(stale.status).toBe(EXIT.refused);
+    expect(stale.err).toContain(`every slot of train ${nonce} merged on GitHub and main ${later.slice(0, 12)} is T1 of train ${otherNonce} (#9, verified at 2026-10-18T13:00:00.000Z), so this record is stale and the queue is not frozen`);
+    expect(stale.err).toContain('(QUEUE_TRAIN_STALE)');
+    expect(next(stale.out)).toBe(`NEXT: gstack-ship-queue train prune --stale --train ${nonce}`);
+    expect(fs.existsSync(freezeFile)).toBe(false);
+    expect(dispatches(fx, 'evals.yml').filter(d => d.ref === 'main').length).toBe(0);
+    // Without another train's verified record for this main, the same mismatch still freezes.
+    fs.rmSync(path.join(fx.state, 'ship-queue', 'trains', otherNonce), { recursive: true });
+    const frozen = v('2');
+    expect(frozen.status).toBe(EXIT.fail);
+    expect(line(frozen.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1,#2; main /);
+  }, 300_000);
+
+  // Value: protects=a train with a slot still OPEN on GitHub freezes on a mismatch even when main's sha is another train's verified prefix; fails_when=the every-slot-merged guard before verifiedElsewhere is dropped or weakened, so a live train refuses as stale and skips the freeze; why_new=the test above only covers an all-merged train; seam=none; no_claim=prune behavior
+  test("a train with a slot still open freezes on the mismatch even when another train verified main's sha", () => {
+    const fx = make();
+    const { nonce } = twoPrTrain(fx);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const t = trainJson(fx, nonce);
+    const coord = coordinatorClone(fx.repo);
+    const v = (pr: string) => queue(fx, ['verify', '--pr', pr, '--train', nonce], {}, coord);
+    publishMain(fx, t.prefixes[1].commit, '1.2.4.0');
+    expect(v('1').status).toBe(EXIT.ok);
+    const later = publishMain(fx, t.prefixes[2].commit, '1.2.5.0', { file: 'stray.txt', text: 'a later train\n' });
+    const tree = fx.repo.git('rev-parse', `${later}^{tree}`);
+    const otherNonce = `${nonce}-later`;
+    const other = { ...t, nonce: otherNonce, state: 'merging', prefixes: [t.prefixes[0], { index: 1, commit: later, tree, pr: '9' }], merged: [{ pr: '9', sha: later, tree, at: '2026-10-18T13:00:00.000Z' }] };
+    fs.mkdirSync(path.join(fx.state, 'ship-queue', 'trains', otherNonce), { recursive: true });
+    fs.writeFileSync(path.join(fx.state, 'ship-queue', 'trains', otherNonce, 'train.json'), JSON.stringify(other));
+    const partial = v('2');
+    expect(partial.status).toBe(EXIT.fail);
+    expect(partial.err).not.toContain('(QUEUE_TRAIN_STALE)');
+    expect(line(partial.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1; main /);
+    expect(fs.existsSync(path.join(fx.state, 'ship-queue', 'freeze', `${repoKey(fx)}.json`))).toBe(true);
   }, 300_000);
 
   // Value: protects=a post-merge CHANGELOG difference is excused only when main's parent is T<i-1> modulo stamps, so a foreign commit between the verified head and the squash freezes; fails_when=published() skips or inverts the parent check; why_new=the two tests above reach the CHANGELOG rule only with a parent that is T1 modulo stamps; seam=none; no_claim=a parent differing from T1 in the CHANGELOG alone

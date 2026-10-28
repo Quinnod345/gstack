@@ -42,6 +42,17 @@ Run directories and scratch on Capy live under `~/.capy/work/<name>` (`--out ~/.
 
 Capy checklist for `/autoplan`: drive `gstack-autoplan`, never a hand adaptation presented as a run. Relay `gstack-gate render <dir>/gate.json --all` with `rec` (every recommendation, plan changes included) as the one-word default; answer with `--by agent:<id> --owner-reply "<their words>"`. Set `GSTACK_AUTOPLAN_CHECKPOINT_DIR` to a private project-user Drive folder; after machine replacement, `gstack-autoplan resume --out <new dir> --from <that dir>` restores the newest valid checkpoint.
 
+## Plan, approve, ship
+
+Every Capy thread that uses gstack follows these for new work, under a Captain or on its own. The rule in full is `docs/captain.md`, "Plan before build"; the lane side is section 3 of captain.md in this folder.
+
+- **Plan first.** Before building new functionality, run `/autoplan` on it as the first act after the install check, sized to the work (scope flags and `--max-rounds`; a one-file fix gets `--no-ui --no-dx --max-rounds 1` with `--estimate-usd` and a small `--spend-cap`, never no run).
+- **ELI5, then the word.** Send the plan and gate to the person, or the Captain, in plain language: `gstack-owner-brief render --captain --out <run dir>`, with `rec` as the one-word default and a "do it" reply that takes every recommendation at full scope. Build only after their word is answered into the run and it reports `APPROVED`; then `gstack-approvals import --autoplan <run dir> --by "<owner>"`.
+- **/ship before ready.** Run /ship at the final pushed head before a PR is called ready; `SHIP_RECEIPT: pr=<n> head=<head>` must name that head, and a later push needs a new /ship. The review inside /ship, like the autoplan, is sized to the change.
+- **No merge without the owner's word.** A thread never merges on its own; under a Captain the controller merges on a recorded standing approval, and a thread with no Captain asks the person.
+
+Exempt from the plan step: read-only work, the daily flaky pass's repairs, slot stamps, CHANGELOG-only resolves and cap re-pins under a written grant.
+
 ## Working under a Captain
 
 When you work for a Capy Captain (a crew thread) or straight for a person, gstack's decisions reach them through you. Every workflow started with the `GSTACK_LAUNCH` line prints `CAPY: on` and a `capy-asks` block that repeats these rules. The full guide, with worked examples and copy-paste templates, is [captain.md](captain.md) in this folder.

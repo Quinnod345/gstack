@@ -70,6 +70,13 @@ gstack-approvals render                                    # the ## Approvals se
 
 ## 3. Plan approvals: the shape
 
+Under a Captain, a thread that builds something plans before any product code. A `/autoplan` run on its
+brief, sized to the work, is its first act, the gate goes up in the shape below, and the build starts only
+when the answer is in the run and it reports `APPROVED`. The short form every Capy thread follows, with the
+exempt work (read-only threads, flaky-pass repairs, slot stamps, CHANGELOG resolves, cap re-pins under a
+grant), is the "Plan, approve, ship" section of SKILL.md in this folder; the rule in full is `docs/captain.md`,
+Plan before build.
+
 Every plan or gate you bring for approval has these parts, in this order, written so someone outside the
 project can follow it:
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.287.0] - 2026-10-28
 
 **Write, change and slim skills with `/write-skill`; the first diet halves /learn's template with the same results.** Garry asked, 2026-10-27: "Can we incorporate skill writing and improvement into gstack? https://github.com/nicobailon/skill-diet". gstack now has one skill for writing a new skill, changing an existing one, and putting one on a diet, plus a size bill, a static check that skills only call flags their bins accept, and a contract for the shared before/after skill eval the gstack-evals crew is building. /learn is the pilot: its template drops from 5,797 to 2,955 bytes and its rendered SKILL.md from 11,217 to 8,375. An A/B of 30 sessions per version on claude-opus-5-5 passed 30/30 before and 30/30 after (29/30 with no skill), with 10% fewer tokens per session. Adapted from nicobailon/skill-diet at 5f41df1 (MIT; NOTICE.md). Plan approved by Garry, 2026-10-27: "A1, B1, C1 D1 E1" and "Rec".
 
@@ -18,6 +18,49 @@
 ### Fixed
 - **`gstack-learnings-search --cross-project`** no longer drops every project when the state root path contains the current project's slug.
 - **The learnings bins refuse bad input.** An unknown flag, a flag without its value, or a `--limit` that is not a positive integer exits 2 with the valid flags named, before any state is read or written; before, unknown flags were silently skipped. No gstack caller passes one.
+
+## [1.91.286.0] - 2026-10-28
+
+**Two ship-touching PRs in one merge train no longer overshoot ship's size cap together, and verify stops freezing the queue on a train whose PRs all landed long ago.** Train 26's free run failed twice ("size ratio 1.753 > maxSizeRatio 1.7528", then "1.752 > 1.7524") because each PR re-pinned the same ratio on its own tree. Ship's cap is now a byte ledger. Each branch records its own signed delta, and the deltas add up exactly in any train order. Train 24's leftover record froze the queue on a main train 28 had already verified (#3519); verify now calls that record stale instead.
+
+### Changed
+- **Ship's parity size cap** (`test/helpers/carve-guards.ts`, `test/helpers/parity-harness.ts`, `test/helpers/size-ledger.ts`): ship's `maxSizeRatio: 1.7529` is replaced by `sizeLedger: 'test/size-ledger/ship'`. The parity suite requires ship's union bytes to equal `base.json` (329,024 bytes, measured on main 10b77de merged with this PR) plus one `<branch>.json` entry (`{ bytes, why }`) per branch that changed them. A missing base, a malformed entry, an under-declared growth and an undeclared shrink all fail with the exact byte gap and the command that fixes it. Other skills keep their ratio caps. The ratio's history moved verbatim to `test/size-ledger/ship/HISTORY.md`.
+
+### Added
+- **`scripts/size-ledger.ts`**: `record <skill> --why "<what changed>"` writes this branch's entry from the measured difference (and deletes it when the difference is zero), `check <skill>` prints measured, expected and every entry, and `fold <skill> --measured-at "<tree>"` moves the entries into `base.json` in a tidy-up PR. `record` refuses on main, master or a detached HEAD.
+- **`QUEUE_TRAIN_STALE`** (`gstack-ship-queue verify --train`): when every slot of the train already merged on GitHub and main's sha is a prefix another train's verify confirmed (read after the notes ref), verify refuses with `NEXT: gstack-ship-queue train prune --stale --train <nonce>`, freezes nothing and dispatches no backstop. A train with a slot still open, a main no train verified, or a `--no-fetch` run freezes as before.
+
+### Fixed
+- **Freeze records keep unreadable slots** (`lib/ship-queue-train-record.ts`, `lib/ship-queue-train.ts`): a slot GitHub could not answer for beside a merged one is stored under an optional `unreadable` field, printed on an `unreadable:` line, and named after the repair as `gh pr view <n> --json state,headRefOid` so the operator checks it before seating it. Records written before the field read unchanged.
+
+### Tests
+- `test/size-ledger.test.ts`: the train-26 shape fails under ratio pins and passes under the ledger in both merge orders through the real `buildChain`; missing, under-declared, shrinking, duplicate-edit and malformed ledgers fail. The fixture repo checks out with `core.autocrlf false`, so Windows counts the same bytes.
+- `test/ship-queue-train.test.ts`: an all-merged train on a main another train verified refuses as stale; the same train with a slot still open freezes; unreadable slots land in the field, the freeze lines and the post-repair NEXT.
+
+### Docs
+- docs/ship-policy.md § Run a merge train: size caps compose through the ledger, and the stale-train and unreadable-slot rules. docs/troubleshooting.md: `QUEUE_TRAIN_STALE`.
+
+### Gate integrity
+- Ship's union-size gate changes from a ceiling (`maxSizeRatio`) to an equality ledger at the same value (329,024 bytes, 1.7529 × 187,706, measured on main 10b77de merged with this PR); no skill prose changed, so ship's bytes did not move. No other threshold, timeout, trial count or case kind changed.
+
+## [1.91.285.0] - 2026-10-27
+
+**A lane plans before it builds, and the /captain skill says so.** Until now a crew thread told to build something started editing, and the first chance for the controller or the owner to say "smaller" or "not that way" was a finished PR with a paid gate behind it; the rule that a sized /autoplan comes first lived only in one crew's rules file, which a crew set up from gstack's templates would never read. The /captain skill, `docs/captain.md` and the crew templates now carry it: a building lane's first act is an /autoplan run sized to the work, the plan and its gate go up to the controller in plain language, the controller relays one ask with the recommended reply as the one-word default and a "do it" reply, and the lane builds only after the owner's word is answered into the run and it reports `APPROVED`.
+
+### Added
+- **`docs/captain.md` § Plan before build**: who plans (any lane that builds; any new scope taken on part-way), the first act (`/autoplan` sized to the work, with the short-run flags for a one-file fix), what the lane sends (`gstack-owner-brief render --captain`, the cost lines, a needs-you report), what the controller relays (shape B, `rec` as the default, "do it"), the build gate (the answer in the run, amendments incorporated, reopened phases finished, `APPROVED`; an imported approval row alone is not completion), the record (`gstack-approvals import --autoplan`, rendered into the report and PR body), and the exemptions (read-only lanes, the daily flaky pass's repairs, slot stamps, CHANGELOG-only resolves, cap re-pins under a written grant; a crew may add, never remove). The rule is row 24 of the "Where each rule lives" table; the READY contract and merge trains are unchanged, and a plan approval is not a READY field.
+- **`captain/templates/brief.md`**: the controller's brief to a lane. A header with the lane, controller, rules file, owned files, the files other lanes own, a `Plan: required | approved: <run> | exempt: <reason>` line and the spend cap; step 1 the plan and the plan ask, step 2 the build after the word, step 3 /ship to READY; a done line that names the approval row or the exemption. A brief marked `approved` starts at step 2, one marked `exempt` at step 3.
+- **`captain/templates/CREW.md` rule 24** (Plan before build) with its home, and a row for the owner's words in the standing-approvals table. Crew-specific rules now number from 25; a crew whose own rules already took 24 keeps its numbering and cites the section by name.
+
+### Changed
+- **`captain/SKILL.md.tmpl`**: the approvals part carries a "Plan before build" paragraph pointing at the section and the brief, and the rules enumeration names the rule.
+- **`capy/skill/gstack/SKILL.md` § Plan, approve, ship**: the short form every Capy thread follows, under a Captain or on its own (the owner, 2026-10-27: "Also incorporate the autoplan and eli5 and ship instructions for Capy-specific gstack usage"): /autoplan sized to the work before new functionality, the ELI5 with `rec` as the one-word default and a "do it" reply, the build only after the word and an `APPROVED` run, /ship at the final pushed head before a PR is called ready with the receipt naming that head, no merge without the owner's word, the review inside /ship and the autoplan sized to the change, and the exempt work. References are plain text, since the folder is copied to a Drive without the repository; the owner copies `capy/skill/gstack/` over the Drive skill folder to pick it up.
+- **`capy/skill/gstack/captain.md` § 3**: the lane-side pointer, so a thread launched on Capy sees the first-act rule where it reads the plan-ask shape, pointing at the SKILL.md section.
+- **`captain/templates/plan-ask.md`**: the record line names the autoplan path (`gstack-autoplan answer … --owner-reply`, then `gstack-approvals import --autoplan`) and keeps `gstack-approvals add` for plans that are not autoplan gates.
+- **`docs/captain.md` Setting it up, step 5**: lanes start with the brief.
+
+### Tests
+- `test/captain-skill.test.ts` ships `brief.md` in the template set (existence, reference, generic prose), pins the CREW template at 24 rules and `docs/captain.md` at 24 mapped rows, and asserts the new section, the brief's `Plan:` line and step order, and the skill's paragraph.
 
 ## [1.91.284.0] - 2026-10-27
 
