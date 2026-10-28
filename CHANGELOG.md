@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.286.0] - 2026-10-28
 
 **Two ship-touching PRs in one merge train no longer overshoot ship's size cap together, and verify stops freezing the queue on a train whose PRs all landed long ago.** Train 26's free run failed twice ("size ratio 1.753 > maxSizeRatio 1.7528", then "1.752 > 1.7524") because each PR re-pinned the same ratio on its own tree. Ship's cap is now a byte ledger. Each branch records its own signed delta, and the deltas add up exactly in any train order. Train 24's leftover record froze the queue on a main train 28 had already verified (#3519); verify now calls that record stale instead.
 
