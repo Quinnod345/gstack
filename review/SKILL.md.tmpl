@@ -251,9 +251,9 @@ critical finding or another writer during collection. Skip silently if no docs e
 
 ## Step 5: Fix-First Review
 
-Before edits, confirm every dispatched reader has returned or is confirmed stopped.
-For an active or unknown reader/writer, wait or confirm it is stopped; if that
-cannot be confirmed, persist incomplete at Step 5.8 and STOP without edits.
+Before edits, every dispatched reader/writer must have returned or be confirmed
+stopped: wait, and if that cannot be confirmed, persist incomplete at Step 5.8 and
+STOP without edits.
 Terminal failure does not block fixes from independent evidence. Missing required
 output still makes the pass incomplete, even after the reader is stopped.
 
@@ -387,7 +387,8 @@ Before replying to any comment, run greptile-triage.md's **Escalation Detection*
 2. On a repeat, execute Steps 3–5 in order. At Step 4.7, an edited pass supersedes
    every earlier QA capture (exploratory §4): rerun each probe the verdict relies on.
    These reruns are revalidation, so they run even after smoke expiry; keep the
-   PROBE_DIR and run its once-only `materialize` on the final pass.
+   PROBE_DIR. Earlier provisional sections link checkpoints; only the final pass
+   runs its once-only `materialize`.
    A zero-edit pass reuses only this invocation's unchanged-input QA evidence,
    rerunning any probe whose inputs changed or are uncertain. Reusing never skips a review step.
 3. **Verify completed actions.** On the final zero-edit pass, reconcile this

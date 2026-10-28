@@ -692,7 +692,7 @@ test('judged repeat-pass QA reruns and unresolved record actions each have one r
   // fails_when=the rerun stops being revalidation, materialize may run per pass, or such a defect has no action.
   const flat = skill.replace(/\s+/g, ' ');
   const repeat = flat.slice(flat.indexOf('2. On a repeat, execute Steps 3–5 in order.'), flat.indexOf('3. **Verify completed actions.**'));
-  expect(repeat).toContain('These reruns are revalidation, so they run even after smoke expiry; keep the PROBE_DIR and run its once-only `materialize` on the final pass.');
+  expect(repeat).toContain('These reruns are revalidation, so they run even after smoke expiry; keep the PROBE_DIR. Earlier provisional sections link checkpoints; only the final pass runs its once-only `materialize`.');
   expect(repeat.indexOf('rerun each probe the verdict relies on')).toBeLessThan(repeat.indexOf('These reruns are revalidation'));
   const actions = flat.slice(flat.indexOf('Actions: `auto-fixed` (Step 5b)'), flat.indexOf('Advice is never `auto-fixed`'));
   expect(actions).toContain('`fixed` (approved **and completed** in Step 5d)');
