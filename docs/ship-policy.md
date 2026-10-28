@@ -896,7 +896,7 @@ receipt when the base moves:
 
 | What changed since /ship | The receipt |
 |---|---|
-| a merge of the base, product diff unchanged (tests, release metadata, registered outputs the pregate regenerated fresh) | carries; no review reruns |
+| a merge of the base, product diff unchanged (tests, release metadata, registered outputs the pregate's regen check proved) | carries; no review reruns |
 | a merge of the base whose resolution changed product code | a fresh /ship (`RECEIPT_CARRY_PRODUCT_CHANGED`) |
 | a rebase or force-push onto a tree the receipt covers, product diff against the new base unchanged | carries (`carry.ancestry: rewritten`) |
 | any other rebase or force-push | a fresh /ship (`RECEIPT_CARRY_TREE_MISMATCH`) |

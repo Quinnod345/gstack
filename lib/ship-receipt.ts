@@ -150,7 +150,7 @@ export const CARRY_METADATA_GLOBS: readonly string[] = ['VERSION', 'CHANGELOG.md
 /** How many differing product paths a RECEIPT_CARRY_PRODUCT_CHANGED refusal names, and how far the per-path patch-id walk goes. */
 export const CARRY_NAMED_PATHS = 20;
 
-/** `generated`: an output of a base-registry entry with a command, which the pregate for HEAD regenerated fresh (its inputs are product). */
+/** `generated`: an output of a base-registry entry with a command, which the pregate for HEAD proved its command recreates (its inputs are product). */
 export type CarryClass = 'product' | 'test' | 'metadata' | 'generated';
 export interface CarryPlanInput {
   /** The reviewed head the receipt names. */

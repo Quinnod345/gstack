@@ -123,12 +123,15 @@ describe('carry across a base merge that changes a registered output', () => {
     const pregate = JSON.parse(fs.readFileSync(pregateJson, 'utf8'));
     const regen = pregate.checks.find((c: { id: string }) => c.id === 'regen');
     expect(regen).toMatchObject({ status: 'pass', proven: ['generated/digest.md'] });
-    const headRegistry = path.join(repo.root, 'pregate-head-registry.json');
-    regen.inputs.registry = 'head (unreviewed)';
-    fs.writeFileSync(headRegistry, JSON.stringify(pregate));
-    const foreign = carry(repo, body, ['--pregate', headRegistry]);
-    expect(foreign.out).toContain('RECEIPT_CARRY_PRODUCT_CHANGED');
-    expect(foreign.err).toContain('generated/digest.md');
+    const tampered = path.join(repo.root, 'pregate-tampered.json');
+    const label = regen.inputs.registry;
+    for (const [registry, proven] of [['head (unreviewed)', ['generated/digest.md']], [label, ['generated/*']]]) {
+      Object.assign(regen, { proven, inputs: { ...regen.inputs, registry } });
+      fs.writeFileSync(tampered, JSON.stringify(pregate));
+      const refused = carry(repo, body, ['--pregate', tampered]);
+      expect(refused.out).toContain('RECEIPT_CARRY_PRODUCT_CHANGED');
+      expect(refused.err).toContain('generated/digest.md');
+    }
     const out = carry(repo, body, ['--pregate', pregateJson]);
     expect(out.status).toBe(EXIT.ok);
     expect(receiptIn(body)).toMatchObject({ head: repo.git('rev-parse', 'HEAD'), carry: { from: reviewed } });

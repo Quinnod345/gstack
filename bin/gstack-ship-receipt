@@ -389,7 +389,8 @@ function pregateFieldFor(repoRoot: string, file: string, head: string): { ok: tr
  * passed for HEAD proved (its regen check deleted each touched output and the
  * entry's command recreated it byte-identically), when that check ran
  * origin/<base>'s `.gstack/generated.json` at the commit this carry reads and the
- * path is an output of an entry with a `command` there. Anything else is product.
+ * path is an output of an entry with a `command` there. A proven name with glob
+ * syntax is product too: the carry uses these paths as pathspec globs.
  */
 function verifiedOutputs(repoRoot: string, base: string, pregateFile: string | undefined): string[] {
   if (!pregateFile) return [];
@@ -398,7 +399,7 @@ function verifiedOutputs(repoRoot: string, base: string, pregateFile: string | u
   const load = loadRegistryFromBase(repoRoot, base);
   if (isRegistryUnavailable(load) || load.errors.length || regen.inputs?.registry !== load.source.label) return [];
   const owned = load.registry.entries.filter(e => e.command).flatMap(e => e.outputs);
-  return regen.proven.filter(p => matchesAny(owned, p));
+  return regen.proven.filter(p => !/[*?[\]\\]/.test(p) && matchesAny(owned, p));
 }
 
 interface ProductRules { extra: { metadata: string[]; outputs: readonly string[] }; metadata: string[]; templates: readonly string[] }

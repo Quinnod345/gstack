@@ -4726,7 +4726,8 @@ instead keeps every later carry available
 
 **Meaning.** Between the receipt's head and HEAD the product diff against the
 base changed: at least one path that is neither a test, release metadata, a
-registered output the pregate regenerated fresh, nor part of the base merge has
+registered output the pregate's regen check proved (listed under `proven`,
+checked against the same base registry), nor part of the base merge has
 a different patch than the reviewed head had. After a rebase it means HEAD has
 the reviewed tree but the base moved under it, so the diff a reviewer would see
 is not the reviewed one. The reviewed verdict does not cover HEAD, so the

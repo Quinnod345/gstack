@@ -164,7 +164,7 @@ export interface EntryResult {
   exit?: number | null; stderr?: string; ms: number;
   /** The exact command an author runs to refresh the entry. */
   fix: string;
-  /** `check` with `prove`, on a fresh entry: the deleted outputs the command recreated byte-identically (an output it never writes is not proven). */
+  /** `check` with `prove`, on a fresh entry: the deleted outputs the proof run recreated byte-identically (an output it never writes, or a proof run that failed, proves nothing). */
   proven?: string[];
 }
 
@@ -216,7 +216,7 @@ export interface RunRegenOptions {
   only?: string[];
   /** Restrict to entries whose inputs or outputs intersect these paths. */
   touched?: string[];
-  /** `check`: outputs to delete from the scratch before their entry's command runs; the ones it recreates byte-identically come back as `proven`. */
+  /** `check`: outputs to prove on a fresh entry: a second run with each one deleted first, the ones it recreates byte-identically come back as `proven`. The verdict comes from the first run alone. */
   prove?: readonly string[];
   env?: NodeJS.ProcessEnv; timeoutMs?: number;
 }
@@ -244,21 +244,30 @@ export function runRegen(o: RunRegenOptions): { results: EntryResult[]; wtree: s
       if (!e.command) { results.push({ id: e.id, command: null, status: 'listed', changed: [], outside: [], ms: 0, fix: fixFor(e) }); continue; }
       const cwd = o.mode === 'check' ? scratch!.dir : o.repoRoot;
       const before = o.mode === 'write' ? snapshotFiles(o.repoRoot) : null;
-      const probe = o.mode === 'check' ? (o.prove ?? []).filter(p => matchesAny(e.outputs, p) && fs.existsSync(path.join(cwd, p))) : [];
-      for (const p of probe) fs.rmSync(path.join(cwd, p), { force: true });
       const run = runCommand(cwd, e.command, o.env ?? process.env, timeout);
       const after = before ? diffSnapshots(before, snapshotFiles(o.repoRoot)) : changedPaths(cwd);
-      const unwritten = probe.filter(p => !fs.existsSync(path.join(cwd, p)));
-      const changed = after.filter(p => matchesAny(e.outputs, p) && !unwritten.includes(p));
+      const changed = after.filter(p => matchesAny(e.outputs, p));
       const outside = after.filter(p => !matchesAny(e.outputs, p) && !matchesAny(o.registry.entries.flatMap(x => x.outputs), p));
       const ms = Date.now() - started;
       if (run.exit !== 0) { results.push({ id: e.id, command: e.command, status: 'failed', changed, outside, exit: run.exit, stderr: run.stderr, ms, fix: fixFor(e) }); continue; }
       if (o.mode === 'check') {
         const differs = changed.length > 0 || outside.length > 0;
-        if (differs && install) results.push({ id: e.id, command: e.command, status: 'deps-missing', changed, outside, exit: 0, ms, fix: `run ${install}, then rerun the check` });
-        else results.push({ id: e.id, command: e.command, status: differs ? 'stale' : 'fresh', changed, outside, exit: 0, ms, fix: fixFor(e), ...(probe.length && !differs ? { proven: probe.filter(p => !unwritten.includes(p)) } : {}) });
         // Reset the scratch so the next entry's diff is its own.
-        git(cwd, ['checkout', '-q', '--', '.']); git(cwd, ['clean', '-fdq']);
+        const reset = () => { git(cwd, ['checkout', '-q', '--', '.']); git(cwd, ['clean', '-fdq']); };
+        reset();
+        if (differs && install) { results.push({ id: e.id, command: e.command, status: 'deps-missing', changed, outside, exit: 0, ms, fix: `run ${install}, then rerun the check` }); continue; }
+        // The proof is a second run apart from the verdict: each touched output deleted first, the ones recreated
+        // byte-identically are proven, and a failure (a generator that reads its own output) proves nothing.
+        const probe = differs ? [] : (o.prove ?? []).filter(p => matchesAny(e.outputs, p) && fs.existsSync(path.join(cwd, p)));
+        let proven: string[] | undefined;
+        if (probe.length) {
+          for (const p of probe) fs.rmSync(path.join(cwd, p), { force: true });
+          const proof = runCommand(cwd, e.command, o.env ?? process.env, timeout);
+          const redo = changedPaths(cwd);
+          proven = proof.exit === 0 ? probe.filter(p => !redo.includes(p)) : [];
+          reset();
+        }
+        results.push({ id: e.id, command: e.command, status: differs ? 'stale' : 'fresh', changed, outside, exit: 0, ms, fix: fixFor(e), ...(proven ? { proven } : {}) });
       } else results.push({ id: e.id, command: e.command, status: changed.length ? 'written' : 'fresh', changed, outside, exit: 0, ms, fix: fixFor(e) });
     }
   } finally { scratch?.remove(); }
