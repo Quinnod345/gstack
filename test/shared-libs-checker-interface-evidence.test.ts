@@ -704,10 +704,11 @@ describe('errored Bash reads from the captured ignored-path review', () => {
     expect(hasTrustedSharedLibsCheck(events, erroredRead.expected)).toBe(true);
   });
 
-  test.each(['no expected sources', 'last source line missing', 'missing file', 'errored single read', 'errored native Read', 'errored checker'])('%s is still rejected', shape => {
+  test.each(['no expected sources', 'empty expected source', 'last source line missing', 'missing file', 'errored single read', 'errored native Read', 'errored checker'])('%s is still rejected', shape => {
     const events = structuredClone(erroredRead.events), call = read(events), result = output(events, call.id);
     const expected: any = structuredClone(erroredRead.expected);
     if (shape === 'no expected sources') delete expected.sources;
+    if (shape === 'empty expected source') expected.sources['src/retry-worker.ts'] = '';
     if (shape === 'last source line missing') result.content = result.content.replace(/\n +15\t\}\n/, '\n');
     if (shape === 'missing file') result.content = 'Exit code 1\ncat: src/retry-worker.ts: No such file or directory';
     if (shape === 'errored single read') call.input.command = 'cat -n src/retry-worker.ts';

@@ -25,8 +25,11 @@ type Scenario = { kind: string; table?: string; exitReason?: string; open?: bool
 // Run the copied section's real Outside Voice preflight against a state root.
 function outsideMode(section: string, home: string, gstackHome?: string): string {
   const block = section.slice(section.indexOf('**Preflight — decide whether and how the outside voice runs:**')).match(/```bash\n([\s\S]*?)```/)![1];
-  const child = Bun.spawnSync(['bash', '-c', block.replaceAll('"$HOME/.claude/skills/gstack/bin/gstack-config"', JSON.stringify(path.join(ROOT, 'bin/gstack-config')))], {
-    env: { PATH: process.env.PATH ?? '', HOME: home, ...(gstackHome ? { GSTACK_HOME: gstackHome } : {}) }, timeout: 10_000 });
+  // Git Bash on Windows needs its own spelling of the checkout path.
+  const bin = Bun.spawnSync(['bash', '-c', 'cd "$1" && pwd', '_', path.join(ROOT, 'bin')], { timeout: 10_000 }).stdout.toString().trim();
+  const child = Bun.spawnSync(['bash', '-c', block.replaceAll('"$HOME/.claude/skills/gstack/bin/gstack-config"', '"$GSTACK_CONFIG_BIN"')], {
+    env: { PATH: process.env.PATH ?? '', HOME: home, GSTACK_CONFIG_BIN: `${bin}/gstack-config`,
+      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), ...(gstackHome ? { GSTACK_HOME: gstackHome } : {}) }, timeout: 10_000 });
   return child.stdout.toString().trim();
 }
 
