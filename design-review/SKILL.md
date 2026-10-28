@@ -640,7 +640,7 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - No red/green only combinations (8% of men have red-green deficiency)
 - Neutral palette is warm or cool consistently — not mixed
 
-**4. Spacing & Layout** (12 items)
+**4. Spacing & Layout** (11 items)
 - Grid consistent at all breakpoints
 - Spacing uses a scale (4px or 8px base), not arbitrary values
 - Alignment is consistent — nothing floats outside the grid
@@ -667,7 +667,7 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - Mindless choice audit: every decision point (button, link, dropdown, modal choice) is a mindless click (obvious what happens). If a click requires thought about whether it's the right choice, flag as HIGH.
 - Browser surfaces themed from the palette: `::selection`, caret, scrollbars, focus ring, underline offset, tabular numerals. Left at defaults, the page reads as assembled, not designed
 
-**6. Responsive Design** (8 items)
+**6. Responsive Design** (6 items)
 - Mobile layout makes *design* sense (not just stacked desktop columns)
 - No horizontal scroll on any viewport
 - Images handle responsive (srcset, sizes, or CSS containment)
@@ -684,7 +684,7 @@ Apply these at each page. Each finding gets an impact rating (high/medium/polish
 - Only `transform` and `opacity` animated (not layout properties like width, height, top, left)
 - One authored motion moment per page: not the same entrance on every section, not a hover effect on everything. Ease-out from an already-visible default; content never hides behind animation timing
 
-**8. Content & Microcopy** (11 items)
+**8. Content & Microcopy** (8 items)
 - Button labels specific ("Save API Key" not "Continue" or "Submit")
 - No placeholder/lorem ipsum text visible in production
 - Truncation handled (`text-overflow: ellipsis`, `line-clamp`, or `break-words`)
