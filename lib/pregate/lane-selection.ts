@@ -26,7 +26,7 @@ export interface Removed { file: string; note: string; lostCoverage: string[] }
 export interface Selection {
   /** Touched files with no lane and no `[]` declaration. */
   noLane: string[];
-  /** Removed paths no remaining test selects: each owes no lane and is named on its own line (issue #3529). */
+  /** Removed paths no remaining test selects that owe no lane, each named on its own line (issue #3529); other removals stay in noLane. */
   removed: Removed[];
   /** Markdown (and `empty_lanes` paths) with no import-graph test: the docs/no-tests empty lane. */
   emptyLane: string[];
@@ -118,15 +118,18 @@ const shown = (files: readonly string[]) => `${files.slice(0, 8).join(' ')}${fil
  * Why a removed path no remaining test selects owes no lane, and the owning-suite tests it selects, or `refused` when it must
  * fail closed as no lane. A rename's old name defers to the new path, unless a test was renamed to a non-test path. A deleted
  * test runs the tests that directly exercise the files it exercised and names those left with no test at all. Any other removed
- * file owes nothing only when it is code the import graph reads (outside fixture, golden and CI trees) and no remaining
- * non-Markdown file names it: deleting a manifest, a lockfile, a config or a workflow owes what editing it owes.
+ * file owes nothing only when it is code the import graph reads (outside fixture, golden and CI trees), no remaining file
+ * imports it and no remaining non-Markdown file names it: deleting a manifest, a lockfile, a config or a workflow owes what
+ * editing it owes.
  */
-function removedPath(ctx: PregateContext, graph: Graph, file: string): { removed: Removed; suite: string[] } | { refused: string } {
+function removedPath(ctx: PregateContext, graph: Graph, gone: ReadonlySet<string>, file: string): { removed: Removed; suite: string[] } | { refused: string } {
   const renamedTo = ctx.touched.find(t => t.renamedFrom === file)?.path;
   if (renamedTo && !(isTestFile(file) && !isTestFile(renamedTo))) return { removed: { file, note: `old name of ${renamedTo}`, lostCoverage: [] }, suite: [] };
   if (!isTestFile(file)) {
     const code = (SOURCE_EXT.test(file) || file.startsWith('bin/')) && !isFixtureOrCiTree(file) && path.posix.basename(file) !== 'conftest.py';
     if (!code) return { refused: 'removed, but not code the import graph reads (a manifest, lockfile, config, fixture or workflow owes what an edit owes)' };
+    const importers = [...new Set((graph.reverse.get(file) ?? []).map(e => e.from))].filter(f => !gone.has(f)).sort();
+    if (importers.length) return { refused: `removed, but still imported by ${shown(importers)}` };
     const names = namedBy(ctx, file);
     if (names.length) return { refused: `removed, but still named by ${shown(names)}` };
     return { removed: { file, note: 'nothing in the tree references it', lostCoverage: [] }, suite: [] };
@@ -159,6 +162,7 @@ export function selectLanes(ctx: PregateContext): Selection {
     if (text !== null) goneSources.set(removedTest, text);
   }
   const graph: Graph = buildGraph(ctx.repoRoot, { declarations: ctx.config.dependencies, extraFiles: gone, goneSources });
+  const goneSet = new Set(gone);
   const all = listRepoFiles(ctx.repoRoot);
   const provenance: string[] = [];
   const tests = new Set<string>();
@@ -216,7 +220,7 @@ export function selectLanes(ctx: PregateContext): Selection {
       provenance.push(`${file}: not version-stamp-only (${verdict.reason})`);
     }
     if (gone.includes(file)) {
-      const r = removedPath(ctx, graph, file);
+      const r = removedPath(ctx, graph, goneSet, file);
       if ('removed' in r) {
         removed.push(r.removed);
         for (const t of r.suite) tests.add(t);

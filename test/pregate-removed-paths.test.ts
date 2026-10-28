@@ -1,6 +1,7 @@
 /**
- * Paths a branch removes (deleted files and the old name of a rename) never fail
- * `lanes` with PREGATE_NO_LANE on their own (issue #3529, gbrain#7829). Each one
+ * Paths a branch removes (deleted files and the old name of a rename) owe no lane
+ * when only a rename, a deleted test or unreferenced code goes (issue #3529,
+ * gbrain#7829); any other removal owes what an edit owes. Each waived one
  * prints a visible `removed (no lane owed): <path> — <why>` line: a deleted test
  * runs its owning suite (the remaining tests of the files it exercised) or says
  * which subjects lost their last test; a modified file whose only test was
@@ -186,6 +187,20 @@ describe('removed paths in lanes (#3529)', () => {
       const r = lanes(repo);
       expect(r.check.code).toBe('PREGATE_NO_LANE');
       expect(r.check.detail).toContain('scripts/setup.js');
+    });
+
+    test.each([
+      ['a relative extensionless TS import', { 'src/d.ts': 'export const d = 1;\n', 'src/u.ts': "import { d } from './d';\nexport const u = d + 1;\n" }, 'src/d.ts', 'src/u.ts'],
+      ['a Python dotted import', { 'pkg/__init__.py': '', 'pkg/m.py': 'X = 1\n', 'app.py': 'from pkg import m\nprint(m.X)\n' }, 'pkg/m.py', 'app.py'],
+    ])('a deleted file untested code still imports by %s fails closed', (_how, files, deleted, importer) => {
+      const repo = fixture({ baseFiles: files });
+      commit(repo, { [deleted]: null });
+      const r = lanes(repo);
+      expect(r.check.code).toBe('PREGATE_NO_LANE');
+      expect(r.check.detail).toContain(deleted);
+      expect(r.removed).toEqual([]);
+      const why = runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands', '--stage', 'tests', '--explain']);
+      expect(`${why.out}${why.err}`).toContain(`${deleted}: removed, but still imported by ${importer}`);
     });
 
     test('a modified file whose only test was deleted still fails PREGATE_NO_LANE', () => {

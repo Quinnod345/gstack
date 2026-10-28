@@ -205,11 +205,12 @@ Two stages with separate clocks, both printed:
   are not subjects), and names each file left with no test at all (`coverage
   removed: <file> has no remaining test`, and `M subject(s) lost their last
   test` in the detail); a deleted code file outside fixture, golden and CI
-  trees that no remaining non-Markdown file names reads `nothing in the tree
-  references it`. Every other removal owes what an edit owes, so it is still
+  trees that no remaining file imports and no remaining non-Markdown file names
+  reads `nothing in the tree references it`. Every other removal owes what an edit owes, so it is still
   `PREGATE_NO_LANE` until a test or a `dependencies` entry covers it: a
   deleted manifest, lockfile, config, conftest.py, fixture, golden or workflow,
-  a deleted file a config or script still names, and a deleted test whose
+  a deleted file remaining code still imports (`still imported by …`, even by
+  a relative or dotted import) or a config or script still names, and a deleted test whose
   merge-base text cannot be read (a symlink, invalid UTF-8, over 1 MiB). A
   modified file whose only test the branch deleted still has no lane, a
   remaining test that reads a deleted file or directory is selected, and a

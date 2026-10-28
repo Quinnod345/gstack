@@ -3217,7 +3217,7 @@ print `removed (no lane owed): <path> — <why>` instead (a deleted test runs it
 owning suite or says `coverage removed: <file> has no remaining test`). A
 removal owes what an edit owes, so these are still this error: a deleted
 manifest, lockfile, config, conftest.py, fixture, golden or workflow, a deleted
-file a config or script still names, a deleted test whose merge-base text
+file remaining code still imports or a config or script still names, a deleted test whose merge-base text
 cannot be read (a symlink, invalid UTF-8, over 1 MiB), and a modified file whose
 only test the branch deleted.
 
