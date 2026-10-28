@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+**Write, change and slim skills with `/write-skill`; the first diet halves /learn's template with the same results.** Garry asked, 2026-10-27: "Can we incorporate skill writing and improvement into gstack? https://github.com/nicobailon/skill-diet". gstack now has one skill for writing a new skill, changing an existing one, and putting one on a diet, plus a size bill, a static check that skills only call flags their bins accept, and a contract for the shared before/after skill eval the gstack-evals crew is building. /learn is the pilot: its template drops from 5,797 to 2,955 bytes and its rendered SKILL.md from 11,217 to 8,375. An A/B of 30 sessions per version on claude-opus-5-5 passed 30/30 before and 30/30 after (29/30 with no skill), with 10% fewer tokens per session. Adapted from nicobailon/skill-diet at 5f41df1 (MIT; NOTICE.md). Plan approved by Garry, 2026-10-27: "A1, B1, C1 D1 E1" and "Rec".
+
+### Added
+- **`/write-skill`**: three modes. New writes a skill from a request; change adds a lesson by editing the line it belongs to rather than appending a paragraph; diet produces a free report first (size bill, drift findings, suggested level moves), then eval tasks written before any cut, then the cut and a before, after and no-skill eval. It works on your own skill folders, never edits an installed gstack skill in place (it points at the checkout's template or a copy you own), and asks for a `Skill-Size: <before>→<after> bytes` line in the commit. Not `/skillify`, which codifies a browser scrape.
+- **`gstack-skill-bill <name|folder> [--json]`**: bytes and estimated tokens for a skill's description, template, render and on-demand files, the last `Skill-Diet:` commit and the growth since, `DUE` past 10%, and `baseline: unknown` on shallow or non-git folders. Errors carry stable codes and a fix line (`SKILL_NOT_FOUND` with the closest names, `SKILL_AMBIGUOUS`, `SKILL_MD_MISSING`, `RENDER_STALE`).
+- **Skill-to-bin drift ratchet** (`scripts/skill-bin-drift.ts`, `test/skill-bin-drift.test.ts`): every gstack bin call in templates, carved sections and the Claude-host render must name a bin that exists and flags its parser accepts, or the free suite fails with `DRIFT_UNKNOWN_BIN` or `DRIFT_UNKNOWN_FLAG` at file:line. Today: 1,751 calls to 105 bins, one allowlisted false positive, and an allowlist that can only shrink. It also lists bins with permissive parsers or no usage text as the help backlog.
+- **`docs/designs/SKILL_EVAL_CONTRACT.md`**: the interface the shared skill eval implements (arms, task format, verdict file, exit codes, the per-task verdict policy). Task files live at `test/fixtures/skill-evals/<skill>/tasks.json`, and a free test holds them to the format.
+- **`gstack-learnings-search --stats`** replaces the stats program /learn used to carry inline, and both learnings bins answer `--help`.
+
+### Changed
+- **/learn** reads as one mode table over the learnings bins, with the prune rules kept. Prune asks remove, keep or update for each flagged entry, and only a request that already names the action counts as the answer.
+- **Budgets:** the skill catalog cap rises from 1,359 to 1,393 bytes for the `/write-skill` row; the always-on context ceiling from 7,880 to 7,985 tokens; /learn's eager ceiling drops from 2,931 to 2,124.
+
+### Fixed
+- **`gstack-learnings-search --cross-project`** no longer drops every project when the state root path contains the current project's slug.
+- **The learnings bins refuse bad input.** An unknown flag, a flag without its value, or a `--limit` that is not a positive integer exits 2 with the valid flags named, before any state is read or written; before, unknown flags were silently skipped. No gstack caller passes one.
+
 ## [1.91.284.0] - 2026-10-27
 
 **Five small takes from tstack, in gstack's words.** Theo Browne's tstack (MIT, 2026-10-24) is nine short PR-landing skills; its best ideas that gstack lacked were a verb for an aging pull request, a Codex picker that says what each skill is for, a written grant for unattended sessions, a repo-level rule for porting a contributor's PR, and a visible author line on agent-posted comments. Each lands here as gstack prose and gstack code; no sentence is copied (NOTICE.md). Approved by Garry, 2026-10-26: "Do it, send" (yes to the opt-in attribution callout, off by default).
