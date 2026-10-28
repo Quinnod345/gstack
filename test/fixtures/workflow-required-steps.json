@@ -123,7 +123,7 @@
         "## Step 22: Terminal line (every run)"
       ],
       "sections/adversarial.md": [
-        "## Step 11: Adversarial review (always-on)"
+        "## Step 11: Adversarial review"
       ],
       "sections/changelog.md": [
         "## Step 13: CHANGELOG (auto-generate)"

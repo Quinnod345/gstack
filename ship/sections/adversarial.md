@@ -2,8 +2,8 @@
 <!-- Regenerate: bun run gen:skill-docs -->
 **Step 9's last full-pass plan governs this step:** run the native pass only on
 `DISPATCH: adversarial-native` and the outside voice only on
-`DISPATCH: outside-voice`. With neither, print `ADVERSARIAL: skipped (review plan)`
-and take decision 3 of Finish the adversarial phase.
+`DISPATCH: outside-voice`. Without the native line, print `ADVERSARIAL: skipped (review plan)`;
+with neither line, take decision 3 of Finish the adversarial phase.
 
 ## Step 11: Adversarial review
 
