@@ -159,7 +159,7 @@ A security cut that stopped half-way after moving `stable` is finished by
 the next run with the reason and evidence its tag recorded, without checking
 them again. A tag that records a security cut but never moved `stable` gets
 no such pass: the cut is refused (`REFUSED_SECURITY`) until it runs again
-with `security` and `ref` and verifies. The floor then counts from the security
+with `security`, `ref` and the reason its tag recorded, and verifies. The floor then counts from the security
 release, and the next regular cut's notes list only the versions after it.
 
 ## Regression releases
@@ -180,15 +180,18 @@ The reason must name exactly one release `v<X>` and at least one `#<n>`.
 All of these must hold, or the cut is `REFUSED_REGRESSION` with what it
 checked:
 
-1. `v<X>` is an annotated release tag strictly behind the current `stable`,
-   an earlier stable release team installs actually ran. The current stable
+1. `v<X>` is an annotated release tag strictly behind the current `stable`
+   whose GitHub Release is published (not a draft): an earlier stable release
+   team installs actually ran, which a tag left behind by a half-done cut is
+   not. The current stable
    itself does not count, since a fix for something it still does right needs
    no exception.
 2. `#<n>` carries the `regression` label (a `security` label does not count,
    nor the reverse) and a commit in `stable`..`ref` references it (the squash
    subject `(#<n>)` does).
 
-**Verified:** the release tag and its place behind `stable`, the label, and
+**Verified:** the release tag, its place behind `stable` and its published
+release, the label, and
 that the labelled issue or PR is in the released span. **Attested, not
 verified:** that the behavior really worked in `v<X>` and that this change
 restores it; the label and the public reason carry that claim.
@@ -199,7 +202,8 @@ rides along (`RIDING_ALONG:`), and the sanitized reason and evidence go into
 the tag message (`Regression:` / `Verified:`) and the notes
 (``**Regression release:** `<reason>` (verified: <evidence>)``). A half-done
 regression cut finishes from its tag's record, and a regression tag that never
-moved `stable` is refused until it runs again with `regression` and verifies.
+moved `stable` is refused until it runs again with `regression` and the reason
+its tag recorded, and verifies.
 Unlike a security cut, a regression cut does not pass `FLOOR_UNKNOWN`. The
 floor counts from the regression release, so the next scheduled cut may be
 held.
@@ -307,8 +311,8 @@ is exercised against real check runs before it merges.
 | `REFUSED_FLOOR: stable moved to v<X> at <time>, <h> h ago; ...` | inside the 72-hour floor; nothing changed. Exit 1 by hand, 0 on the schedule or a dry run |
 | `NEXT_ALLOWED: <time> for a hand-run cut; <time> for a scheduled run` | follows every `REFUSED_FLOOR` (and `FLOOR_UNKNOWN`, where it says why there is no time) |
 | `FLOOR_UNKNOWN: ...` | stable's last move cannot be dated (no annotated `v<VERSION>` tag, an unreadable release, or an unpublished release under a `ref` cut); exit 1 on every trigger |
-| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, or a security tag that never moved stable run without `security`; exit 1 on every trigger |
-| `REFUSED_REGRESSION: ...` | `regression` without `ref` or beside `security`, a reason without one earlier stable `v<X>` and a regression-labelled `#<n>` in the span, or a regression tag that never moved stable run without `regression`; exit 1 on every trigger |
+| `REFUSED_SECURITY: ...` | `security` without `ref`, a reason the tool cannot tie to the released commits, a security tag that never moved stable run without `security`, or a rerun whose reason differs from the one its unmoved tag recorded; exit 1 on every trigger (the workflow stops `security` without `ref` before the script runs) |
+| `REFUSED_REGRESSION: ...` | `regression` without `ref` or beside `security`, a reason without one earlier stable `v<X>` and a regression-labelled `#<n>` in the span, a regression tag that never moved stable run without `regression`, or a rerun whose reason differs from the one its unmoved tag recorded; exit 1 on every trigger (the workflow stops `regression` without `ref` before the script runs) |
 | `FLOOR: clear|refused|unknown|none|not applied|bypassed by the security|regression exception (...)` | the floor verdict, in every plan |
 | ``SECURITY: `<reason>` (verified: <evidence>)`` or ``REGRESSION: `<reason>` (verified: <evidence>)``, `RIDING_ALONG: <n> other versions ship with the fix` | an exception cut's plan |
 | `TAG:`, `STABLE:`, `RELEASE:` | what the cut did; a re-run reports each step as already done and finishes a step an earlier run did not reach |

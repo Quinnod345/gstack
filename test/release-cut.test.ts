@@ -909,11 +909,12 @@ describe('release-cut: the regression exception', () => {
     if (moved.at === null) throw new Error(moved.why);
     const fix = f.release('1.0.5', 'Restores the update check.', { message: 'v1.0.5: restore the update check (#91)' });
     git(f.seed, 'tag', 'v1.0.1', f.shas['1.0.1']!);
-    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.1');
+    execFileSync('git', ['tag', '-a', 'v1.0.2', f.shas['1.0.2']!, '-m', 'gstack v1.0.2 (regular release)'], { cwd: f.seed, timeout: 30_000, env: { ...process.env, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x' } });
+    git(f.seed, 'push', '-q', 'origin', 'refs/tags/v1.0.1', 'refs/tags/v1.0.2');
     f.refresh();
     const now = () => moved.at + H;
     const reg = (ref: string | undefined, reason: string, extra: { security?: string } = {}) => planRelease({ repo: f.repo, ref, git: f.git, gh: f.gh, now, regression: reason, ...extra });
-    const reason = '#91: worked in v1.0.3: the update check stopped running';
+    const reason = '#91: the update check stopped running; it worked in v1.0.3.';
     const refused = (r: ReturnType<typeof reg>) => { expect(r.ok).toBe(false); return r.ok ? '' : (expect(r.code).toBe('REFUSED_REGRESSION'), r.message); };
 
     expect(refused(reg(undefined, reason))).toBe('--regression needs --ref <the fix commit>: a regression cut releases up to the fix, never whatever is newest');
@@ -924,6 +925,8 @@ describe('release-cut: the regression exception', () => {
     expect(refused(reg(fix, '#91: worked in v1.0.4'))).toBe('v1.0.4 is not an earlier stable release: it must sit strictly behind the current stable ' + f.shas['1.0.4']!.slice(0, 12) + ', since a fix for something the current stable still does right needs no exception');
     expect(refused(reg(fix, '#91: worked in v9.9.9'))).toBe('v9.9.9 is not an annotated release tag here, so it cannot be the earlier stable release the behavior worked in');
     expect(refused(reg(fix, '#91: worked in v1.0.1'))).toBe('v1.0.1 is not an annotated release tag here, so it cannot be the earlier stable release the behavior worked in');
+    // An annotated tag a half-done cut left behind, with no published release, never ran as stable.
+    expect(refused(reg(fix, '#91: worked in v1.0.2'))).toBe('v1.0.2 has no published release, so team installs never ran it as stable');
     f.state.api = { 'repos/o/r/issues/91': { labels: [{ name: 'security' }] }, 'repos/o/r/issues/92': { labels: [{ name: 'regression' }] } };
     expect(refused(reg(fix, reason))).toEndWith('#91: no regression label');
     expect(refused(reg(fix, '#92: worked in v1.0.3'))).toEndWith('#92: no commit in the span references it');
@@ -969,6 +972,10 @@ describe('release-cut: the regression exception', () => {
     const forged = planRelease({ repo: f.repo, ref: later, git: f.git, gh: f.gh, now: () => moved.at + 3 * H, security: 'CVE-2026-2: x' });
     expect(forged.ok).toBe(false);
     if (!forged.ok) expect(forged).toMatchObject({ code: 'REFUSED_REGRESSION', message: 'tag v1.0.6 records a regression cut that has not moved stable; run it again with --regression and --ref ' + later.slice(0, 12) + ' so the reason is verified' });
+    // A different reason than the tag recorded would publish notes the tag (and a later retry) contradicts.
+    const other = planRelease({ repo: f.repo, ref: later, git: f.git, gh: f.gh, now: () => moved.at + 3 * H, regression: '#93: worked in v1.0.4: other' });
+    expect(other.ok).toBe(false);
+    if (!other.ok) expect(other).toMatchObject({ code: 'REFUSED_REGRESSION', message: 'tag v1.0.6 records the regression reason "#93: forged"; run it again with that same reason so the tag and the notes agree' });
   });
 
   // Value: protects=an undatable stable and the very first cut stay closed to a regression claim (FLOOR_UNKNOWN is security-only; nothing earlier worked

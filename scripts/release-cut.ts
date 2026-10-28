@@ -321,14 +321,15 @@ export function verifySecurity(o: { reason: string; git: Git; gh: Gh; repo: stri
  * Ties a regression reason to the commits in (from, to]. A regression is a fix
  * for behavior that worked in an earlier stable release. The reason names
  * exactly one release v<X> and at least one #<n>; it is verified when v<X> is
- * an annotated release tag strictly behind the current stable (so team installs
- * ran it and have since moved past it), and issue or PR #<n> carries the
+ * an annotated release tag strictly behind the current stable with a published
+ * GitHub Release (so team installs ran it and have since moved past it; a tag a
+ * half-done cut left behind does not count), and issue or PR #<n> carries the
  * regression label (a maintainer's declaration: labelling needs triage rights)
  * and a commit in the span references #<n>. That the behavior really worked in
  * v<X> stays attested, in public, by the label and the reason.
  */
 export function verifyRegression(o: { reason: string; git: Git; gh: Gh; repo: string; from: string | null; to: string; stable: string | null }): { ok: true; evidence: string } | { ok: false; why: string } {
-  const releases = [...new Set([...o.reason.matchAll(/(?<![\w.])v(\d+(?:\.\d+)+)(?![\w.])/g)].map(m => 'v' + m[1]!))];
+  const releases = [...new Set([...o.reason.matchAll(/(?<![\w.])v(\d+(?:\.\d+)+)(?!\w|\.\d)/g)].map(m => 'v' + m[1]!))];
   const issues = issueNumbers(o.reason);
   if (releases.length !== 1 || issues.length === 0) return { ok: false, why: 'the reason must name exactly one earlier stable release v<X> the behavior worked in and the regression-labelled #<n> it fixes (named ' + releases.length + ' release' + (releases.length === 1 ? '' : 's') + ' and ' + issues.length + ' #<n>)' };
   if (!o.stable) return { ok: false, why: 'there is no stable release yet, so nothing earlier can have worked' };
@@ -337,6 +338,9 @@ export function verifyRegression(o: { reason: string; git: Git; gh: Gh; repo: st
   const worked = o.git(['rev-parse', '--verify', '-q', 'refs/tags/' + tag + '^{commit}']);
   if (!type.ok || type.out !== 'tag' || !worked.ok) return { ok: false, why: tag + ' is not an annotated release tag here, so it cannot be the earlier stable release the behavior worked in' };
   if (worked.out === o.stable || !o.git(['merge-base', '--is-ancestor', worked.out, o.stable]).ok) return { ok: false, why: tag + ' is not an earlier stable release: it must sit strictly behind the current stable ' + o.stable.slice(0, 12) + ', since a fix for something the current stable still does right needs no exception' };
+  const release = o.gh(['release', 'view', tag, '--repo', o.repo, '--json', 'isDraft']);
+  const published = release.status === 0 ? parseJson<{ isDraft?: boolean }>(release) : null;
+  if (!published || published.isDraft === true) return { ok: false, why: tag + ' has no published release, so team installs never ran it as stable' };
   const labelled = labelledReference(o.gh, o.repo, spanCommits(o.git, o.from, o.to), issues, 'regression');
   if (!labelled.ok) return { ok: false, why: 'nothing in ' + spanName(o.from, o.to) + ' ties the reason to the release: ' + labelled.why.join('; ') };
   return { ok: true, evidence: labelled.evidence + '; ' + tag + ' (' + worked.out.slice(0, 12) + ') is an earlier stable release' };
@@ -483,6 +487,7 @@ export function planRelease(o: PlanOptions): PlanResult {
   if (recorded && !exception && asked !== recorded.kind) return { ok: false, code: refusalFor(recorded.kind), message: 'tag ' + tag + ' records a ' + recorded.kind + ' cut that has not moved stable; run it again with --' + recorded.kind + ' and --ref ' + sha.slice(0, 12) + ' so the reason is verified' };
   if (!exception && asked) {
     const reason = sanitizeReason((asked === 'security' ? o.security : o.regression)!);
+    if (recorded && recorded.reason !== reason) return { ok: false, code: refusalFor(asked), message: 'tag ' + tag + ' records the ' + asked + ' reason "' + recorded.reason + '"; run it again with that same reason so the tag and the notes agree' };
     const verified = asked === 'security' ? verifySecurity({ reason, git, gh, repo, from: before, to: sha }) : verifyRegression({ reason, git, gh, repo, from: before, to: sha, stable: prevStable });
     if (!verified.ok) return { ok: false, code: refusalFor(asked), message: verified.why };
     exception = { kind: asked, reason, evidence: verified.evidence };
