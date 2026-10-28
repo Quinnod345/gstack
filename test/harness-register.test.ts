@@ -158,6 +158,25 @@ describe('gstack-harness register and unregister (skill folders)', () => {
   }, 60_000);
 });
 
+describe('bin/gstack-harness-ledger.sh (the bun-free reader gstack-uninstall sources)', () => {
+  const ledgerSh = path.join(ROOT, 'bin', 'gstack-harness-ledger.sh');
+  test('removes every registration with only bash and coreutils on PATH, and refuses without a state root', () => {
+    const d = tmp();
+    const r = register(opts(d, 'dots', { skillsDir: path.join(d, 'skills') }));
+    const bare = { PATH: '/usr/bin:/bin', HOME: path.join(d, 'home') };
+    const refused = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', ledgerSh], { env: bare, encoding: 'utf8', timeout: 30_000 });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('GSTACK_STATE_ROOT is not set');
+    expect(fs.existsSync(r.router!)).toBe(true);
+    const ok = spawnSync('bash', ['-c', '. "$0" && gstack_harness_unregister_all', ledgerSh], { env: { ...bare, GSTACK_STATE_ROOT: path.join(d, 'state') }, encoding: 'utf8', timeout: 30_000 });
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('harness: ' + r.id);
+    expect(files(path.join(d, 'skills'))).toEqual([]);
+    expect(fs.existsSync(path.join(d, 'skills'))).toBe(false);
+    expect(listLedgers(path.join(d, 'state'))).toEqual([]);
+  }, 60_000);
+});
+
 describe('gstack-harness QM (org skill pack, against a fake admin API)', () => {
   function fakeQm(failImports = 0) {
     const packs: Array<{ id: string; url: string; ref: string; config: unknown }> = [];
