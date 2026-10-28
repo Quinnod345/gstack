@@ -1210,8 +1210,8 @@ describe('Test Bootstrap ({{TEST_BOOTSTRAP}}) integration', () => {
     expect(content).toContain('Step 4');
   });
 
-  test('TEST_BOOTSTRAP appears in design-review/SKILL.md', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'design-review', 'SKILL.md'), 'utf-8');
+  test('TEST_BOOTSTRAP appears in design-review/sections/test-bootstrap.md', () => {
+    const content = fs.readFileSync(path.join(ROOT, 'design-review', 'sections', 'test-bootstrap.md'), 'utf-8');
     expect(content).toContain('Test Framework Bootstrap');
   });
 

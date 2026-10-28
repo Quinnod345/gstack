@@ -142,7 +142,7 @@ describe('selectTests', () => {
       ['plan-eng-review/sections/review-sections.md', 'TEST_COVERAGE_AUDIT_PLAN'],
       ['ship/sections/tests.md', 'TEST_BOOTSTRAP'],
       ['ship/sections/test-coverage.md', 'TEST_COVERAGE_AUDIT_SHIP'],
-      ['design-review/SKILL.md', 'TEST_BOOTSTRAP'],
+      ['design-review/sections/test-bootstrap.md', 'TEST_BOOTSTRAP'],
     ];
     for (const [output, token] of consumers) {
       expect(fs.readFileSync(path.join(ROOT, `${output}.tmpl`), 'utf8')).toContain(`{{${token}}}`);

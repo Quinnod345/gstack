@@ -3,7 +3,7 @@
 This is the operating model a team adopts when it runs gstack under a Capy
 Captain: one person, one Captain thread that directs a crew, crew threads that
 each own a branch and stop at an unstamped READY, one controller that merges
-through trains, a daily flaky pass, a weekly release, and a scorecard that says
+through trains, a daily flaky pass, a twice-weekly release, and a scorecard that says
 whether the factory is getting better. It was written from two crews that ran
 it for a week on their own repositories (about 100 merges a week each) and from
 the recurring problems four Captains reported while doing so. Every path and
@@ -33,7 +33,7 @@ flowchart LR
   C -->|train build: one gate for up to 5 PRs| G[(Gate workflow)]
   G -->|GREEN or RED with flake records| C
   C -->|slot: stamp, verify, merge, verify| M[(main)]
-  M -->|Monday| R[Weekly release: tag, notes, stable]
+  M -->|Mon + Thu, 72 h floor| R[Stable release: tag, notes, stable]
   G -.->|flake-records artifacts| F[Daily flaky pass]
   M -.->|free-suite retries| F
   M -.->|/retro Step 7.5| S[Factory scorecard]
@@ -84,7 +84,7 @@ a time; each is independent.
 |---|---|---|
 | `.gstack/pregate.json` | Maps changed paths to test lanes, so `/ship` runs the tests that cover the diff and the remote gate selects correctly ([docs/pregate.md](pregate.md)) | `/ship` fails every touched file with `PREGATE_NO_LANE`. Write it once, from one owner, before the crew starts. |
 | `.gstack/ship-policy.json` | `queue_mode`, the `train` block (gate and free workflow names, the full-gate check, the train size and fill wait), the stamp files ([docs/ship-policy.md](ship-policy.md)) | Per-PR queue; `train …` refuses with `QUEUE_TRAIN_OFF`. |
-| `CHANGELOG.md` + `VERSION` | A stamp per merge and a weekly release with notes ([docs/releases.md](releases.md)) | Skip the version and changelog steps; the train still works on the tree receipt. |
+| `CHANGELOG.md` + `VERSION` | A stamp per merge and a twice-weekly release with notes ([docs/releases.md](releases.md)) | Skip the version and changelog steps; the train still works on the tree receipt. |
 | `AGENTS.md` validation discipline | Diagnose before fixing, focused checks during repair, one full suite at the end on a frozen tree | Threads retry blindly and report passes from older revisions. |
 
 A `.github/workflows` gate that the train can dispatch is the one hard
@@ -221,17 +221,20 @@ repeats first, start one fix thread with the Open section as its brief, and
 report the count to the Captain". Pass `thread: "this"` to keep the history in
 one place, and run it once by hand before enabling it.
 
-## The weekly release
+## The stable release
 
-`.github/workflows/weekly-release.yml` runs `scripts/release-cut.ts` every
-Monday morning: it takes the newest green commit on main's first-parent history
+`.github/workflows/weekly-release.yml` ("Stable release") runs
+`scripts/release-cut.ts` every Monday and Thursday at 14:00 UTC, and never moves
+`stable` more than once in 72 hours except for a verified security fix
+(`--security` with `--ref`): it takes the newest green commit on main's first-parent history
 (its required check succeeded, the backstop check succeeded, every check run
 completed and none failed, no active freeze), tags it `v<VERSION>`, publishes a
 GitHub Release whose notes are one line per CHANGELOG version since the
 previous release, and fast-forwards `stable`. Team-mode installs follow
 `stable`; `gstack-config set update_channel main` follows every merge. A
-hotfix is `--ref <sha on main>`. Details and the "nothing green in the window"
-failure mode: [docs/releases.md](releases.md). A repository adopting this
+hotfix is `--ref <sha on main>`, held by the same floor. Details, the floor's
+refusal codes and the "nothing green in the window" failure mode:
+[docs/releases.md](releases.md). A repository adopting this
 copies the workflow, sets its required check and backstop check names
 (`REQUIRED_CHECK`, `BACKSTOP_CHECK`), and keeps the CHANGELOG headline
 convention ([docs/CHANGELOG_STYLE.md](CHANGELOG_STYLE.md)).
@@ -428,5 +431,5 @@ allowlist; no cost ceiling surfaced at autoplan gates.
 | Ship policy, queue and trains | `docs/ship-policy.md`, `lib/ship-queue*.ts`, `bin/gstack-ship-queue`, `bin/gstack-restamp` |
 | Pregate and lanes | `docs/pregate.md`, `bin/gstack-pregate` |
 | Flaky reruns and records | `docs/TESTING_INTERNALS.md#flaky-reruns`, `scripts/lib/paid-rerun.ts`, `scripts/lib/ci-history.ts` |
-| Weekly release | `docs/releases.md`, `scripts/release-cut.ts`, `.github/workflows/weekly-release.yml` |
+| Stable release | `docs/releases.md`, `scripts/release-cut.ts`, `.github/workflows/weekly-release.yml` |
 | Scorecard | `bin/gstack-factory-scorecard`, `lib/factory-scorecard.ts`, `retro/SKILL.md.tmpl` Step 7.5, `test/factory-scorecard.test.ts` |

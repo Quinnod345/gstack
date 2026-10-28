@@ -2343,7 +2343,7 @@ describe('DESIGN_OUTSIDE_VOICES resolver', () => {
   });
 
   test('design-review contains outside voices section', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'design-review', 'SKILL.md'), 'utf-8');
+    const content = readSkillUnion('design-review');
     expect(content).toContain('Design Outside Voices');
     expect(content).toContain('source audit');
   });
