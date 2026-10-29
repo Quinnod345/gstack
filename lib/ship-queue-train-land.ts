@@ -70,7 +70,7 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   const retargeted = (b?: string) => b && b !== ctx.base ? outRefused({ code: 'QUEUE_NOT_READY', message: `#${o.pr} targets ${b}, not ${ctx.base}; train land merges only PRs on the base the train stamped` }, lines, `retarget #${o.pr} to ${ctx.base}, then ${rerun}`, run) : null;
   const wrongBase = retargeted(info.baseRefName);
   if (wrongBase) return wrongBase;
-  if (!j || j.base !== main.sha) {
+  if (!j || j.base !== main.sha || info.headRefOid !== j.stamp_commit) {
     const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`], { ...process.env, ...STAMP_IDENTITY }).out;
     if (!isSha(commit)) return outFailed({ code: 'QUEUE_LAND_CONFLICT', message: `cannot create the stamp commit for tree ${s.tree.slice(0, 12)}; nothing pushed` }, lines, `${Q} train status --train ${t.nonce}`, run);
     if (![pin, commit, j?.stamp_commit].includes(info.headRefOid)) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not its pin ${pin.slice(0, 12)}`, main.sha, lines, true);

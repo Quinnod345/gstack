@@ -144,6 +144,17 @@ describe('stamped trains: build and land', () => {
     expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'main^{tree}')).toBe(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', stamp + '^{tree}'));
   }, 300_000);
 
+  test('a rerun after the journal but before the stamp push pushes the stamp instead of stopping', () => {
+    const { fx, h1, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const stamp = /^PUSHED: ([0-9a-f]{40})/m.exec(land(fx, nonce, '1').out)![1]!;
+    fx.repo.git('push', '-q', '-f', 'origin', `${h1}:refs/heads/pr-1`);
+    const again = land(fx, nonce, '1');
+    expect(again.err).not.toContain('QUEUE_TRAIN_MOVED');
+    expect(again.out).toContain(`PUSHED: ${stamp}`);
+    expect(land(fx, nonce, '1').status).toBe(EXIT.ok);
+  }, 300_000);
+
   test('a PR retargeted off the train base refuses before any push', () => {
     const { fx, h1, nonce } = stampedTrain();
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
