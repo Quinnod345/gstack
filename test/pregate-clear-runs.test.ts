@@ -83,6 +83,12 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     expect(d.substitution).toBeUndefined();
     const cleared = clearObligation(file, LANE, d.receipt, 'test');
     expect(verifyPregate(repo.work, cleared, { tree: file.tree } as any)).toMatchObject({ ok: true });
+    const out = path.join(repo.work, '.gstack/tmp/pregate.json');
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, JSON.stringify(cleared));
+    const bound = runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '7', '--base', 'main', '--version', '1.0.0', '--session-kind', 'interactive', '--pregate', out, '--json']);
+    expect([bound.status, bound.err]).toEqual([EXIT.ok, expect.any(String)]);
+    expect(bound.out).toContain(d.receipt);
   }, 120_000);
 
   test('runs on a stamp-only predecessor are accepted for the stamped head and recorded as a substitution', async () => {
@@ -110,6 +116,37 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     expect(msg(clearDecision(file, LANE, { runs: ['200'], evidence: check(repo, both(head)) }, repo.work))).toBe('usage: pregate.json/remote_gate clears with exactly 2 run(s), one per profile (test, e2e); got 1');
     expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { gateRuns: null }) }, repo.work))).toContain('only when the base branch\'s .gstack/pregate.json declares remote_gate_runs');
     expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { inventory: () => ({ error: 'boom' }) }) }, repo.work))).toContain('inventory command failed: boom');
+  }, 120_000);
+
+  test('runs that tested different trees, or that record no tests, never clear the gate', async () => {
+    const repo = fixture();
+    const older = repo.git('rev-parse', 'HEAD~1');
+    const head = repo.git('rev-parse', 'HEAD');
+    const file = await pregateAt(repo);
+    const split = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }, { id: 201, profile: 'e2e', head: older, files: [] }]) }, repo.work);
+    expect('refused' in split && split.message).toContain('the runs tested different trees');
+    const empty = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: [] }, { id: 201, profile: 'e2e', head, files: [] }], { inventory: () => [] }) }, repo.work);
+    expect('refused' in empty && empty.message).toContain('inventory command listed no test files');
+  }, 120_000);
+
+  test('a lane with its own profile clears from --run-url through the verifier; a lane without one keeps the plain run-URL record, even when the base config cannot be read', async () => {
+    const repo = fixture();
+    const head = repo.git('rev-parse', 'HEAD');
+    const base = await pregateAt(repo);
+    const PLATFORM = 'test.yml/full-suite';
+    const file: PregateFile = { ...base, requires_remote: [...base.requires_remote!, { lane: PLATFORM, platform: 'macos', workflow: 'test.yml', job: 'full-suite', tests: ['test/a.test.ts'], receipt: null }] };
+    const url = 'https://github.com/fx/fx/actions/runs/200';
+    const profiled = clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts'] }], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
+    if ('refused' in profiled) throw new Error(profiled.message);
+    expect(profiled).toMatchObject({ attested: false });
+    expect(profiled.receipt).toStartWith(`run tree=${file.tree.slice(0, 12)} tests=5 runs=200/1 profiles=${PLATFORM} `);
+    const failed = clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts'], conclusion: 'failure' }], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
+    expect('refused' in failed && failed.refused).toBe('PREGATE_RECEIPT_INVALID');
+    expect(clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, []) }, repo.work)).toEqual({ receipt: url, attested: false });
+    fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
+    const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', PLATFORM, '--run-url', url]);
+    expect([r.status, r.err]).toEqual([EXIT.ok, expect.any(String)]);
   }, 120_000);
 
   test('offline verify refuses a run receipt recorded for another tree', async () => {

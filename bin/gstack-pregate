@@ -232,6 +232,7 @@ function cmdClear(root: string, rest: string[]): number {
   }
   const file = clearObligation(read.file, lane, decision.receipt, `gstack-pregate clear ${new Date().toISOString()}`, decision.substitution);
   writePregateFile(root, out, file);
+  if (/ runs=\S+ profiles=/.test(decision.receipt)) process.stdout.write(`REUSE: accepted ${lane} ${decision.receipt}\n`);
   if (decision.substitution) process.stdout.write(`PREGATE_RECEIPT_SUBSTITUTED: ${describeSubstitution(decision.substitution)}\n`);
   process.stdout.write(`PREGATE_CLEARED: ${lane} receipt=${decision.receipt} verdict=${file.verdict}${decision.attested ? ` (attested, not validated: ${lane} has no machine-checkable receipt)` : ''}\n`);
   return EXIT.ok;

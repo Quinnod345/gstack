@@ -285,25 +285,25 @@ function clearByRuns(file: PregateFile, lane: string, refs: string[], check: Run
     const hit = left.findIndex(ref => {
       const v = verifyRun(check.deps, { repo: check.repo, runRef: ref, profileName: name, profile, vetoHeads: file.head ? [file.head] : [], now: check.now });
       if (v.ok) { evidence.push(v.evidence); return true; }
-      tried.push(`${ref}: ${v.detail} (${v.reason})`);
+      tried.push(`${ref}: reason=${v.reason} ${v.detail}`);
       return false;
     });
-    if (hit < 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — no run verifies as ${name}: ${tried.join('; ')}; ${lane} stays uncleared` };
+    if (hit < 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_verified_run — no run verifies as ${name}: ${tried.join('; ')}; ${lane} stays uncleared` };
     left.splice(hit, 1);
   }
   const trees = [...new Set(evidence.map(e => e.tree))];
-  if (trees.length > 1) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the runs tested different trees (${trees.map(t => t.slice(0, 12)).join(', ')}); ${lane} stays uncleared` };
+  if (trees.length > 1) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=tree_mismatch — the runs tested different trees (${trees.map(t => t.slice(0, 12)).join(', ')}); ${lane} stays uncleared` };
   const sub = treeSubstitution(file, trees[0]!, lane, repoRoot);
   if ('refused' in sub) return sub;
   const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
   if (isGate) {
     const listed = check.inventory(check.gateRuns!.inventory);
-    if ('error' in listed) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the remote gate's inventory command failed: ${listed.error}; ${lane} stays uncleared` };
-    if (!listed.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the remote gate's inventory command listed no test files; ${lane} stays uncleared` };
+    if ('error' in listed) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_failed — the remote gate's inventory command failed: ${listed.error}; ${lane} stays uncleared` };
+    if (!listed.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_empty — the remote gate's inventory command listed no test files; ${lane} stays uncleared` };
     const missing = uncoveredFiles(listed, evidence);
-    if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — ${missing.length} of the gate's ${listed.length} test file(s) appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
+    if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_uncovered — ${missing.length} of the gate's ${listed.length} test file(s) appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
   }
-  if (tests === 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the verified runs record no tests; ${lane} stays uncleared` };
+  if (tests === 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_tests — the verified runs record no tests; ${lane} stays uncleared` };
   const accepted = sub.substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${sub.substitution.files.length}` : '';
   return { receipt: `${isGate ? 'remote-gate' : 'run'} tree=${trees[0]!.slice(0, 12)} tests=${tests}${accepted} ${runReceiptFields(evidence, check.now)}`, attested: false, substitution: sub.substitution };
 }

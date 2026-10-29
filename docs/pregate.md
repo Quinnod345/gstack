@@ -626,11 +626,15 @@ once:
   exactly the rule [above](#remote-gate-stamp-only) (a policy whose
   `stamp_sensitive_gates` names `tests` refuses that substitution).
 
-Any API or git error refuses. Each refusal prints `REUSE: refused — …` with the
-run and its reason (`fork_run`, `event_mismatch`, `run_not_success`,
-`job_missing`, `artifact_mismatch`, `artifact_reused`, `tree_mismatch`,
-`newer_run_vetoes`, `run_stale`, `os_mismatch`, `api_error`, …), as
-`PREGATE_RECEIPT_INVALID`. Accepted, the receipt reads
+Any API or git error refuses. Each refusal prints `REUSE: refused
+reason=<code> — …` as `PREGATE_RECEIPT_INVALID`, and a run that fails
+verification is named with its own reason (`fork_run`, `event_mismatch`,
+`run_not_success`, `job_missing`, `artifact_mismatch`, `artifact_reused`,
+`tree_mismatch`, `newer_run_vetoes`, `run_stale`, `os_mismatch`, `api_error`,
+…); the clear-level codes are `no_verified_run`, `tree_mismatch` (runs on
+different trees), `inventory_failed`, `inventory_empty`, `inventory_uncovered`
+and `no_tests`. Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and
+the receipt reads
 `remote-gate tree=<t12> tests=<n> runs=<id>/<attempt>,… profiles=<p>,…
 heads=<h12> verified=<time>` (with `accepted-for=` and the substitution for a
 stamp-only predecessor). A lane with its own profile gets `run tree=… runs=…`
