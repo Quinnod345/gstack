@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.319.0] - 2026-10-29
 
 **`gstack-pregate sealed` no longer prints a line that reads like a push confirmation.** On gstack-evals#29 the lane read `pushed aeb2413` in the `SEALED:` line as the push landing, while the remote stayed at 9036ab1 (#3565). `sealed` never pushes: it checks the commits a push would publish. `pushed <sha>` was its label for the commit whose `sealed` policy it read beside the base branch's.
 
@@ -10,6 +10,102 @@
 
 ### Tests
 - `test/sealed-guard.test.ts`: `gstack-pregate sealed` names the checked commit, prints no `pushed`, and leaves the remote's refs exactly as they were. It failed before the fix on `policy=origin/main + pushed <sha>`.
+
+## [1.91.318.0] - 2026-10-29
+
+**/office-hours now has eval tasks for the shared skill eval, and /write-skill's diet locks its tasks before a paid run.** gstack-evals' Lane A will re-check the office-hours diet from #3525. To do that it needs office-hours' tasks in gstack's contract format, a sidecar for what Lane A adds, and a diet step that commits the lock a paid run requires. #3525 never committed the task set GSTA-134 ran, so these tasks rebuild it from the pilot's written summary.
+
+### Added
+- **`test/fixtures/skill-evals/office-hours/`**: 11 tasks on a CSV-merge idea, with a `seed.sh` that makes the git repo and the `.gstack-home` state root. Nine follow the pilot's set, which covered the mode question, the first startup question, pushback on vague evidence, builder mode, the premise challenge, the second-opinion offer, alternatives, the UI visual step and the backend skip. Two are new safety tasks. One allows no code during a session (the hard gate), and the other allows no design doc before the user picks an approach (the Phase 4 stop). `no-code-mvp` failed in every arm of the pilot and is left out.
+- **`tasks.ext.json`** beside it, in Lane A's sidecar format: every task is interactive, with a persona and scripted replies, a judge rubric per behavior task, and a violating `mutant` per safety task. Reply category names are provisional until gstack-evals publishes its list.
+
+### Changed
+- **/write-skill diet step 6** starts with `gstack-evals skill-eval --lock` and a commit of `tasks.lock.json`. Without that commit the shared eval refuses a paid run (LOCK_MISSING).
+- **`docs/designs/SKILL_EVAL_CONTRACT.md`** adds notes for implementers. The harness should set both `GSTACK_STATE_ROOT` and `GSTACK_HOME` to `<work dir>/.gstack-home`. A verdict may carry an optional `resumable` field. The notes also cover the lock, the sidecar, and an open question about what `must` patterns grade when a host answers an interactive task's questions.
+
+### Tests
+- `test/skill-eval-tasks.test.ts` checks office-hours' `tasks.json` against the contract. It also checks that each `tasks.ext.json` entry names a task in `tasks.json` and uses only known keys. No existing test, threshold or allowlist changed.
+
+## [1.91.317.0] - 2026-10-29
+
+**Registered gstack skills now say when to use them where the harness model reads them, and OpenClaw lists the task skills directly.** HARN-5's paid cells showed OpenClaw and Hermes listing gstack's skills while the model rarely opened them. Router lines kept only each skill's first sentence and dropped its "Use when asked to ..." trigger, and Hermes's skills index shows only the first 57 characters of a description, which for gstack was capability prose. This release changes only what gstack writes into its own skills folders. Use rates are not claimed yet: HARN-5's fixed panel measures them next.
+
+### Changed
+- **Router lines lead with the trigger** (`gstack-harness`, every router-mode target: OpenClaw, dots, `generic` and `--print`). Each line opens with the skill's own trigger sentence, or, when the description has none, `Use for:` and the skill's `triggers:` list, within 160 characters. The router's description now leads with task verbs (review, debug, QA test, plan, ship) in its first 200 characters, within the 300-character budget. The wording rule lives in `lib/skill-triggers.ts`.
+- **Hermes descriptions open with a trigger list of at most 57 characters** (`frontmatter.descriptionLead` in `hosts/hermes.ts`), for example `Use for: review this pr, code review, check my diff.`, followed by the description without its own trigger sentence, which the lead repeats, so no Hermes render grows. Claude Code and every other host render their descriptions as before.
+- **OpenClaw registers in `hybrid` mode by default**: `gstack-review`, `gstack-investigate`, `gstack-qa`, `gstack-ship` and `gstack-plan-eng-review` are top-level skills and the `gstack` router carries the rest. Dumped through OpenClaw 2026.10.6's own `buildSkillSnapshot`/`prepareSkillsForPrompt` with its 19 eligible bundled skills, hybrid's skills section is 10,290 characters in full format (budget 18,000). `--skills all` falls to compact format at 17,971 characters, and `--skills router` is 6,701. `--skills router` and `--skills all` remain, and a mode switch now removes the empty folders the previous mode left behind.
+- **`--context <file>` is opt-in for OpenClaw and Hermes too**: the block is written only into the file named, after a `gstack-harness: context block: <file> (<profile|project> scope)` line. Setup, upgrades and refresh never add one and do not re-add a block you deleted. A second `--context` file keeps the first, because the ledger keys blocks by file. The block text follows the mode (with `--skills all` it names no router path). Uninstall now restores each file byte for byte (the blank separator line, a missing final newline and a file gstack created are undone).
+- `HARNESS_MODE_UNSUPPORTED`'s fix text and docs/hosts.md describe Hermes's listing, not its loader, and docs/hosts.md states registered, listed and used as separate facts.
+
+### Fixed
+- Re-registering an OpenClaw, Hermes or dots registration without `--context` (what setup and `gstack-harness auto` do) no longer cuts a block the user opted into.
+
+### Added
+- `HARNESS_CONTEXT_REFUSED`: `--context` refuses `SOUL.md` (in any letter case), and for Hermes a new rules file that would outrank rules Hermes loads now: a file of an earlier group (`.hermes.md`/`HERMES.md` before `AGENTS.md` before `CLAUDE.md`), an earlier name in the same folder (`.hermes.md` before `HERMES.md`, `AGENTS.override.md` before `AGENTS.md`), or a `.hermes.md`/`HERMES.md` below one in a parent folder, which Hermes takes as the nearest.
+
+### Gate integrity
+- `test/harness-register.test.ts`: three expectations change with the byte-for-byte restore and blocks keyed by file. The generic cut now expects the original bytes, without the extra newline. The second `--context` case now expects both blocks kept and both restored where it used to expect the first block cut. The OpenClaw router case passes `mode: 'router'` because the default is now hybrid. New cases cover router lines, Hermes leads (at most 57 characters), hybrid with mode switches through refresh and uninstall, context opt-in, refusal and scope, the CLI scope line, and Hermes's threat scanner on every block variant. The scanner case runs when `GSTACK_HERMES_SRC` names a Hermes checkout and is skipped otherwise. More new cases cover the same-folder and nearest-parent refusals, pre-blockpad ledgers, refresh keeping a block the user edited, `--json --context` output, and the Hermes check outside a git repository; new `test/skill-triggers.test.ts` covers the wording rule's fallbacks and cuts.
+- `test/fixtures/skill-md-size-allowlist.json`: the Hermes pins for `gstack-autoplan` (108,982 to 108,891) and `gstack-plan-eng-review` (128,708 to 128,655) go down to the new render sizes, as the size guard directs.
+- New `test/session-kind-marker.test.ts`: a marker-only environment (`GSTACK_SESSION_KIND=spawned`, no `GSTACK_CAPY`) gets the same soft admission from `bin/gstack-install-verdict.sh` and `lib/install-verdict.ts`. A ratchet fails when a file in `bin/`, `lib/`, `hosts/` or `scripts/` reads or sets `GSTACK_SESSION_KIND` outside its 13-file inventory; a planted-reader control and a comments-only control check it.
+
+## [1.91.316.0] - 2026-10-29
+
+**/ship takes a token cap and stops cleanly at it, and long runs hand their heavy segments to fresh-context children.** On gstack-evals#31 a /ship spent 54M tokens against a 25M cap because the cap was only a number in a brief; #26, whose agent read the counter after every step, stopped at 39.40M of 40M. `/ship --token-cap 25M` (or `GSTACK_SHIP_TOKEN_CAP`) now admits each step and dispatch batch only when it fits, and a run started from a long-lived context, or one whose per-call charge passes 150k at Step 7 or Step 12, runs that segment in a fresh child.
+
+### Added
+- **`gstack-ship-budget`** (`lib/ship-budget.ts`, `lib/ship-budget-cli.ts`, `lib/ship-handoff.ts`): an admission cap on a per-run token ledger under `<state root>/ship-runs/<run>/` (its own schema; only `withFileLock` is shared with `lib/spend-ledger.ts`). `start`, `check` (the `BUDGET:` line, `verdict=continue|delegate|stop`, a `RESERVATION:` id per admitted step or batch), `settle`/`release`, `handoff`/`launch`/`verify-handoff`/`return`/`reconcile`, `resume` (cap raises need `--approved-by` and the owner's words; `--rebuild-from-record`; restore from a private Drive checkpoint) and `close`. Exit 0 continue/delegate, 3 stop, 2 usage. Each meter is a versioned contract, and there are three: the Capy root counter (`--reading`), Claude Code journal usage (`lib/claude-usage.ts`, bound by `--session` or an echoed nonce) and `--meter estimate`.
+- **`gstack-review-log --start ... --reservation <id>`**: under a cap, a dispatch without an unspent, one-shot reservation refuses before launch (`BUDGET_CHECK_SKIPPED`), and `--finish` settles it. Without a cap nothing changes.
+- **/ship**: the skeleton's Budget paragraph (`--token-cap`, `--resume <record>`, `--continue <handoff>`) and a new `budget-handoff` section with the meter recipes, reservations, stop and resume, and the delegate flow per host.
+- **Result codes** `BUDGET_CAP_REACHED`, `BUDGET_READING_MISSING`, `BUDGET_READING_REJECTED`, `BUDGET_METER_UNAVAILABLE`, `BUDGET_LEDGER_INVALID`, `BUDGET_CHECK_SKIPPED`, `HANDOFF_PIN_MOVED` with docs/troubleshooting.md anchors; `lib/ship-budget-calibration.json` seeded from #19, #26 and #31.
+- **Docs**: docs/ship-budget.md (linked from docs/unattended.md), and a paragraph each in the Capy skill's SKILL.md and captain.md.
+
+### Tests
+- `test/ship-budget.test.ts`: the cap boundary, batch overshoot, the #31 replay, spend above a reservation, the no-cap path, meters and epochs, exit codes, start and segment delegation, the full handoff chain with an idempotent reconcile, moved pins and a tampered brief, refused and interrupted children, stop and RECOVER, checkpoint restore into an empty state root, ledger rebuild, concurrent ledgers, and an unchanged `gstack-wtree`.
+- `test/ship-budget-review-log.test.ts`, `test/claude-usage.test.ts`, `test/ship-budget-calibration.test.ts` (leave-one-out), `test/ship-budget-section.test.ts`.
+
+## [1.91.315.0] - 2026-10-29
+
+### Changed
+- **Stacked PRs** (Fixes #3570): after a stack parent lands and the child is retargeted to the base with the base merged in, `carry --base <base>` compares HEAD's product diff against the base with the range the receipt reviewed against the parent branch. That is the recorded `product_patch_id`, or the range against `origin/<parent>` for an older receipt. HEAD's side is its whole product diff against the base, so a parent's `package.json` change that never reached the base refuses too. Equal carries with the reason `stack parent <branch> landed` and rebinds the receipt's `base` to the base; anything else refuses. Until now every stacked child paid a full /ship once its parent merged (gstack-evals#19).
+
+### Tests
+- `test/ship-receipt-carry-squash.test.ts`: a child carries after its parent squash-merges and main is merged in, names main as its base, and carries again across a later main merge. A test-only child carries. A child edited after the merge, a parent that never landed, a parent `package.json` change that never reached main, and a merge that keeps the child's tree over the landed parent refuse. An older receipt falls back to `origin/<parent>` and refuses once that branch is deleted.
+
+## [1.91.314.0] - 2026-10-29
+
+**A later autoplan gate that asks nothing new is now answered with the owner's earlier words instead of another round trip.** Captains were carrying approvals across gate revisions by hand (GSTA-140 reused a rev-1 "Do it" on rev 2; ALPH-50 lost about 27 minutes to one), and a replay over 23 recorded runs found 14 later gates, 8 of them holding only post-cap delta items.
+
+### Added
+- **Carry-forward** (`lib/autoplan-carry.ts`): when gate_rev N+1 asks nothing new and gate_rev N was fully answered by the owner with `rec` or "do it", gstack answers N+1 with those recorded words and prints `CARRIED: gate_rev=<n> <- gate_rev=<m> …`; anything else prints `CARRY: no (<why>)` and goes to the owner. `--no-carry-forward` on the first `next` turns it off.
+- **"do it" covers new low-risk items.** When the owner's own words were "do it", a new item that changes no scope, cost, direction or plan text takes its recommendation, is marked `carried_under: do it`, and is listed in the approval record and the Captain brief as not shown to the owner. A Captain's "do it" never counts.
+- **Delta check.** A "plan changed after cap" item gets one reviewer from another model family on the delta first (`CARRY_CHECK:`, `gstack-autoplan check`), within a per-gate spend cap (`--carry-check-cap`, default $5). High or above, no reviewer, an owner answer, or a plan edit after dispatch leaves the gate for the owner and releases the reservation. The verdict is recorded on `gate.json`, the decision rows and `decisions.tsv`.
+- **`eli5` in gate.json**: the plan's `## ELI5` and the four approvals-shape sections; `gstack-gate render` opens page 1 with them, and the Captain brief requires `## ELI5` (older runs render as before).
+- **`gstack-approvals import --autoplan <dir> --stack b1,b2`** writes the same rows to every branch of a stack, or to none when one branch is unknown.
+- **`REVIEW_ESTIMATE:`** on the first `next`: phases, voices, rounds, attempts and the reservation total.
+
+### Changed
+- `lib/decision-trail.ts` holds the trail append rules shared by `gstack-decision-trail` and the carry.
+
+## [1.91.313.0] - 2026-10-29
+
+**The PII scanner stops flagging two kinds of ordinary text: a bare power-of-two or hash constant in code, and a package@version-style filename.** Eval artifacts and PR bodies that print a PRNG range or name a versioned results file no longer raise a MEDIUM phone or email finding, and real phone numbers and addresses next to them still report.
+
+### Fixed
+- **`lib/redact-patterns.ts`**: `pii.phone.e164` skips a bare number that is exactly a power of two from 2^30 through 2^49, one less than one, or one of eleven well-known 32-bit hash and PRNG constants. The same digits written with a `+`, spaces, dashes, dots or parentheses still report (#3577).
+- **`lib/redact-patterns.ts`**: `pii.email` skips a filename whose part after the `@` is a version or tag followed by file extensions no top-level domain uses, or a dotted version followed by an extension that doubles as one. A file named after a real address, an address at a numeric domain such as 163.com, and an address under a top-level domain that doubles as an extension (`.sh`, `.md`) still report (#3576).
+
+### Tests
+- `test/redact-constant-and-at-filename.test.ts`: pins both exemptions in both directions, including files named after a real address.
+
+## [1.91.312.0] - 2026-10-29
+
+**An install check run from inside /ship no longer upgrades gstack under it.** /ship's docs step runs `scripts/install.sh --for document-release`. That run fast-forwarded the checkout from 1.91.298 to 1.91.299 in the middle of a lane's /ship, so the receipt writer's rules changed partway through the run (#3571).
+
+### Fixed
+- **`bin/gstack-capy-session`**: in install mode, a live workflow lease under 120 minutes old held by the caller's own process chain now skips the self-upgrade: `SELF_UPGRADE: skipped (a gstack run in this session holds a workflow lease on this installation: pid <p> (<age>m <command>), so the upgrade waits until the lease is 120 minutes old; …(UPGRADE_BUSY))`. The install still certifies the installed revision and the trailer stays ok with `behind=`. `bin/gstack-upgrade` deliberately ignores the caller's own lease, and an install started from inside the run passed that check. Each `gstack-skill-start` renews the lease. The age bound matters on Capy, where the leased pid is the machine's long-lived `capy-server`, so a lease is never released by its process exiting. An older lease, or none, upgrades as before, and `GSTACK_UPGRADE_FORCE=1` or a hand-run `bin/gstack-upgrade` still moves the checkout.
+
+### Tests
+- `test/capy-skill-wrapper.test.ts`: an install run under a shell that holds a fresh lease leaves HEAD where it was and stays ok. Once that lease is 121 minutes old, with its holder still alive, the same install upgrades. Before this change the first run printed `SELF_UPGRADE: done 1.0.1 -> 1.0.2`.
 
 ## [1.91.311.0] - 2026-10-29
 
