@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.321.0] - 2026-10-29
 
 **Free Tests passes again on Ubicloud runner image 20261026.1.0.** Every Linux job that landed on that image failed the cookie-import Playwright pipe smoke, in-shard and again on the serial retry, and a rerun passed only when it happened to land on the older 20261021.1.0 image. Both images keep `kernel.apparmor_restrict_unprivileged_userns=1`, but 20261026 loads three AppArmor profiles instead of 123, so nothing grants the bundled Chromium a user namespace and its sandbox aborts with `credentials.cc:131 ... Permission denied`. The two Linux jobs that launch Chromium now grant user namespaces to that one binary, the way Ubuntu's own `chrome` profile does.
 
