@@ -15,6 +15,51 @@
 - `test/ship-budget.test.ts`: the cap boundary, batch overshoot, the #31 replay, spend above a reservation, the no-cap path, meters and epochs, exit codes, start and segment delegation, the full handoff chain with an idempotent reconcile, moved pins and a tampered brief, refused and interrupted children, stop and RECOVER, checkpoint restore into an empty state root, ledger rebuild, concurrent ledgers, and an unchanged `gstack-wtree`.
 - `test/ship-budget-review-log.test.ts`, `test/claude-usage.test.ts`, `test/ship-budget-calibration.test.ts` (leave-one-out), `test/ship-budget-section.test.ts`.
 
+## [1.91.310.0] - 2026-10-29
+
+**The cookie workflow judge now asks for structured output, so a quote the model forgets to escape can no longer fail the gate.** Train 42 went red because both of its `setup-browser-cookies/SKILL.md workflow` samples came back as free text with a bare quote inside `reasoning` ("one --domain per run"), and neither parsed. The GSTA-91 comparison had measured that failure: 2 of 144 free-text samples failed to parse, against 0 of 72 with the schema.
+
+### Changed
+- **Cookie workflow judge transport:** `setup-browser-cookies/SKILL.md workflow` now sends `WORKFLOW_JUDGE_RESPONSE_SCHEMA`, released on GStack Minder's ruling: "GStack Minder, 2026-10-29: release the GSTA-91 hold; a07 is matched by old-b; free-text parse errors cost train 42". Its model, thresholds (4/3/4), sample count and case kind are unchanged. The ruling is recorded in `test/fixtures/judge-calibration/cookie-workflow/release.json`, and the held comparison stays recorded as held.
+
+### Tests
+- `test/cookie-workflow-judge-input.test.ts` runs the registered cookie callback through the real `callJudge` and pins its request to the schema. It replays train 42's two replies (msg_011CgVnRtVj5vyLvb56m6KJH, msg_011CgVne5GStZ6f9pRoCvgWE): their free-text bytes do not parse, and the same judgment returned as schema output scores and passes. `test/judge-calibration.test.ts` reads the release record. Both fail without the transport change.
+
+### Gate integrity
+- Gate edit: the cookie judge's response transport moves from free text to the JSON schema, on the ruling above. No threshold, sample, trial, deadline or case-kind change. The Haiku free-text failure pin in `test/llm-judge-frontier.test.ts` is untouched.
+
+## [1.91.309.0] - 2026-10-29
+
+**The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
+
+### Fixed
+- **`/review` Step 5.8**: an unresolved non-gate defect (an unanswered question) is recorded as `open`, so every finding has a record action. A repeat pass's reruns of superseded probes are revalidation, so they run after smoke expiry, in the same probe directory; earlier provisional QA sections link checkpoints and only the final pass runs the once-only `materialize`.
+- **`/plan-eng-review`**: the shared Voice now loads once. Eng no longer carries a near-copy whose only difference was its em-dash clause; the Scope gate's format precedence says required formats keep their em dashes.
+- **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
+
+### Changed
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, wrapper attempts and 429 waits, HTTP requests and statuses (so the SDK's own retries show), connection, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason (at most 200 characters). Counts only, never content; an observer that throws cannot change a judge result. Deadlines, effort, samples and thresholds are unchanged.
+
+### Tests
+- `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events, one cancelled after headers, an SDK-retried 429, a cancelled 429 wait, an event the observer cannot read and an overlong reason, with no-abort controls; each fails with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
+
+### Gate integrity
+- No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
+## [1.91.308.0] - 2026-10-29
+
+**`gstack-restamp` no longer cuts a four-part package.json version to three parts in a repo whose convention is four.** On garrytan/gbrain#7878, `/ship` restamped gbrain's `package.json` to `"0.60.483"` beside `VERSION` `0.60.483.0`; gbrain requires the two to match and its CI version gate fails when they drift, so the stamp had to be reverted by hand. The version stage called `gstack-version-bump write`, which always stores the npm-valid three-part form in the manifest (decision 11, which is why gstack's own `package.json` reads `1.91.298`).
+
+### Fixed
+- **`lib/restamp.ts`**: the version stage keeps the full version in the manifest when the policy lists it in `stamp_paths` or `stamp_files` and the base's copy holds four parts, and the stage detail says so (`wrote 0.60.483.0 (package.json keeps four parts: …)`). The form is read at the base, like the policy, so a branch an earlier restamp already cut to three parts goes back to four. Every other repo, gstack included, still gets the npm-valid form, and a four-part manifest the policy does not list still migrates to three parts as decision 11 says.
+- **`bin/gstack-version-bump write`**: new `--manifest-form npm|full` (default `npm`); `full` writes the version as given to the manifest and its npm lockfiles. It has no effect when the version path is itself a JSON manifest.
+
+### Tests
+- `test/restamp-four-part-manifest.test.ts`: a gbrain-shaped fixture (four-part `VERSION` and `package.json`, the manifest in `stamp_files`, bun, no npm lockfile) restamped from an unstamped branch and from a branch already carrying its stamp (both failed before the fix with `"0.60.483"`), from a branch an older restamp cut to three parts, and with the manifest listed through `stamp_paths`. gstack's shape (three-part manifest and lockfile) and an unlisted four-part manifest keep their current results.
+- `test/gstack-version-bump.test.ts`: `--manifest-form full` keeps four parts in the manifest and lockfile; an unknown form exits 2 before anything is written.
+
 ## [1.91.307.0] - 2026-10-29
 
 **/ship now reviews in proportion to what the diff can break: light, standard or full depth.** A diff with 50 or fewer runtime lines gets one batched specialist plus the native adversarial pass, a larger runtime diff gets the class's specialists scoped to their hunks, and gate code or any classifier error gets the full review as before. The receipt records the depth and the queue refuses a receipt below what the head needs. Before this, a 12-line fix paid for the same reviewer fan-out as a change to the merge gate. The backtest that would have let light depth drop the adversarial pass was inconclusive (9 light-eligible PRs, 5 with attributable findings, below the 15 the plan required), so light keeps it.
