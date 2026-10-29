@@ -1271,8 +1271,10 @@ release-field-only conflict, write an entry from the title, or refuse on a
 product conflict. Then set `changelog_fragments` and `min_gstack_version` in
 one policy PR; a claim-at-open repository switches `queue_mode` to
 `stamp-at-merge` in the same PR. Open PRs need no change: `land` handles each
-census case. Rollback is removing the key; `gstack-restamp` still folds any
-fragment it finds, so no entry is lost.
+census case. Rollback is removing the key. With it off, `gstack-restamp`
+neither folds nor deletes fragment files, so first land every open PR that
+carries a fragment (`land --census` lists them) or move each fragment's text
+under `[Unreleased]` in its PR; otherwise that entry never reaches CHANGELOG.md.
 
 <a id="tree-receipt"></a>
 ## The tree receipt
