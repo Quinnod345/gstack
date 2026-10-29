@@ -447,7 +447,7 @@ function linkIgnoredDeps(repoRoot: string, staging: string): void {
  */
 function runRestampCommand(command: string, plan: Plan, staging: string, env: NodeJS.ProcessEnv, before: Set<string>, s: StageRecord): void {
   const seeded = git(staging, ['write-tree']).out;
-  const r = spawnSync('sh', ['-c', `${command} "$1"`, 'sh', plan.newVersion], { cwd: staging, encoding: 'utf8', timeout: 600_000, env: { ...env, GSTACK_RESTAMP_VERSION: plan.newVersion } });
+  const r = spawnSync('sh', ['-c', `${command} "$1"`, 'sh', plan.newVersion], { cwd: staging, encoding: 'utf8', timeout: 600_000, env: { ...env, GSTACK_RESTAMP_VERSION: plan.newVersion, GSTACK_RESTAMP_BASE_SHA: plan.baseSha } });
   git(staging, ['read-tree', seeded]);
   if (r.status !== 0) { s.status = 'failed'; s.detail = `${r.stderr ?? ''}${r.stdout ?? ''}`.trim().slice(0, 300); throw new Refusal('RESTAMP_RELEASE_TOOL_FAILED', `restamp_command exited ${r.status}: ${s.detail}; nothing written to the branch`); }
   const outside = changedPaths(staging).filter(p => !before.has(p) && !allowedOutput(plan, staging, p));

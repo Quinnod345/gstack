@@ -12,11 +12,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parseChangelog } from './changelog-check';
+import { effectiveBump, readFragments } from './changelog-fragments';
 import { matchesAny } from './ship-policy';
 
 export type TrainHead =
   | { kind: 'off' }
-  | { kind: 'unstamped' }
+  | { kind: 'unstamped'; fragments?: number; entry?: 'fragment' | 'unreleased' | 'none-bot' }
   | { kind: 'stamped'; expected: string }
   | { kind: 'invalid'; reason: string };
 
@@ -89,12 +90,13 @@ export function regeneratedAtBase(o: { repoRoot: string; head: string; baseVersi
   }
 }
 
-export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: string }): TrainHead {
+export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: string; author?: string }): TrainHead {
   const base = `origin/${o.baseRef.replace(/^origin\//, '')}`;
   const show = (rev: string, file: string) => git(o.repoRoot, ['show', `${rev}:${file}`]);
   let policy: any = null;
   try { policy = JSON.parse(show(base, '.gstack/ship-policy.json') ?? 'null'); } catch { policy = null; }
-  if (!policy || typeof policy.train !== 'object' || policy.train === null) return { kind: 'off' };
+  const fragDir: string | null = typeof policy?.changelog_fragments?.dir === 'string' ? policy.changelog_fragments.dir : null;
+  if (!policy || ((typeof policy.train !== 'object' || policy.train === null) && !fragDir)) return { kind: 'off' };
   const mergeBase = git(o.repoRoot, ['merge-base', base, o.head])?.trim();
   if (!mergeBase) return { kind: 'invalid', reason: `no merge base between ${base} and ${o.head}` };
 
@@ -113,7 +115,10 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
     if (regen.kind === 'differs') touched.push(...regen.files);
   } else touched.push(...outputs);
   if (touched.length) {
-    const expected = bumpVersion(baseVersion, policy.bump ?? 'patch');
+    // A merge-step stamp commit has parents [pin, base]: the fragments it folded are the pin's own.
+    const pin = git(o.repoRoot, ['rev-parse', '--verify', '--quiet', `${o.head}^2`]) ? `${o.head}^1` : mergeBase;
+    const level = policy.bump === 'patch' ? 'patch' : 'micro';
+    const expected = bumpVersion(baseVersion, fragDir ? effectiveBump(level, readFragments(o.repoRoot, pin, fragDir, base).fragments) : (policy.bump ?? 'patch'));
     return expected ? { kind: 'stamped', expected } : { kind: 'invalid', reason: `${base}:VERSION is not a 4-part version` };
   }
 
@@ -136,5 +141,11 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
   if (was.length !== now.length || was.some((text, i) => text !== now[i])) {
     return { kind: 'invalid', reason: `${file} changes text outside [Unreleased]; an unstamped head may only add or edit its [Unreleased] section` };
   }
-  return { kind: 'unstamped' };
+  if (!fragDir) return { kind: 'unstamped' };
+  const frags = readFragments(o.repoRoot, o.head, fragDir, mergeBase);
+  if (frags.errors.length) return { kind: 'invalid', reason: `${frags.errors[0]!.path}: ${frags.errors[0]!.message}` };
+  if (frags.fragments.length) return { kind: 'unstamped', fragments: frags.fragments.length, entry: 'fragment' };
+  if (unreleased.length) return { kind: 'unstamped', fragments: 0, entry: 'unreleased' };
+  if (/\[bot\]$/.test(o.author ?? '')) return { kind: 'unstamped', fragments: 0, entry: 'none-bot' };
+  return { kind: 'invalid', reason: `add a CHANGELOG fragment: ${fragDir.replace(/\/+$/, '')}/<slug>.md with the entry text (the merge step folds it under the version it allocates)` };
 }
