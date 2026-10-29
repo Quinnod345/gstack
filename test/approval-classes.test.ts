@@ -198,7 +198,7 @@ describe('gstack-ship-receipt write enforces declared classes (APPROVAL_CITATION
     expect(changes.err).toMatch(/requests changes; it is not an approval/);
     const ok = write(repo, `## Summary\n\nApproved by garrytan 2026-10-16 via ${COMMENT}\n`, [], ghApi(repo, { [COMMENT_API]: { user: { login: 'garrytan' }, body: `Approved: ${token}. Preview first, never at upgrade.` } }));
     expect(ok.status, ok.err).toBe(EXIT.ok);
-    expect(ok.err).toMatch(/^SHIP_RECEIPT: .* approval=verified(?: depth=(?:light|standard|full))?$/m);
+    expect(ok.err).toMatch(/^SHIP_RECEIPT: .* approval=verified$/m);
     const receipt = JSON.parse(ok.out);
     expect(receipt.approval).toMatchObject({ status: 'checked', source: expect.stringMatching(/^origin\/main@[0-9a-f]{12}:\.gstack\/approval-classes\.json$/) });
     expect(receipt.approval.classes).toEqual([{ class: 'data-repair', scope: token, effects: ['src/commands/repair/accepted-takes.ts:1'], citation: 'verified', approved_by: 'garrytan', date: '2026-10-16', via: COMMENT, binding: 'token', evidence: 'comment by garrytan' }]);
@@ -256,7 +256,7 @@ describe('gstack-ship-receipt write enforces declared classes (APPROVAL_CITATION
     expect(bare.err).toMatch(/GBRA-60: unresolved \(GBRA-60 is neither a plan sha nor a GitHub comment or review URL\); an unverified citation must attest "for data-repair@[0-9a-f]{12}".*\(APPROVAL_CITATION_MISSING\)$/m);
     const attested = write(repo, '', ['--approval', `Approved by Garry 2026-10-16 via GBRA-60 for ${token}`]);
     expect(attested.status, attested.err).toBe(EXIT.ok);
-    expect(attested.err).toMatch(/^SHIP_RECEIPT: .* approval=unverified:data-repair(?: depth=(?:light|standard|full))?$/m);
+    expect(attested.err).toMatch(/^SHIP_RECEIPT: .* approval=unverified:data-repair$/m);
     expect(JSON.parse(attested.out).approval.classes[0]).toMatchObject({ citation: 'unverified', binding: 'attested', via: 'GBRA-60', evidence: expect.stringMatching(/^unresolved: /) });
     commit(repo, { 'src/commands/repair/orphans.ts': 'export const y = 2;\n' }, 'more repair');
     const stale = write(repo, '', ['--approval', `Approved by Garry 2026-10-16 via GBRA-60 for ${token}`]);
@@ -280,12 +280,12 @@ describe('gstack-ship-receipt write enforces declared classes (APPROVAL_CITATION
     const w = write(repo, '');
     expect(w.status, w.err).toBe(EXIT.ok);
     expect(JSON.parse(w.out).approval).toEqual({ source: expect.stringMatching(/^origin\/main@[0-9a-f]{12}:/), status: 'checked', classes: [], report_only: ['migrations db/migrate/0250_x.sql:1 (added)'] });
-    expect(w.err).toMatch(/approval=none(?: depth=(?:light|standard|full))?$/m);
+    expect(w.err).toMatch(/approval=none$/m);
     repo.git('remote', 'remove', 'origin');
     const gone = write(repo, '');
     expect(gone.status, gone.err).toBe(EXIT.ok);
     expect(gone.err).toMatch(/^APPROVAL_CLASSES: unavailable \(origin\/main is not a resolvable commit\); approval classes were not checked$/m);
-    expect(gone.err).toMatch(/approval=unchecked(?: depth=(?:light|standard|full))?$/m);
+    expect(gone.err).toMatch(/approval=unchecked$/m);
     expect(JSON.parse(gone.out).approval).toMatchObject({ status: 'unavailable', classes: [] });
   }, 30_000);
 });
