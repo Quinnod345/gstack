@@ -18,10 +18,10 @@ The 14 days from the 2026-10-15 fix waves (the Captain took over
 the next day) against the 14 days before, measured from git and GitHub[^1]:
 
 - **197 PRs merged to gstack's main, up from 65 (3.0x).** That is 98.5 a week.
-- **194 versions shipped, 13.9 a day, up from 62 (3.1x).** Under stamp-at-merge,
-  each merged PR ships as its own version.
-- **Nearly twice gstack's best fortnight before Capy.** The March launch
-  shipped 99 versions in its busiest 14 days; this fortnight shipped 194.
+- **194 versions shipped, 13.9 a day, up from 62 (3.1x).** Nearly every merged PR
+  gets its own version number when it merges.
+- **Nearly twice gstack's best two weeks before Capy.** The March launch
+  shipped 99 versions in its busiest 14 days; these two weeks shipped 194.
 - **36 PRs merged and 36 versions shipped in one day** (UTC), on October 25
   and again on October 26.
 - **A reported issue is fixed in a median 2.4 days**, from the issue opening to the
@@ -72,7 +72,7 @@ flowchart LR
   C -->|brief| L1[Lane: plan with /autoplan]
   C -->|brief| L2[Lane: build]
   C -->|brief| L3[Lane: fix wave]
-  L1 -->|ELI5 plan + rec| C
+  L1 -->|plain-English plan + rec| C
   L2 -->|/ship receipt, READY at head| C
   L3 -->|READY| C
   C -->|train: one gate, up to 5 PRs| T[(Gate)]
@@ -91,7 +91,7 @@ his exact reply.
 **Plan first, with a plain-language yes.** New functionality starts with
 `/autoplan`: a CEO review, an engineering review, design and DX when the work
 has them, each with a native and a cross-model voice. The gate goes to Garry as
-a short ELI5 with "rec" as the default answer and a "do it" option that takes
+a short plain-English summary with "rec" as the default answer and a "do it" option that takes
 every recommendation at full scope. One "do it" has approved eight plans in a
 morning, and the lanes built them in parallel. Reviews catch the expensive
 mistakes before code exists. One plan learned that 12 tasks were too few to
@@ -122,11 +122,11 @@ within the hour gstack had a lane on it. Another eval Captain's $5.78 panel foun
 OpenClaw refused to load a 78 KB gstack skill, and gstack had a fix up the
 same day ([#3610](https://github.com/garrytan/gstack/pull/3610)). When Garry
 said "hurry up" to one Captain, another reordered its merge queue for it and
-sent back each merge sha.
+sent back each merge commit.
 
 **Evals with preregistered bars.** A prompt or skill change that claims to
 help is judged by a before/after with fixed trials and a bar written down
-before the first paid call ([/eval-plan](../docs/skills.md#eval-plan)), never by vibes.
+before the first paid call ([/eval-plan](../docs/skills.md#eval-plan)), never by gut feel.
 Good evals here have a no-skill arm and a length-matched placebo, a check that
 the treatment actually arrived, decoys verified clean, and spend quoted from
 the meter. They report losses as plainly as wins. One preregistered eval found
@@ -147,7 +147,7 @@ did it go on by default.
   receipt, tests that cap prompt sizes, a ship policy file. A new crew inherits
   them by installing gstack, not by reading someone's notes.
 - **It measures itself.** `gstack-factory-scorecard` reports lead time, gate
-  cost, red-train rate and flaky events every week against DORA-style bars,
+  cost, red-train rate and flaky events every week against industry benchmarks (DORA),
   and says `unavailable` instead of 0 when it can't read something.
 - **It is honest about cost.** Paid gates are cheap relative to a broken main
   ("it's fine run as many $93 paid gates as you want who cares"), but token
@@ -170,7 +170,7 @@ did it go on by default.
    CHANGELOG conflict and voids the receipt. Merge once, at your slot.
 6. **Size review to the diff.** A docs PR doesn't need a red team. Full-depth
    review on small diffs is how `/ship` once cost about 50M tokens per
-   gate-class PR.
+   PR that needed the full test gate.
 7. **Keep threads small.** A long-lived parent context reached 1.36B tokens.
    Hand long steps to fresh children and read the token counter instead of
    estimating.
