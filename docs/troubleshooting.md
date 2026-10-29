@@ -1729,8 +1729,11 @@ restate them. Rotate the secret if it was real.
 
 **Meaning.** The record is kept per branch (one Capy thread ships one branch), and
 HEAD is detached or the working directory is not a git repository. Exit 3.
+From `import --autoplan <dir> --stack <b1,b2,...>` it means a listed branch exists
+neither locally nor on origin; the line names it, and no branch's record was written.
 
-**Fix.** Check out the branch the work ships from, or pass `--branch <name>`.
+**Fix.** Check out the branch the work ships from, or pass `--branch <name>`. For
+`--stack`, correct or fetch the named branch and import again.
 
 <a id="approval-record-unavailable"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_UNAVAILABLE)`

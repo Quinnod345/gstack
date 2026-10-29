@@ -501,10 +501,12 @@ A gate revision after the first (`gate_rev` 2 and later, written after a
 it when nothing new needs their decision. `gstack-autoplan` prints
 `CARRIED: gate_rev=<n> <- gate_rev=<m> words="<their words>" by=<relayer> reason=<why>`,
 then the usual `APPROVED:` lines, and journals `gate_carried`. The carry needs
-all of: the earlier gate approved (`p1a` or `p1b`) with the owner's words
+all of: the earlier gate approved (`p1a` or `p1b`) with `rec` or "do it"
+(not item tokens), no item there left pending, and the owner's words
 recorded; that gate was not itself carried; every accepted change incorporated
 or settled; the plan file's bytes equal those recorded at the gate or at the
-`revise` that took the changes (an ELI5-only edit counts); no urgent or
+`revise` that took the changes (any later edit refuses, an ELI5-only one
+included); no urgent or
 outside-plan finding open; and every new gate item one of the cases below.
 Anything else prints `CARRY: no (<why>)` (journal `carry_refused`) and the gate
 goes to the owner as before. `--no-carry-forward` on the first `next` turns it
@@ -512,12 +514,13 @@ off for the run.
 
 - **"do it".** When the owner's words were "do it" (their words, not a
   `captain:` relay of them), a new `auto` item that changes no scope, cost or
-  direction and is no round or budget grant takes its recommendation. The
+  direction, whose recommended option changes no plan text, and is no round
+  or budget grant takes its recommendation. The
   decision row gets `carried_under: do it`, the output prints
   `CARRIED_UNDER_DO_IT:` per item, and the approval record lists them as
   "taken under "do it", not seen by the owner". `rec` carries no new item.
-- **Unreviewed post-cap delta.** A "plan changed after <phase> cap" item is
-  read by one reviewer before it carries. `CARRY_CHECK:` names the attempt and
+- **Unreviewed post-cap delta.** A "plan changed after <phase> cap" item
+  recommending `a` (accept) is read by one reviewer before it carries. `CARRY_CHECK:` names the attempt and
   the prompt (the delta against `plan-at-gate.r<m>.md`, the accepted changes,
   the full plan); the run reserves the estimate in `spend.json` and refuses
   when it is over `--carry-check-cap <usd>` (default 5) or the run's cap.
@@ -526,13 +529,17 @@ off for the run.
   (`--same-family "<why>"` when no other family is available). A High or
   Critical finding, or `--unavailable "<reason>"`, leaves the gate for the
   owner. The verdict is saved as `carry_check` on `gate.json`, on the
-  decision rows (`carry_check`) and in `<dir>/decisions.tsv`.
+  decision rows (`carry_check`) and in `<dir>/decisions.tsv`. A pending
+  check is void, its reservation released and the gate left for the owner,
+  when the owner answers the gate, the plan is revised, a new gate is
+  written, or the delta changed after dispatch.
 
 Carried rows keep `answered_by: agent:gstack-autoplan` and name their source
 (`carried_gate_from`, `carried_gate_rev`, `carried_answered_by`);
 `gstack-approvals import --autoplan` writes the carried gate as its own row,
 and `gstack-owner-brief render --captain` opens with "Nothing pending.
-Carried forward from gate_rev <m>".
+Carried forward from gate_rev <m>", followed by any items taken under "do it"
+without being shown to the owner.
 
 ## Owner brief
 

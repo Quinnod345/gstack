@@ -101,8 +101,8 @@ For an autoplan run, open the plan with `## ELI5` (5-10 plain sentences), then w
 gstack-owner-brief render --captain --out <run dir>
 ```
 
-It prints a header line ("Decision needed … Reply **rec** …"), the four plan sections (each capped, with a
-pointer to the plan for the rest), and "What we need from you", which lists every choice `rec` takes, in
+It prints a header line ("Decision needed … Reply **rec** …"), the `### ELI5` summary (on a run whose gate
+carries `eli5`), the four plan sections (each capped, with a pointer to the plan for the rest), and "What we need from you", which lists every choice `rec` takes, in
 words, and closes with the "do it" reply, then a `### Cost` section (spent so far, worst case, and the estimate for
 the phases `rec` can reopen). The last line, "For the relaying agent", carries the run, `gate_rev`, `rec_hash` and the exact
 `gstack-autoplan answer` command. Relay everything above that line. When the reply comes back:
