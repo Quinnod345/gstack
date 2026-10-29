@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { extractReceipt, renderReceiptBlock } from '../lib/ship-receipt';
+import { bindShippedReceipt } from '../lib/ship-receipt-depth';
 import { cleanup, commit, makeFixtureRepo, runBin, write, type FixtureRepo } from './helpers/pregate-fixture';
 
 const repos: FixtureRepo[] = [];
@@ -64,6 +65,9 @@ describe('carry after a stack parent squash-merges (#3570)', () => {
     expect(r.carry!.reason).toBe('stack parent parent landed + base merge');
     expect(r.product_patch_id).toBe(reviewed);
     expect(r.base).toBe('main');
+    expect(r.review_depth!.base).toBe(repo.git('rev-parse', 'origin/main'));
+    expect(r.review_depth!.gate_scan.head).toBe(head);
+    expect(bindShippedReceipt(repo.work, 'origin/main', fs.readFileSync(body, 'utf8'), '8', [head]).ok).toBe(true);
     repo.git('checkout', '-q', 'main');
     commit(repo, { 'docs/CHANGES.md': '# main moves again\n' }, 'main moves again');
     repo.git('push', '-q', 'origin', 'main');

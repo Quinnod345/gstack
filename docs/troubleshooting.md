@@ -4749,7 +4749,8 @@ ready` refuses `QUEUE_RECEIPT_STALE`.
 already rewritten and the receipt predates `head_tree`, run /ship on the new
 head; next time merge the base in instead of rebasing. For a retargeted stacked
 PR whose older receipt lost its parent branch, or a depth or exception
-refusal, run /ship on the new head (or check out `--head` and carry there).
+refusal, run /ship on the new head. When `--head` is not the checked-out HEAD,
+check it out and carry there.
 
 <a id="review-loop-exception-invalid"></a>
 ### `REVIEW_LOOP_EXCEPTION_INVALID`
