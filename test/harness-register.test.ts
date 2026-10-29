@@ -10,8 +10,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  BLOCK_BEGIN, BLOCK_END, CONTEXT_BLOCK_MAX, DOT_SKILLS_DIR, HARNESS_CODES, HYBRID_SKILLS, HarnessError, ROUTER_DESCRIPTION, ROUTER_DESCRIPTION_MAX, TARGETS,
-  contextBlock, contextScope, detect, listLedgers, readLedger, refresh, register, unregister, type RegisterOptions,
+  BLOCK_BEGIN, BLOCK_END, CONTEXT_BLOCK_MAX, DOT_SKILLS_DIR, HARNESS_CODES, HYBRID_SKILLS, HarnessError, OPENCLAW_FULL_SKILL, OPENCLAW_INSTRUCTION_MAX, ROUTER_DESCRIPTION, ROUTER_DESCRIPTION_MAX, TARGETS,
+  contextBlock, contextScope, detect, listLedgers, readLedger, refresh, register, sourceSkills, unregister, type RegisterOptions,
 } from '../lib/harness-register';
 import { QM_PACK_LIMITS, qmRequest, registerQm, removeQmPack } from '../lib/harness-qm';
 import { cleanupFixtures, cleanupSeed, makeFixture, makeSource, registryRows, runSetup, tree } from './helpers/install-fixture';
@@ -384,6 +384,72 @@ describe('GSTA-135: registered skills get used', () => {
       expect(JSON.parse(r.stdout), b).toEqual([]);
     }
   }, 60_000);
+});
+
+describe('GST-110: OpenClaw serves every registered skill file whole', () => {
+  /** OpenClaw's registered instruction files: SKILL.md in each non-dot child folder, a folder without one searched below (dist/skill-root-discovery-C2QVZC77.mjs:44, :343-361). */
+  const registered = (dir: string, depth = 0): string[] => depth > 6 ? [] : fs.readdirSync(dir, { withFileTypes: true })
+    .filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+    .flatMap(e => { const sub = path.join(dir, e.name); return fs.existsSync(path.join(sub, 'SKILL.md')) ? [path.join(sub, 'SKILL.md')] : registered(sub, depth + 1); });
+  const frontmatter = (md: string) => md.slice(0, md.indexOf('\n---', 4) + 4);
+
+  test('hybrid and all: every registered SKILL.md is within the limit; a larger skill is an entry naming its full text, unregistered, beside it; uninstall removes both', () => {
+    const d = tmp();
+    for (const mode of ['hybrid', 'all'] as const) {
+      const skills = path.join(d, mode, 'skills');
+      const r = register(opts(d, 'openclaw', { mode, env: { OPENCLAW_STATE_DIR: path.join(d, mode) }, stateRoot: path.join(d, mode, 'state') }));
+      const mds = registered(skills);
+      expect(mds.length, mode).toBe(mode === 'all' ? r.skills : 1 + HYBRID_SKILLS.length);
+      const entries = mds.filter(md => fs.readFileSync(md, 'utf8').includes(OPENCLAW_FULL_SKILL));
+      if (mode === 'hybrid') expect(entries.map(md => path.basename(path.dirname(md)))).toContain('gstack-review');
+      expect(entries.length, mode).toBeGreaterThan(0);
+      for (const md of mds) expect(fs.statSync(md).size, md).toBeLessThanOrEqual(OPENCLAW_INSTRUCTION_MAX);
+      const ledger = readLedger(r.ledger)!.files.map(x => x.path);
+      for (const md of entries) {
+        const entry = fs.readFileSync(md, 'utf8');
+        const full = /Read \x60([^\x60]+)\x60 in full/.exec(entry)![1];
+        expect(full).toBe(path.join(path.dirname(md), OPENCLAW_FULL_SKILL));
+        expect(mds).not.toContain(full);
+        const text = fs.readFileSync(full, 'utf8');
+        expect(Buffer.byteLength(text)).toBeGreaterThan(OPENCLAW_INSTRUCTION_MAX);
+        expect(frontmatter(entry)).toBe(frontmatter(text));
+        expect(ledger).toContain(full);
+      }
+      unregister(path.join(d, mode, 'state'), ROOT, r.id);
+      expect(files(skills), mode).toEqual([]);
+    }
+  }, 180_000);
+
+  test('Hermes is unchanged: its registration is the Hermes render, byte for byte, with no entry files', () => {
+    const d = tmp();
+    const r = register(opts(d, 'hermes', { env: { HERMES_HOME: path.join(d, 'hermes') } }));
+    const render = sourceSkills(TARGETS.hermes, ROOT, tmp());
+    const want = render.flatMap(s => files(s.dir).map(f => path.join(path.basename(s.dir), f))).sort();
+    expect(files(r.dest)).toEqual(want);
+    for (const s of render) for (const f of files(s.dir)) {
+      expect(fs.readFileSync(path.join(r.dest, path.basename(s.dir), f)).equals(fs.readFileSync(path.join(s.dir, f))), f).toBe(true);
+    }
+  }, 180_000);
+
+  const openclaw = process.env.GSTACK_OPENCLAW_BIN || Bun.which('openclaw');
+  test.skipIf(!openclaw)('a real OpenClaw lists the hybrid entries as its skills and none of the full texts (GSTACK_OPENCLAW_BIN or openclaw on PATH)', () => {
+    const d = tmp();
+    const env = { ...process.env, OPENCLAW_STATE_DIR: path.join(d, 'oc') };
+    const r = register(opts(d, 'openclaw', { env: { OPENCLAW_STATE_DIR: env.OPENCLAW_STATE_DIR } }));
+    const run = (...args: string[]) => {
+      const p = spawnSync(openclaw!, ['skills', ...args, '--json'], { cwd: d, env, encoding: 'utf8', timeout: 120_000 });
+      expect(p.status, p.stderr).toBe(0);
+      return JSON.parse(p.stdout);
+    };
+    const managed = run('list').skills.filter((s: { source: string }) => s.source === 'openclaw-managed').map((s: { name: string }) => s.name).sort();
+    expect(managed).toEqual(['gstack', ...HYBRID_SKILLS].sort());
+    for (const name of managed) {
+      const file = run('info', name).filePath as string;
+      expect(file.startsWith(r.dest + path.sep) && path.basename(file) === 'SKILL.md', file).toBe(true);
+      expect(fs.statSync(file).size, file).toBeLessThanOrEqual(OPENCLAW_INSTRUCTION_MAX);
+    }
+    expect(fs.existsSync(path.join(r.dest, 'gstack-review', OPENCLAW_FULL_SKILL))).toBe(true);
+  }, 180_000);
 });
 
 describe('bin/gstack-harness CLI error path', () => {
