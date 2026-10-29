@@ -3,9 +3,11 @@
  * review read the head, and what the queue checks against it
  * (docs/review-policy.md#review-depth, docs/ship-policy.md#ship-receipt).
  *
- * `review_depth`: written by `gstack-ship-receipt write` from
- * gstack-review-plan at the reviewed head (depth, runtime lines, the rules
- * hash, the base and registry commits, the gate scan bound to that head).
+ * `review_depth`: the depth the reviewed head needs, recomputed by
+ * `gstack-ship-receipt write` (receiptDepthAtHead: the committed range from
+ * git objects, gstack-diff-scope on that range and the gate scan of the clean
+ * checkout at that head), with the runtime lines, the rules hash, the base and
+ * registry commits and the gate scan bound to the head.
  * `review_loop_exception`: the owner's acceptance of a stop after a
  * fix-check edit under frozen scope (#3559), shaped like the docs exception.
  * The queue recomputes the depth the head needs from git objects
@@ -26,6 +28,7 @@ export type ReviewLoopException = NonNullable<ShipReceipt['review_loop_exception
 const RANK: Record<Depth, number> = { light: 0, standard: 1, full: 2 };
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0 && !/[\x00-\x1f\x7f]/.test(v);
 const sha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v);
+const BIN_DIR = path.join(import.meta.dir, '..', 'bin');
 const short = (s: string | null | undefined) => (s ? s.slice(0, 12) : 'none');
 
 function git(root: string, args: string[]): { ok: boolean; out: string } {
@@ -33,29 +36,37 @@ function git(root: string, args: string[]): { ok: boolean; out: string } {
   return { ok: r.status === 0, out: (r.stdout ?? '').trim() };
 }
 
+/** gstack-diff-scope on the committed range `base`...`head` (`--head`): the same signals at write, carry and the queue. */
+function scopeOfRange(root: string, binDir: string, base: string, head: string): Record<string, string> {
+  const sr = runScriptSync(path.join(binDir, 'gstack-diff-scope'), [base, '--head', head], { cwd: root, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024 });
+  const scope: Record<string, string> = {};
+  for (const l of (sr.stdout ?? '').split('\n')) { const m = /^(SCOPE_[A-Z_]+)=(.*)$/.exec(l); if (m) scope[m[1]!] = m[2]!; }
+  if (sr.status !== 0 && !scope.SCOPE_ERROR) scope.SCOPE_ERROR = `exit ${sr.status}`;
+  return scope;
+}
+
 /**
- * The depth record for `head` (the checked-out commit), computed the way the
- * queue recomputes it: the range from git objects (collectCommit), plus
- * gstack-diff-scope and, for a tests or code diff, the gate scan of this
- * checkout, which therefore names `head`.
+ * The depth record for `head`: the range from git objects (collectCommit) and
+ * its diff-scope, as the queue recomputes them, plus, for a tests or code diff,
+ * the gate scan of this checkout. The scan reads the working tree, so it counts
+ * only when the checkout is `head` with no tracked edits; otherwise it is
+ * unavailable and the depth fails closed to full.
  */
 export function receiptDepthAtHead(repoRoot: string, base: string, binDir: string, head: string): ReceiptDepth {
   const branch = base.replace(/^origin\//, '');
   const baseSha = git(repoRoot, ['rev-parse', '--verify', '--quiet', `origin/${branch}^{commit}`]);
-  const c = collectCommit(repoRoot, baseSha.ok ? baseSha.out : branch, head);
-  const run = (bin: string, timeout: number) => runScriptSync(path.join(binDir, bin), [branch], { cwd: repoRoot, encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
-  const scope: Record<string, string> = {};
-  const sr = run('gstack-diff-scope', 60_000);
-  for (const l of (sr.stdout ?? '').split('\n')) { const m = /^(SCOPE_[A-Z_]+)=(.*)$/.exec(l); if (m) scope[m[1]!] = m[2]!; }
-  if (sr.status !== 0 && !scope.SCOPE_ERROR) scope.SCOPE_ERROR = `exit ${sr.status}`;
+  const baseRev = baseSha.ok ? baseSha.out : branch;
+  const c = collectCommit(repoRoot, baseRev, head);
+  const scope = scopeOfRange(repoRoot, binDir, baseRev, head);
   let tagged: number | null = 0;
   if (c.paths.some(p => classifyPath(p, c.root) !== 'docs')) {
-    const g = run('gstack-gate-diff', 120_000);
-    const m = /GATE_SUMMARY: .*?tagged=\{([^}]*)\}/.exec(g.stdout ?? '');
-    tagged = g.status === 0 && m ? m[1]!.split(',').reduce((n, kv) => n + (Number(kv.split(':')[1]) || 0), 0) : null;
+    const atHead = git(repoRoot, ['rev-parse', 'HEAD']).out === head && git(repoRoot, ['diff', '--quiet', 'HEAD', '--']).ok;
+    const g = atHead ? runScriptSync(path.join(binDir, 'gstack-gate-diff'), [baseRev], { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 }) : null;
+    const m = /GATE_SUMMARY: .*?tagged=\{([^}]*)\}/.exec(g?.stdout ?? '');
+    tagged = g?.status === 0 && m ? m[1]!.split(',').reduce((n, kv) => n + (Number(kv.split(':')[1]) || 0), 0) : null;
   }
   const d = depthOfCommitInput({ ...c, scope, gateTagged: tagged });
-  return { depth: d.depth, class: d.class, runtime_lines: d.runtimeLines, rules: d.rules, base: baseSha.ok ? baseSha.out : branch, registry: c.registry.sha, gate_scan: { tagged, head }, reasons: d.reasons.slice(0, 12) };
+  return { depth: d.depth, class: d.class, runtime_lines: d.runtimeLines, rules: d.rules, base: baseRev, registry: c.registry.sha, gate_scan: { tagged, head }, reasons: d.reasons.slice(0, 12) };
 }
 
 export const depthBelow = (have: Depth, need: Depth) => RANK[have] < RANK[need];
@@ -86,8 +97,11 @@ export function reviewLoopExceptionLine(e: ReviewLoopException): string {
 
 const carries = (body: string, line: string) => body.split(/\r?\n/).some(l => l.trim() === line);
 
-/** The owner exceptions a receipt records, checked the same way: valid shape, and the body carries each line verbatim. */
-export function exceptionProblems(body: string, r: ShipReceipt): string[] {
+/**
+ * The owner exceptions a receipt records, checked the same way: valid shape, and the body carries each line verbatim.
+ * `isAncestor`, when given, also requires the review-loop exception's fix-check head to be the receipt head or its ancestor.
+ */
+export function exceptionProblems(body: string, r: ShipReceipt, isAncestor?: (commit: string) => boolean): string[] {
   const out: string[] = [];
   const raw = r as ShipReceipt & { docs?: unknown };
   if (raw.docs !== undefined) {
@@ -100,6 +114,7 @@ export function exceptionProblems(body: string, r: ShipReceipt): string[] {
     if (!e.ok) out.push(e.message);
     else {
       if (!r.review_loop?.fix_checks) out.push('review_loop_exception needs review_loop.fix_checks >= 1 (the stop it accepts follows a fix-check)');
+      if (isAncestor && !isAncestor(e.exception.fix_check.head)) out.push(`review_loop_exception.fix_check.head ${e.exception.fix_check.head.slice(0, 12)} is not the receipt head or an ancestor of it`);
       const line = reviewLoopExceptionLine(e.exception);
       if (!carries(body, line)) out.push(`the body does not carry the review-loop exception line verbatim: ${JSON.stringify(line)}`);
     }
@@ -120,9 +135,10 @@ export function receiptDepthVerdict(root: string, baseRef: string, r: ShipReceip
   const rd = r.review_depth;
   if (!rd && !r.gstack_version) return { ok: true, line: 'REVIEW_DEPTH: legacy receipt (written before receipts recorded review_depth); accepted' };
   const baseSha = git(root, ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]);
-  const c = collectCommit(root, baseSha.ok ? baseSha.out : baseRef, head);
-  const scanBound = !!rd && rd.gate_scan.tagged !== null && head.startsWith(rd.gate_scan.head);
-  const need = depthOfCommitInput({ ...c, gateTagged: scanBound ? rd!.gate_scan.tagged : null });
+  const baseRev = baseSha.ok ? baseSha.out : baseRef;
+  const c = collectCommit(root, baseRev, head);
+  const scanBound = !!rd && rd.gate_scan.tagged !== null && /^[0-9a-f]{40,64}$/.test(rd.gate_scan.head) && rd.gate_scan.head === head.toLowerCase();
+  const need = depthOfCommitInput({ ...c, scope: scopeOfRange(root, BIN_DIR, baseRev, head), gateTagged: scanBound ? rd!.gate_scan.tagged : null });
   const have = rd?.depth;
   const inputs = `base@${short(baseSha.ok ? baseSha.out : null)},registry@${short(c.registry.sha)},gate_scan@${scanBound ? short(rd!.gate_scan.head) : 'missing'}`;
   const line = `REVIEW_DEPTH: receipt=${have ?? 'none'} required=${need.depth} runtime_lines=${need.runtimeLines} class=${need.class} reasons=${need.reasons.join(',')} inputs=${inputs}`;
@@ -138,7 +154,8 @@ export function bindShippedReceipt(root: string, baseRef: string, body: string, 
   | { ok: false; code: ReceiptBindingCode | 'QUEUE_RECEIPT_DEPTH_RAISED' | 'QUEUE_RECEIPT_EXCEPTION_INVALID'; message: string; line: string; depthLine?: string } {
   const b = bindReceipt(body, pr, accepted);
   if (!b.ok) return b;
-  const problems = exceptionProblems(body, b.receipt);
+  const ancestor = (commit: string) => b.receipt.carry?.ancestry === 'rewritten' || git(root, ['merge-base', '--is-ancestor', commit, b.head]).ok;
+  const problems = exceptionProblems(body, b.receipt, ancestor);
   if (problems.length) return { ok: false, code: 'QUEUE_RECEIPT_EXCEPTION_INVALID', message: `the receipt's owner exception does not stand: ${problems.join('; ')}`, line: b.line };
   const d = receiptDepthVerdict(root, baseRef, b.receipt, b.head);
   if (!d.ok) return { ok: false, code: 'QUEUE_RECEIPT_DEPTH_RAISED', message: d.message!, line: b.line, depthLine: d.line };

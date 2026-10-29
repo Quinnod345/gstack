@@ -84,7 +84,7 @@ function readDiff(root: string, range: string[], errors: DepthError[]): Pick<Col
     if (line[0] === '+') (added[cur] ??= []).push(line.slice(1));
     if (line[0] === '+' || line[0] === '-') (changed[cur] ??= []).push(line);
   }
-  const stampOnly = perPath.map(e => e.path).filter(p => p.endsWith('package.json') && !!changed[p]?.length && changed[p]!.every(l => /^[+-]\s*"version"\s*:/.test(l)));
+  const stampOnly = perPath.map(e => e.path).filter(p => p.endsWith('package.json') && !!changed[p]?.length && changed[p]!.every(l => /^[+-]\s*"version"\s*:\s*"[^"]*"\s*,?\s*$/.test(l)));
   return { perPath, deleted, stampOnly, added };
 }
 

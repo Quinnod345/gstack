@@ -104,7 +104,7 @@ export interface ShipReceipt {
   carry?: { from: string; reason: string; product_patch_id: string; changed_paths: string[]; merge_commits: number; range_diff: string; covers: string[]; reruns: string[]; trees?: string[]; ancestry?: 'linear' | 'rewritten' };
   /** The reviewed head's tree and its product patch-id against the base (gstack-ship-receipt write; carry rebinds both): what a carry across rewritten history compares. */
   head_tree?: string; product_patch_id?: string;
-  /** The gstack that wrote the receipt, and the review depth gstack-review-plan computed at the reviewed head (lib/ship-receipt-depth.ts). */
+  /** The gstack that wrote the receipt, and the review depth the reviewed head needs, recomputed at write (lib/ship-receipt-depth.ts receiptDepthAtHead). */
   gstack_version?: string;
   review_depth?: { depth: 'light' | 'standard' | 'full'; class: 'docs' | 'tests' | 'code' | 'gate'; runtime_lines: number; rules: string; base: string; registry: string | null; gate_scan: { tagged: number | null; head: string }; reasons: string[] };
   /** The owner's acceptance of a stop after a fix-check edit under frozen scope (#3559); the PR body repeats it word for word. */

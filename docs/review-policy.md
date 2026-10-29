@@ -166,7 +166,7 @@ invalid (`REGEN_REGISTRY_INVALID` or `REGEN_CONTAINMENT` in `codes=`), a numstat
 could not produce, and a binary code-class path (it is never counted as 0 lines).
 
 **The registry rule.** Only the base commit's registry counts (the merge base's
-`origin/<base>` commit for live /ship, the receipt's base sha for the queue), and only
+`origin/<base>` commit for live /ship and the current base ref's commit for the queue: `origin/<base>` in `ready`, `<remote>/<base>` in `train build`), and only
 entries with a `command`, which pregate's regen check proves for that tree. An entry
 added on the branch never excludes anything; `command: null` entries, vendored code
 and lockfiles stay runtime. To adopt it, commit an entry like this on the base branch:

@@ -91,6 +91,33 @@ describe('the queue refuses a receipt below the depth its head needs', () => {
     const verdict = receiptDepthVerdict(repo.work, 'origin/main', extractReceipt(legacy).receipt!, head);
     expect(verdict).toEqual({ ok: true, line: 'REVIEW_DEPTH: legacy receipt (written before receipts recorded review_depth); accepted' });
   }, 60_000);
+
+  // Value: protects=the queue's required depth keeps the scope signals the writer used, and a gate scan binds only the full
+  // bound commit; fails_when=the queue recomputes without diff-scope (auth reads light) or binds an empty or short scan head
+  // by prefix; seam=bindShippedReceipt
+  test('an auth path needs full at the queue though the receipt says light; an empty or short gate scan head binds nothing', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const head = commit(repo, { 'lib/auth.js': lines(3) });
+    const body = path.join(repo.root, 'body.md');
+    expect(writeReceipt(repo, body).status).toBe(EXIT.ok);
+    expect(receiptIn(body).review_depth).toMatchObject({ depth: 'full', class: 'gate' });
+    const bind = (text: string) => bindShippedReceipt(repo.work, 'origin/main', text, '7', [head]);
+    const light = bind(rewrite(body, r => { r.review_depth.depth = 'light'; }));
+    expect(!light.ok && light.code).toBe('QUEUE_RECEIPT_DEPTH_RAISED');
+    expect(!light.ok && light.depthLine).toContain('receipt=light required=full');
+    expect(!light.ok && light.depthLine).toContain('class=gate');
+
+    const plain = makeFixtureRepo(); repos.push(plain);
+    const plainHead = commit(plain, { 'lib/util.js': lines(3) });
+    const plainBody = path.join(plain.root, 'body.md');
+    expect(writeReceipt(plain, plainBody).status).toBe(EXIT.ok);
+    for (const scanHead of ['', plainHead.slice(0, 12)]) {
+      const r = bindShippedReceipt(plain.work, 'origin/main', rewrite(plainBody, x => { x.review_depth.gate_scan.head = scanHead; }), '7', [plainHead]);
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.depthLine).toContain('required=full');
+      expect(!r.ok && r.depthLine).toContain('gate_scan@missing');
+    }
+  }, 90_000);
 });
 
 describe('carry and the review depth', () => {
@@ -113,6 +140,27 @@ describe('carry and the review depth', () => {
     expect(refused.err).toContain(`HEAD ${skipped.slice(0, 12)} needs full review depth`);
     expect(refused.err).toContain("above the receipt's light");
     expect(receiptIn(body).head).toBe(plain);
+  }, 90_000);
+
+  // Value: protects=a carry never binds a scan of one checkout to another commit, and never rebinds a receipt the queue would
+  // refuse; fails_when=carry --head from another checkout carries a skipped test at light, or a current receipt without
+  // review_depth carries; seam=none
+  test('carry --head from another checkout refuses; a receipt with gstack_version but no review_depth refuses', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const reviewed = commit(repo, { 'lib/util.js': lines(3), 'test/util.test.js': "test('a', () => {});\n" });
+    const body = path.join(repo.root, 'body.md');
+    expect(writeReceipt(repo, body).status).toBe(EXIT.ok);
+    const skipped = commit(repo, { 'test/util.test.js': "test.skip('a', () => {});\n" });
+    repo.git('checkout', '-q', reviewed);
+    const r = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main', '--head', skipped]);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toContain(`--head ${skipped.slice(0, 12)} is not the checked-out HEAD ${reviewed.slice(0, 12)}`);
+    expect(receiptIn(body).head).toBe(reviewed);
+    repo.git('checkout', '-q', skipped);
+    rewrite(body, x => { delete x.review_depth; });
+    const noDepth = runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main']);
+    expect(noDepth.status).toBe(EXIT.refused);
+    expect(noDepth.err).toContain('records gstack_version but no review_depth');
   }, 90_000);
 });
 
@@ -150,5 +198,10 @@ describe('the review-loop exception (#3559)', () => {
     const dropped = bindShippedReceipt(repo.work, 'origin/main', fs.readFileSync(body, 'utf8').replace(line, ''), '7', [head]);
     expect(!dropped.ok && dropped.code).toBe('QUEUE_RECEIPT_EXCEPTION_INVALID');
     expect(!dropped.ok && dropped.message).toContain('does not carry the review-loop exception line verbatim');
+    const foreign = { ...exception, fix_check: { head: 'f'.repeat(40), findings: 1 } };
+    const forged = rewrite(body, x => { x.review_loop_exception = foreign; }).replace(line, reviewLoopExceptionLine(foreign));
+    const offBranch = bindShippedReceipt(repo.work, 'origin/main', forged, '7', [head]);
+    expect(!offBranch.ok && offBranch.code).toBe('QUEUE_RECEIPT_EXCEPTION_INVALID');
+    expect(!offBranch.ok && offBranch.message).toContain('is not the receipt head or an ancestor of it');
   }, 90_000);
 });

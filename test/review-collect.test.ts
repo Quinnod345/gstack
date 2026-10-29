@@ -25,6 +25,15 @@ function repo(baseFiles: Record<string, string | Buffer>) {
 }
 
 describe('collectCommit: git objects only', () => {
+  // Value: protects=only a bare version bump in package.json is release metadata; fails_when=a version line that also
+  // carries scripts counts as stamp-only (docs class, light); seam=none
+  test('a package.json version line that also carries scripts is not stamp-only; a bare version bump is', () => {
+    const r = repo({ 'package.json': '{\n  "name": "x",\n  "version": "1.0.0"\n}\n' });
+    const bare = r.commit({ 'package.json': '{\n  "name": "x",\n  "version": "1.0.1"\n}\n' });
+    expect(collectCommit(r.dir, r.baseSha, bare).stampOnly).toEqual(['package.json']);
+    const riding = r.commit({ 'package.json': '{\n  "name": "x",\n  "version": "1.0.2", "scripts": { "postinstall": "node x.js" }\n}\n' });
+    expect(collectCommit(r.dir, r.baseSha, riding).stampOnly).toEqual([]);
+  });
   test('a registered glob output is excluded, a command:null entry is not, and a .tmpl edit counts once', () => {
     const r = repo({ '.gstack/generated.json': REGISTRY, 'ship/SKILL.md.tmpl': 'a\n', 'ship/SKILL.md': 'a\n' });
     const head = r.commit({ 'ship/SKILL.md.tmpl': 'a\nb\nc\n', 'ship/SKILL.md': lines(120), 'src/hand.ts': lines(5) });

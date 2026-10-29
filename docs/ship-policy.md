@@ -818,21 +818,25 @@ repair is trimming the file, never raising the cap in the same PR.
 wrote the receipt and the review depth at the checked-out head
 ([review-policy.md#review-depth](review-policy.md#review-depth)):
 `{ depth, class, runtime_lines, rules, base, registry, gate_scan: { tagged, head }, reasons }`,
-computed from git objects for the range against `origin/<base>`, with the
-gate scan run on that head. `--head` must be the checked-out HEAD
+computed from git objects for the range against `origin/<base>`
+(`gstack-diff-scope <base> --head <sha>` for the scope signals), with the gate
+scan run on that head. `--head` must be the checked-out HEAD
 (`RECEIPT_INVALID` otherwise), so the record and `head_tree` describe the
-tree the review read. `gstack-ship-queue ready` and `train build` recompute
-the depth the head needs and print `REVIEW_DEPTH: receipt=<d> required=<d>
+tree the review read; tracked edits in the checkout make the scan unavailable,
+which records `full`. `gstack-ship-queue ready` and `train build` recompute
+the depth the head needs from the same range and scope and print `REVIEW_DEPTH: receipt=<d> required=<d>
 runtime_lines=<n> class=<c> reasons=<…> inputs=base@<sha>,registry@<sha>,gate_scan@<sha|missing>`;
-a recorded gate scan counts only when it names the bound head, otherwise the
-scan is unavailable and the head needs `full`. A receipt below the required
+a recorded gate scan counts only when its `head` is the full bound commit,
+otherwise the scan is unavailable and the head needs `full`. A receipt below the required
 depth, or one whose writer records `gstack_version` but no `review_depth`, is
 [`QUEUE_RECEIPT_DEPTH_RAISED`](troubleshooting.md#queue-receipt-depth-raised):
 the receipt is left unchanged and the fix is /ship on that head. A receipt with
 neither field predates depth receipts and is accepted as legacy. A carry
 recomputes the depth at the new head, rebinds the gate scan, and refuses when
 the new head needs a deeper review than the receipt records (a test change that
-skips a test raises the diff to gate class).
+skips a test raises the diff to gate class), when `--head` is not the
+checked-out HEAD, when the receipt records `gstack_version` without
+`review_depth`, or when an owner exception no longer stands.
 
 **`review_loop_exception`.** The owner's acceptance of a stop after a
 fix-check edit under frozen scope (#3559), from `write --review-loop-exception
@@ -843,8 +847,10 @@ that is the receipt head or its ancestor, and, with `--body`, the line
 word for word; otherwise
 [`REVIEW_LOOP_EXCEPTION_INVALID`](troubleshooting.md#review-loop-exception-invalid)
 and nothing is written. The queue checks both owner exceptions the same way
-before READY and train build: the record must parse and the body must still
-carry its line, or the receipt is
+before READY and train build: the record must parse, the body must still
+carry its line, and the fix-check head must be the bound head or its ancestor
+(after a carry across rewritten history the old fix-check commit is off the
+branch, so that check is skipped), or the receipt is
 [`QUEUE_RECEIPT_EXCEPTION_INVALID`](troubleshooting.md#queue-receipt-exception-invalid).
 
 **Prose against the receipt.** `gstack-ship-receipt read --pr <n> --check-prose`
