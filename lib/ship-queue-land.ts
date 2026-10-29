@@ -216,7 +216,7 @@ function prInfo(ctx: QueueContext, pr: string): PrInfo | QueueFailure {
 }
 
 /** Poll the stamp commit's checks (the same read as the pin's) until they are green, one is red, or the time runs out. */
-function waitChecks(ctx: QueueContext, sha: string, minutes: number): void {
+export function waitChecks(ctx: QueueContext, sha: string, minutes: number): void {
   const deadline = Date.now() + minutes * 60_000;
   for (let ci = ciAtHead(ctx, sha); !ci.green && !ci.line.startsWith('red') && Date.now() < deadline; ci = ciAtHead(ctx, sha)) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);

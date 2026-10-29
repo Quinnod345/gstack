@@ -26,6 +26,7 @@ import { bindShippedReceipt } from './ship-receipt-depth';
 import { git, sha256, withIndex, type QueueFailure } from './ship-queue-gate';
 import { recordVerdict, screenVerdict, verdictLines } from './ship-queue-screen';
 import { stackTestLine, stackTests } from './ship-queue-stack-tests';
+import { stampChain } from './ship-queue-train-stamp';
 import { asRun, execFor, newestBranchRun, prInfo, remoteBranchSha, repoSlug, runView, checkRun } from './ship-queue-train-github';
 import {
   TERMINAL_STATES, activeFreeze, attemptsOf, listTrains, loadBisect, loadReady, loadTrain, nowIso, persist, rebuildFromNotes, repoIdentity, trainFile,
@@ -321,6 +322,8 @@ export interface BuildOptions {
   pins?: string; order?: string; resume?: string; dryRun: boolean; urgent: boolean; repair: boolean; freeTimeoutSec: number; pollMs: number;
   /** `--dry-run --stack-tests`: run each PR's new test files on its integrated prefix (lib/ship-queue-stack-tests.ts); the command's words when `--stack-tests-command` names one. */
   stackTests?: string[] | true;
+  /** Stamping S_i runs the base policy's restamp_command or release_tool (changelog_fragments trains). */
+  allowRepoCommands?: boolean;
 }
 
 /** `--order <pr>,<pr>,...`: every pinned PR exactly once (a leading # allowed). */
@@ -412,13 +415,17 @@ async function newTrain(env: TrainEnv, o: BuildOptions): Promise<{ t: TrainRecor
   if (due && !o.dryRun) return outPending({ code: 'QUEUE_TRAIN_WAITING', message: `${order.train.length} of ${env.train.max_size} PRs; the oldest READY dispatches at ${due}` }, lines, `${Q} train build ${prsArgs(order.train, !!explicit)} (after ${due}, or with more PRs, or --urgent for one)`, 'none');
   const live = listTrains(env.repo.keys).find(t => t.key === key && !TERMINAL_STATES.includes(t.state) && t.state !== 'red' && t.state !== 'unattributed');
   if (live) return { t: Object.assign(live, { held: order.held.map(s => s.pr) }), lines };
-  const head = chain.prefixes.at(-1)!;
+  const policy = env.policy.policy;
+  const stamped = policy.changelog_fragments ? stampChain({ repoRoot: env.ctx.repoRoot, base: env.ctx.base, policy, policyLabel: env.policy.source.label, baseSha, slots: order.train, plain: chain.prefixes, allowRepoCommands: !!o.allowRepoCommands, now: new Date(nowIso()) }) : null;
+  if (stamped && 'code' in stamped) return outFailed(stamped, lines, `${Q} train build ${prsArgs(order.train, !!explicit)} --allow-repo-commands (after the named slot is fixed or dropped)`, 'none');
+  if (stamped) lines.push(...stamped.lines);
+  const head = stamped ? stamped.stamped.at(-1)! : chain.prefixes.at(-1)!;
   const nonce = makeNonce('gate', head.commit, baseSha, randomBytes(3).toString('hex'), { purpose: 'train' });
   const now = nowIso();
   return { lines, t: {
     schema: 1, kind: 'train', nonce, key, repo_key: env.repo.key, repo: env.repo.url, base: { ref: env.ctx.base, sha: baseSha }, policy: env.policy.source.label,
     slots: order.train, held: order.held.map(s => s.pr), prefixes: chain.prefixes, head: head.commit, tree: head.tree, branch: `train/${nonce}`,
-    urgent: o.urgent, repair: o.repair, ...(explicit ? { explicit_order: true } : {}), state: 'built', free: null, attempts: [], merged: [], superseded_by: null, effects: [], error: null,
+    urgent: o.urgent, repair: o.repair, ...(explicit ? { explicit_order: true } : {}), ...(stamped ? { stamped: stamped.stamped } : {}), state: 'built', free: null, attempts: [], merged: [], superseded_by: null, effects: [], error: null,
     created_at: now, updated_at: now,
   } };
 }

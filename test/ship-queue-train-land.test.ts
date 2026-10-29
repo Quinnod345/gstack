@@ -1,0 +1,132 @@
+/**
+ * Stamped trains (changelog_fragments; GSTA-154 PR B): train build makes S_1..S_k beside T_1..T_k and gates
+ * S_k; train land publishes each slot's S_i exactly (a tool-made stamp commit on [pin, main], pushed under
+ * the pin's lease, labelled evals-no-debounce), confirms main is S_i, and freezes on any other main.
+ * Fixture repos with a bare origin and the train gh shim, wrapped for pr edit, pr merge and the PR's checks.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { EXIT } from '../lib/headless-artifacts';
+import { cleanup } from './helpers/restamp-fixture';
+import {
+  GREEN_GATE, TRAIN_POLICY, line, nonceOf, openPr, queue, readyReceipt, trainFixture, trainJson, type TrainFixture,
+} from './helpers/ship-queue-train-fixture';
+
+const POLICY = { ...TRAIN_POLICY, release_tool: null, release_outputs: [], changelog_fragments: { dir: 'changelog.d' }, min_gstack_version: '1.92.0.0' };
+const fixtures: TrainFixture[] = [];
+afterEach(() => { while (fixtures.length) cleanup(fixtures.pop()!.repo); });
+
+/** pr view reads the head from origin's branch; pr edit and pr merge act on origin; any commit without recorded CI reads green. */
+function wrap(fx: TrainFixture): void {
+  const dir = path.join(fx.repo.root, 'gh-land-wrap');
+  fs.mkdirSync(dir, { recursive: true });
+  const shim = path.join(fx.repo.root, 'gh-train-shim', 'shim.js');
+  fs.writeFileSync(path.join(dir, 'gh'), [
+    '#!/usr/bin/env node',
+    "const fs=require('fs');const cp=require('child_process');const D=process.env.LAND_WRAP_DATA;const a=process.argv.slice(2);",
+    "const d=JSON.parse(fs.readFileSync(D,'utf8'));const save=()=>fs.writeFileSync(D,JSON.stringify(d));",
+    "const g=(...x)=>cp.execFileSync('git',['--git-dir',d.origin,...x],{encoding:'utf8'}).trim();",
+    "const rev=r=>{try{return g('rev-parse','--verify','--quiet',r)}catch{return ''}};",
+    "if(a[0]==='pr'&&a[1]==='view'&&d.prs[a[2]]){const p=d.prs[a[2]];const h=rev('refs/heads/'+p.headRefName);if(h)p.headRefOid=h;save();console.log(JSON.stringify(p));process.exit(0)}",
+    "if(a[0]==='pr'&&a[1]==='edit'){(d.labels=d.labels||{})[a[2]]=a[a.indexOf('--add-label')+1];save();process.exit(0)}",
+    "if(a[0]==='pr'&&a[1]==='merge'){const p=d.prs[a[2]];const want=a[a.indexOf('--match-head-commit')+1];if(rev('refs/heads/'+p.headRefName)!==want){console.error('Head branch was modified');process.exit(1)}",
+    "  const before=rev('main');let tree=rev(want+'^{tree}');",
+    "  if(d.outsideOnMerge){const blob=cp.execFileSync('git',['--git-dir',d.origin,'hash-object','-w','--stdin'],{input:'outside\\n',encoding:'utf8'}).trim();",
+    "    const ls=g('ls-tree',before+'^{tree}')+'\\n100644 blob '+blob+'\\toutside.txt';const ot=cp.execFileSync('git',['--git-dir',d.origin,'mktree'],{input:ls+'\\n',encoding:'utf8'}).trim();",
+    "    g('update-ref','refs/heads/main',g('commit-tree',ot,'-p',before,'-m','outside'));tree=g('merge-tree','--write-tree','--merge-base='+before,rev('main'),want).split('\\n')[0];d.outsideOnMerge=false}",
+    "  g('update-ref','refs/heads/main',g('commit-tree',tree,'-p',rev('main'),'-m','squash #'+a[2]));p.state='MERGED';save();process.exit(0)}",
+    "const paged=/commits\\/([0-9a-f]+)\\/(check-runs|status)\\?.*page=(\\d+)/.exec(a[1]||'');",
+    "if(a[0]==='api'&&paged&&!(d.ci||{})[paged[1]]&&!((d.statuses||{})[paged[1]])){const list=paged[2]==='check-runs'?[{name:'free-tests',status:'completed',conclusion:'success',id:1,completed_at:'2026-10-26T00:00:00Z'}]:[];const key=paged[2]==='check-runs'?'check_runs':'statuses';console.log(JSON.stringify(paged[3]==='1'?{total_count:list.length,state:'success',[key]:list}:{total_count:list.length,[key]:[]}));process.exit(0)}",
+    `const r=cp.spawnSync('node',[${JSON.stringify(shim)},D,...a],{stdio:'inherit'});process.exit(r.status??1);`,
+    '',
+  ].join('\n'), { mode: 0o755 });
+  fx.env.PATH = `${dir}:${fx.env.PATH}`;
+  (fx.env as Record<string, string>).LAND_WRAP_DATA = fx.dataFile;
+}
+
+function fragmentPr(fx: TrainFixture, pr: string, fragment = `- #${pr} change\n`): string {
+  const head = openPr(fx, pr, { file: `changelog.d/pr-${pr}.md`, text: fragment, changelog: false });
+  fx.repo.git('push', '-q', 'origin', `${head}:refs/heads/pr-${pr}`);
+  readyReceipt(fx, pr, head);
+  return head;
+}
+function stampedTrain() {
+  const fx = trainFixture(POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
+  const h1 = fragmentPr(fx, '1');
+  const h2 = fragmentPr(fx, '2', '---\nbump: minor\n---\n- #2 change\n');
+  fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+  const built = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`]);
+  const nonce = nonceOf(built.out);
+  return { fx, h1, h2, built, nonce };
+}
+const land = (fx: TrainFixture, nonce: string, pr: string) => queue(fx, ['train', 'land', '--train', nonce, '--pr', pr, '--no-wait']);
+const originMain = (fx: TrainFixture) => fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'main');
+
+describe('stamped trains: build and land', () => {
+  test('build records S1, S2 and gates S2; land publishes each slot exactly, with the label, and records the merge', () => {
+    const { fx, h1, h2, built, nonce } = stampedTrain();
+    expect(built.status, built.err).toBe(EXIT.ok);
+    expect(built.out).toMatch(/^S1: #1 v1\.2\.4\.0 [0-9a-f]{12} /m);
+    expect(built.out).toMatch(/^S2: #2 v1\.3\.0\.0 [0-9a-f]{12} /m);
+    const t = trainJson(fx, nonce);
+    expect(t.stamped.map((s: any) => [s.pr, s.version])).toEqual([['1', '1.2.4.0'], ['2', '1.3.0.0']]);
+    expect(t.head).toBe(t.stamped[1].commit);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+
+    const verify = queue(fx, ['verify', '--pr', '1', '--train', nonce]);
+    expect(verify.err).toMatch(/has stamped prefixes.*\(QUEUE_GATE_MISSING\)/);
+    expect(line(verify.out, 'NEXT:')).toBe(`NEXT: gstack-ship-queue train land --train ${nonce} --pr 1`);
+    const early = land(fx, nonce, '2');
+    expect(early.err).toMatch(/is neither S1 nor S2 exactly.*not frozen.*\(QUEUE_TRAIN_TREE_MISMATCH\)/);
+    const pushed = land(fx, nonce, '1');
+    expect(pushed.out, pushed.err).toContain('LABEL: evals-no-debounce added');
+    const stamp = /^PUSHED: ([0-9a-f]{40})/m.exec(pushed.out)![1]!;
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(stamp);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-list', '--parents', '-n', '1', stamp).split(' ').slice(1)).toEqual([h1, originMain(fx)]);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', stamp + '^{tree}')).toBe(t.stamped[0].tree);
+    const merged = land(fx, nonce, '1');
+    expect(merged.status, merged.err).toBe(EXIT.ok);
+    expect(merged.out).toContain("main's tree is S1 exactly");
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'main^{tree}')).toBe(t.stamped[0].tree);
+    land(fx, nonce, '2');
+    const second = land(fx, nonce, '2');
+    expect(second.status, second.err).toBe(EXIT.ok);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'show', 'main:VERSION')).toBe('1.3.0.0');
+    expect(trainJson(fx, nonce)).toMatchObject({ state: 'merged' });
+    expect(fx.read().prs['2']).toMatchObject({ state: 'MERGED' });
+    expect((fx.read() as any).labels).toEqual({ 1: 'evals-no-debounce', 2: 'evals-no-debounce' });
+    void h2;
+  }, 300_000);
+
+  test('a foreign push to the PR branch is never overwritten; a merge outside the train freezes the queue', () => {
+    const { fx, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    fx.repo.git('push', '-q', '-f', 'origin', 'origin/main:refs/heads/pr-1');
+    const moved = land(fx, nonce, '1');
+    expect(moved.err).toContain('(QUEUE_TRAIN_MOVED)');
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'main'));
+
+    const second = stampedTrain();
+    expect(queue(second.fx, ['train', 'verdict', '--train', second.nonce]).status).toBe(EXIT.ok);
+    land(second.fx, second.nonce, '1');
+    expect(land(second.fx, second.nonce, '1').status).toBe(EXIT.ok);
+    land(second.fx, second.nonce, '2');
+    second.fx.write(d => { (d as any).outsideOnMerge = true; });
+    const drift = land(second.fx, second.nonce, '2');
+    expect(drift.err).toContain('(QUEUE_TRAIN_TREE_MISMATCH)');
+    expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
+  }, 300_000);
+
+  test('a plain train refuses train land and keeps the slot-stamp path', () => {
+    const fx = trainFixture(TRAIN_POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
+    const h1 = openPr(fx, '1');
+    readyReceipt(fx, '1', h1);
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const nonce = nonceOf(queue(fx, ['train', 'build', '--prs', `1@${h1}`, '--urgent']).out);
+    expect(trainJson(fx, nonce).stamped).toBeUndefined();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const r = land(fx, nonce, '1');
+    expect(r.err).toMatch(/was built without stamped prefixes.*\(QUEUE_GATE_MISSING\)/);
+  }, 180_000);
+});
