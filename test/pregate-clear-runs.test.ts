@@ -1,0 +1,132 @@
+/**
+ * gstack-pregate clear --run (GSTA-156): GitHub Actions runs clear the remote gate obligation, or a lane with a run
+ * profile, on the identical tree or a stamp-only predecessor, covering the gate's inventory; verify then checks the
+ * recorded receipt offline. The run API is a fake; trees come from the fixture repository's git.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { EXIT, type PregateFile } from '../lib/headless-artifacts';
+import { buildContext } from '../lib/pregate/context';
+import { clearDecision, clearObligation, runPregate, verifyPregate, type RunCheck } from '../lib/pregate/index';
+import type { ApiRun, RunDeps, RunProfile } from '../lib/run-evidence';
+import { BASE_PREGATE, cleanup, commit, makeFixtureRepo, readFile, runBin, type FixtureRepo } from './helpers/pregate-fixture';
+
+const repos: FixtureRepo[] = [];
+afterEach(() => { while (repos.length) cleanup(repos.pop()!); });
+
+const LANE = 'pregate.json/remote_gate';
+const NOW = new Date('2026-10-29T12:00:00Z');
+const POLICY = { bump: 'patch', queue_mode: 'stamp-at-merge', changelog: 'CHANGELOG.md', stamp_files: ['VERSION', 'package.json', 'CHANGELOG.md'] };
+const PROFILES: Record<string, RunProfile> = {
+  test: { workflow: 'test.yml', events: ['workflow_dispatch'], jobs: ['full-suite'], artifact: 'full-suite-tree' },
+  e2e: { workflow: 'e2e.yml', events: ['workflow_dispatch'], jobs: ['e2e-full-suite'], artifact: 'e2e-full-suite-tree' },
+};
+const GATE_RUNS = { profiles: ['test', 'e2e'], inventory: 'printf "test/a.test.ts\\ntest/b.test.ts\\n"' };
+
+function fixture(): FixtureRepo {
+  const repo = makeFixtureRepo({
+    pregate: { ...BASE_PREGATE, remote_gate: 'node scripts/remote-gate.js', dependencies: { ...BASE_PREGATE.dependencies, 'CHANGELOG.md': [], VERSION: [] } },
+    baseFiles: { '.gstack/ship-policy.json': JSON.stringify(POLICY, null, 2) + '\n', VERSION: '1.0.0\n', 'CHANGELOG.md': '# Changelog\n\n## [Unreleased]\n\n- add\n' },
+  });
+  repos.push(repo);
+  repo.git('checkout', '-q', 'main');
+  commit(repo, { 'scripts/remote-gate.js': "console.log('PREGATE_REMOTE: tree=' + process.env.PREGATE_TREE + ' tests=3 failed=0');\n" }, 'remote gate');
+  repo.git('push', '-q', 'origin', 'main');
+  repo.git('checkout', '-q', 'feature');
+  repo.git('merge', '-q', '--ff-only', 'main');
+  commit(repo, { 'lib/util.js': 'exports.add = (a, b) => a + b + 0;\n' }, 'the real change');
+  return repo;
+}
+
+function stamp(repo: FixtureRepo): string {
+  const pkg = JSON.parse(readFile(repo, 'package.json'));
+  pkg.version = '1.0.1';
+  return commit(repo, { VERSION: '1.0.1\n', 'package.json': JSON.stringify(pkg, null, 2) + '\n', 'CHANGELOG.md': '# Changelog\n\n## [1.0.1] - 2026-10-29\n\n- add\n' }, 'v1.0.1 stamp');
+}
+
+async function pregateAt(repo: FixtureRepo): Promise<PregateFile> {
+  const loaded = buildContext({ repoRoot: repo.work, base: 'main', policyFrom: 'base', allowRepoCommands: true, env: { ...process.env, ...repo.env }, progress: () => {}, cores: 4, testBackend: 'local' });
+  if (!('ctx' in loaded)) throw new Error('fixture context refused');
+  const file = await runPregate(loaded.ctx, { stage: 'tests' });
+  expect(file.requires_remote).toEqual([expect.objectContaining({ lane: LANE, receipt: null })]);
+  return file;
+}
+
+/** A run of `profile` on `head` with a tree.json listing `files`, as GitHub would report it. */
+interface FakeRun { id: number; profile: string; head: string; files: string[]; conclusion?: string }
+function check(repo: FixtureRepo, runs: FakeRun[], over: Partial<RunCheck> = {}): RunCheck {
+  const byId = new Map(runs.map(r => [r.id, r]));
+  const api = (r: FakeRun): ApiRun => ({
+    id: r.id, run_attempt: 1, status: 'completed', conclusion: r.conclusion ?? 'success', event: 'workflow_dispatch', head_sha: r.head,
+    path: `.github/workflows/${PROFILES[r.profile]!.workflow}`, created_at: '2026-10-29T10:00:00Z', updated_at: '2026-10-29T10:30:00Z',
+    repository: { full_name: 'fx/fx' }, head_repository: { full_name: 'fx/fx' },
+  });
+  const deps: RunDeps = {
+    run: id => { const r = byId.get(id); if (!r) throw new Error('HTTP 404'); return api(r); },
+    runsForHead: (wf, sha) => runs.filter(r => r.head === sha && PROFILES[r.profile]!.workflow === wf).map(api),
+    jobs: id => [{ name: PROFILES[byId.get(id)!.profile]!.jobs[0]!, conclusion: 'success' }],
+    artifact: id => { const r = byId.get(id)!; return { run_id: id, run_attempt: 1, event: 'workflow_dispatch', sha: r.head, tree: repo.git('rev-parse', `${r.head}^{tree}`), files: r.files, tests: r.files.length * 5 }; },
+    commitTree: sha => repo.git('rev-parse', `${sha}^{tree}`),
+  };
+  return { repo: 'fx/fx', deps, profiles: PROFILES, gateRuns: GATE_RUNS, now: NOW, inventory: () => ['test/a.test.ts', 'test/b.test.ts'], ...over };
+}
+
+describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remote gate evidence', () => {
+  test('one verified run per profile on the identical tree clears the gate, and verify accepts the receipt offline', async () => {
+    const repo = fixture();
+    const head = repo.git('rev-parse', 'HEAD');
+    const file = await pregateAt(repo);
+    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 201, profile: 'e2e', head, files: ['test/b.test.ts'] }, { id: 200, profile: 'test', head, files: ['test/a.test.ts'] }]) }, repo.work);
+    if ('refused' in d) throw new Error(d.message);
+    expect(d.receipt).toBe(`remote-gate tree=${file.tree.slice(0, 12)} tests=10 runs=200/1,201/1 profiles=test,e2e heads=${head.slice(0, 12)} verified=2026-10-29T12:00:00.000Z`);
+    expect(d.substitution).toBeUndefined();
+    const cleared = clearObligation(file, LANE, d.receipt, 'test');
+    expect(verifyPregate(repo.work, cleared, { tree: file.tree } as any)).toMatchObject({ ok: true });
+  }, 120_000);
+
+  test('runs on a stamp-only predecessor are accepted for the stamped head and recorded as a substitution', async () => {
+    const repo = fixture();
+    const gated = repo.git('rev-parse', 'HEAD');
+    stamp(repo);
+    const file = await pregateAt(repo);
+    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head: gated, files: ['test/a.test.ts', 'test/b.test.ts'] }, { id: 201, profile: 'e2e', head: gated, files: [] }]) }, repo.work);
+    if ('refused' in d) throw new Error(d.message);
+    expect(d.receipt).toContain(`accepted-for=${file.tree.slice(0, 12)} stamp-only=3 runs=200/1,201/1`);
+    expect(d.substitution?.accepted_for).toBe(file.tree);
+    expect(verifyPregate(repo.work, clearObligation(file, LANE, d.receipt, 'test', d.substitution), { tree: file.tree } as any)).toMatchObject({ ok: true });
+  }, 120_000);
+
+  test('refusals: a non-stamp difference, an uncovered inventory file, a failed run, a missing profile, no remote_gate_runs', async () => {
+    const repo = fixture();
+    const older = repo.git('rev-parse', 'HEAD~1');
+    const head = repo.git('rev-parse', 'HEAD');
+    const file = await pregateAt(repo);
+    const both = (h: string, files: string[][] = [['test/a.test.ts'], ['test/b.test.ts']], conclusion?: string): FakeRun[] => [{ id: 200, profile: 'test', head: h, files: files[0]!, conclusion }, { id: 201, profile: 'e2e', head: h, files: files[1]! }];
+    const msg = (d: ReturnType<typeof clearDecision>) => ('refused' in d ? `${d.refused}: ${d.message}` : `cleared ${d.receipt}`);
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(older)) }, repo.work))).toMatch(/^PREGATE_RECEIPT_INVALID: .*lib\/util\.js/);
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, [['test/a.test.ts'], []])) }, repo.work))).toContain('1 of the gate\'s 2 test file(s) appear in no run\'s tree.json (test/b.test.ts)');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, undefined, 'failure')) }, repo.work))).toContain('no run verifies as test');
+    expect(msg(clearDecision(file, LANE, { runs: ['200'], evidence: check(repo, both(head)) }, repo.work))).toBe('usage: pregate.json/remote_gate clears with exactly 2 run(s), one per profile (test, e2e); got 1');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { gateRuns: null }) }, repo.work))).toContain('only when the base branch\'s .gstack/pregate.json declares remote_gate_runs');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { inventory: () => ({ error: 'boom' }) }) }, repo.work))).toContain('inventory command failed: boom');
+  }, 120_000);
+
+  test('offline verify refuses a run receipt recorded for another tree', async () => {
+    const repo = fixture();
+    const file = await pregateAt(repo);
+    const forged = clearObligation(file, LANE, `remote-gate tree=${'0'.repeat(12)} tests=10 runs=200/1 profiles=test heads=${'1'.repeat(12)} verified=2026-10-29T12:00:00.000Z`, 'test');
+    expect(verifyPregate(repo.work, forged, { tree: file.tree } as any)).toMatchObject({ ok: false, code: 'PREGATE_REMOTE_UNCLEARED' });
+  }, 120_000);
+
+  test('the bin refuses --run when the base declares no run profiles, and keeps the --receipt route unchanged', async () => {
+    const repo = fixture();
+    const file = await pregateAt(repo);
+    fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
+    repo.git('remote', 'set-url', 'origin', 'https://github.com/fx/fx.git');
+    const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', LANE, '--run', '200', '--run', '201', '--allow-repo-commands']);
+    expect(r.status).toBe(EXIT.usage);
+    expect(r.err).toContain('--run clears pregate.json/remote_gate only when the base branch\'s .gstack/pregate.json declares remote_gate_runs');
+  }, 120_000);
+});

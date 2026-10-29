@@ -73,6 +73,8 @@ the byte-pinned `/ship` renders in `test/fixtures/golden/`).
 | `price_file` | repo-relative path of the paid gate's call-plan data file (`GSTACK_EVAL_CALLS v1`); `gstack-eval-plan price-gate` prices from it and never executes anything ([docs/eval-calls.md](eval-calls.md)) |
 | `stall_timeout_s` | seconds a test command may print nothing before its process group is killed and the check is `incomplete` (`PREGATE_STALLED`); default 300, `0` disables; `--stall-timeout` overrides (see [supervision](#supervision)) |
 | `remote_gate` | the repo's remote test gate command; under 8 cores the local test tier becomes a `requires-remote` obligation naming it, and `--remote` runs it (see [remote gate](#remote-gate)) |
+| `run_profiles` | name → `{ workflow, events, jobs, artifact, max_age_hours?, os? }`: the GitHub Actions runs `clear --run` verifies as evidence on the identical tree; a profile named after a lane (`free-tests.yml/macos-named-regressions`) clears that lane (see [run evidence](#run-evidence)) |
+| `remote_gate_runs` | `{ profiles, inventory }`: the run profiles that together clear `pregate.json/remote_gate`, and the command that prints the remote gate's test files, one per line, which their runs must cover (see [run evidence](#run-evidence)) |
 | `allowlist` | `[{ finding, paths?, pattern?, reason }]`: benign findings the `secrets` check accepts and names as allowlisted, by gstack-redact finding id or non-secret category, path globs and a pattern anchored at the finding; never `env.value` (see [allowlist](#allowlist)) |
 
 Only the `origin/<base>` copy or the user-owned file below is honoured, so a
@@ -406,6 +408,10 @@ the supervision above. Close the obligation one of two ways:
   accepted and recorded, see [below](#remote-gate-stamp-only)), or
   `gstack-pregate clear --remote test_backend/<backend> --run-url <url>`, which
   has no machine-checkable receipt and is recorded as `attested:<url>`; or
+- when CI already ran the full suite on this tree, `gstack-pregate clear --remote
+  pregate.json/remote_gate --run <id|url> [--run …] --allow-repo-commands`, one
+  verified GitHub Actions run per `remote_gate_runs` profile (see
+  [run evidence](#run-evidence)); or
 - `gstack-pregate --stage tests --remote --spend-cap <usd> --allow-repo-commands`,
   which runs the declared `remote_gate` now (never under `--policy-from head`;
   a `test_backend` without `remote_gate` cannot be run this way). The gate runs
@@ -563,6 +569,84 @@ Every refusal line starts with a reason code:
 | `PREGATE_REMOTE_TIMEOUT_TOO_SHORT` | 5 | pregate's deadline leaves the VM under 300 s after the 135 s teardown reserve; nothing created |
 | `PREGATE_REMOTE_INFRA` | 4 | create, setup, SSH or the stop deadline failed; the VM, its teardown line and `spent=` follow |
 | `PREGATE_REMOTE_INTERRUPTED` | 130 | TERM or INT; ubi-runner tears the VM down on its own |
+
+<a id="run-evidence"></a>
+## Run evidence: one full suite per tree (`clear --run`)
+
+A repository that runs its full suite in CI and again as its remote gate on the
+same tree paid twice for one result (gbrain: a 30–45 min Ubicloud gate, then an
+18–20 min full-ci dispatch, every serial slot). `clear --run` lets a passed
+GitHub Actions run stand in for the gate, on the runner's own record and never
+on prose: a pasted URL is only a pointer the verifier resolves.
+
+**Declare it on the base branch.** In `.gstack/pregate.json`:
+
+```json
+{
+  "run_profiles": {
+    "test": { "workflow": "test.yml", "events": ["workflow_dispatch", "push"], "jobs": ["full-suite"], "artifact": "full-suite-tree" },
+    "e2e":  { "workflow": "e2e.yml",  "events": ["workflow_dispatch", "push"], "jobs": ["e2e-full-suite"], "artifact": "e2e-full-suite-tree" }
+  },
+  "remote_gate_runs": { "profiles": ["test", "e2e"], "inventory": "bash scripts/pregate-remote-gate.sh --list" }
+}
+```
+
+Profiles are read only from `origin/<base>`, so a pull request can tighten
+them but never relax them. Each profile names the workflow file, the events it
+accepts, every job that must have passed (each exactly once), and the artifact
+holding the run's `tree.json`. `max_age_hours` (1–168, default 24) bounds how
+old the run may be, and `os` (`Linux`, `macOS`, `Windows`) requires
+`tree.json` to record that runner OS. Each workflow uploads `tree.json` from
+its own job: `run_id`, `run_attempt`, `event`, `sha` (or `head_sha`),
+`tree` (`git rev-parse HEAD^{tree}` as tested), `files` (every test file the
+run executed), `tests` (the count) and, with `os`, the runner OS.
+
+**What `clear --run` checks** (`lib/run-evidence.ts`), for every run, online,
+once:
+
+- The run belongs to this repository and ran for a same-repository head.
+  Its workflow file and event are the profile's, and it completed with success.
+  The API answers with the newest attempt, so an earlier green attempt under a
+  newer red one is refused.
+- Every job the profile names appears exactly once in that attempt and
+  succeeded.
+- `tree.json` names this run, attempt, event and head. It is not a reuse
+  record (a reuse is never evidence). Its tree equals the tree git computes for
+  the run's head commit.
+- No newer run of the same workflow on that head, or on pregate.json's own
+  head, failed, was cancelled or is still running.
+- The run finished within `max_age_hours`, and on the profile's OS when it
+  names one.
+- For `pregate.json/remote_gate`: there is exactly one verified run per
+  `remote_gate_runs` profile, all on one tree. Every file the `inventory`
+  command prints for this tree appears in some run's `files`. The command is a
+  pin-file command, so it runs only with `--allow-repo-commands`, and an empty
+  or failing inventory refuses.
+- The run tree is pregate.json's tree, or a stamp-only predecessor of it under
+  exactly the rule [above](#remote-gate-stamp-only) (a policy whose
+  `stamp_sensitive_gates` names `tests` refuses that substitution).
+
+Any API or git error refuses. Each refusal prints `REUSE: refused — …` with the
+run and its reason (`fork_run`, `event_mismatch`, `run_not_success`,
+`job_missing`, `artifact_mismatch`, `artifact_reused`, `tree_mismatch`,
+`newer_run_vetoes`, `run_stale`, `os_mismatch`, `api_error`, …), as
+`PREGATE_RECEIPT_INVALID`. Accepted, the receipt reads
+`remote-gate tree=<t12> tests=<n> runs=<id>/<attempt>,… profiles=<p>,…
+heads=<h12> verified=<time>` (with `accepted-for=` and the substitution for a
+stamp-only predecessor). A lane with its own profile gets `run tree=… runs=…`
+the same way, and for such a lane `--run-url` is verified as `--run` is. A
+lane with no profile keeps today's `--run-url` recording.
+
+**`verify` stays offline.** The check ran at `clear`. `gstack-pregate verify`,
+and `gstack-ship-queue ready` through it, refuse a run receipt whose `tree=`
+is not pregate.json's tree unless a substitution for it is recorded. They make
+no network call, so GitHub's availability and the run's age never sit on the
+merge path.
+
+**What is never reusable.** Security and advisory scans (osv, audit,
+gitleaks) depend on the day, not on the tree, so they are not run profiles:
+they run on every head as before. Pull-request required checks always run
+fresh.
 
 <a id="guards"></a>
 ## Guards and the lane-done rule

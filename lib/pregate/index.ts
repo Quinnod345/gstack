@@ -23,10 +23,11 @@ import { regenCheck } from './checks/regen';
 import { secretsCheck } from './checks/secrets';
 import { straysCheck } from './checks/strays';
 import { timingCheck } from './checks/timing';
-import { NON_DOWNGRADABLE, userPolicyAbsent } from './config';
+import { NON_DOWNGRADABLE, PREGATE_CONFIG_PATH, userPolicyAbsent } from './config';
 import { sha256, withFingerprint } from './context';
 import { baseBranchOf, baseMismatchFix, describeSubstitution, substituteStampOnlyTree } from './remote-receipt';
 import { resolveBaseBranch } from '../ship-policy';
+import { parseRunReceipt, runReceiptFields, uncoveredFiles, verifyRun, type RemoteGateRuns, type RunDeps, type RunEvidence, type RunProfile } from '../run-evidence';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
 export const CHECKS: readonly CheckDef[] = [regenCheck, secretsCheck, straysCheck, literalsCheck, timingCheck, guardsCheck, lanesCheck];
@@ -173,6 +174,9 @@ export function verifyPregate(repoRoot: string, file: PregateFile, treeNow: Wtre
   // A receipt accepted from a stamp-only predecessor tree was accepted for one head tree; recorded for another, it clears nothing here.
   const misapplied = (file.requires_remote ?? []).filter(r => r.substitution && (r.substitution.accepted_for !== file.tree || !(r.receipt ?? '').includes(`tree=${r.substitution.gated_tree.slice(0, 12)} `)));
   if (misapplied.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${misapplied.length} remote receipt(s) accepted for another tree or recorded against another gated tree: ${misapplied.map(r => `${r.lane} (accepted for ${r.substitution!.accepted_for.slice(0, 12)} from gated ${r.substitution!.gated_tree.slice(0, 12)}, pregate.json is ${file.tree.slice(0, 12)})`).join(', ')}; clear again`, current, uncleared: misapplied };
+  // A run receipt was verified online at clear for its tree; offline it must still name this tree (or carry its substitution).
+  const foreignRuns = (file.requires_remote ?? []).filter(r => { const run = parseRunReceipt(r.receipt ?? ''); return run && !r.substitution && run.tree !== file.tree.slice(0, 12); });
+  if (foreignRuns.length) return { ok: false, code: 'PREGATE_REMOTE_UNCLEARED', message: `${foreignRuns.length} run receipt(s) verified for another tree: ${foreignRuns.map(r => `${r.lane} (${r.receipt})`).join(', ')}; clear again with runs on tree ${file.tree.slice(0, 12)}`, current, uncleared: foreignRuns };
   const substituted = (file.requires_remote ?? []).filter(r => r.substitution).map(r => `${r.lane}: ${describeSubstitution(r.substitution!)}`);
   return { ok: true, message: `pregate ${file.verdict} is current for tree ${file.tree.slice(0, 12)}${substituted.length ? `; ${substituted.join('; ')}` : ''}`, current, uncleared };
 }
@@ -198,7 +202,9 @@ function userPolicyChange(file: PregateFile): string | null {
   return `${absent} now holds a user-owned policy, and pregate.json was recorded under the defaults; rerun gstack-pregate`;
 }
 
-export interface ClearInput { runUrl?: string; bundleLane?: string; receiptPath?: string }
+export interface ClearInput { runUrl?: string; bundleLane?: string; receiptPath?: string; runs?: string[]; evidence?: RunCheck }
+/** What a run clear needs: the base branch's run profiles, the verifier's dependencies, the clock, and the remote gate's inventory. */
+export interface RunCheck { repo: string; deps: RunDeps; profiles: Record<string, RunProfile>; gateRuns: RemoteGateRuns | null; now: Date; inventory: (command: string) => string[] | { error: string } }
 export type ClearDecision = { receipt: string; attested: boolean; substitution?: PregateReceiptSubstitution } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string; fix?: string };
 
 /**
@@ -217,6 +223,8 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
   const list = file.requires_remote ?? [];
   const target = list.find(r => r.lane === lane);
   if (!target) return { refused: 'usage', message: `no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}` };
+  const profiled = input.evidence && (lane === REMOTE_GATE_LANE ? input.evidence.gateRuns : input.evidence.profiles[lane]);
+  if (input.runs?.length || (input.runUrl && profiled)) return clearByRuns(file, lane, [...(input.runs ?? []), ...(input.runUrl ? [input.runUrl] : [])], input.evidence, repoRoot);
   if (target.lane === REMOTE_GATE_LANE) {
     if (!input.receiptPath) return { refused: 'usage', message: `${lane} clears only with --receipt <file> holding the remote gate's PREGATE_REMOTE: tree=… tests=… failed=… line (a run URL is not checkable); or rerun gstack-pregate --remote` };
     let text: string;
@@ -226,16 +234,9 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
     if (!report) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${input.receiptPath} has no PREGATE_REMOTE: line; ${lane} stays uncleared` };
     const own = remoteReportProblem(report, report.tree);
     if (own) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${own}; ${lane} stays uncleared` };
-    let substitution: PregateReceiptSubstitution | undefined;
-    if (report.tree !== file.tree) {
-      // The stamp rule is the ship's own base branch's policy (origin/HEAD, as regate reads it), never a branch the artifact names.
-      const base = resolveBaseBranch(repoRoot);
-      const recorded = baseBranchOf(file.base);
-      if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${treeMismatch(report.tree, file.tree)}; pregate.json was recorded against origin/${recorded}, not this repository's base origin/${base}, so the stamp rule that would class the difference is not the base's; ${lane} stays uncleared`, fix: baseMismatchFix(repoRoot, base, recorded) };
-      const s = substituteStampOnlyTree(repoRoot, base, report.tree, file.tree);
-      if ('problem' in s) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${s.problem}; ${lane} stays uncleared`, fix: s.fix };
-      substitution = s.substitution;
-    }
+    const sub = treeSubstitution(file, report.tree, lane, repoRoot);
+    if ('refused' in sub) return sub;
+    const substitution = sub.substitution;
     const problem = remoteReportProblem(report, substitution ? report.tree : file.tree);
     if (problem) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${problem}; ${lane} stays uncleared` };
     const accepted = substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${substitution.files.length}` : '';
@@ -249,6 +250,62 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
   const receipt = input.runUrl ?? (input.bundleLane ? `bundle-lane:${input.bundleLane}` : undefined);
   if (!receipt) return { refused: 'usage', message: `${lane} clears with --run-url <url> or --bundle-lane <label>` };
   return { receipt, attested: false };
+}
+
+/** The stamp-only substitution that lets a receipt for `gatedTree` clear pregate.json's tree, none when the trees are equal, or the refusal. */
+function treeSubstitution(file: PregateFile, gatedTree: string, lane: string, repoRoot: string): { substitution?: PregateReceiptSubstitution } | Extract<ClearDecision, { refused: string }> {
+  if (gatedTree === file.tree) return {};
+  // The stamp rule is the ship's own base branch's policy (origin/HEAD, as regate reads it), never a branch the artifact names.
+  const base = resolveBaseBranch(repoRoot);
+  const recorded = baseBranchOf(file.base);
+  if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${treeMismatch(gatedTree, file.tree)}; pregate.json was recorded against origin/${recorded}, not this repository's base origin/${base}, so the stamp rule that would class the difference is not the base's; ${lane} stays uncleared`, fix: baseMismatchFix(repoRoot, base, recorded) };
+  const s = substituteStampOnlyTree(repoRoot, base, gatedTree, file.tree);
+  if ('problem' in s) return { refused: 'PREGATE_RECEIPT_INVALID', message: `${s.problem}; ${lane} stays uncleared`, fix: s.fix };
+  return { substitution: s.substitution };
+}
+
+/**
+ * `clear --run`: GitHub Actions runs as the obligation's evidence (lib/run-evidence.ts). The remote gate needs one
+ * verified run per `remote_gate_runs` profile, all on one tree, whose tree.json file lists together cover every file
+ * the gate's inventory command prints; any other lane needs one verified run of the profile named after it. The run
+ * tree must be pregate.json's tree or a stamp-only predecessor of it, exactly as a gate report's tree must.
+ */
+function clearByRuns(file: PregateFile, lane: string, refs: string[], check: RunCheck | undefined, repoRoot: string): ClearDecision {
+  if (!check) return { refused: 'usage', message: `--run needs the base branch's run_profiles; none could be read` };
+  const isGate = lane === REMOTE_GATE_LANE;
+  const names = isGate ? check.gateRuns?.profiles ?? [] : check.profiles[lane] ? [lane] : [];
+  if (!names.length) return { refused: 'usage', message: isGate ? `--run clears ${lane} only when the base branch's ${PREGATE_CONFIG_PATH} declares remote_gate_runs` : `--run clears ${lane} only when the base branch's ${PREGATE_CONFIG_PATH} declares a run_profiles entry named ${lane}` };
+  if (refs.length !== names.length) return { refused: 'usage', message: `${lane} clears with exactly ${names.length} run(s), one per profile (${names.join(', ')}); got ${refs.length}` };
+  const evidence: RunEvidence[] = [];
+  const left = [...refs];
+  for (const name of names) {
+    const profile = check.profiles[name];
+    if (!profile) return { refused: 'usage', message: `run profile ${name} is not declared` };
+    const tried: string[] = [];
+    const hit = left.findIndex(ref => {
+      const v = verifyRun(check.deps, { repo: check.repo, runRef: ref, profileName: name, profile, vetoHeads: file.head ? [file.head] : [], now: check.now });
+      if (v.ok) { evidence.push(v.evidence); return true; }
+      tried.push(`${ref}: ${v.detail} (${v.reason})`);
+      return false;
+    });
+    if (hit < 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — no run verifies as ${name}: ${tried.join('; ')}; ${lane} stays uncleared` };
+    left.splice(hit, 1);
+  }
+  const trees = [...new Set(evidence.map(e => e.tree))];
+  if (trees.length > 1) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the runs tested different trees (${trees.map(t => t.slice(0, 12)).join(', ')}); ${lane} stays uncleared` };
+  const sub = treeSubstitution(file, trees[0]!, lane, repoRoot);
+  if ('refused' in sub) return sub;
+  const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
+  if (isGate) {
+    const listed = check.inventory(check.gateRuns!.inventory);
+    if ('error' in listed) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the remote gate's inventory command failed: ${listed.error}; ${lane} stays uncleared` };
+    if (!listed.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the remote gate's inventory command listed no test files; ${lane} stays uncleared` };
+    const missing = uncoveredFiles(listed, evidence);
+    if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — ${missing.length} of the gate's ${listed.length} test file(s) appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
+  }
+  if (tests === 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused — the verified runs record no tests; ${lane} stays uncleared` };
+  const accepted = sub.substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${sub.substitution.files.length}` : '';
+  return { receipt: `${isGate ? 'remote-gate' : 'run'} tree=${trees[0]!.slice(0, 12)} tests=${tests}${accepted} ${runReceiptFields(evidence, check.now)}`, attested: false, substitution: sub.substitution };
 }
 
 /** Record the receipt that clears one obligation (a run URL, an evidence-bundle lane label, or a remote gate report, with the stamp-only substitution when one was accepted). */
