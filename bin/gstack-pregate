@@ -221,10 +221,11 @@ function cmdClear(root: string, rest: string[]): number {
   if (!read.file) { process.stderr.write(resultLine('gstack-pregate clear', 'PREGATE_STALE', `${out} is missing or invalid; run gstack-pregate first`) + '\n'); return EXIT.fail; }
   const runs = rest.flatMap((a, i) => a === '--run' ? [rest[i + 1]!] : []);
   const runUrl = flag(rest, '--run-url');
-  const checked = runs.length || runUrl ? runCheck(root, rest.includes('--allow-repo-commands')) : undefined;
-  if (checked && 'error' in checked && runs.length) { process.stderr.write(`gstack-pregate clear: ${checked.error}\n`); return EXIT.fail; }
+  const bundleLane = flag(rest, '--bundle-lane');
+  const checked = runs.length || runUrl || bundleLane ? runCheck(root, lane, rest.includes('--allow-repo-commands')) : undefined;
+  if (checked && 'error' in checked && (runs.length || checked.profiled)) { process.stderr.write(`gstack-pregate clear: ${checked.error}${checked.profiled ? `; the base branch declares a run profile for ${lane}, so it clears only with --run` : ''}\n`); return EXIT.fail; }
   const evidence = checked && !('error' in checked) ? checked : undefined;
-  const decision = clearDecision(read.file, lane, { runUrl, runs, bundleLane: flag(rest, '--bundle-lane'), receiptPath: flag(rest, '--receipt'), evidence }, root);
+  const decision = clearDecision(read.file, lane, { runUrl, runs, bundleLane, receiptPath: flag(rest, '--receipt'), evidence }, root);
   if ('refused' in decision) {
     if (decision.refused === 'usage') { process.stderr.write(`gstack-pregate clear: ${decision.message}\n`); return EXIT.usage; }
     process.stderr.write(`gstack-pregate clear: receipt refused — ${decision.message}; fix: ${decision.fix ?? RESULT_CODES.PREGATE_RECEIPT_INVALID.fix} ${resultCodeSuffix('PREGATE_RECEIPT_INVALID')}\n`);
@@ -235,17 +236,18 @@ function cmdClear(root: string, rest: string[]): number {
   if (/ runs=\S+ profiles=/.test(decision.receipt)) process.stdout.write(`REUSE: accepted ${lane} ${decision.receipt}\n`);
   if (decision.substitution) process.stdout.write(`PREGATE_RECEIPT_SUBSTITUTED: ${describeSubstitution(decision.substitution)}\n`);
   process.stdout.write(`PREGATE_CLEARED: ${lane} receipt=${decision.receipt} verdict=${file.verdict}${decision.attested ? ` (attested, not validated: ${lane} has no machine-checkable receipt)` : ''}\n`);
+  if (checked && 'error' in checked) process.stderr.write(`gstack-pregate clear: run profiles unavailable (${checked.error}); ${lane} was recorded without run verification\n`);
   return EXIT.ok;
 }
 
 /** The run-evidence inputs for `clear --run`: the base branch's run profiles, this repository on GitHub, and the gate's inventory command (a pin-file command, so only with --allow-repo-commands). */
-function runCheck(root: string, allowRepoCommands: boolean): RunCheck | { error: string } {
+function runCheck(root: string, lane: string, allowRepoCommands: boolean): RunCheck | { error: string; profiled?: boolean } {
   const base = resolveBaseBranch(root);
   const loaded = loadConfigFromBase(root, base);
   if (isConfigUnavailable(loaded)) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is unreadable (${loaded.detail}); run profiles come only from the base` };
   if (loaded.errors.length) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is invalid: ${loaded.errors.map(e => `${e.path}: ${e.message}`).join('; ')}` };
   const repo = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(gitOut(root, ['remote', 'get-url', 'origin']) ?? '')?.[1];
-  if (!repo) return { error: 'origin is not a github.com repository; run evidence is read from GitHub Actions' };
+  if (!repo) return { error: 'origin is not a github.com repository; run evidence is read from GitHub Actions', profiled: lane === REMOTE_GATE_LANE ? !!loaded.config.remote_gate_runs : !!loaded.config.run_profiles[lane] };
   return {
     repo, deps: ghRunDeps(repo, root), profiles: loaded.config.run_profiles, gateRuns: loaded.config.remote_gate_runs, now: new Date(),
     inventory: command => {

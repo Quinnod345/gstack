@@ -225,6 +225,7 @@ export function clearDecision(file: PregateFile, lane: string, input: ClearInput
   if (!target) return { refused: 'usage', message: `no requires-remote obligation named ${lane}; obligations: ${list.map(r => r.lane).join(', ') || '(none)'}` };
   const profiled = input.evidence && (lane === REMOTE_GATE_LANE ? input.evidence.gateRuns : input.evidence.profiles[lane]);
   if (input.runs?.length || (input.runUrl && profiled)) return clearByRuns(file, lane, [...(input.runs ?? []), ...(input.runUrl ? [input.runUrl] : [])], input.evidence, repoRoot);
+  if (input.bundleLane && profiled && lane !== REMOTE_GATE_LANE) return { refused: 'usage', message: `${lane} has a run profile on the base branch; clear it with --run <id|url>, which verifies the run` };
   if (target.lane === REMOTE_GATE_LANE) {
     if (!input.receiptPath) return { refused: 'usage', message: `${lane} clears only with --receipt <file> holding the remote gate's PREGATE_REMOTE: tree=… tests=… failed=… line (a run URL is not checkable); or rerun gstack-pregate --remote` };
     let text: string;
@@ -294,7 +295,7 @@ function clearByRuns(file: PregateFile, lane: string, refs: string[], check: Run
   const trees = [...new Set(evidence.map(e => e.tree))];
   if (trees.length > 1) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=tree_mismatch — the runs tested different trees (${trees.map(t => t.slice(0, 12)).join(', ')}); ${lane} stays uncleared` };
   const sub = treeSubstitution(file, trees[0]!, lane, repoRoot);
-  if ('refused' in sub) return sub;
+  if ('refused' in sub) return { ...sub, message: `REUSE: refused reason=tree_not_stamp_only — ${sub.message}` };
   const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
   if (isGate) {
     const listed = check.inventory(check.gateRuns!.inventory);

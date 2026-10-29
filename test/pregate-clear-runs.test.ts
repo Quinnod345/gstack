@@ -24,9 +24,9 @@ const PROFILES: Record<string, RunProfile> = {
 };
 const GATE_RUNS = { profiles: ['test', 'e2e'], inventory: 'printf "test/a.test.ts\\ntest/b.test.ts\\n"' };
 
-function fixture(): FixtureRepo {
+function fixture(extra: Record<string, unknown> = {}): FixtureRepo {
   const repo = makeFixtureRepo({
-    pregate: { ...BASE_PREGATE, remote_gate: 'node scripts/remote-gate.js', dependencies: { ...BASE_PREGATE.dependencies, 'CHANGELOG.md': [], VERSION: [] } },
+    pregate: { ...BASE_PREGATE, ...extra, remote_gate: 'node scripts/remote-gate.js', dependencies: { ...BASE_PREGATE.dependencies, 'CHANGELOG.md': [], VERSION: [] } },
     baseFiles: { '.gstack/ship-policy.json': JSON.stringify(POLICY, null, 2) + '\n', VERSION: '1.0.0\n', 'CHANGELOG.md': '# Changelog\n\n## [Unreleased]\n\n- add\n' },
   });
   repos.push(repo);
@@ -129,7 +129,7 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     expect('refused' in empty && empty.message).toContain('inventory command listed no test files');
   }, 120_000);
 
-  test('a lane with its own profile clears from --run-url through the verifier; a lane without one keeps the plain run-URL record, even when the base config cannot be read', async () => {
+  test('a lane with its own profile clears from --run-url through the verifier; a lane without one keeps the plain run-URL record, and so does a repository whose run profiles cannot be read (a non-GitHub origin), with a warning', async () => {
     const repo = fixture();
     const head = repo.git('rev-parse', 'HEAD');
     const base = await pregateAt(repo);
@@ -143,10 +143,33 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const failed = clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts'], conclusion: 'failure' }], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
     expect('refused' in failed && failed.refused).toBe('PREGATE_RECEIPT_INVALID');
     expect(clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, []) }, repo.work)).toEqual({ receipt: url, attested: false });
+    const bundled = clearDecision(file, PLATFORM, { bundleLane: 'macos', evidence: check(repo, [], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
+    expect('refused' in bundled && `${bundled.refused}: ${bundled.message}`).toBe(`usage: ${PLATFORM} has a run profile on the base branch; clear it with --run <id|url>, which verifies the run`);
+    expect(clearDecision(file, PLATFORM, { bundleLane: 'macos', evidence: check(repo, []) }, repo.work)).toEqual({ receipt: 'bundle-lane:macos', attested: false });
+    const unprofiled = clearDecision(file, PLATFORM, { runs: ['200'], evidence: check(repo, []) }, repo.work);
+    expect('refused' in unprofiled && `${unprofiled.refused}: ${unprofiled.message}`).toContain(`usage: --run clears ${PLATFORM} only when the base branch's .gstack/pregate.json declares a run_profiles entry named`);
+    const gateFromUrl = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }]) }, repo.work);
+    expect('refused' in gateFromUrl && `${gateFromUrl.refused}: ${gateFromUrl.message}`).toBe('usage: pregate.json/remote_gate clears with exactly 2 run(s), one per profile (test, e2e); got 1');
+    const oneProfile = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }], { gateRuns: { profiles: ['test'], inventory: 'true' } }) }, repo.work);
+    if ('refused' in oneProfile) throw new Error(oneProfile.message);
+    expect(oneProfile.receipt).toStartWith(`remote-gate tree=${file.tree.slice(0, 12)} tests=10 runs=200/1 profiles=test `);
     fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
     fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
     const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', PLATFORM, '--run-url', url]);
-    expect([r.status, r.err]).toEqual([EXIT.ok, expect.any(String)]);
+    expect([r.status, r.err]).toEqual([EXIT.ok, expect.stringContaining('origin is not a github.com repository')]);
+    expect(r.err).toContain(`${PLATFORM} was recorded without run verification`);
+    const viaRun = runBin(repo, 'gstack-pregate', ['clear', '--remote', LANE, '--run', '200', '--run', '201', '--allow-repo-commands']);
+    expect([viaRun.status, viaRun.err]).toEqual([EXIT.fail, expect.stringContaining('origin is not a github.com repository')]);
+  }, 120_000);
+
+  test('a lane the base profiles never falls back to an unverified record when the GitHub origin cannot be read', async () => {
+    const repo = fixture({ run_profiles: PROFILES, remote_gate_runs: GATE_RUNS });
+    const file = await pregateAt(repo);
+    fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
+    const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', LANE, '--run-url', 'https://github.com/fx/fx/actions/runs/200']);
+    expect([r.status, r.err]).toEqual([EXIT.fail, expect.stringContaining(`the base branch declares a run profile for ${LANE}, so it clears only with --run`)]);
+    expect(JSON.parse(fs.readFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), 'utf8')).requires_remote[0].receipt).toBeNull();
   }, 120_000);
 
   test('offline verify refuses a run receipt recorded for another tree', async () => {

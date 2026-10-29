@@ -5,7 +5,7 @@
  * obligation, a platform lane) may accept a run that already passed on the
  * identical tree, but only on the runner's own record, never on prose: the
  * GitHub API's record of the run, the tree git computes from the run's head
- * commit, and the `tested-tree` artifact (tree.json) the run uploaded itself.
+ * commit, and the profile's artifact (its tree.json) the run uploaded itself.
  * `verifyRun` refuses unless every check holds:
  *
  *   the run belongs to this repository and ran for a same-repository head;
@@ -34,7 +34,7 @@ export interface RunProfile { workflow: string; events: string[]; jobs: string[]
 export interface RemoteGateRuns { profiles: string[]; inventory: string }
 export interface ApiRun {
   id: number; run_attempt: number; status: string; conclusion: string | null; event: string; head_sha: string;
-  path?: string; created_at?: string; updated_at?: string;
+  path?: string; created_at?: string; run_started_at?: string; updated_at?: string;
   repository?: { full_name: string } | null; head_repository?: { full_name: string } | null;
 }
 export interface ApiJob { name: string; conclusion: string | null }
@@ -86,7 +86,7 @@ export function runProfileErrors(profiles: unknown, gateRuns: unknown): Array<{ 
         const v = p[k];
         if (!Array.isArray(v) || v.length === 0 || v.length > 32 || v.some(s => typeof s !== 'string' || !s.trim())) errors.push({ path: `${at}.${k}`, message: 'must be a non-empty array of up to 32 names' });
       }
-      if (Array.isArray(p.events) && p.events.some(e => e !== 'push' && e !== 'workflow_dispatch' && e !== 'pull_request')) errors.push({ path: `${at}.events`, message: 'events are push, workflow_dispatch or pull_request' });
+      if (Array.isArray(p.events) && p.events.some(e => e !== 'push' && e !== 'workflow_dispatch')) errors.push({ path: `${at}.events`, message: 'events are push or workflow_dispatch (a pull_request run tests the merge commit, not the head tree)' });
       if (typeof p.artifact !== 'string' || !NAME.test(p.artifact)) errors.push({ path: `${at}.artifact`, message: 'must be the artifact name holding tree.json' });
       if ('max_age_hours' in p && (!Number.isInteger(p.max_age_hours) || (p.max_age_hours as number) < 1 || (p.max_age_hours as number) > 168)) errors.push({ path: `${at}.max_age_hours`, message: 'must be an integer from 1 to 168' });
       if ('os' in p && (typeof p.os !== 'string' || !/^(Linux|macOS|Windows)$/.test(p.os))) errors.push({ path: `${at}.os`, message: 'must be Linux, macOS or Windows' });
@@ -106,6 +106,8 @@ export function runProfileErrors(profiles: unknown, gateRuns: unknown): Array<{ 
 }
 
 const fail = (reason: RunRefusal, detail: string): RunVerdict => ({ ok: false, reason, detail });
+/** When a run's newest attempt started. A run vetoes the candidate when it started after the candidate was created: a red re-run of an older run counts, and re-running the candidate does not hide a failure in between. */
+const started = (r: ApiRun): string => r.run_started_at ?? r.created_at ?? '';
 
 /**
  * The verdict for run `runRef` under `profile`. `vetoHeads` are further heads
@@ -138,7 +140,7 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
     }
     const heads = [...new Set([run.head_sha, ...(o.vetoHeads ?? []).filter(h => SHA.test(h))])];
     for (const head of heads) {
-      const newer = deps.runsForHead(p.workflow, head).filter(r => r.id !== id && (r.created_at ?? '') > (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
+      const newer = deps.runsForHead(p.workflow, head).filter(r => r.id !== id && started(r) > (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
       if (newer.length) return fail('newer_run_vetoes', `newer run ${newer[0]!.id} of ${p.workflow} on ${head.slice(0, 12)} is ${newer[0]!.status === 'completed' ? newer[0]!.conclusion : newer[0]!.status}`);
     }
     let rec: TreeRecord;

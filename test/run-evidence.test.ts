@@ -91,6 +91,10 @@ describe('verifyRun', () => {
     expect(reason(world({ others: [newer('in_progress', null)] }))).toBe('newer_run_vetoes');
     expect(reason(world({ others: [newer('completed', 'success')] }))).toBe('ok');
     expect(reason(world({ others: [{ ...newer('completed', 'failure'), created_at: '2026-10-29T09:00:00Z' }] }))).toBe('ok');
+    // A re-run keeps its run's created_at; its newest attempt started after the candidate, so its red result still vetoes.
+    expect(reason(world({ others: [{ ...newer('completed', 'failure'), created_at: '2026-10-29T09:00:00Z', run_started_at: '2026-10-29T11:00:00Z' }] }))).toBe('newer_run_vetoes');
+    // Re-running the candidate itself does not hide a failure that started after it was first created.
+    expect(reason(world({ run: { ...w.run, run_started_at: '2026-10-29T12:00:00Z' }, others: [newer('completed', 'failure')] }))).toBe('newer_run_vetoes');
   });
 
   test('a newer failure on another head the consumer names (same tree, the lane\'s own head) vetoes too', () => {
@@ -117,7 +121,7 @@ describe('verifyRun', () => {
 describe('profiles, coverage and receipts', () => {
   test('runProfileErrors accepts a well-formed pair and names every malformed field', () => {
     expect(runProfileErrors({ test: PROFILE, e2e: { ...PROFILE, workflow: 'e2e.yml', jobs: ['e2e-full-suite'], artifact: 'e2e-full-suite-tree', os: 'Linux', max_age_hours: 12 } }, { profiles: ['test', 'e2e'], inventory: 'bash scripts/pregate-remote-gate.sh --list' })).toEqual([]);
-    const errors = runProfileErrors({ bad: { workflow: '../x.yml', events: ['schedule'], jobs: [], artifact: '', max_age_hours: 0, os: 'BeOS', extra: 1 } }, { profiles: ['missing'], inventory: 'a\nb' }).map(e => e.path);
+    const errors = runProfileErrors({ bad: { workflow: '../x.yml', events: ['pull_request'], jobs: [], artifact: '', max_age_hours: 0, os: 'BeOS', extra: 1 } }, { profiles: ['missing'], inventory: 'a\nb' }).map(e => e.path);
     expect(errors).toEqual(expect.arrayContaining(['run_profiles["bad"].extra', 'run_profiles["bad"].workflow', 'run_profiles["bad"].events', 'run_profiles["bad"].jobs', 'run_profiles["bad"].artifact', 'run_profiles["bad"].max_age_hours', 'run_profiles["bad"].os', 'remote_gate_runs.profiles', 'remote_gate_runs.inventory']));
   });
 

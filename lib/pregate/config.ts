@@ -307,10 +307,10 @@ export function loadConfigFromUser(file: string, knownChecks: readonly string[] 
     return { ...parseConfig('{}', knownChecks), errors: [{ code: 'PREGATE_CONFIG_INVALID', path: file, message: `cannot read the user-owned policy: ${(e as Error).message}` }], present: true, label: `user ${file}`, kind: 'user' };
   }
   const load = parseConfig(text, knownChecks);
-  // `sealed` (the pre-push guard) and `price_file` (gstack-eval-plan) read only the git copies, so a non-null value in the user file would look active and do nothing.
+  // `sealed` (the pre-push guard), `price_file` (gstack-eval-plan) and the run profiles (`clear --run`) read only the git copies, so a non-null value in the user file would look active and do nothing.
   let raw: unknown = null;
   try { raw = JSON.parse(text); } catch { /* parseConfig reported it */ }
-  const ignored = raw && typeof raw === 'object' && !Array.isArray(raw) ? ['sealed', 'price_file'].filter(k => (raw as Record<string, unknown>)[k] != null) : [];
+  const ignored = raw && typeof raw === 'object' && !Array.isArray(raw) ? ['sealed', 'price_file', 'run_profiles', 'remote_gate_runs'].filter(k => { const v = (raw as Record<string, unknown>)[k]; return v != null && !(k === 'run_profiles' && typeof v === 'object' && Object.keys(v).length === 0); }) : [];
   // parseConfig names the repo copy for a JSON error; this file is not it.
   const errors = [...load.errors.map(e => e.path === PREGATE_CONFIG_PATH ? { ...e, path: file } : e), ...ignored.map(k => ({ code: 'PREGATE_CONFIG_INVALID' as const, path: k, message: `the user-owned policy covers gstack-pregate run only; ${k} is read from ${PREGATE_CONFIG_PATH} on the base branch` }))];
   return { ...load, errors, present: true, label: `user ${file}`, kind: 'user', digest: createHash('sha256').update(text).digest('hex') };

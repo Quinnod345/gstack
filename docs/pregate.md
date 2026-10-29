@@ -592,7 +592,10 @@ on prose: a pasted URL is only a pointer the verifier resolves.
 ```
 
 Profiles are read only from `origin/<base>`, so a pull request can tighten
-them but never relax them. Each profile names the workflow file, the events it
+them but never relax them. That covers the profile, not the suite it names: the
+workflow file a run executed and the inventory command are the branch's own, as
+the remote gate's script already is, so a diff to either is reviewed like any
+other gate change. Each profile names the workflow file, the events it
 accepts, every job that must have passed (each exactly once), and the artifact
 holding the run's `tree.json`. `max_age_hours` (1–168, default 24) bounds how
 old the run may be, and `os` (`Linux`, `macOS`, `Windows`) requires
@@ -613,8 +616,12 @@ once:
 - `tree.json` names this run, attempt, event and head. It is not a reuse
   record (a reuse is never evidence). Its tree equals the tree git computes for
   the run's head commit.
-- No newer run of the same workflow on that head, or on pregate.json's own
-  head, failed, was cancelled or is still running.
+- No run of the same workflow on that head, or on pregate.json's own head,
+  whose newest attempt started after this run was created failed, was
+  cancelled or is still running (`run_started_at`, so a red re-run of an older
+  run counts, and re-running this run does not hide a failure in between).
+- Its event is `push` or `workflow_dispatch`. A `pull_request` run tests the
+  merge commit, not the head tree, so no profile may accept it.
 - The run finished within `max_age_hours`, and on the profile's OS when it
   names one.
 - For `pregate.json/remote_gate`: there is exactly one verified run per
@@ -632,13 +639,21 @@ verification is named with its own reason (`fork_run`, `event_mismatch`,
 `run_not_success`, `job_missing`, `artifact_mismatch`, `artifact_reused`,
 `tree_mismatch`, `newer_run_vetoes`, `run_stale`, `os_mismatch`, `api_error`,
 …); the clear-level codes are `no_verified_run`, `tree_mismatch` (runs on
-different trees), `inventory_failed`, `inventory_empty`, `inventory_uncovered`
-and `no_tests`. Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and
+different trees), `tree_not_stamp_only`, `inventory_failed`, `inventory_empty`,
+`inventory_uncovered` and `no_tests`. A wrong run count or a lane with no
+profile is a usage error (exit 2), not a REUSE refusal. When the base config or
+the GitHub origin cannot be read, `--run` fails, and so do `--run-url` and
+`--bundle-lane` for a lane the base profiles; any other lane is recorded as
+before, with a warning naming the cause. Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and
 the receipt reads
 `remote-gate tree=<t12> tests=<n> runs=<id>/<attempt>,… profiles=<p>,…
 heads=<h12> verified=<time>` (with `accepted-for=` and the substitution for a
 stamp-only predecessor). A lane with its own profile gets `run tree=… runs=…`
-the same way, and for such a lane `--run-url` is verified as `--run` is. A
+the same way, and for such a lane `--run-url` is verified as `--run` is and
+`--bundle-lane` is refused. `gstack-ship-queue ready --dispatch-ci` still
+records its dispatched runs by URL; routing it through the verifier is the
+next change (P3b), so a repository that declares lane profiles clears those
+lanes with `gstack-pregate clear --run`. A
 lane with no profile keeps today's `--run-url` recording.
 
 **`verify` stays offline.** The check ran at `clear`. `gstack-pregate verify`,
