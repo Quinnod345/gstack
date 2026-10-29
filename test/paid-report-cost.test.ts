@@ -102,4 +102,9 @@ describe('junitCensus cost binding', () => {
       .toEqual({ failureClass: unbound.failureClass, error: unbound.error, line: unbound.line?.replace(/ {2}\[slice.*$/, '') });
     expect(bound.failureClass).toBe('assertion');
   });
+
+  test('a cost-only record never sets the trial\'s model, which keys its pass-rate series', () => {
+    const history = census(labelled.map(r => ({ ...r, model: 'claude-opus-5-5' }))).history;
+    expect(history.map(h => [h.case, h.model])).toEqual([['browse-basic', undefined], ['browse-snapshot', undefined]]);
+  });
 });
