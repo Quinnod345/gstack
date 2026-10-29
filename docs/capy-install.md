@@ -155,7 +155,16 @@ and `/proc` start time; elsewhere `ps -o lstart`), because a pid is reused after
 a reboot or a machine wake. `bin/gstack-upgrade`, and so the session-start
 self-upgrade, refuses with [UPGRADE_BUSY](troubleshooting.md#upgrade-busy)
 while a lease held by a live process outside its own chain exists, naming each
-holder as `pid <p> (<age>m <command>)`. The team-mode SessionStart hook
+holder as `pid <p> (<age>m <command>)`. The install-mode self-upgrade also
+defers while its own chain holds a live lease under 120 minutes old. An install
+run from inside a workflow (/ship's docs step running `install.sh --for
+document-release`, #3571) prints `SELF_UPGRADE: skipped (a gstack run in this
+session holds a workflow lease on this installation: ... (UPGRADE_BUSY))`,
+leaves the checkout where the run started and stays ok with `behind=`. Each
+`gstack-skill-start` renews the lease. On Capy the leased pid is the machine's
+long-lived `capy-server`, so the deferral ends when the lease turns 120
+minutes old, not when the process exits; `bin/gstack-upgrade` run by hand
+moves the checkout sooner. The team-mode SessionStart hook
 (`bin/gstack-session-update`) honors the same leases: it logs
 `SKIP leased pid=<p>/<age>m` to `analytics/session-update.log` and tries again at
 the next session start, without writing its hourly throttle stamp. A lease whose
@@ -274,7 +283,16 @@ keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
    honoured, the resolved Bun (`bun_path`, `bun_version`, `bun_rule`, and
    `bun_install` when this run downloaded it), the resolved Node when the
    project pins one (`node_path`, `node_version`, `node_rule`), the trailer, the remote
-   minimum, the launch PATH and the time. Admission refuses a workflow whose
+   minimum, the launch PATH and the time. An ok run (install or `--check`) at
+   the same checkout, project, HEAD and Bun as an earlier ok verdict keeps what
+   that verdict certified, so one machine stays admitted for /ship and its
+   `--for document-release` docs step (#3561): `required` becomes the union,
+   pins count as planning-only only when both runs skipped them, and the
+   verdict's `for` lists every workflow, comma-separated (`for=ship,document-release`;
+   the installer prints `the install verdict at <file> keeps for=<old> and adds
+   <new> (for=<list>)`, and the trailer still names this run's workflow). A
+   failing run, a new HEAD or another Bun replaces the verdict, and so does any
+   workflow install over a review-voice verdict. Admission refuses a workflow whose
    running Bun is not the one the verdict recorded
    ([BUN_RESOLUTION_DRIFT](troubleshooting.md#bun-resolution-drift)), and so
    do the pregate's lanes and guards, which also refuse an invalid verdict
