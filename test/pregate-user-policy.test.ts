@@ -145,7 +145,7 @@ describe('gstack-pregate with a user-owned policy', () => {
     expect(invalid.err).not.toContain('.gstack/pregate.json has');
 
     const profile = { workflow: 'test.yml', events: ['push'], jobs: ['full-suite'], artifact: 'full-suite-tree' };
-    for (const [key, value] of [['sealed', { paths: ['evals/**'] }], ['price_file', 'evals/calls.json'], ['run_profiles', { test: profile }]] as const) {
+    for (const [key, value] of [['sealed', { paths: ['evals/**'] }], ['price_file', 'evals/calls.json'], ['run_profiles', { test: profile }], ['remote_gate_runs', { profiles: ['test'], inventory: 'true' }]] as const) {
       writePolicy(userPolicy, { [key]: value });
       const r = run();
       expect(r.status).toBe(EXIT.refused);

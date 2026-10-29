@@ -218,6 +218,11 @@ export type ClearDecision = { receipt: string; attested: boolean; substitution?:
  * the tree mismatch refuses as before. A `test_backend/<backend>` obligation
  * has no machine-checkable receipt, so its run URL is recorded as attested.
  * Platform lanes take a run URL or an evidence-bundle lane label.
+ *
+ * `--run` (and `--run-url` on a lane the base branch profiles) goes to
+ * clearByRuns, which accepts only verified Actions runs; a profiled lane
+ * refuses `--bundle-lane`, and the remote gate clears by runs only when the
+ * base declares remote_gate_runs.
  */
 export function clearDecision(file: PregateFile, lane: string, input: ClearInput, repoRoot: string): ClearDecision {
   const list = file.requires_remote ?? [];
@@ -322,7 +327,7 @@ function clearByRuns(file: PregateFile, lane: string, refs: string[], check: Run
     for (const f of listed) required.add(f);
   }
   const missing = uncoveredFiles([...required], evidence);
-  if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_uncovered — ${missing.length} of the ${required.size} test file(s) ${lane} must cover appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
+  if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=${isGate ? 'inventory_uncovered' : 'tests_uncovered'} — ${missing.length} of the ${required.size} test file(s) ${lane} must cover appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
   const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
   const accepted = sub.substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${sub.substitution.files.length}` : '';
   return { receipt: `${isGate ? 'remote-gate' : 'run'} tree=${trees[0]!.slice(0, 12)} tests=${tests}${accepted} ${runReceiptFields(evidence, check.now)}`, attested: false, substitution: sub.substitution };

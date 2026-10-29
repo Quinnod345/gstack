@@ -169,7 +169,7 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     if ('refused' in oneProfile) throw new Error(oneProfile.message);
     expect(oneProfile.receipt).toStartWith(`remote-gate tree=${file.tree.slice(0, 12)} tests=15 runs=200/1 profiles=test `);
     const uncovered = clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/smoke.test.ts'] }], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
-    expect('refused' in uncovered && uncovered.message).toContain(`1 of the 1 test file(s) ${PLATFORM} must cover appear in no run's tree.json (test/a.test.ts)`);
+    expect('refused' in uncovered && uncovered.message).toContain(`reason=tests_uncovered — 1 of the 1 test file(s) ${PLATFORM} must cover appear in no run's tree.json (test/a.test.ts)`);
     fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
     fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
     const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', PLATFORM, '--run-url', url]);
@@ -187,6 +187,19 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', LANE, '--run-url', 'https://github.com/fx/fx/actions/runs/200']);
     expect([r.status, r.err]).toEqual([EXIT.fail, expect.stringContaining(`${LANE} may have a run profile on the base branch, so it clears only with a verified --run`)]);
     expect(JSON.parse(fs.readFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), 'utf8')).requires_remote[0].receipt).toBeNull();
+  }, 120_000);
+
+  test('an unreadable base config refuses --run-url even on a lane with no profile, since the base may profile it', async () => {
+    const repo = fixture();
+    const base = await pregateAt(repo);
+    const PLATFORM = 'test.yml/full-suite';
+    const file: PregateFile = { ...base, requires_remote: [...base.requires_remote!, { lane: PLATFORM, platform: 'macos', workflow: 'test.yml', job: 'full-suite', tests: ['test/a.test.ts'], receipt: null }] };
+    fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
+    fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
+    repo.git('update-ref', '-d', 'refs/remotes/origin/main');
+    const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', PLATFORM, '--run-url', 'https://github.com/fx/fx/actions/runs/200']);
+    expect([r.status, r.err]).toEqual([EXIT.fail, expect.stringContaining(`${PLATFORM} may have a run profile on the base branch, so it clears only with a verified --run`)]);
+    expect(JSON.parse(fs.readFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), 'utf8')).requires_remote.find((o: { lane: string }) => o.lane === PLATFORM).receipt).toBeNull();
   }, 120_000);
 
   test('offline verify refuses a run receipt recorded for another tree', async () => {

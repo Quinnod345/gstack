@@ -13,11 +13,16 @@
  *   completed with success; every job the profile names appears exactly once
  *   in that attempt and succeeded; its artifact names this run, attempt,
  *   event and head (the API always answers with the newest attempt, so an
- *   older green attempt under a newer red one is refused), is not a reuse record, and records the tree git computes
- *   for the head; no newer run of the same workflow on that head, or on any
- *   other head the consumer names, failed, was cancelled or is still running;
- *   it finished within the profile's max_age_hours (default 24); and its
- *   runner OS matches when the profile names one.
+ *   older green attempt under a newer red one is refused), is not a reuse
+ *   record, records the tree git computes for the head, and holds well-formed
+ *   files (a list of paths) and tests (a non-negative integer); no run of the
+ *   same workflow on that head, or on any other head the consumer names, that
+ *   started after this run was created failed, was cancelled or is still
+ *   running (a red re-run of an older run counts, and re-running this run does
+ *   not hide a failure in between); it finished within the profile's
+ *   max_age_hours (default 24); its runner OS matches when the profile names
+ *   one; and a second read of the run still shows the same successful attempt
+ *   (run_changed otherwise).
  *
  * Profiles are the base branch's `.gstack/pregate.json` `run_profiles`, so a
  * pull request can tighten them but never relax them. The workflow a run

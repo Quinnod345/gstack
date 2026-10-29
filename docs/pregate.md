@@ -654,8 +654,9 @@ verification is named with its own reason (`fork_run`, `event_mismatch`,
 `tree_mismatch`, `newer_run_vetoes`, `run_changed`, `run_stale`,
 `os_mismatch`, `api_error`, …); the clear-level codes are `base_mismatch`,
 `no_verified_run`, `tree_mismatch` (runs on different trees),
-`tree_not_stamp_only`, `no_tests`, `inventory_failed`, `inventory_empty` and
-`inventory_uncovered`. A wrong run count, a repeated run or a lane with no
+`tree_not_stamp_only`, `no_tests`, `inventory_failed`, `inventory_empty`,
+`inventory_uncovered` (the remote gate) and `tests_uncovered` (a lane's own
+selected tests). A wrong run count, a repeated run or a lane with no
 profile is a usage error (exit 2), not a REUSE refusal.
 
 Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and the receipt
