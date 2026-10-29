@@ -230,6 +230,8 @@ export interface JUnitCensus {
   deselected: Map<string, number>;
   /** Per shard key: skip reason -> skipped testcase count. */
   shardSkipReasons: Map<string, Map<string, number>>;
+  /** Session cost no collector record carries; the headline adds it to the collectors' total_cost_usd. */
+  ledgerCostUsd: number;
   /** `<shard key> :: <test name> (<outcome>)` for every testcase no rule attributes. */
   unattributed: string[];
 }
@@ -251,12 +253,18 @@ export const MODEL_FREE_CASES: ReadonlySet<string> = new Set(['timeline-event-fl
  */
 export function caseCost(id: string, records: any[], sessions: SessionLedgerRow[]): { cost_usd: number; cost_known?: false } {
   if (!records.length && !sessions.length) return MODEL_FREE_CASES.has(id) ? { cost_usd: 0 } : { cost_usd: 0, cost_known: false };
-  const unrecorded = sessions.map(s => s.billed !== false ? (records.length ? 0 : s.cost_usd) : s.streamed_cost_usd);
+  const unrecorded = unrecordedCosts(records, sessions);
   const known = records.every(r => r?.cost_known !== false) && unrecorded.every(c => typeof c === 'number' && Number.isFinite(c));
-  const total = [...records.map(r => Number(r?.cost_usd) || 0), ...unrecorded.filter((c): c is number => typeof c === 'number' && Number.isFinite(c))]
-    .reduce((sum, c) => sum + c, 0);
+  const total = records.reduce((sum, r) => sum + (Number(r?.cost_usd) || 0), 0) + knownSum(unrecorded);
   return { cost_usd: Math.round(total * 100) / 100, ...(known ? {} : { cost_known: false as const }) };
 }
+
+/** Session costs no collector record carries (so no collector total_cost_usd counts them): streamed usage, and a billed session's own cost when the trial has no record. */
+function unrecordedCosts(records: any[], sessions: SessionLedgerRow[]): Array<number | undefined> {
+  return sessions.map(s => s.billed !== false ? (records.length ? 0 : s.cost_usd) : s.streamed_cost_usd);
+}
+
+const knownSum = (costs: Array<number | undefined>) => costs.reduce<number>((sum, c) => sum + (typeof c === 'number' && Number.isFinite(c) ? c : 0), 0);
 
 /** The artifact holding a slice's shards: the downloaded directory's own name when it is one. */
 /** The red-census guide the report and every eval:pass-rates view link. */
@@ -269,7 +277,8 @@ export function sliceArtifactName(root: string, slice: number, attempt: number):
 
 export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact[], recordsByShard: Map<string, any[]>,
   base: Record<string, unknown>, cliVersion?: string): JUnitCensus {
-  const census: JUnitCensus = { ruleCases: [], history: [], failedShards: new Set(), skipped: [], deselected: new Map(), shardSkipReasons: new Map(), unattributed: [] };
+  const census: JUnitCensus = { ruleCases: [], history: [], failedShards: new Set(), skipped: [], deselected: new Map(), shardSkipReasons: new Map(), unattributed: [],
+    ledgerCostUsd: 0 };
   const entries = new Map(manifest.entries.map(entry => [normalizeRelativePath(entry.file), entry]));
   for (const { root, result } of artifacts) {
     for (const outcome of result.outcomes) {
@@ -302,6 +311,7 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
           : failed.failureType === 'TimeoutError' ? 'timeout' : failedRecord ? failureClassOf(failedRecord) : 'assertion';
         const sessions = caseSessions(ledger, id, byCase.size === 1);
         const cost = caseCost(id, mine, sessions);
+        census.ledgerCostUsd += knownSum(unrecordedCosts(mine, sessions));
         const credentials = failed && recorded !== 'contract' ? credentialRejection({ error: `${failedRecord?.error ?? ''}\n${failed.message ?? ''}`, sessions }) : undefined;
         const failureClass = credentials ? 'infra' : recorded;
         const rawError = credentials ? `credentials rejected: ${credentials}` : failedRecord?.error ?? failed?.message;
@@ -796,7 +806,7 @@ export function runPaidReport(reportDir: string, options: { writeDurations?: boo
     ...(spend.executions ? { reruns: spend } : {}),
     actionRequired: verdict.problems.length,
     wallMs: wall.length ? Math.max(...wall.map(r => r.finishedAt!)) - Math.min(...wall.map(r => r.startedAt!)) : null,
-    costUsd: Math.round(costUsd * 100) / 100,
+    costUsd: Math.round((costUsd + census.ledgerCostUsd) * 100) / 100,
     redispatchEligible: red && infraOnly(verdict.problems),
   };
   const executed = history.filter(r => r.attempt === primary && r.execution === 'executed' && r.outcome !== 'skipped');
