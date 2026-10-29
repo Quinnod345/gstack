@@ -69,6 +69,8 @@ export interface PregateCheck {
   stage?: 'preflight' | 'tests'; inputs?: Record<string, string>; fix?: string; code?: string; lines?: string[];
   // Lane D (GSTA-112): a non-pass names its cause; an environment cause carries its kind and evidence.
   cause?: 'diff' | 'environment'; environment?: { kind: string; evidence: string; proof?: 'launch' | 'output' };
+  /** `regen`: the touched outputs the generator recreated byte-identically from a deleted copy (what a receipt carry may set aside as generated). */
+  proven?: string[];
 }
 /** A remote_gate receipt accepted from a stamp-only predecessor tree (lib/pregate/remote-receipt.ts): the gated tree, the tree it was accepted for, the policy, and every differing path with its stamp rule. */
 export interface PregateReceiptSubstitution { gated_tree: string; accepted_for: string; policy: string; files: Array<{ path: string; rule: string }> }
@@ -210,7 +212,7 @@ export const ARTIFACT_SCHEMAS = {
     type: 'object', required: ['schema_version', 'tree', 'checks'],
     properties: {
       schema_version: { const: 1 }, run: str, tree: str, stage1_ms: num, stage2_ms: num,
-      checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str, stage: { enum: ['preflight', 'tests'] }, inputs: { type: 'object' }, fix: str, code: str, lines: strList, cause: { enum: ['diff', 'environment'] }, environment: { type: 'object', required: ['kind', 'evidence'], properties: { kind: str, evidence: str } } } } },
+      checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str, stage: { enum: ['preflight', 'tests'] }, inputs: { type: 'object' }, fix: str, code: str, lines: strList, cause: { enum: ['diff', 'environment'] }, environment: { type: 'object', required: ['kind', 'evidence'], properties: { kind: str, evidence: str } }, proven: strList } } },
       head: str, base: str, generated_at: str, policy: str, policy_digest: str, policy_user_path: str, registry: str, verdict: str, scratch: str,
       requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str, command: str,
         substitution: { type: 'object', required: ['gated_tree', 'accepted_for', 'policy', 'files'], properties: { gated_tree: str, accepted_for: str, policy: str, files: { type: 'array', items: { type: 'object', required: ['path', 'rule'], properties: { path: str, rule: str } } } } } } } },

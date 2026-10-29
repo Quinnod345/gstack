@@ -120,9 +120,40 @@ describe('carry across a base merge that changes a registered output', () => {
 
     expect(runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands']).status).toBe(EXIT.ok);
     const pregateJson = path.join(repo.work, '.gstack/tmp/pregate.json');
-    expect(JSON.parse(fs.readFileSync(pregateJson, 'utf8')).checks.find((c: { id: string }) => c.id === 'regen')).toMatchObject({ status: 'pass' });
+    const pregate = JSON.parse(fs.readFileSync(pregateJson, 'utf8'));
+    const regen = pregate.checks.find((c: { id: string }) => c.id === 'regen');
+    expect(regen).toMatchObject({ status: 'pass', proven: ['generated/digest.md'] });
+    const tampered = path.join(repo.root, 'pregate-tampered.json');
+    const label = regen.inputs.registry;
+    for (const [registry, proven] of [['head (unreviewed)', ['generated/digest.md']], [label, ['generated/*']]]) {
+      Object.assign(regen, { proven, inputs: { ...regen.inputs, registry } });
+      fs.writeFileSync(tampered, JSON.stringify(pregate));
+      const refused = carry(repo, body, ['--pregate', tampered]);
+      expect(refused.out).toContain('RECEIPT_CARRY_PRODUCT_CHANGED');
+      expect(refused.err).toContain('generated/digest.md');
+    }
     const out = carry(repo, body, ['--pregate', pregateJson]);
     expect(out.status).toBe(EXIT.ok);
     expect(receiptIn(body)).toMatchObject({ head: repo.git('rev-parse', 'HEAD'), carry: { from: reviewed } });
+  }, 120_000);
+
+  // Value: protects=a hand-written file under an output glob is reviewed code (red team, #3564 pass 1); fails_when=a
+  // regen pass that never wrote the path sets it aside as generated; seam=none; no_claim=-
+  test('a file that matches an output glob but that the generator never writes stays product', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const reviewed = commit(repo, { 'lib/util.js': "exports.add = (a, b) => a + b + 0;\n" });
+    const body = path.join(repo.root, 'body.md');
+    expect(writeReceipt(repo, body).status).toBe(EXIT.ok);
+    commit(repo, { 'generated/extra.md': '# hand-written after review\n' });
+    expect(runBin(repo, 'gstack-pregate', ['--base', 'main', '--allow-repo-commands']).status).toBe(EXIT.ok);
+    const pregateJson = path.join(repo.work, '.gstack/tmp/pregate.json');
+    const regen = JSON.parse(fs.readFileSync(pregateJson, 'utf8')).checks.find((c: { id: string }) => c.id === 'regen');
+    expect(regen.status).toBe('pass');
+    expect(regen.proven ?? []).not.toContain('generated/extra.md');
+    const out = carry(repo, body, ['--pregate', pregateJson]);
+    expect(out.status).toBe(EXIT.refused);
+    expect(out.out).toContain('RECEIPT_CARRY_PRODUCT_CHANGED');
+    expect(out.err).toContain('generated/extra.md');
+    expect(receiptIn(body).head).toBe(reviewed);
   }, 120_000);
 });

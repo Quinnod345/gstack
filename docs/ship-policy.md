@@ -777,8 +777,9 @@ written by the pr-body section of `/ship` after the body is composed.
 
 The ```` ```gstack-ship-receipt ```` block is the handoff record: identifiers
 first (`pr`, `head`, `version`, `base`), then the evidence (`gate`, `ci`,
-`pregate`, `issues`, `approval`, `docs`, `review_loop`, `review_depth`,
-`review_loop_exception`, `carry`), validated
+`head_tree`, `product_patch_id`, `gstack_version`, `review_depth`, `pregate`,
+`issues`, `approval`, `docs`, `review_loop`, `review_loop_exception`, `carry`),
+validated
 against the `ship-receipt` schema (`gstack-artifact schema ship-receipt`) and
 read back by `gstack-ship-receipt read`, `result`, `carry` and the queue.
 
@@ -930,7 +931,7 @@ receipt when the base moves:
 
 | What changed since /ship | The receipt |
 |---|---|
-| a merge of the base, product diff unchanged (tests, release metadata, registered outputs the pregate regenerated fresh) | carries; no review reruns |
+| a merge of the base, product diff unchanged (tests, release metadata, registered outputs the pregate's regen check proved) | carries; no review reruns |
 | a merge of the base whose resolution changed product code | a fresh /ship (`RECEIPT_CARRY_PRODUCT_CHANGED`) |
 | a rebase or force-push onto a tree the receipt covers, product diff against the new base unchanged | carries (`carry.ancestry: rewritten`) |
 | any other rebase or force-push | a fresh /ship (`RECEIPT_CARRY_TREE_MISMATCH`) |
@@ -967,14 +968,20 @@ edit). A logic change in a
 stamped source file is product. Lockfiles are product unless the policy names
 them. An output of an entry with a `command` in origin/<base>'s
 `.gstack/generated.json` is `generated`, not product, only when the
-`--pregate` result passed for HEAD shows the `regen` check passing with those
-entries fresh; without that evidence, or for an entry with no command or one
-only the branch registers, the output is product (U1 on gstack-evals paid a
+`--pregate` result passed for HEAD lists it under the `regen` check's
+`proven` paths (the check deleted the touched output in its scratch worktree
+and the command recreated it byte-identically) and that check ran the same
+registry, origin/<base> at the commit the carry reads. A file that matches an
+output glob but that the command never writes is not proven. Without that
+evidence, or for an entry with no command or one only the branch registers,
+the output is product (U1 on gstack-evals paid a
 full rerun because a merge changed its generated index's diff). A base merge
 contributes no product change of its own. A receipt carried twice keeps the reviewed head as
 `carry.from` and adds up the merges and paths. The carried receipt records
 `carry: { from, reason, product_patch_id, changed_paths, merge_commits,
-range_diff, covers, reruns }` with the `git range-diff` evidence, prints
+range_diff, covers, reruns, ancestry, trees }` (`ancestry` is `linear`
+along the receipt's own history, `rewritten` once any hop was a rebase;
+`trees` lists the earlier covered trees) with the `git range-diff` evidence, prints
 `CARRY: carried from <old> to <new> (<reason>)` and the `GSTACK_RESULT:
 skill=ship status=complete` line, and its summary line ends with
 `carried_from=<old12>`. `CARRY: current` means the receipt already names HEAD;
