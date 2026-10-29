@@ -78,7 +78,7 @@ describe('stamped trains: build and land', () => {
     expect(verify.err).toMatch(/has stamped prefixes.*\(QUEUE_GATE_MISSING\)/);
     expect(line(verify.out, 'NEXT:')).toBe(`NEXT: gstack-ship-queue train land --train ${nonce} --pr 1`);
     const early = land(fx, nonce, '2');
-    expect(early.err).toMatch(/is neither S1 nor S2 exactly.*not frozen.*\(QUEUE_TRAIN_TREE_MISMATCH\)/);
+    expect(early.err).toMatch(/main is the train base; land #1 \(slot 1\) first.*\(QUEUE_TRAIN_TREE_MISMATCH\)/);
     const pushed = land(fx, nonce, '1');
     expect(pushed.out, pushed.err).toContain('LABEL: evals-no-debounce added');
     const stamp = /^PUSHED: ([0-9a-f]{40})/m.exec(pushed.out)![1]!;
@@ -123,12 +123,21 @@ describe('stamped trains: build and land', () => {
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
     const file = path.join(fx.state, 'ship-queue', 'trains', nonce, 'train.json');
     const t = trainJson(fx, nonce);
-    t.stamped[0] = { ...t.stamped[0], commit: h1, tree: fx.repo.git('rev-parse', h1 + '^{tree}') };
-    fs.writeFileSync(file, JSON.stringify(t));
-    const r = land(fx, nonce, '1');
-    expect(r.status).toBe(EXIT.refused);
-    expect(r.err).toMatch(/is not the gated head \S+'s prefix 1 with tree.*\(QUEUE_PROOF_MISSING\)/);
-    expect(r.out).not.toMatch(/^PUSHED:/m);
+    const base = trainJson(fx, nonce).prefixes[0];
+    const forged = [
+      { ...t.stamped[0], commit: h1, tree: fx.repo.git('rev-parse', h1 + '^{tree}') },
+      { ...t.stamped[0], tree: 'f'.repeat(40) },
+      { ...t.stamped[1] },
+      { ...t.stamped[0], index: 0, commit: base.commit, tree: base.tree },
+    ];
+    for (const entry of forged) {
+      fs.writeFileSync(file, JSON.stringify({ ...t, stamped: [entry, t.stamped[1]] }));
+      const r = land(fx, nonce, '1');
+      expect(r.status).toBe(EXIT.refused);
+      expect(r.err).toMatch(/is not the gated head \S+'s prefix 1 with tree.*\(QUEUE_PROOF_MISSING\)/);
+      expect(r.out).not.toMatch(/^PUSHED:/m);
+    }
+    expect(fx.read().prs['1']).not.toMatchObject({ state: 'MERGED' });
     expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
   }, 180_000);
 
@@ -156,7 +165,7 @@ describe('stamped trains: build and land', () => {
     expect(land(fx, nonce, '1').status).toBe(EXIT.ok);
   }, 300_000);
 
-  test('a slot landed out of order after an earlier slot merged refuses without freezing and names the next slot', () => {
+  test('a slot landed out of order after an earlier slot merged refuses without freezing and names the next slot; a rerun of a landed slot confirms', () => {
     const fx = trainFixture(POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
     const heads = ['1', '2', '3'].map(pr => fragmentPr(fx, pr));
     fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
@@ -168,6 +177,24 @@ describe('stamped trains: build and land', () => {
     expect(early.err).toMatch(/main is S1; land #2 \(slot 2\) first.*\(QUEUE_TRAIN_TREE_MISMATCH\)/);
     expect(early.out).not.toMatch(/^QUEUE_TRAIN_FROZEN:/m);
     expect(line(early.out, 'NEXT:')).toBe(`NEXT: gstack-ship-queue train land --train ${nonce} --pr 2`);
+    land(fx, nonce, '2');
+    expect(land(fx, nonce, '2').status).toBe(EXIT.ok);
+    const rerun = land(fx, nonce, '1');
+    expect(rerun.status, rerun.err).toBe(EXIT.ok);
+    expect(rerun.out).toContain('is S2, past S1');
+    expect(rerun.out).not.toMatch(/^QUEUE_TRAIN_FROZEN:/m);
+  }, 300_000);
+
+  test('a failed stamp push with the branch still at the pin fails retryably instead of reporting a move', () => {
+    const { fx, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const hook = path.join(fx.repo.origin, 'hooks', 'pre-receive');
+    fs.writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const failed = land(fx, nonce, '1');
+    expect(failed.err).toMatch(/the stamp push failed and pr-1 still reads.*\(QUEUE_NOT_READY\)/);
+    expect(failed.err).not.toContain('QUEUE_TRAIN_MOVED');
+    fs.rmSync(hook);
+    expect(land(fx, nonce, '1').out).toMatch(/^PUSHED: [0-9a-f]{40}/m);
   }, 300_000);
 
   test('a PR retargeted off the train base refuses before any push', () => {

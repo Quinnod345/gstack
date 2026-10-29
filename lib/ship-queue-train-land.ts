@@ -56,13 +56,16 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   };
   const rerun = `${Q} train land --train ${t.nonce} --pr ${o.pr}`;
   const lines = [`TRAIN_LAND: ${t.nonce} slot ${i + 1}/${t.slots.length} #${o.pr} pin ${pin} -> S${s.index} v${s.version} tree ${s.tree}`];
-  if (git(root, ['rev-parse', `${t.head}~${t.stamped.length - s.index}`]).out !== s.commit || git(root, ['rev-parse', `${s.commit}^{tree}`]).out !== s.tree) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the record's S${s.index} is not the gated head ${t.head.slice(0, 12)}'s prefix ${s.index} with tree ${s.tree.slice(0, 12)}` }, lines, `${Q} train status --train ${t.nonce}`, run);
+  if (t.stamped.length !== t.slots.length || s.index !== i + 1 || git(root, ['rev-parse', `${t.head}~${t.slots.length - i - 1}`]).out !== s.commit || git(root, ['rev-parse', `${s.commit}^{tree}`]).out !== s.tree) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the record's S${i + 1} is not the gated head ${t.head.slice(0, 12)}'s prefix ${i + 1} with tree ${s.tree.slice(0, 12)}` }, lines, `${Q} train status --train ${t.nonce}`, run);
   let main = mainNow();
   if ('error' in main) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: main.error }, lines, rerun, run);
   if (main.tree === s.tree) return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `main: ${main.sha} is S${s.index} exactly`]);
   const mainTree = main.tree;
-  const earlier = t.stamped.slice(0, Math.max(i - 1, 0)).find(p => p.tree === mainTree);
-  if (earlier) return outRefused({ code: 'QUEUE_TRAIN_TREE_MISMATCH', message: `main is S${earlier.index}; land #${t.stamped[earlier.index]!.pr} (slot ${earlier.index + 1}) first` }, lines, `${Q} train land --train ${t.nonce} --pr ${t.stamped[earlier.index]!.pr}`, run);
+  const chain = [{ index: 0, tree: t.prefixes[0]!.tree }, ...t.stamped];
+  const earlier = chain.slice(0, i).find(p => p.tree === mainTree);
+  if (earlier) return outRefused({ code: 'QUEUE_TRAIN_TREE_MISMATCH', message: `main is ${earlier.index ? `S${earlier.index}` : 'the train base'}; land #${t.slots[earlier.index]!.pr} (slot ${earlier.index + 1}) first` }, lines, `${Q} train land --train ${t.nonce} --pr ${t.slots[earlier.index]!.pr}`, run);
+  const later = chain.slice(i + 2).find(p => p.tree === mainTree);
+  if (later) return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `main: ${main.sha} is S${later.index}, past S${s.index}`]);
   if (main.tree !== pred.tree) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main ${main.sha.slice(0, 12)} is neither S${pred.index} nor S${s.index} exactly`, main.sha, lines, true);
 
   const file = path.join(path.dirname(run), `land-${o.pr}.json`);
@@ -88,7 +91,12 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
     const pushed = info.headRefOid !== commit;
     if (pushed) {
       const push = git(root, ['push', '-q', `--force-with-lease=refs/heads/${info.headRefName}:${info.headRefOid}`, env.remote, `${commit}:refs/heads/${info.headRefName}`]);
-      if (!push.ok) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s branch moved off ${info.headRefOid.slice(0, 12)} before the stamp push; train land never overwrites it`, main.sha, lines, true);
+      if (!push.ok) {
+        const remote = git(root, ['ls-remote', env.remote, `refs/heads/${info.headRefName}`]);
+        const now = remote.ok ? remote.out.split(/\s/)[0] ?? '' : '';
+        if (remote.ok && now !== info.headRefOid) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s branch moved off ${info.headRefOid.slice(0, 12)} before the stamp push; train land never overwrites it`, main.sha, lines, true);
+        return outFailed({ code: 'QUEUE_NOT_READY', message: `the stamp push failed and ${info.headRefName} still reads ${remote.ok ? info.headRefOid.slice(0, 12) : 'unknown'}: ${push.err.split('\n')[0]}` }, lines, rerun, run);
+      }
     }
     lines.push(`${pushed ? 'PUSHED' : 'RESUMED'}: ${commit} (tree S${s.index}, parents [pin, main ${main.sha.slice(0, 12)}]) ${pushed ? 'to' : 'is already the head of'} ${info.headRefName}`);
     const next = `gstack-pr-wait ${o.pr} --until green && ${Q} train land --train ${t.nonce} --pr ${o.pr}`;
@@ -96,7 +104,8 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
     if (!o.noWait) waitChecks(ctx, commit, o.timeoutMin ?? 60);
   }
   const head = prInfo(ctx, o.pr);
-  if ('error' in head || head.headRefOid !== j.stamp_commit) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is not the stamp commit ${j.stamp_commit.slice(0, 12)}`, main.sha, lines, true);
+  if ('error' in head) return outPending({ code: 'QUEUE_PROOF_MISSING', message: head.error }, lines, rerun, run);
+  if (head.headRefOid !== j.stamp_commit) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is not the stamp commit ${j.stamp_commit.slice(0, 12)}`, main.sha, lines, true);
   const movedBase = retargeted(head.baseRefName);
   if (movedBase) return movedBase;
   const ci = ciAtHead(ctx, j.stamp_commit);
