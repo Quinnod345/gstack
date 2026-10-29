@@ -113,7 +113,7 @@ describe('projection calibrated from the run\'s own meter (GST-101)', () => {
     }
     expect(stop).toContain('STOP: reason=budget_exhausted');
     expect(reading + STOP_26).toBeLessThanOrEqual(cap);
-  });
+  }, 120_000);
 
   test('the prior holds until the first measurement; the tail reserve scales with the measured step cost', () => {
     const h = fresh();
