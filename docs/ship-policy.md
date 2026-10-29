@@ -61,7 +61,7 @@ refuses the file (`POLICY_GSTACK_TOO_OLD`). `validate` ends with
 | `min_gstack_version` | version or `null` | `null` | The oldest gstack that may read the file; see the compatibility rule above. |
 | `docs` | `{ caps: [{ path, max_bytes }] }` or `null` | `null` | Documentation files with a byte cap. `/ship` Step 14.5 runs `gstack-ship-receipt docs-caps --base <base>` (the caps come from `origin/<base>`'s policy, never the branch's copy; `--policy <file>` is for a repository bootstrapping its policy) before the verification gate and prints one `DOCS_CAP: <path> <bytes>/<max> ok\|over` line per cap; any `over` (an absent file counts) exits 1 and blocks the ship until the file is trimmed or the cap raised on the base branch (`DOCS_AUDIT_BLOCKED`). At most 64 caps, each path contained. See [the ship receipt](#ship-receipt). Needs `min_gstack_version`. |
 | `train` | `{ gate_workflow, free_workflow, full_gate_check, record_artifact, max_size, fill_hours, screen_selection, trial_reservation_usd }` or `null` | `null` | Turns on [merge trains](#run-a-merge-train), read from the base revision only. Every field is required and an unknown field is `POLICY_INVALID`: `max_size` 1 to 6, `fill_hours` above 0 and at most 24, `screen_selection` `gstack-paid` \| `none`, `trial_reservation_usd` above 0 and at most 100. `null` keeps the per-PR queue exactly as it is. Needs `min_gstack_version`. |
-| `changelog_fragments` | `{ dir }` or `null` | `null` | PRs carry unversioned [CHANGELOG fragments](#changelog-fragments) in `dir` (one flat, repo-relative directory, no `..`) and the merge step ([`land`](#land)) assigns the version. `null` keeps `[Unreleased]` sections and per-PR stamps. Needs `min_gstack_version`. |
+| `changelog_fragments` | `{ dir, required_checks? }` or `null` | `null` | PRs carry unversioned [CHANGELOG fragments](#changelog-fragments) in `dir` (one flat, repo-relative directory, no `..`) and the merge step ([`land`](#land)) assigns the version. `required_checks` (up to 50 distinct names) are the checks [`train land`](#stamped-trains-under-changelog_fragments-train-land) requires present and green on a stamp commit. `null` keeps `[Unreleased]` sections and per-PR stamps. Needs `min_gstack_version`. |
 
 Containment, checked by `validate` and again at write time: paths and globs are
 repo-relative with no `..` segment, under 256 characters, at most 64 per list,
@@ -385,8 +385,14 @@ tree the last merge publishes.
 
 Slots merge with `train land --train <nonce> --pr <n>`, never a slot call:
 
-1. main's tree must equal S_(i-1)'s exactly (slot 1: the train base), and the
-   PR's head its pin, with its /ship receipt.
+1. The record must be the gated head's own chain. Walking first parents from
+   S_k gives T0 and S_1..S_k with the recorded commits and trees, and each
+   S_i's second parent is slot i's pin. A record rebuilt from notes that
+   differs anywhere refuses (`QUEUE_PROOF_MISSING`), and every later step uses
+   only that verified chain. main's tree must equal S_(i-1)'s exactly (slot 1:
+   the train base), and the PR's head its pin, with its /ship receipt. main
+   equal to an earlier prefix refuses and names the slot to land first; main
+   equal to a later prefix confirms the slot (a rerun).
 2. It commits S_i's tree with parents [pin, main], adds the
    `evals-no-debounce` label (a tool-made head gets no later push, so the
    10-minute quiet window protects nothing), and pushes under
@@ -394,7 +400,11 @@ Slots merge with `train land --train <nonce> --pr <n>`, never a slot call:
    (`QUEUE_TRAIN_MOVED`).
 3. It waits for the PR's checks on that commit (`--no-wait` prints the
    command). Required checks run live at the slot until GSTA-156's exact-tree
-   reuse is on main.
+   reuse is on main. Every name in `changelog_fragments.required_checks` must
+   be present and green on the stamp commit (a check run of that name, all of
+   its `<name> (…)` matrix runs, or a status context); a missing one holds the
+   merge (`QUEUE_NOT_READY`) and the fix names it. Without the list, any green
+   set counts, so set it to the checks branch protection does not enforce.
 4. It refuses if main moved during the checks, merges with
    `--match-head-commit`, and confirms main's tree is S_i exactly. Any other
    main is the freeze path above (`QUEUE_TRAIN_TREE_MISMATCH`, backstop).

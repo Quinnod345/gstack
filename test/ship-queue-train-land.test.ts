@@ -51,8 +51,8 @@ function fragmentPr(fx: TrainFixture, pr: string, fragment = `- #${pr} change\n`
   readyReceipt(fx, pr, head);
   return head;
 }
-function stampedTrain(gate = GREEN_GATE) {
-  const fx = trainFixture(POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
+function stampedTrain(gate = GREEN_GATE, policy: Record<string, unknown> = POLICY) {
+  const fx = trainFixture(policy, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
   const h1 = fragmentPr(fx, '1');
   const h2 = fragmentPr(fx, '2', '---\nbump: minor\n---\n- #2 change\n');
   fx.write(d => { d.rules['evals.yml'] = gate; });
@@ -118,23 +118,27 @@ describe('stamped trains: build and land', () => {
     expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
   }, 300_000);
 
-  test('a record whose S_i is not the gated head\'s prefix i pushes nothing and leaves the PR branch in place', () => {
+  test('a record that is not the gated head\'s first-parent chain (any slot\'s commit, tree or pin) pushes nothing, merges nothing and leaves the PR branch in place', () => {
     const { fx, h1, nonce } = stampedTrain();
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
     const file = path.join(fx.state, 'ship-queue', 'trains', nonce, 'train.json');
     const t = trainJson(fx, nonce);
-    const base = trainJson(fx, nonce).prefixes[0];
+    const base = t.prefixes[0];
+    const [s1, s2] = t.stamped;
     const forged = [
-      { ...t.stamped[0], commit: h1, tree: fx.repo.git('rev-parse', h1 + '^{tree}') },
-      { ...t.stamped[0], tree: 'f'.repeat(40) },
-      { ...t.stamped[1] },
-      { ...t.stamped[0], index: 0, commit: base.commit, tree: base.tree },
+      { ...t, stamped: [{ ...s1, commit: h1, tree: fx.repo.git('rev-parse', h1 + '^{tree}') }, s2] },
+      { ...t, stamped: [{ ...s1, tree: 'f'.repeat(40) }, s2] },
+      { ...t, stamped: [{ ...s2 }, s2] },
+      { ...t, stamped: [{ ...s1, index: 0, commit: base.commit, tree: base.tree }, s2] },
+      { ...t, stamped: [s1, { ...s2, tree: base.tree }] },
+      { ...t, stamped: [s1] },
+      { ...t, slots: [{ ...t.slots[0], head: t.slots[1].head }, t.slots[1]] },
     ];
-    for (const entry of forged) {
-      fs.writeFileSync(file, JSON.stringify({ ...t, stamped: [entry, t.stamped[1]] }));
+    for (const record of forged) {
+      fs.writeFileSync(file, JSON.stringify(record));
       const r = land(fx, nonce, '1');
       expect(r.status).toBe(EXIT.refused);
-      expect(r.err).toMatch(/is not the gated head \S+'s prefix 1 with tree.*\(QUEUE_PROOF_MISSING\)/);
+      expect(r.err).toMatch(/are not the first-parent chain of the gated head.*\(QUEUE_PROOF_MISSING\)/);
       expect(r.out).not.toMatch(/^PUSHED:/m);
     }
     expect(fx.read().prs['1']).not.toMatchObject({ state: 'MERGED' });
@@ -195,6 +199,17 @@ describe('stamped trains: build and land', () => {
     expect(failed.err).not.toContain('QUEUE_TRAIN_MOVED');
     fs.rmSync(hook);
     expect(land(fx, nonce, '1').out).toMatch(/^PUSHED: [0-9a-f]{40}/m);
+  }, 300_000);
+
+  test('a required check that never reported on the stamp commit holds the merge and names the check', () => {
+    const { fx, nonce } = stampedTrain(GREEN_GATE, { ...POLICY, changelog_fragments: { dir: 'changelog.d', required_checks: ['free-tests', 'windows-free-shard'] } });
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const stamp = /^PUSHED: ([0-9a-f]{40})/m.exec(land(fx, nonce, '1').out)![1]!;
+    const held = land(fx, nonce, '1');
+    expect(held.err).toMatch(/required checks missing or not green on the stamp commit \S+: windows-free-shard; fix: wait for windows-free-shard to pass on \S+ \(dispatch the workflow on pr-1 if it never ran\).*\(QUEUE_NOT_READY\)/);
+    expect(held.out).toContain(`REQUIRED_CHECKS: not green at ${stamp.slice(0, 12)}: windows-free-shard`);
+    expect(line(held.out, 'NEXT:')).toMatch(/^NEXT: wait for windows-free-shard to pass on /);
+    expect(fx.read().prs['1']).not.toMatchObject({ state: 'MERGED' });
   }, 300_000);
 
   test('a PR retargeted off the train base refuses before any push', () => {
