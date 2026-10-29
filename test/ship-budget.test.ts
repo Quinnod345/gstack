@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { admits, loadCalibration, parseNext, parseTokens, segmentEstimate, stepProjection, unitConstants } from '../lib/ship-budget';
+import { admits, loadCalibration, METER_CONTRACTS, newEpoch, parseNext, parseTokens, segmentEstimate, stepProjection, tally, unitConstants, type Ledger } from '../lib/ship-budget';
 import { BUDGET_BIN, budgetHarness, type Harness } from './helpers/ship-budget-harness';
 
 const cal = loadCalibration();
@@ -395,5 +395,19 @@ describe('isolation', () => {
     expect(h.git('status', '--porcelain')).toBe('');
     expect(s.ledger.startsWith(path.join(h.state, 'ship-runs'))).toBe(true);
     expect((fs.statSync(s.ledger).mode & 0o777).toString(8)).toBe('600');
+  });
+});
+
+describe('meter epochs', () => {
+  test('estimate spend survives a change of meter (estimate -> capy -> estimate)', () => {
+    const l = { meter: { contract: METER_CONTRACTS.estimate, epoch: 0, baseline: 0, last: 0 }, epochs: [], carried_used: 0, estimate_used: 20_000_000, unknown: 0, reservations: [] } as unknown as Ledger;
+    expect(tally(l).used).toBe(20_000_000);
+    newEpoch(l, METER_CONTRACTS.capy, 100_000_000);
+    expect(tally(l).used).toBe(20_000_000);
+    l.meter.last = 103_000_000;
+    newEpoch(l, METER_CONTRACTS.estimate, 0);
+    expect(tally(l).used).toBe(23_000_000);
+    l.estimate_used = 1_000_000;
+    expect(tally(l).used).toBe(24_000_000);
   });
 });

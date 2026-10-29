@@ -239,9 +239,10 @@ export function applyReading(l: Ledger, value: number | null, source: 'flag' | '
 
 /** A meter change: close the epoch (its usage carries) and start the next at the new baseline. */
 export function newEpoch(l: Ledger, contract: MeterContract, baseline: number): void {
-  const metered = l.meter.contract.meter === 'estimate' ? 0 : Math.max(0, (l.meter.last ?? l.meter.baseline) - l.meter.baseline);
+  const metered = l.meter.contract.meter === 'estimate' ? l.estimate_used : Math.max(0, (l.meter.last ?? l.meter.baseline) - l.meter.baseline);
   l.epochs.push({ epoch: l.meter.epoch, contract: l.meter.contract, baseline: l.meter.baseline, last: l.meter.last, used: metered });
   l.carried_used += metered;
+  l.estimate_used = 0;
   l.meter = { contract, epoch: l.meter.epoch + 1, baseline, last: baseline };
 }
 

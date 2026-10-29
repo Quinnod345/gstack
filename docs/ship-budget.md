@@ -131,9 +131,11 @@ record's block with `--rebuild-from-record`; open reservations are then charged 
 
 `lib/ship-budget-calibration.json` holds per-meter constants (per call, per dispatch, stop
 overhead, calls and dispatches per step) fitted from metered runs: each constant is the
-largest observation times 1.5, so a fit on two runs is at or above the meter on the third
-(test/ship-budget-calibration.test.ts). Only the Capy meter has observations; the Claude Code
-and estimate units are seeded from it until a Claude-metered /ship completes.
+largest observation times 1.5, rounded up to 10,000 tokens. The leave-one-out test
+(test/ship-budget-calibration.test.ts) covers the per-call constant only, the one observed
+across three runs; per-dispatch has two observations and stop overhead one. Only the Capy
+meter has observations; the Claude Code and estimate units are seeded from it until a
+Claude-metered /ship completes.
 
 ## Token cap and USD spend cap
 
