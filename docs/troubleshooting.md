@@ -1567,12 +1567,13 @@ records its process's start identity, so a pid reused after a reboot or a
 machine wake (GBRA-105's lease named pid 379, which had become dbus-daemon)
 is reclaimed instead of blocking. The upgrader's own session (the pid chain it
 runs under) never counts for `bin/gstack-upgrade` run by hand. A Capy install
-in install mode (`bin/gstack-capy-session`) counts it, though: an install run from inside a
-workflow that holds the lease (/ship's docs step, #3571) prints
-`SELF_UPGRADE: skipped (this session's own gstack run holds a workflow lease on
-this installation: pid <p> (<age>m <command>), so the upgrade is deferred until
-the run ends; fix: <checkout>/bin/gstack-upgrade (UPGRADE_BUSY))` and leaves the
-checkout where the run started.
+in install mode (`bin/gstack-capy-session`) counts it while that lease is under
+120 minutes old: an install run from inside a workflow that holds the lease
+(/ship's docs step, #3571) prints `SELF_UPGRADE: skipped (a gstack run in this
+session holds a workflow lease on this installation: pid <p> (<age>m
+<command>), so the upgrade waits until the lease is 120 minutes old; fix:
+<checkout>/bin/gstack-upgrade once the run ends (UPGRADE_BUSY))` and leaves the
+checkout where the run started. Each `gstack-skill-start` renews the lease.
 
 **Fix.** Wait for those sessions to finish (`bin/gstack-lease list` shows
 every lease with its age and `alive|dead|stale`; a holder is named as
