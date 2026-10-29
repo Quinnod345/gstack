@@ -154,7 +154,7 @@ On any error: continue — ${feature} is informational, not a gate.`;
  *     all — skip the section, no Claude fallback.
  *   - `codex-only` (diff adversarial): disabled gates only the Codex passes; the
  *     free Claude adversarial subagent still runs.
- * `planDispatch` (/ship Step 11): the review plan's DISPATCH lines decide whether the
+ * `planDispatch` (/ship's adversarial review step): the review plan's DISPATCH lines decide whether the
  * native pass runs, so no mode line says anything about it.
  */
 export function codexPreflight(opts: { modeVar?: string; disabledBehavior: 'skip-all' | 'codex-only'; nativeReview?: boolean; role?: boolean; planDispatch?: boolean }): string {
