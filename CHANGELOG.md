@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+**The free suite's shards now finish close together, because nine slow test files were split and the packer plans from fresh timings.** The committed duration seed missed 117 of 1,401 files, so every CI plan guessed 441 s for every shard and the slowest shard ran about 1.46× the mean. No product code changed, and the split files run the same 341 tests and 5,900 expect() calls as before.
+
+### Changed
+- **Split free test files**: `test/host-renders-prune.test.ts`, `test/ship-queue-train.test.ts`, `test/claude-overlay-setup-lifecycle.test.ts`, `test/claude-overlay-setup-installs.test.ts`, `test/setup-codex-scope-namespaces.test.ts`, `test/setup-codex-scope-review-boundaries.test.ts`, `test/docsync-fault-interface.test.ts` and `test/shared-libs-checker-interface-evidence.test.ts` each went over the 60 s seed ceiling, and each is now two to four files. Test bodies moved unchanged; shared setup moved into `test/helpers/`.
+- **Windows lane**: `test/gstack-doctor.test.ts` was the Windows lane's longest file, so it is now three files of 132 to 153 s each on windows-latest.
+- **Duration seeds**: `scripts/free-test-durations.json` (1,416 Linux files) and `scripts/free-test-durations-windows.json` (795 curated Windows files) were re-recorded at this branch by `free-durations-record.yml`, so the 20-shard plan predicts about 176 s per shard.
+
+### Gate integrity
+- `scripts/free-test-seed-allowlist.json` loses `test/setup-codex-scope.test.ts`, which fell to 49 s. No entry was added.
+- `scripts/lib/windows-curation.ts` gives each new part the same Windows scope as its original, so the curated Windows list grows only by the two doctor parts (793 to 795), and `WINDOWS_CURATED_FLOOR` rises from 638 to 795.
+- `test/test-of-test-ratchet.test.ts` lists seven files from the splits whose product reach now lives in a shared helper, each with its reason, and `scripts/typecheck-test-baseline.json` moves one known diagnostic with its code into `test/helpers/shared-libs-checker-evidence.ts`.
+
 ## [1.91.304.0] - 2026-10-29
 
 **Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
