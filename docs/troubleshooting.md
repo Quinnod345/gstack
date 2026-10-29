@@ -4576,7 +4576,9 @@ the receipt without `base_red`.
 
 **Meaning.** `origin/<base>`'s ship policy has no `base_red` block, so
 `gstack-base-red` cannot reproduce a failure there and every Step 5 failure
-stays in-branch. `wait` prints it when the block was removed after the pause.
+stays in-branch. An invalid ship policy on the base counts the same (the
+invalid key is printed first). `wait` prints it when the block was removed
+after the pause.
 
 **Fix.** Use /ship's usual triage. To let /ship pause on a red base, add
 `base_red` to `.gstack/ship-policy.json` on the base branch
