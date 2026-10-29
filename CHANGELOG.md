@@ -1,12 +1,64 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.315.0] - 2026-10-29
 
 ### Changed
 - **Stacked PRs** (Fixes #3570): after a stack parent lands and the child is retargeted to the base with the base merged in, `carry --base <base>` compares HEAD's product diff against the base with the range the receipt reviewed against the parent branch. That is the recorded `product_patch_id`, or the range against `origin/<parent>` for an older receipt. HEAD's side is its whole product diff against the base, so a parent's `package.json` change that never reached the base refuses too. Equal carries with the reason `stack parent <branch> landed` and rebinds the receipt's `base` to the base; anything else refuses. Until now every stacked child paid a full /ship once its parent merged (gstack-evals#19).
 
 ### Tests
 - `test/ship-receipt-carry-squash.test.ts`: a child carries after its parent squash-merges and main is merged in, names main as its base, and carries again across a later main merge. A test-only child carries. A child edited after the merge, a parent that never landed, a parent `package.json` change that never reached main, and a merge that keeps the child's tree over the landed parent refuse. An older receipt falls back to `origin/<parent>` and refuses once that branch is deleted.
+
+## [1.91.314.0] - 2026-10-29
+
+**A later autoplan gate that asks nothing new is now answered with the owner's earlier words instead of another round trip.** Captains were carrying approvals across gate revisions by hand (GSTA-140 reused a rev-1 "Do it" on rev 2; ALPH-50 lost about 27 minutes to one), and a replay over 23 recorded runs found 14 later gates, 8 of them holding only post-cap delta items.
+
+### Added
+- **Carry-forward** (`lib/autoplan-carry.ts`): when gate_rev N+1 asks nothing new and gate_rev N was fully answered by the owner with `rec` or "do it", gstack answers N+1 with those recorded words and prints `CARRIED: gate_rev=<n> <- gate_rev=<m> …`; anything else prints `CARRY: no (<why>)` and goes to the owner. `--no-carry-forward` on the first `next` turns it off.
+- **"do it" covers new low-risk items.** When the owner's own words were "do it", a new item that changes no scope, cost, direction or plan text takes its recommendation, is marked `carried_under: do it`, and is listed in the approval record and the Captain brief as not shown to the owner. A Captain's "do it" never counts.
+- **Delta check.** A "plan changed after cap" item gets one reviewer from another model family on the delta first (`CARRY_CHECK:`, `gstack-autoplan check`), within a per-gate spend cap (`--carry-check-cap`, default $5). High or above, no reviewer, an owner answer, or a plan edit after dispatch leaves the gate for the owner and releases the reservation. The verdict is recorded on `gate.json`, the decision rows and `decisions.tsv`.
+- **`eli5` in gate.json**: the plan's `## ELI5` and the four approvals-shape sections; `gstack-gate render` opens page 1 with them, and the Captain brief requires `## ELI5` (older runs render as before).
+- **`gstack-approvals import --autoplan <dir> --stack b1,b2`** writes the same rows to every branch of a stack, or to none when one branch is unknown.
+- **`REVIEW_ESTIMATE:`** on the first `next`: phases, voices, rounds, attempts and the reservation total.
+
+### Changed
+- `lib/decision-trail.ts` holds the trail append rules shared by `gstack-decision-trail` and the carry.
+
+## [1.91.313.0] - 2026-10-29
+
+**The PII scanner stops flagging two kinds of ordinary text: a bare power-of-two or hash constant in code, and a package@version-style filename.** Eval artifacts and PR bodies that print a PRNG range or name a versioned results file no longer raise a MEDIUM phone or email finding, and real phone numbers and addresses next to them still report.
+
+### Fixed
+- **`lib/redact-patterns.ts`**: `pii.phone.e164` skips a bare number that is exactly a power of two from 2^30 through 2^49, one less than one, or one of eleven well-known 32-bit hash and PRNG constants. The same digits written with a `+`, spaces, dashes, dots or parentheses still report (#3577).
+- **`lib/redact-patterns.ts`**: `pii.email` skips a filename whose part after the `@` is a version or tag followed by file extensions no top-level domain uses, or a dotted version followed by an extension that doubles as one. A file named after a real address, an address at a numeric domain such as 163.com, and an address under a top-level domain that doubles as an extension (`.sh`, `.md`) still report (#3576).
+
+### Tests
+- `test/redact-constant-and-at-filename.test.ts`: pins both exemptions in both directions, including files named after a real address.
+
+## [1.91.312.0] - 2026-10-29
+
+**An install check run from inside /ship no longer upgrades gstack under it.** /ship's docs step runs `scripts/install.sh --for document-release`. That run fast-forwarded the checkout from 1.91.298 to 1.91.299 in the middle of a lane's /ship, so the receipt writer's rules changed partway through the run (#3571).
+
+### Fixed
+- **`bin/gstack-capy-session`**: in install mode, a live workflow lease under 120 minutes old held by the caller's own process chain now skips the self-upgrade: `SELF_UPGRADE: skipped (a gstack run in this session holds a workflow lease on this installation: pid <p> (<age>m <command>), so the upgrade waits until the lease is 120 minutes old; …(UPGRADE_BUSY))`. The install still certifies the installed revision and the trailer stays ok with `behind=`. `bin/gstack-upgrade` deliberately ignores the caller's own lease, and an install started from inside the run passed that check. Each `gstack-skill-start` renews the lease. The age bound matters on Capy, where the leased pid is the machine's long-lived `capy-server`, so a lease is never released by its process exiting. An older lease, or none, upgrades as before, and `GSTACK_UPGRADE_FORCE=1` or a hand-run `bin/gstack-upgrade` still moves the checkout.
+
+### Tests
+- `test/capy-skill-wrapper.test.ts`: an install run under a shell that holds a fresh lease leaves HEAD where it was and stays ok. Once that lease is 121 minutes old, with its holder still alive, the same install upgrades. Before this change the first run printed `SELF_UPGRADE: done 1.0.1 -> 1.0.2`.
+
+## [1.91.311.0] - 2026-10-29
+
+**A sealed policy can now refuse `sealed/<set>/tasks.json` while allowing the `MANIFEST.json` beside it, and can catch `HELDOUT/` with a `heldout` glob.** The sealed guard only had deny globs and one-commit waivers, so the gstack-evals layout, which keeps a public manifest of hashes and counts next to its sealed tasks, needed a fresh `.gstack/sealed-allow.tsv` line for every manifest commit (gstack-evals wiki/board/2026-10-28-gsta-9-sealed-manifest-glob-gap.md). Their first draft also wrote `sealed/**`, which never matched their nested `tasks/<id>/sealed/` directories, and garrytan/gstack-evals#3 (dc54796) hand-listed `Sealed/`, `HELDOUT/` and other case variants.
+
+### Added
+- **`sealed.allow_paths`** (`lib/sealed-guard.ts`): globs that exempt publishable files from `sealed.path` and `sealed.transcript`, applied after the deny globs and before sha waivers. They are read from the destination base branch only, so a push cannot widen its own exceptions; a pushed copy is still validated and refuses when malformed. Text rules still read an exempt file, so a manifest that quotes a sealed answer still refuses. An entry whose file name contains `**` or is only wildcards before its extension (`**`, `sealed/*`, `**/*.json`) is refused. Each exempt path prints `exempt <rule>  <file>  commit <sha> (sealed.allow_paths <glob>)` on every push.
+- **`sealed.case_insensitive: true`**: `paths` and `transcripts` match regardless of case, so `**/heldout/**` also refuses `HELDOUT/` and `HeldOut/`. The value is the base branch's OR the pushed one, because it only tightens. `allow_paths` never fold case. Separator and spelling variants such as `hold-out/` still need their own globs.
+
+### Changed
+- `gstack-pregate sealed` prints `exempt=<n>` after `waived=<n>` on its `SEALED:` line (`policy=` stays last), and `--json` carries an `exempt` array. Both bins build their error report through one `sealedErrorReport`.
+- An unknown `sealed` key now says to upgrade gstack if the key comes from a newer one. A gstack older than this release refuses `allow_paths` and `case_insensitive` this way on every push and `gstack-pregate run`, so a repository raises `min_gstack_version` before landing either key.
+- `docs/pregate.md` § Sealed output explains glob anchoring: patterns match from the repository root, so `sealed/**` misses `tasks/x/sealed/a.json` and the docs say to write `**/sealed/**`. It also documents case handling, exceptions and the version skew.
+
+### Gate integrity
+- This is a gate edit: `allow_paths` lets the sealed guard pass files it refused before, but only from the reviewed base branch. No existing test, threshold or allowlist changed. New cases in `test/sealed-guard.test.ts` (10) and `test/pregate-guards.test.ts` cover an allowed exception, a non-matching one, an exception added on the pushed head, a text rule inside an exempt file, transcripts, the waiver order, the error report, case folding in both directions and the root-anchoring example.
 
 ## [1.91.310.0] - 2026-10-29
 
