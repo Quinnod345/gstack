@@ -20,7 +20,7 @@ import { wtreeFingerprint } from './script-invocation';
 import { resultLine } from './result-codes';
 import {
   SHIP_STEPS, budgetError, budgetLine, ledgerFileFor, loadCalibration, mintRunId, mutateLedger, parseStep, pointMarker,
-  readLedger, reserveIn, runDirFor, segmentEstimate, tally, usageError, writeLedger, type Handoff, type Ledger,
+  projector, readLedger, reserveIn, runDirFor, segmentEstimate, tally, usageError, writeLedger, type Handoff, type Ledger,
 } from './ship-budget';
 import { loadMeterState, saveMeterState } from './claude-usage';
 import { parseArgs, readMeter, stopLines, str, tokensOpt, writeReturnFile, type Ctx, type Outcome } from './ship-budget-cli';
@@ -92,7 +92,7 @@ export function cmdHandoff(argv: string[], ctx: Ctx): Outcome {
     const call = readMeter(l, o, true);
     const cal = loadCalibration(l.calibration);
     const t = tally(l);
-    const room = l.cap === null ? Infinity : l.cap - t.used - t.reserved - t.unknown - l.tail - l.stop_overhead;
+    const room = l.cap === null ? Infinity : l.cap - t.used - t.reserved - t.unknown - projector(l, cal).reserve;
     const subCap = tokensOpt(o, 'sub-cap') ?? Math.min(room, segmentEstimate(cal, l.meter.contract.unit, from, to));
     if (subCap <= 0 || subCap > room) return { stdout: stopLines(l, { call, next: from, step: from, projected: subCap, reason: 'budget_exhausted' }), exit: 3 };
     const pins = pinsNow(ctx.cwd, base, ctx.env);

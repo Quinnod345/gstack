@@ -8,7 +8,7 @@
  * ship-budget-projection-GSTA-152-prb.md in the GStack Minder drive).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { loadCalibration, SHIP_STEPS, unitConstants } from '../lib/ship-budget';
+import { loadCalibration, measureSettled, settleIn, SHIP_STEPS, unitConstants } from '../lib/ship-budget';
 import { budgetHarness, type Harness } from './helpers/ship-budget-harness';
 
 const cal = loadCalibration();
@@ -195,5 +195,47 @@ describe('dispatch reservations settle when the reviewer returns (GST-101)', () 
     const close = h.sb(['close', '--run', s.run, '--reading', '700000']);
     expect(close.code).toBe(0);
     expect(close.out).toMatch(/^BUDGET_DRIFT: steps=2 step_projected=\d+ step_actual=700000 dispatches=0 dispatch_projected=0 dispatch_actual=0$/m);
+  });
+});
+
+describe('the gate fixes from /ship review (GST-101)', () => {
+  test('a dispatch settled --unknown is never measured, so the dispatch factor stays at the prior', () => {
+    const h = fresh();
+    const s = started(h, '40M');
+    const id = h.field(h.sb(['check', '--run', s.run, '--step', '11', '--next', 'dispatch:outside-voice', '--reading', '0']).out, 'RESERVATION', 'id');
+    expect(h.reviewLog(['--start', 'adversarial-review', '--reservation', id]).code).toBe(0);
+    const settled = h.sb(['settle', '--run', s.run, '--reservation', id, '--unknown', '--reading', '100000']);
+    expect(settled.code, settled.out + settled.err).toBe(0);
+    expect(settled.out).not.toContain('DRIFT:');
+    const next = h.sb(['check', '--run', s.run, '--step', '11', '--next', 'dispatch:outside-voice', '--reading', '200000']);
+    expect(h.field(next.out, 'BUDGET', 'calibration')).toEndWith('dispatch:prior');
+    expect(Number(h.field(next.out, 'BUDGET', 'projected'))).toBe(K.per_dispatch);
+    expect(Number(h.field(next.out, 'BUDGET', 'unknown'))).toBe(K.per_dispatch);
+  });
+
+  test('a Claude-metered outside voice is booked unknown and never measured', () => {
+    const r = { id: 'r1', kind: 'dispatch', step: '11', next: 'dispatch:outside-voice', roles: ['outside-voice'], tokens: K.per_dispatch, at: '', state: 'consumed', reading_at: 0, epoch: 1 };
+    const l: any = { meter: { contract: { meter: 'claude' }, epoch: 1, last: 100_000 }, reservations: [r], unknown: 0, samples: [] };
+    settleIn(l, r as any);
+    expect(l.unknown).toBe(K.per_dispatch);
+    expect(measureSettled(l)).toEqual([]);
+    expect(l.samples).toEqual([]);
+  });
+
+  test('a calibrated delegate verdict is one the handoff admits: both hold back the same reserve', () => {
+    const h = fresh();
+    const cap = 12_000_000;
+    const s = started(h, '12M');
+    const sb = (args: string[]) => { const c = h.sb(['check', '--run', s.run, ...args]); expect(c.code, c.out + c.err).toBe(0); return c; };
+    for (const [i, step] of ['1', '2', '3'].entries()) sb(['--step', step, '--next', String(i + 2), '--reading', String(300_000 * (i + 1)), '--prior-reading', String(300_000 * i + 200_000)]);
+    const d = h.field(sb(['--step', '4', '--next', 'dispatch:specialist', '--reading', '1200000', '--prior-reading', '1100000']).out, 'RESERVATION', 'id');
+    expect(h.reviewLog(['--start', 'review', '--reservation', d]).code).toBe(0);
+    const c = sb(['--step', '4', '--next', '12', '--reading', '8000000', '--returned', d]);
+    expect(h.field(c.out, 'BUDGET', 'verdict')).toBe('delegate');
+    const tail = Number(h.field(c.out, 'BUDGET', 'tail'));
+    expect(cap - 8_000_000).toBeLessThan(2_000_000 + K.stop_overhead);
+    const ho = h.sb(['handoff', '--run', s.run, '--from', '12', '--to', '22', '--base', 'origin/main', '--reading', '8000000']);
+    expect(ho.code, ho.out + ho.err).toBe(0);
+    expect(Number(ho.out.match(/^HANDOFF: \S+ sha256=\S+ sub_cap=(\d+)$/m)![1])).toBe(cap - 8_000_000 - tail);
   });
 });

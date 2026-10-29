@@ -51,7 +51,7 @@ export const METER_CONTRACTS: Record<MeterKind, MeterContract> = {
 export interface Reservation {
   id: string; kind: 'step' | 'dispatch' | 'child'; step: string; next: string; roles?: string[]; tokens: number; at: string;
   state: 'open' | 'consumed' | 'settled' | 'released'; token?: string; started_at?: string; settled_at?: string;
-  prior?: number; reading_at?: number | null; epoch?: number; actual?: number;
+  prior?: number; reading_at?: number | null; epoch?: number; actual?: number; unseen?: boolean;
 }
 export interface Sample { id: string; kind: 'step' | 'dispatch'; epoch: number; prior: number; projected: number; actual: number }
 export interface Handoff {
@@ -172,12 +172,14 @@ export function projector(l: Ledger, cal: Calibration = loadCalibration(l.calibr
 /**
  * Measure settled reservations against the current (fresh) reading: a step
  * from its reading to now; settled dispatches as one group from the earliest
- * of their readings, split by role. Returns one DRIFT line per measurement.
+ * of their readings, split by role. A charge the meter cannot see (settled
+ * --unknown, or a Claude-metered outside voice) is never measured. Returns one
+ * DRIFT line per measurement.
  */
 export function measureSettled(l: Ledger): string[] {
   const last = l.meter.last;
   if (last === null) return [];
-  const pending = l.reservations.filter(r => r.state === 'settled' && r.kind !== 'child' && r.actual === undefined
+  const pending = l.reservations.filter(r => r.state === 'settled' && r.kind !== 'child' && r.actual === undefined && !r.unseen
     && typeof r.reading_at === 'number' && r.epoch === l.meter.epoch && last >= r.reading_at);
   const dispatches = pending.filter(r => r.kind === 'dispatch');
   const from = Math.min(...dispatches.map(r => r.reading_at!));
@@ -277,10 +279,10 @@ export function settleIn(l: Ledger, r: Reservation, opts: { unknown?: boolean; c
   if (r.state === 'settled' || r.state === 'released') return;
   r.state = 'settled';
   r.settled_at = new Date().toISOString();
-  if (opts.unknown) { l.unknown += r.tokens; return; }
+  if (opts.unknown) { l.unknown += r.tokens; r.unseen = true; return; }
   if (l.meter.contract.meter === 'estimate') { l.estimate_used += r.tokens; return; }
   const unseen = l.meter.contract.meter === 'claude' ? (r.roles ?? []).filter(x => x === 'outside-voice').length : 0;
-  if (unseen && r.roles?.length) l.unknown += Math.round((r.tokens * unseen) / r.roles.length);
+  if (unseen && r.roles?.length) { l.unknown += Math.round((r.tokens * unseen) / r.roles.length); r.unseen = true; }
 }
 
 /** Validate and store one meter reading against the run's contract. */
