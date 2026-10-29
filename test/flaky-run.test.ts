@@ -7,7 +7,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { JunitError, parseJunit, readJunit, testId } from '../lib/junit';
 import { appendLedger, incompleteRun, ledgerPath, renderResult, rerunSelection, runFlaky, safeExcerpt, stepSummary, unreportedFailures, workflowEscape } from '../lib/flaky-run';
 
@@ -260,6 +260,18 @@ describe('runFlaky', () => {
     expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'a generic runner cannot prove every test ran' });
   });
 
+  test('a whole-command rerun clears nothing when any test fails in it, a first-run test is missing, it is killed or it retried', async () => {
+    const dir = tmp();
+    const generic = (second: string, exit = 0, signal?: string) => base(fakeRun((_a, n) => n === 1 ? suite(fail('a') + pass('b')) : second, () => exit && 1, undefined, n => n === 2 ? signal : undefined), dir, { runner: 'generic' });
+    expect((await generic(suite(pass('a') + fail('b')))).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: 1 test(s) failed in the whole-command rerun' });
+    expect((await generic(suite(pass('a')))).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: 1 test(s) of the first run are missing from the whole-command rerun' });
+    expect((await generic(suite(pass('a') + pass('b')), 0, 'SIGTERM')).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: killed by SIGTERM' });
+    const retried = await generic(suite('<testcase name="a" classname="" file="a.test.ts"><flakyFailure message="x"/></testcase>' + pass('b')));
+    expect(retried.outcomes.find(o => o.status === 'rerun-fail')).toMatchObject({ attempts: ['fail', 'fail', 'pass'] });
+    expect(retried.ledger.find(l => l.kind === 'rerun-fail')).toMatchObject({ rerun_scope: 'command' });
+    expect(retried.exitCode).toBe(1);
+  });
+
   test('an incomplete run that is already red is not rerun as a whole', async () => {
     const dir = tmp();
     const f = fakeRun(() => suite(fail('b') + pass('b') + fail('c')), () => 1, () => '');
@@ -358,6 +370,40 @@ describe('bin/gstack-flaky', () => {
     expect(r.stderr).toContain('(FLAKY_NO_RESULTS)');
     expect(r.stderr).toContain('fix: ');
   });
+
+  test('a runner that dies by a signal exits 3 FLAKY_COMMAND_KILLED and is not rerun', () => {
+    const dir = tmp();
+    const runner = path.join(dir, 'runner.sh');
+    fs.writeFileSync(runner, ['#!/usr/bin/env bash', 'echo x >> count', `printf '%s' '${suite(fail('b'))}' > r.xml`, 'kill -TERM $$'].join('\n'), { mode: 0o755 });
+    const r = spawnSync(path.join(ROOT, 'bin', 'gstack-flaky'), ['run', '--junit', 'r.xml', '--runner', 'bun', '--ledger', path.join(dir, 'l.jsonl'), '--', runner], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('(FLAKY_COMMAND_KILLED)');
+    expect(fs.readFileSync(path.join(dir, 'count'), 'utf-8').trim().split('\n')).toHaveLength(1);
+  });
+
+  test('cancelling gstack-flaky is latched even when the runner traps the signal and exits by code', async () => {
+    const dir = tmp();
+    const runner = path.join(dir, 'runner.sh');
+    fs.writeFileSync(runner, [
+      '#!/usr/bin/env bash',
+      'echo x >> count',
+      'trap "cp report.xml r.xml; exit 143" TERM',
+      'touch ready',
+      'for i in $(seq 1 300); do sleep 0.1; done',
+    ].join('\n'), { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, 'report.xml'), suite(fail('b')));
+    const child = spawn(path.join(ROOT, 'bin', 'gstack-flaky'), ['run', '--junit', 'r.xml', '--runner', 'generic', '--ledger', path.join(dir, 'l.jsonl'), '--', runner], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    const done = new Promise<number | null>(resolve => child.on('close', code => resolve(code)));
+    const deadline = Date.now() + 20_000;
+    while (!fs.existsSync(path.join(dir, 'ready')) && Date.now() < deadline) await Bun.sleep(50);
+    child.kill('SIGTERM');
+    expect(await done).toBe(3);
+    expect(stderr).toContain('(FLAKY_COMMAND_KILLED)');
+    expect(fs.readFileSync(path.join(dir, 'count'), 'utf-8').trim().split('\n')).toHaveLength(1);
+    expect(fs.existsSync(path.join(dir, 'l.jsonl'))).toBe(false);
+  }, 30_000);
 
   test('every FLAKY_ code the bin and the library emit is in the docs table', () => {
     const doc = fs.readFileSync(path.join(ROOT, 'docs', 'flaky.md'), 'utf-8');

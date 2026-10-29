@@ -100,20 +100,27 @@ export function rerunSelection(runner: 'playwright' | 'bun', t: JunitTest): stri
 
 const OUTPUT_TAIL = 256 * 1024;
 
+/** Set once gstack-flaky itself is asked to stop; every attempt after that counts as killed, whatever exit the runner chose. */
+let cancelled: string | undefined;
+
 /** Stream the child's output live (a quiet runner trips CI idle watchdogs) and keep its tail for reconciliation. */
 function defaultSpawn(argv: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<Attempted> {
   return new Promise((resolve, reject) => {
     let tail = '';
     const keep = (chunk: Buffer) => { tail = (tail + chunk.toString('utf-8')).slice(-OUTPUT_TAIL); };
     const child = spawnChild(argv[0]!, argv.slice(1), { stdio: ['inherit', 'pipe', 'pipe'], env, cwd });
-    const forward = (s: NodeJS.Signals) => { child.kill(s); };
+    const forward = (s: NodeJS.Signals) => { cancelled ??= s; child.kill(s); };
     const release = () => { process.off('SIGINT', forward); process.off('SIGTERM', forward); };
     process.on('SIGINT', forward);
     process.on('SIGTERM', forward);
     child.stdout!.on('data', (c: Buffer) => { process.stdout.write(c); keep(c); });
     child.stderr!.on('data', (c: Buffer) => { process.stderr.write(c); keep(c); });
     child.on('error', e => { release(); reject(new JunitError('FLAKY_COMMAND_NOT_STARTED', `could not start ${argv[0]}: ${e.message}`)); });
-    child.on('close', (code, signal) => { release(); resolve({ exit: code ?? 128, output: tail, ...(signal ? { signal } : {}) }); });
+    child.on('close', (code, signal) => {
+      release();
+      const killed = signal ?? cancelled;
+      resolve({ exit: code ?? 128, output: tail, ...(killed ? { signal: killed } : {}) });
+    });
   });
 }
 
@@ -208,13 +215,31 @@ async function attempt(opts: RunOptions, argv: string[], cwd: string, env: NodeJ
   }
 }
 
+/**
+ * What keeps a rerun from clearing anything even when it exited 0: failures
+ * its runner counted outside the report and, for a whole-command rerun, any
+ * failed test or any first-run test missing from its report.
+ */
+function rerunProblem(again: Attempted & { report?: JunitReport }, first: JunitReport, whole: boolean): string | undefined {
+  if (!again.report) return undefined;
+  const failedNow = again.report.tests.filter(x => finalAttempt(x) === 'fail');
+  const unreported = unreportedFailures(first.runner, again.output, failedNow.length);
+  if (unreported) return unreported;
+  if (!whole) return undefined;
+  if (failedNow.length) return `${failedNow.length} test(s) failed in the whole-command rerun`;
+  const seen = new Set(again.report.tests.map(x => x.id));
+  const missing = first.tests.filter(x => !seen.has(x.id)).length;
+  return missing ? `${missing} test(s) of the first run are missing from the whole-command rerun` : undefined;
+}
+
 /** A rerun clears a test only when its command exited 0 and the test ran once and passed on its first attempt. */
-function rerunVerdict(again: Attempted & { report?: JunitReport; error?: JunitError }, t: JunitTest): { status: 'flaky-pass' | 'rerun-fail'; attempts: string[]; reason?: string } {
+function rerunVerdict(again: Attempted & { report?: JunitReport; error?: JunitError }, t: JunitTest, problem?: string): { status: 'flaky-pass' | 'rerun-fail'; attempts: string[]; reason?: string } {
   const match = again.report?.tests.find(x => x.id === t.id);
   if (!match) return { status: 'rerun-fail', attempts: [...t.attempts, 'fail'], reason: again.error ? `rerun: ${again.error.message}` : 'rerun: the report does not contain this test' };
   const attempts = [...t.attempts, ...match.attempts];
   if (again.signal) return { status: 'rerun-fail', attempts, reason: `rerun: killed by ${again.signal}` };
   if (again.exit !== 0) return { status: 'rerun-fail', attempts, reason: `rerun: the command exited ${again.exit}` };
+  if (problem) return { status: 'rerun-fail', attempts, reason: `rerun: ${problem}` };
   if (match.executions !== 1 || match.attempts.join() !== 'pass') return { status: 'rerun-fail', attempts, reason: `rerun: the test did not pass once on its first attempt (${match.attempts.join(',')})` };
   return { status: 'flaky-pass', attempts };
 }
@@ -261,8 +286,8 @@ export async function runFlaky(opts: RunOptions): Promise<RunResult> {
   const firstXml = fs.readFileSync(junit);
   let reruns = 0;
   const rerun = async (argv: string[]) => {
-    const again = await attempt(opts, argv, cwd, env, report.runner);
     reruns++;
+    const again = await attempt(opts, argv, cwd, env, report.runner);
     if (fs.existsSync(junit)) fs.renameSync(junit, `${junit.replace(/\.xml$/i, '')}.rerun-${reruns}.xml`);
     return again;
   };
@@ -275,14 +300,15 @@ export async function runFlaky(opts: RunOptions): Promise<RunResult> {
       for (const t of eligible) outcomes.push({ test: t, status: 'fail', attempts: t.attempts, reason: `not rerun: the run is already red, and a rerun would repeat the whole command (${wholeRerun})` });
     } else if (wholeRerun) {
       const again = await rerun(opts.command);
-      for (const t of eligible) record(t, rerunVerdict(again, t), 'command');
+      const problem = rerunProblem(again, report, true);
+      for (const t of eligible) record(t, rerunVerdict(again, t, problem), 'command');
     } else if (eligible.length) {
       let interrupted = false;
       for (const t of eligible) {
         if (interrupted) { outcomes.push({ test: t, status: 'fail', attempts: t.attempts, reason: 'not rerun: an earlier rerun was killed' }); continue; }
         const again = await rerun([...opts.command, ...rerunSelection(report.runner as 'playwright' | 'bun', t)]);
         interrupted = !!again.signal;
-        record(t, rerunVerdict(again, t), 'test');
+        record(t, rerunVerdict(again, t, rerunProblem(again, report, false)), 'test');
       }
     }
   } finally {
