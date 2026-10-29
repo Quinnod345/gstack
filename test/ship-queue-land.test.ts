@@ -45,6 +45,7 @@ function setup(policy: Record<string, unknown> = POLICY): Fx {
     "  if(head!==want){console.error('Head branch was modified');process.exit(1)}",
     "  if(d.driftOnMerge){const m=g('rev-parse','refs/heads/main');const t=g('rev-parse',m+'^{tree}');g('update-ref','refs/heads/main',g('commit-tree',t,'-p',m,'-m','outside merge'));d.driftOnMerge=false}",
     "  const main=g('rev-parse','refs/heads/main');const sq=g('commit-tree',g('rev-parse',want+'^{tree}'),'-p',main,'-m','squash #'+a[2]);g('update-ref','refs/heads/main',sq);p.state='MERGED';save();process.exit(0)}",
+    "if(a[0]==='pr'&&a[1]==='create'){const n=String(Math.max(0,...Object.keys(d.prs).map(Number))+1);d.prs[n]={state:'OPEN',headRefName:a[a.indexOf('--head')+1],isCrossRepository:false,title:a[a.indexOf('--title')+1],body:''};save();console.log('https://github.com/o/r/pull/'+n);process.exit(0)}",
     "console.error('gh shim: unsupported '+a.join(' '));process.exit(1);",
     '',
   ].join('\n'), { mode: 0o755 });
@@ -208,7 +209,22 @@ describe('land: lock, races and refusals', () => {
     expect(r.err).toContain('(QUEUE_LAND_DRIFT)');
     openPr(fx, '10');
     expect(land(fx, ['--pr', '10']).err).toMatch(/#9 holds the land lock .*phase drift.*\(QUEUE_LAND_LOCKED\)/);
-  }, 90_000);
+    const rep = land(fx, ['--pr', '9', '--repair']);
+    expect(rep.status).toBe(EXIT.ok);
+    expect(rep.out).toContain('entry: changelog.d/repair-9.md names 1 outside commit(s)');
+    const n = /REPAIR_PR: #(\d+) gstack-land-repair\/9 ([0-9a-f]{40})/.exec(rep.out)!;
+    expect(show(fx, n[2] + ':changelog.d/repair-9.md')).toBe('- Changes merged outside land beside #9: outside merge');
+    expect(land(fx, ['--pr', n[1]!]).err).toContain('(QUEUE_RECEIPT_MISSING)');
+    fx.write(d => { d.prs[n[1]!].body = shippedBody(n[1]!, n[2]!); });
+    const pushed = land(fx, ['--pr', n[1]!]);
+    expect(pushed.out).toContain("LOCK: taking over #9's drift lock for its repair");
+    const merged = land(fx, ['--pr', n[1]!]);
+    expect(merged.status).toBe(EXIT.ok);
+    expect(merged.out).toContain('LOCK: released');
+    expect(fx.repo.git('ls-tree', '-r', '--name-only', 'origin/main', '--', 'changelog.d')).not.toContain('repair-9');
+    expect(show(fx, 'origin/main:CHANGELOG.md')).toContain('- Changes merged outside land beside #9: outside merge');
+    expect(land(fx, ['--pr', '10']).status).toBe(EXIT.ok);
+  }, 120_000);
 
   test('census lists what land would do, writing nothing', () => {
     const fx = setup();

@@ -318,7 +318,7 @@ export const RELEASE_RESULT_CODES = {
   QUEUE_LAND_DRIFT: {
     anchor: 'queue-land-drift',
     summary: 'the base branch moved between the merge step\'s last check and the squash merge, so main\'s tree is not the stamped tree land verified',
-    fix: 'run the printed gstack-ship-queue land --repair to renumber main\'s top entry through a stamp-only PR; the land lock stays held with the record until it merges',
+    fix: 'gstack-ship-queue land --pr <n> --repair opens a PR whose only change is a fragment for what the outside merge brought; /ship and land it, which releases the lock',
   },
   QUEUE_LAND_BASE_BUSY: {
     anchor: 'queue-land-base-busy',

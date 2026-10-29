@@ -30,10 +30,11 @@ export interface LandJournal {
   schema_version: 1; pr: string; branch: string;
   reviewed_pin: string; last_pushed_head: string | null; stamp_commit: string | null; stamp_tree: string | null;
   base_sha: string | null; version: string | null; date: string | null; restamps: number;
+  drift_main?: string; repair_pr?: string;
   phase: 'locked' | 'stamped' | 'pushed' | 'merged' | 'landed' | 'drift';
 }
 export interface LandLock { pr: string; holder: string; started_at: string; phase: 'stamping' | 'pushing' | 'waiting' | 'merging' | 'drift'; journal: string }
-export interface LandOptions { pr: string; dryRun?: boolean; noWait?: boolean; breakLock?: boolean; allowRepoCommands?: boolean; waitTimeoutMin?: number; now?: () => Date; holder?: string }
+export interface LandOptions { pr: string; repair?: boolean; dryRun?: boolean; noWait?: boolean; breakLock?: boolean; allowRepoCommands?: boolean; waitTimeoutMin?: number; now?: () => Date; holder?: string }
 
 const fail = (lines: string[], failure: QueueFailure, run: string): StepOutput => ({ ok: false, lines, failure, run });
 export const landJournalRel = (pr: string) => `${QUEUE_DIR_REL}/land/${pr}.json`;
@@ -229,6 +230,54 @@ export function census(ctx: QueueContext): StepOutput {
   return { ok: true, run: 'none', lines };
 }
 
+/**
+ * `land --repair --pr <n>` after QUEUE_LAND_DRIFT: a merge outside land slipped in beside #n, so what it
+ * brought has no release of its own. Open a PR from the base whose only change is a fragment for it: each
+ * fragment the outside merge left unfolded on the base moves to repair-<n>-<name>.md (so it counts as new),
+ * or, with none, one entry naming the outside commits. That PR goes through /ship and land like any other;
+ * its land takes over #n's drift lock and releases it.
+ */
+function repair(ctx: QueueContext, policy: ShipPolicy, j: LandJournal | null, file: string, run: string): StepOutput {
+  const root = ctx.repoRoot;
+  if (!j || j.phase !== 'drift' || !j.drift_main || !j.base_sha) return fail([], { code: 'QUEUE_NOT_READY', message: `#${j?.pr ?? '?'} has no drift record; --repair runs only after QUEUE_LAND_DRIFT` }, run);
+  const lines = [`REPAIR: #${j.pr} landed on ${j.drift_main.slice(0, 12)} beside a merge outside land`];
+  if (j.repair_pr) return { ok: true, run, lines: [...lines, `REPAIR_PR: #${j.repair_pr} (already open)`, `NEXT: run /ship on #${j.repair_pr}, then gstack-ship-queue land --pr ${j.repair_pr}`] };
+  const dir = policy.changelog_fragments?.dir?.replace(/\/+$/, '');
+  if (!dir) return fail(lines, { code: 'QUEUE_NOT_READY', message: 'changelog_fragments is off: write the [Unreleased] entry for the outside merge by hand and land it' }, run);
+  git(root, ['fetch', '-q', 'origin', ctx.base]);
+  const main = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
+  const outside = git(root, ['log', '--first-parent', '--format=%h %s', `${j.base_sha}..${j.drift_main}^1`]).out.split('\n').filter(Boolean);
+  const stray = readFragments(root, main, dir, null);
+  const branch = `gstack-land-repair/${j.pr}`;
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-land-repair-'));
+  fs.rmSync(wt, { recursive: true, force: true });
+  if (!git(root, ['worktree', 'add', '--detach', '-q', wt, main]).ok) return fail(lines, { code: 'QUEUE_NOT_READY', message: `cannot create a worktree at ${main.slice(0, 12)}` }, run);
+  try {
+    for (const f of stray.fragments) {
+      fs.renameSync(path.join(wt, f.path), path.join(wt, dir, `repair-${j.pr}-${path.basename(f.path)}`));
+      lines.push(`moved: ${f.path} (left unfolded by the outside merge)`);
+    }
+    if (!stray.fragments.length) {
+      fs.mkdirSync(path.join(wt, dir), { recursive: true });
+      fs.writeFileSync(path.join(wt, dir, `repair-${j.pr}.md`), `- Changes merged outside land beside #${j.pr}: ${outside.map(c => c.slice(c.indexOf(' ') + 1)).join('; ') || 'unknown'}\n`);
+      lines.push(`entry: ${dir}/repair-${j.pr}.md names ${outside.length} outside commit(s)`);
+    }
+    git(wt, ['add', '-A', '--', dir]);
+    if (!git(wt, ['commit', '-q', '--no-verify', '-m', `land: release entry for the merge outside land beside #${j.pr}`]).ok) return fail(lines, { code: 'QUEUE_NOT_READY', message: 'cannot commit the repair' }, run);
+    const head = git(wt, ['rev-parse', 'HEAD']).out;
+    const push = git(root, ['push', '-q', `--force-with-lease=refs/heads/${branch}:`, 'origin', `${head}:refs/heads/${branch}`]);
+    if (!push.ok) return fail(lines, { code: 'QUEUE_TRAIN_MOVED', message: `${branch} already exists on origin; open or land its PR` }, run);
+    const pr = ctx.gh(['pr', 'create', '--base', ctx.base, '--head', branch, '--title', `Release entry for the merge outside land beside #${j.pr}`, '--body', `QUEUE_LAND_DRIFT repair (docs/troubleshooting.md#queue-land-drift). Outside commits: ${outside.join(', ') || 'unknown'}.`]);
+    const n = /\/pull\/(\d+)/.exec(pr.out)?.[1];
+    if (!pr.ok || !n) return fail(lines, { code: 'QUEUE_NOT_READY', message: `gh pr create failed: ${(pr.err ?? pr.out).trim().slice(0, 160)}` }, run);
+    j.repair_pr = n; writeJsonAtomic(file, j);
+    return { ok: true, run, lines: [...lines, `REPAIR_PR: #${n} ${branch} ${head}`, `NEXT: run /ship on #${n}, then gstack-ship-queue land --pr ${n} (it takes over #${j.pr}'s drift lock and releases it)`] };
+  } finally {
+    git(root, ['worktree', 'remove', '--force', wt]);
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+}
+
 /** `gstack-ship-queue land --pr <n>`: one resumable pass of the merge step. */
 export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   const root = ctx.repoRoot;
@@ -239,6 +288,7 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   const loaded = loadBasePolicy(ctx);
   if ('message' in loaded) return fail([], loaded, run);
   const policy = loaded.policy;
+  if (o.repair) return repair(ctx, policy, readJson<LandJournal>(file), file, run);
   const info = prInfo(ctx, o.pr);
   if ('code' in info) return fail([], info, run);
   if (info.isCrossRepository) return fail([], { code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr} is a fork head; land stamps and pushes only crew branches` }, run);
@@ -263,7 +313,9 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   }
 
   let { sha: lockSha, lock } = readLock(root);
-  if (lock && lock.pr !== o.pr) {
+  const repairOf = lock && lock.pr !== o.pr && lock.phase === 'drift' ? readJson<LandJournal>(path.join(root, lock.journal)) : null;
+  if (repairOf?.repair_pr === o.pr) lines.push(`LOCK: taking over #${lock!.pr}'s drift lock for its repair`);
+  else if (lock && lock.pr !== o.pr) {
     const age = now().getTime() - Date.parse(lock.started_at);
     if (!o.breakLock) return fail(lines, { code: 'QUEUE_LAND_LOCKED', message: `#${lock.pr} holds the land lock (${lock.holder}, phase ${lock.phase}, since ${lock.started_at})` }, run);
     if (lock.phase === 'pushing' && age < PUSH_STALE_MS) return fail(lines, { code: 'QUEUE_LAND_LOCKED', message: `#${lock.pr}'s holder is mid-push (${Math.round(age / 1000)} s ago); --break-lock refused` }, run);
@@ -289,11 +341,11 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
       j.restamps += 1; j.phase = 'locked'; save();
     }
     if (j.phase === 'locked') {
-      const s = buildStamp(ctx, policy, { pin, baseSha: baseNow, pr: o.pr, title: info.title, allowRepoCommands: !!o.allowRepoCommands, now: now() });
+      const s = buildStamp(ctx, policy, { pin, baseSha: baseNow, pr: o.pr, title: info.title, allowRepoCommands: !!o.allowRepoCommands, now: j.date ? new Date(`${j.date}T12:00:00Z`) : now() });
       if ('code' in s) { setLock('stamping'); return fail([...lines], s, run); }
       lines.push(...s.lines);
       const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', baseNow, '-m', `v${s.version} stamp: merge ${ctx.base} ${baseNow.slice(0, 12)} into #${o.pr} (land)`]).out;
-      Object.assign(j, { stamp_commit: commit, stamp_tree: s.tree, base_sha: baseNow, version: s.version, date: now().toISOString().slice(0, 10), phase: 'stamped' });
+      Object.assign(j, { stamp_commit: commit, stamp_tree: s.tree, base_sha: baseNow, version: s.version, date: j.date ?? now().toISOString().slice(0, 10), phase: 'stamped' });
       save();
       lines.push(`STAMP_VERSION: ${s.version}`, `STAMP_COMMIT: ${commit} tree=${s.tree}`);
     }
@@ -329,13 +381,14 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
       const tree = git(root, ['rev-parse', `${main}^{tree}`]).out;
       const parent = git(root, ['rev-parse', `${main}^1`]).out;
       if (tree !== j.stamp_tree || parent !== j.base_sha) {
-        j.phase = 'drift'; save(); setLock('drift');
-        return fail([...lines, `MAIN: ${main} tree=${tree} parent=${parent}`], { code: 'QUEUE_LAND_DRIFT', message: `origin/${ctx.base} ${main.slice(0, 12)} is not the stamped tree on ${j.base_sha?.slice(0, 12)} (a merge outside land slipped in)`, fix: `renumber main's top CHANGELOG entry and VERSION with a stamp-only PR (gstack-restamp --next on a branch from origin/${ctx.base}, merged through land), then release the lock: gstack-ship-queue land --pr ${o.pr} --break-lock` }, run);
+        j.phase = 'drift'; j.drift_main = main; save(); setLock('drift');
+        return fail([...lines, `MAIN: ${main} tree=${tree} parent=${parent}`], { code: 'QUEUE_LAND_DRIFT', message: `origin/${ctx.base} ${main.slice(0, 12)} is not the stamped tree on ${j.base_sha?.slice(0, 12)} (a merge outside land slipped in)`, fix: `gstack-ship-queue land --pr ${o.pr} --repair opens the PR that gives the outside merge its own release; /ship and land it, which releases the lock` }, run);
       }
       j.phase = 'landed'; save();
+      if (repairOf?.repair_pr === o.pr) writeJsonAtomic(path.join(root, landJournalRel(repairOf.pr)), { ...repairOf, phase: 'landed' });
       const rel = writeLock(root, lockSha, { released: true, by: holder, at: now().toISOString() });
       return { ok: true, run, lines: [...lines, `MERGED: #${o.pr} as ${main} (${j.version})`, `LANDED: origin/${ctx.base} tree ${tree} equals the stamped tree`, `LOCK: ${rel.ok ? 'released' : 'release push failed (the next land takes it over)'}`] };
     }
-    if (j.phase === 'drift') return fail(lines, { code: 'QUEUE_LAND_DRIFT', message: 'a previous land of this PR found drift; repair main first' }, run);
+    if (j.phase === 'drift') return fail(lines, { code: 'QUEUE_LAND_DRIFT', message: 'a previous land of this PR found drift', fix: `gstack-ship-queue land --pr ${o.pr} --repair` }, run);
   }
 }
