@@ -4267,6 +4267,20 @@ the two allowed restamps, so `land` stopped instead of restamping again.
 it), then rerun `gstack-ship-queue land --pr <n>`; the lock was released and
 the rerun restamps from the pin.
 
+<a id="queue-train-stamp-mismatch"></a>
+### `QUEUE_TRAIN_STAMP_MISMATCH`
+
+**Meaning.** While building a stamped train (`changelog_fragments`), a prefix
+S_i could not be stamped, or it is not the merge of S_(i-1) and its pin
+modulo stamps, or it rewrote an earlier release entry, or it differs from the
+plain prefix T_i outside release paths. Nothing was pushed or dispatched. See
+[stamped trains](ship-policy.md#train-land).
+
+**Fix.** Read the named slot and files. A stamp hook (`restamp_command`,
+`release_tool`) that writes product files is fixed in the hook; an invalid
+fragment goes back to its lane. Otherwise rebuild the train without that slot
+and report it.
+
 <a id="queue-train-moved"></a>
 ### `QUEUE_TRAIN_MOVED`
 
