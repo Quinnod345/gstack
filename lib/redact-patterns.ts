@@ -475,23 +475,29 @@ export function isDotenvFilename(match: RegExpExecArray): boolean {
   return spanStart > 0 && input[spanStart - 1] === ".";
 }
 
-/** File extensions that are not top-level domains (checked against the IANA
- * root zone list, 2026-10-28). Extensions that are also TLDs (`.md`, `.py`,
- * `.sh`, `.rs`, `.so`, `.zip`, `.mov`, `.map`) are left out on purpose. */
-const NON_TLD_EXTENSION = /\.(?:json|jsonc|jsonl|ndjson|ya?ml|toml|lock|txt|csv|tsv|log|ini|cfg|conf|xml|html?|[mc]?js|jsx|tsx?|tgz|gz|tar|bz2|xz|zst|whl|jar|gem|nupkg|deb|rpm|wasm|svg|png|jpe?g|pdf|patch|diff)$/i;
+/** A trailing run of file extensions that are not top-level domains (checked
+ * against the IANA root zone list, 2026-10-28). Extensions that are also TLDs
+ * (`.md`, `.py`, `.sh`, `.rs`, `.so`, `.zip`, `.mov`, `.map`) are left out on
+ * purpose. */
+const NON_TLD_EXTENSIONS = /(?:\.(?:json|jsonc|jsonl|ndjson|ya?ml|toml|lock|txt|csv|tsv|log|ini|cfg|conf|xml|html?|[mc]?js|jsx|tsx?|tgz|gz|tar|bz2|xz|zst|whl|jar|gem|nupkg|deb|rpm|wasm|svg|png|jpe?g|pdf|patch|diff))+$/i;
 
 /**
  * True when a pii.email span is a filename with an `@` in it rather than an
  * address: `terminal-bench@2.0.json`, `lodash@4.17.21.tgz`,
- * `eslint-config@next.yaml`. The package@version convention puts a version
- * after the `@`, so either sign decides: the "domain" ends in a file extension
- * no TLD uses, or it is a dotted version (two or more all-digit labels) with
- * one label after it. `user@163.com` (one numeric label) and an address at a
- * TLD that doubles as an extension (`dev@acme.sh`, `ops@acme.md`) still report.
+ * `eslint-config@next.yaml`. The package@version convention puts a version or
+ * tag after the `@`, so either sign decides: the "domain" ends in file
+ * extensions no TLD uses and what precedes them cannot be a domain (one dotless
+ * label or a dotted version), or it is a dotted version (two or more all-digit
+ * labels) followed by an extension that doubles as a TLD (`a@1.2.md`). A file
+ * named after an address (`jane@acme.com.json`), `user@163.com`,
+ * `alice@1.2.com` and an address at a TLD that doubles as an extension
+ * (`dev@acme.sh`, `ops@acme.md`) still report.
  */
 export function looksLikeAtFilename(span: string): boolean {
   const domain = span.slice(span.lastIndexOf("@") + 1);
-  return NON_TLD_EXTENSION.test(domain) || /^\d+(?:\.\d+)+\.[A-Za-z]{2,}$/.test(domain);
+  const stem = domain.replace(NON_TLD_EXTENSIONS, "");
+  if (stem !== domain) return !/\.[A-Za-z]{2,}$/.test(stem);
+  return /^\d+(?:\.\d+)+\.(?:md|py|sh|rs|so|zip|mov|map)$/i.test(domain);
 }
 
 /** Extensions that mark a `<name>.local.<ext>` span as a file. Closed on

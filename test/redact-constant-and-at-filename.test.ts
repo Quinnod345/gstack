@@ -73,9 +73,9 @@ describe("pii.email and package@version filenames", () => {
     expect(looksLikeAtFilename("terminal-bench@2.0.json")).toBe(true);
   });
 
-  // Value: protects=real addresses still report, including a numeric domain label (163.com) and TLDs that double as file extensions (.sh, .md, .py,
-  // .zip); fails_when=the guard treats any digit label or any extension-like TLD as a filename; why_new=pins the narrowness of the new guard;
-  // seam=none (scan); no_claim=every IANA TLD
+  // Value: protects=real addresses still report, including numeric domain labels (163.com, 1.2.com), TLDs that double as file extensions (.sh, .md,
+  // .py, .zip) and a file named after an address; fails_when=the guard treats any digit label, any extension-like TLD or any trailing extension as a
+  // filename; why_new=pins the narrowness of the new guard; seam=none (scan); no_claim=every IANA TLD
   test("real addresses still report, numeric domains and extension-shaped TLDs included", () => {
     for (const s of [
       "mail alex@acme-corp.com",
@@ -85,6 +85,11 @@ describe("pii.email and package@version filenames", () => {
       "py team@acme.py",
       "files sales@acme.zip",
       "contact jo@mail.acme.io",
+      "reach alice@1.2.com",
+      "export jane.doe@acme-corp.com.json",
+      "log at ops-team@acme.io.log",
+      "uploaded jdoe@acme-corp.com.PDF",
+      "archive li.wei@163.com.tar.gz",
     ]) {
       expect([s, flags("pii.email", s)]).toEqual([s, true]);
     }
