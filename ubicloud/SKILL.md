@@ -242,18 +242,12 @@ VM after setup, and each is its own checkpoint:
 }
 ```
 
-`command` beside `tiers` is refused (`UBI_CONFIG_TIERS_AND_COMMAND`), and a
-name must match `[a-z0-9][a-z0-9_-]{0,31}` and be unique (`UBI_CONFIG_TIER_NAME`).
-Each tier's start, pass or fail is recorded under `UBI_CHECKPOINT_DIR` (default
-`~/.capy/work/ubi-runner/checkpoints`), keyed by the run key: the checkout's
-content, setup, tiers, env, a hash of each pass value, size, image, origin/HEAD
-and the runner itself. A rerun prints one `UBI_VERIFY_RESUME:` line per tier,
-reuses a pass younger than `UBI_CHECKPOINT_MAX_AGE` (86400 s) whose log still
-hashes, never reruns a recorded fail without `--rerun-failed`, and ignores the
-records with `--no-resume`. Its last line is `UBI_VERIFY: tree=… key=… tiers=…
-passed=… reused=… failed=… prior_failures=… saved_s=…`. A resume runs on a new
-VM, so every tier must pass from a fresh checkout plus setup; a tier that edits
-the source gets no pass record (`UBI_VERIFY_TREE_MOVED`).
+Tier names are unique `[a-z0-9][a-z0-9_-]{0,31}`. Results are recorded under
+`UBI_CHECKPOINT_DIR`, keyed by the checkout, config, env and runner. A rerun
+prints one `UBI_VERIFY_RESUME:` line per tier, reuses a pass younger than
+`UBI_CHECKPOINT_MAX_AGE` (86400 s), reruns a fail only with `--rerun-failed`,
+and ignores records with `--no-resume`; the last line is `UBI_VERIFY: …`. A
+resume uses a new VM, and a tier that edits the source gets no pass record.
 
 ---
 
@@ -279,18 +273,14 @@ is visible: a `standard-16` run is billed from create to confirmed teardown.
 
 ## Resume checklist after a wake or a machine swap
 
-1. Rerun the same command first. A run whose runner died (killed, a sleeping
-   machine) or detached (`UBI_DETACHED`, exit 129 after a HUP) reattaches to its
-   live VM (`reattached to <vm> created_at=<epoch> key=<k12>`) and continues
-   from the first phase without an exit status; a finished setup is not rerun.
-   `UBI_ATTACH_BUSY` means another runner on this machine still owns it;
-   `UBI_ATTACH_LOST` (exit 125) means the remote session died without a status.
+1. Rerun the same command first: a run whose runner died or detached
+   (`UBI_DETACHED`, exit 129 after a HUP) reattaches to its live VM and skips a
+   finished setup. `UBI_ATTACH_BUSY`: another runner here owns it;
+   `UBI_ATTACH_LOST` (exit 125): the remote session died without a status.
 2. `$U records` and `$U list --mine`, then `$U down` anything of yours that no
    rerun will reattach to.
-3. A machine replacement loses the state dir (run records and SSH keys), so
-   nothing reattaches there and the old VM waits for its TTL. Tier checkpoints
-   survive when `UBI_CHECKPOINT_DIR` is on a Drive: the rerun redoes setup and
-   only the tiers without a pass.
+3. A machine replacement loses the state dir, so nothing reattaches; tier
+   checkpoints survive when `UBI_CHECKPOINT_DIR` is on a Drive.
 4. A background log without its exit sentinel after the VM is gone is an
    interrupted run, not a pass; rerun it.
 5. Measure before/after pairs on the same size and location, never one side

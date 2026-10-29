@@ -719,7 +719,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       writeFileSync(join(f.root, 'make-test.sh'), 'echo begin; sleep 4; echo end; exit 3\n');
       const args = ['run', '--src', repo, '--setup', setup, '--', 'make test'];
       const a = f.spawn(args);
-      await until(() => phaseStarted(f, 'command'), 30_000);
+      await until(() => vmDirs(f).some(d => existsSync(join(f.state, d, 'command.out')) && readFileSync(join(f.state, d, 'command.out'), 'utf8').includes('begin')), 30_000);
       process.kill(a.pid, 'SIGKILL');
       await a.exited;
       const name = vmDirs(f)[0]!;
@@ -728,7 +728,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       const err = b.stderr.toString();
       expect(b.exitCode, err).toBe(3);
       expect(err).toMatch(new RegExp('ubi-runner: reattached to ' + name + ' created_at=\\d{10} key=[0-9a-f]{12}\n'));
-      expect(b.stdout.toString()).toContain('end');
+      expect(b.stdout.toString().split('\n').filter(l => l === 'begin' || l === 'end')).toEqual(['begin', 'end']);
       expect(err).toMatch(/command exited 3 after \d+s/);
       expect(creates(f)).toBe(1);
       expect(readFileSync(join(f.vm, 'setup-count'), 'utf8')).toBe('setup\n');
@@ -783,6 +783,23 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   }, 90_000);
 
+  test('run: HUP on a VM without a TTL tears it down instead of detaching', async () => {
+    const f = fakeVm();
+    try {
+      const repo = gitSrc(f);
+      writeFileSync(join(f.root, 'make-test.sh'), 'sleep 3\n');
+      const a = f.spawn(['run', '--src', repo, '--', 'make test'], { UBI_TTL_HOURS: '0' });
+      await until(() => phaseStarted(f, 'command'), 30_000);
+      await Bun.sleep(500);
+      process.kill(a.pid, 'SIGHUP');
+      expect(await a.exited).toBe(130);
+      const err = await new Response(a.stderr).text();
+      expect(err).toMatch(/HUP: ubirun-thrd1-\S+ has no TTL, so it is torn down instead of detached/);
+      expect(err).not.toContain('UBI_DETACHED');
+      expect(f.listed()).toBe('');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('run: INT and TERM during a live command still tear the VM down', async () => {
     for (const sig of ['SIGTERM', 'SIGINT'] as const) {
       const f = fakeVm();
@@ -807,7 +824,7 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       writeFileSync(join(f.root, 'make-test.sh'), 'sleep 30\n');
       const args = ['run', '--src', repo, '--', 'make test'];
       const a = f.spawn(args);
-      await until(() => phaseStarted(f, 'command'), 30_000);
+      await until(() => existsSync(join(f.vm, '.ubirun-command.pid')) && readFileSync(join(f.vm, '.ubirun-command.pid'), 'utf8').trim() !== '', 30_000);
       process.kill(a.pid, 'SIGKILL');
       await a.exited;
       await killSession(f, 'command');
@@ -962,6 +979,23 @@ describe('ubi-runner run, verify and quota against a fake API and a fake ssh', (
       expect(gens).toEqual(gens.map((_, i) => i + 1));
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   }, 120_000);
+
+  test('verify tiers: a writer whose start record is no longer the newest publishes nothing (stale writer)', () => {
+    const py = /\nCKPT_PY='\n([^']*)'\n/.exec(readFileSync(join(DIR, 'ubi-runner.sh'), 'utf8'))![1]!;
+    const root = mkdtempSync(join(tmpdir(), 'ubi-ckpt-'));
+    try {
+      const d = join(root, 'key');
+      const log = join(root, 'tier.log'); writeFileSync(log, 'ok\n');
+      const publish = (status: string, startgen: string, pid: string) => Bun.spawnSync(['python3', '-c', py, 'publish', d, 't1', status, 'vm', '100', '200', '0', status === 'start' ? '' : log, startgen, 'k', 'tree', pid], { timeout: 30_000 });
+      expect(publish('start', '0', '1').stdout.toString().trim()).toBe('1');
+      expect(publish('start', '0', '2').stdout.toString().trim()).toBe('2');
+      const stale = publish('pass', '1', '1');
+      expect(stale.exitCode).toBe(2);
+      expect(stale.stderr.toString()).toContain('stale writer: its start record is generation 1, the newest for t1 is 2');
+      expect(readdirSync(d).filter(n => n.endsWith('.json')).length).toBe(2);
+      expect(publish('pass', '2', '2').stdout.toString().trim()).toBe('3');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 
   test('verify tiers: a tier that edits the source gets no pass record (UBI_VERIFY_TREE_MOVED) and reruns next time', () => {
     const f = fakeVm();

@@ -354,10 +354,12 @@ stream_cmd() {
 PHASE_LIVE="" STREAM_PID="" RUN_KEY="" TREE=""
 
 # on_hup: once a remote phase is live, HUP detaches: the VM keeps running under
-# its TTL and the next run of the same command reattaches. Before that, HUP
-# tears down like INT and TERM.
+# its TTL and the next run of the same command reattaches. Before that, or on
+# a VM without a TTL (nothing would ever reap it), HUP tears down like INT and
+# TERM.
 on_hup() {
   [ -n "$PHASE_LIVE" ] || exit 130
+  [[ "$RUN_VM" =~ -t[0-9]+$ ]] || { log "HUP: $RUN_VM has no TTL, so it is torn down instead of detached"; exit 130; }
   [ -z "$STREAM_PID" ] || kill -TERM -- "-$STREAM_PID" 2>/dev/null || true
   trap - EXIT
   rm -f "$(state_dir "$RUN_VM")/lease"
@@ -372,7 +374,7 @@ on_hup() {
 # recorded start, not from a reattach. Returns the phase's exit status, 124
 # after a watchdog kill, 125 when the session is gone without an exit status.
 detached() {
-  local name=$1 phase=$2 inner=$3 dir st rc=0 tries=0 start now idle elapsed last_beat why old_traps spid sst
+  local name=$1 phase=$2 inner=$3 dir st rc=0 tries=0 start now idle elapsed last_beat why old_traps spid sst oo oe
   load "$name"
   dir=$(state_dir "$name")
   local lout="$dir/$phase.out" lerr="$dir/$phase.err" out="$dir/$phase.log" p="~/.ubirun-$phase"
@@ -397,6 +399,8 @@ detached() {
   if [ -f "$dir/stream" ] && read -r spid sst <"$dir/stream" && [ -n "$spid" ] && [ "$(proc_start "$spid")" = "$sst" ]; then
     kill -TERM -- "-$spid" 2>/dev/null || true
   fi
+  oo=$(fsize "$lout") oe=$(fsize "$lerr")
+  if [ "$st" != none ]; then head -c "$oo" "$lout"; head -c "$oe" "$lerr" >&2; fi
   old_traps=$(trap -p INT TERM)
   trap '[ -z "$STREAM_PID" ] || kill -TERM -- "-$STREAM_PID" 2>/dev/null; exit 130' INT TERM
   last_beat=$(date +%s)
@@ -404,7 +408,7 @@ detached() {
     touch "$out"
     # shellcheck disable=SC2046
     ( exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-        ssh $(ssh_opts) "ubi@$IP" "umask 022; $(stream_cmd "$phase" "$(fsize "$lout")" "$(fsize "$lerr")")" ) \
+        ssh $(ssh_opts) "ubi@$IP" "umask 022; $(stream_cmd "$phase" "$oo" "$oe")" ) \
       </dev/null > >(tee -a "$lout" | tee -a "$out") 2> >(tee -a "$lerr" | tee -a "$out" >&2) &
     STREAM_PID=$!
     echo "$STREAM_PID $(proc_start "$STREAM_PID")" >"$dir/stream"
@@ -453,6 +457,7 @@ detached() {
     if [ "$tries" -ge 5 ]; then log "lost the connection to $phase on $name 5 times; giving up (the VM keeps it until teardown)"; rc=255; break; fi
     log "the stream of $phase on $name dropped; following it again"
     sleep "$POLL"
+    oo=$(fsize "$lout") oe=$(fsize "$lerr")
   done
   rm -f "$dir/stream"
   trap - INT TERM; eval "$old_traps"
@@ -1191,6 +1196,10 @@ cmd_run() {
       echo "UBI_ATTACH_INFO: vm=$attach created_at=$(load "$attach"; echo "$CREATE_AT") key=${RUN_KEY:0:12} busy=$busy"
     fi
     return 0
+  fi
+  if [ ${#TIER_NAMES[@]} -gt 0 ] && { [ -n "$TIER_BLOCKED" ] || [ "$TIER_TO_RUN" -eq 0 ]; } && [ -n "$attach" ] && ! lease_busy "$(state_dir "$attach")"; then
+    log "verify: no tier needs $attach, which a dead runner left behind; destroying it"
+    cmd_down "$attach" >/dev/null || log "WARNING: failed to destroy $attach; run: $0 down $attach"
   fi
   if [ ${#TIER_NAMES[@]} -gt 0 ] && [ -n "$TIER_BLOCKED" ]; then
     TIER_FAILED=$TIER_BLOCKED
