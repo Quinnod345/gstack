@@ -307,7 +307,11 @@ describe('D6: the scoped second pass after a blocking fix (GSTA-152 PR B)', () =
     expect(p.dispatches.every(d => d.effort === 'full' && d.exclude.length === 0)).toBe(true);
   });
   test('Step 11 voices that have not run yet stay listed, as on a full pass 2', () => {
-    expect(r(planReview(n19({ adversarialRan: false })))).toEqual(['fix-check:fix-check', 'red-team:red-team', 'adversarial-native:adversarial', 'outside-voice:outside-voice']);
+    const p = planReview(n19({ adversarialRan: false }));
+    expect(r(p)).toEqual(['fix-check:fix-check', 'red-team:red-team', 'adversarial-native:adversarial', 'outside-voice:outside-voice']);
+    expect(p.skipped).toContain('specialists (scoped pass)');
+    expect(planReview(n19()).skipped).toEqual(expect.arrayContaining(['specialists (scoped pass)', 'outside-voice (scoped pass)']));
+    expect(planReview(n19({ force: ['security'] })).skipped).toContain('specialists (scoped pass; forced ones dispatched)');
   });
   test.each([
     ['full depth (a gate tag)', { gateTagged: 1 }],

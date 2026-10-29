@@ -107,7 +107,7 @@ function main(): number {
   const tiersSetting = runScriptSync(path.join(binDir, 'gstack-config'), ['get', 'review_effort_tiers'], { encoding: 'utf8', timeout: 15_000 });
   const auditEffort = has('--no-tiers') || (tiersSetting.stdout ?? '').trim() === 'off' ? 'host' : 'light';
   const { added, diffLines, paths, deleted, stampOnly, perPath, registry } = collected;
-  let fixRange: { base: string; runtime_lines: number | null; error?: string } | undefined;
+  let fixRange: { base: string; runtime_lines: number | null; error?: string; touched_gate?: true } | undefined;
   if (rangeBase) {
     const unread = (error: string) => ({ base: rangeBase, runtime_lines: null, error });
     const resolved = git(['rev-parse', '--verify', '--quiet', `${rangeBase}^{commit}`])?.trim();
@@ -115,14 +115,17 @@ function main(): number {
     else if (git(['merge-base', '--is-ancestor', resolved, 'HEAD']) === null) fixRange = unread('not an ancestor of HEAD');
     else if (git(['diff', '--quiet', 'HEAD', '--']) === null || collected.untracked.length) fixRange = unread('uncommitted or untracked edits: commit the fixes first');
     else {
-      const range = classifyDiff({ ...collectCommit(root, resolved, 'HEAD'), registry, gateTagged: 0 });
-      fixRange = range.errors.length ? unread(range.errors.map(e => `${e.code} ${e.input}`).join('; ')) : { base: rangeBase, runtime_lines: range.runtimeLines };
+      const commit = collectCommit(root, resolved, 'HEAD');
+      const range = classifyDiff({ ...commit, registry, gateTagged: 0 });
+      fixRange = range.errors.length ? unread(range.errors.map(e => `${e.code} ${e.input}`).join('; '))
+        : !commit.paths.length ? unread('the fix range is empty: commit the fix after the range base')
+        : { base: rangeBase, runtime_lines: range.runtimeLines, ...(range.class === 'gate' ? { touched_gate: true as const } : {}) };
     }
   }
   const plan = planReview({
     ...collected, scope, gateTagged, numbers: scanNumbers(added), force, gated: list('--gated'), floor,
     criticalFound: has('--critical-found'), adversarialRan: has('--adversarial-ran'), reviewedNumbers: flag('--reviewed-numbers'),
-    history: { fullPasses: pass, last, fixedBlocking: has('--fixed-blocking'), fixedBelow: has('--fixed-below'), blockingOpen: has('--blocking-open'), touchedGate: has('--touched-gate'), rangeRuntimeLines: fixRange?.runtime_lines },
+    history: { fullPasses: pass, last, fixedBlocking: has('--fixed-blocking'), fixedBelow: has('--fixed-below'), blockingOpen: has('--blocking-open'), touchedGate: has('--touched-gate') || !!fixRange?.touched_gate, rangeRuntimeLines: fixRange?.runtime_lines },
   });
   const gateScan = { tagged: gateTagged, head };
   if (has('--json')) {

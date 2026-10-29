@@ -194,6 +194,19 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
     expect(dirty).toMatch(/^NEXT: full /m);
     expect(run(r, [...pass2, '--range-base']).status).toBe(2);
   });
+  test('a fix range that touches a gate path keeps the full pass 2 without --touched-gate, and an empty range is unread', () => {
+    const r = repo({ 'src/a.ts': code(80), '.github/workflows/ci.yml': 'on: push\n' });
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
+    const rangeBase = git('rev-parse', 'HEAD').stdout.trim();
+    expect(run(r, [...pass2, '--range-base', rangeBase]).stdout).toMatch(/^FIX_RANGE: unread \(the fix range is empty: .*\) base=/m);
+    git('rm', '-q', '.github/workflows/ci.yml');
+    fs.writeFileSync(path.join(r.dir, 'src', 'b.ts'), code(2, 'b'));
+    git('add', '.'); git('commit', '-qm', 'fix: revert the workflow edit');
+    const out = run(r, [...pass2, '--range-base', rangeBase]).stdout;
+    expect(out).toMatch(/^REVIEW_DEPTH: standard /m);
+    expect(out).toMatch(/^NEXT: full \(a blocking finding was fixed and a fix touched a gate-class path/m);
+    expect(JSON.parse(run(r, [...pass2, '--range-base', rangeBase, '--json']).stdout)).toMatchObject({ next: { step: 'full' }, fix_range: { touched_gate: true } });
+  });
   test('--depth-floor full opts out of the scoped pass', () => {
     const { r, rangeBase } = fixed(10);
     expect(run(r, [...pass2, '--range-base', rangeBase, '--depth-floor', 'full']).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the diff is at full depth/m);

@@ -134,8 +134,9 @@ force-included specialist and the outside voice when published numbers changed.
 Step 11's voices that have not run yet stay listed, as on a full pass 2. It
 writes a full-pass `review` row with `"scope":"scoped"`, so it counts toward
 the cap, and a blocker it leaves open stops for the owner as before. A fix that
-touched a gate-class path, a larger range, or a range, classifier or depth it
-cannot read keeps the full pass 2. The 150-line figure is a starting value from
+touched a gate-class path (read from the range itself, so a revert of a gate
+edit counts without `--touched-gate`), a larger range, an empty range, or a
+range, classifier or depth it cannot read keeps the full pass 2. The 150-line figure is a starting value from
 a 24-PR backtest (GSTA-152 D6), to revisit once classified findings carry
 `raised_by`.
 

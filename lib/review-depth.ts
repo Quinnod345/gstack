@@ -354,14 +354,16 @@ export function planReview(i: PlanInput): ReviewPlan {
     }
   } else if (next.step === 'scoped') {
     add('fix-check', 'fix-check', 'full');
-    for (const n of SPECIALISTS.filter(forcedBy(i))) add('specialist', n, 'full');
+    const forced = SPECIALISTS.filter(forcedBy(i));
+    for (const n of forced) add('specialist', n, 'full');
+    skipped.push(forced.length ? 'specialists (scoped pass; forced ones dispatched)' : 'specialists (scoped pass)');
     add('red-team', 'red-team', 'full');
     const stepElevenPending = !i.adversarialRan && cls === 'code';
     if ((h.rangeRuntimeLines ?? 0) > 0 || stepElevenPending) add('adversarial-native', 'adversarial', 'full');
     else skipped.push('adversarial-native (scoped pass: the fix range changes no runtime lines)');
     if (stepElevenPending) add('outside-voice', 'outside-voice', 'host');
     else if (numbersChanged) add('outside-voice', 'outside-voice (numbers changed)', 'host');
-    else skipped.push('specialists and outside-voice (scoped pass)');
+    else skipped.push('outside-voice (scoped pass)');
   } else if (next.step === 'fix-check') {
     add('fix-check', 'fix-check', 'full');
     if (numbersChanged) add('outside-voice', 'outside-voice (numbers changed)', 'host');
