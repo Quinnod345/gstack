@@ -214,7 +214,7 @@ then did it go on by default.
 
 [^1]: Windows are UTC, [2026-10-01, 2026-10-15) before and
     [2026-10-15, 2026-10-29) after. Merged PRs are GitHub's `mergedAt` with base
-    `main` (`gh pr list --state merged --search 'merged:2026-10-15..2026-10-28 base:main'`
+    `main` (`gh pr list --state merged --limit 1000 --search 'merged:2026-10-15..2026-10-28 base:main'`
     returns 197; the same query for 10-01..10-14 returns 65). Versions are distinct
     new values of `VERSION` on main's first-parent history. The March comparison is
     the busiest 14-day window between 2026-03-01 and 2026-09-15. Issue-to-fix time
