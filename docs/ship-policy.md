@@ -221,8 +221,11 @@ It refuses (`QUEUE_NOT_READY`) when the working tree has tracked edits, HEAD
 is not the PR's pushed head, CI at that exact head is not green, or the pregate
 result is not a current pass, and (`QUEUE_RECEIPT_MISSING`,
 `QUEUE_RECEIPT_STALE`) when the PR body carries no /ship receipt for that
-head: /ship runs before every READY ([details](#ship-before-ready)). Send the
-block as printed.
+head: /ship runs before every READY ([details](#ship-before-ready)). It also
+refuses `QUEUE_RECEIPT_DEPTH_RAISED` when the receipt's review depth is below
+what the head needs and `QUEUE_RECEIPT_EXCEPTION_INVALID` when an owner
+exception the receipt records does not stand ([the ship receipt](#ship-receipt)).
+Send the block as printed.
 
 **2. Lane behind another PR: gate ahead.** Gate the tree the queue will have
 once the predecessor lands, while it is still open:
@@ -370,12 +373,17 @@ slot. The queue enforces this at every step from the PR body alone:
 - `ready` refuses with `QUEUE_RECEIPT_MISSING` when the body has no valid
   receipt and with `QUEUE_RECEIPT_STALE` when the receipt's `head` is not the
   head being READY'd (or its `pr` is another PR); the informational
-  `SHIP_RECEIPT:` line still prints. There is no flag around it.
+  `SHIP_RECEIPT:` line still prints. It refuses `QUEUE_RECEIPT_DEPTH_RAISED`
+  (with a `REVIEW_DEPTH:` line) when the receipt records a review depth below
+  what the head needs, and `QUEUE_RECEIPT_EXCEPTION_INVALID` when an owner
+  exception it records does not stand ([the ship receipt](#ship-receipt)).
+  There is no flag around it.
 - `train build` refuses a pin whose PR has no current receipt with the same
   codes, naming the PR, before anything is written, pushed or dispatched,
   `--dry-run` included.
-- `verify --train` refuses the slot with the same codes before printing
-  `MERGE_CONDITION`.
+- `verify --train` refuses the slot with `QUEUE_RECEIPT_MISSING` or
+  `QUEUE_RECEIPT_STALE` before printing `MERGE_CONDITION`; it does not
+  recompute the review depth.
 
 **The stamp keeps the pin's receipt.** The slot's stamp commit changes only
 stamp files (and, from slot 2 on, merges main into the pin), so no /ship runs
@@ -478,6 +486,9 @@ its record. Refusals, all before any spend: `QUEUE_TRAIN_UNTRUSTED` (a fork
 head), `QUEUE_TRAIN_MOVED` (a head moved from its pin),
 `QUEUE_RECEIPT_MISSING` and `QUEUE_RECEIPT_STALE` (the PR body has no /ship
 receipt for the pin; see [/ship before READY](#ship-before-ready)),
+`QUEUE_RECEIPT_DEPTH_RAISED` and `QUEUE_RECEIPT_EXCEPTION_INVALID` (the
+receipt's review depth is below what the pin needs, or an owner exception it
+records does not stand; see [the ship receipt](#ship-receipt)),
 `QUEUE_NOT_READY` (no READY receipt at that head), `QUEUE_TRAIN_CONFLICT` (the printed
 `QUEUE_TRAIN_CONFLICT: train <id> stopped at #<pr> (conflicts: <files>) after
 merging #<a>,#<b>; nothing dispatched, no branch pushed; fix: …` line names
@@ -836,7 +847,8 @@ recomputes the depth at the new head, rebinds the gate scan, and refuses when
 the new head needs a deeper review than the receipt records (a test change that
 skips a test raises the diff to gate class), when `--head` is not the
 checked-out HEAD, when the receipt records `gstack_version` without
-`review_depth`, or when an owner exception no longer stands.
+`review_depth`, or when an owner exception no longer stands, each as
+[`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused).
 
 **`review_loop_exception`.** The owner's acceptance of a stop after a
 fix-check edit under frozen scope (#3559), from `write --review-loop-exception
