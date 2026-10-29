@@ -119,11 +119,11 @@ export function receiptSummaryLine(r: ShipReceipt): string {
   if (r.predecessor) parts.push(`predecessor=${r.predecessor.slice(0, 12)}`);
   if (r.session_kind) parts.push(`session_kind=${r.session_kind}`);
   if (r.artifacts_consumed) parts.push(`artifacts_consumed=${r.artifacts_consumed}`);
+  if (r.review_depth && typeof r.review_depth.depth === 'string') parts.push(`depth=${r.review_depth.depth}`);
   if (r.approval) parts.push(`approval=${approvalSummary(r.approval)}`);
   const loop = parseReviewLoop(r.review_loop);
   if (loop) parts.push(`passes=${loop.passes} blocking_found=${loop.blocking_found} deferred=${loop.deferred}`
     + (loop.fix_checks ? ` fix_checks=${loop.fix_checks}` : '') + (loop.dispatches ? ` dispatches=${Object.values(loop.dispatches).reduce((a, c) => a + c, 0)}` : ''));
-  if (r.review_depth && typeof r.review_depth.depth === 'string') parts.push(`depth=${r.review_depth.depth}`);
   if (r.carry && typeof r.carry.from === 'string') parts.push(`carried_from=${r.carry.from.slice(0, 12)}`);
   return `SHIP_RECEIPT: ${oneLine(parts.join(' '))}`;
 }
