@@ -99,7 +99,8 @@ Step 12, 150k or more (or an unknown charge) delegates the next segment (7–11.
    brief (mode 0600, under the run directory) with the pins (HEAD, merge base, working tree,
    reviewed tree), the record with its six headings and start tokens, the decisions in scope
    with the owner's words, the decision trail, the budget and the return contract. It reserves
-   the child's sub-cap: min(cap − used − reserved − tail, the segment estimate), or `--sub-cap`.
+   the child's sub-cap: min(cap − used − reserved − unknown − the calibrated tail reserve and stop
+   overhead, the segment estimate), or `--sub-cap`.
 2. The child is a Capy subagent on the shared machine, or on Claude Code
    `gstack-ship-budget launch --in <brief>`: a background `claude -p` (resolved through lib/claude-bin.ts)
    with explicit permission flags and the return file named.
