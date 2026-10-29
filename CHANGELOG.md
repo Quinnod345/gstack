@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.314.0] - 2026-10-29
 
 **A later autoplan gate that asks nothing new is now answered with the owner's earlier words instead of another round trip.** Captains were carrying approvals across gate revisions by hand (GSTA-140 reused a rev-1 "Do it" on rev 2; ALPH-50 lost about 27 minutes to one), and a replay over 23 recorded runs found 14 later gates, 8 of them holding only post-cap delta items.
 
