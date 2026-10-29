@@ -12,12 +12,12 @@
  * ends with a conditional receipt; `wait` re-runs the cases on each new base
  * head and returns once they pass there, and `/ship --resume` re-runs Step 5.
  */
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ShipReceipt } from './headless-artifacts';
 import { type BaseRedPolicy } from './ship-policy';
 import { git, sha256, writeJsonAtomic } from './ship-queue-gate';
+import { runBashSync } from './script-invocation';
 import { resolveStateRoot } from './state-root';
 
 export const PAUSE_HOURS = 24;
@@ -36,7 +36,7 @@ export interface PauseRecord {
 }
 
 export const shellRunner: Runner = (cwd, command, timeoutSec) => {
-  const r = spawnSync('bash', ['-c', command], { cwd, encoding: 'utf8', timeout: timeoutSec * 1000, env: { ...process.env, CI: process.env.CI ?? '1' }, maxBuffer: 64 * 1024 * 1024 });
+  const r = runBashSync(command, { cwd, encoding: 'utf8', timeout: timeoutSec * 1000, env: { ...process.env, CI: process.env.CI ?? '1' }, maxBuffer: 64 * 1024 * 1024 });
   return { status: r.status, out: `${r.stdout ?? ''}\n${r.stderr ?? ''}`, error: r.error ? r.error.message : r.signal ? `killed by ${r.signal}` : undefined };
 };
 
