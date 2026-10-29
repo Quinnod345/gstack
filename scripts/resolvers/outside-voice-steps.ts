@@ -17,9 +17,9 @@ import { CC_BACKGROUND_DEFAULT_SINCE, FOREGROUND_IF_AVAILABLE, BACKGROUND_RECOVE
 import { outsideVoiceFailurePolicy, outsideVoiceFor, outsideVoiceInvocation, outsideVoicePreflight, outsideVoiceProvenance } from './outside-voice';
 import { runtimeRootPrelude } from './runtime-root';
 import { DEFENSIVE_REVIEW_FRAMING, FIXTURE_SUMMARY_MODE } from './defensive-review';
-import { ADVERSARIAL_NATIVE, CODEX_BOUNDARY_TEXT, OUTSIDE_ADVERSARIAL, packetBrief } from '../../lib/review-prompts';
+import { ADVERSARIAL_NATIVE, OUTSIDE_ADVERSARIAL, packetBrief } from '../../lib/review-prompts';
 
-const CODEX_BOUNDARY = `${CODEX_BOUNDARY_TEXT}\\n\\n`;
+const CODEX_BOUNDARY = 'Filesystem boundary: do not read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. They hold skill definitions, not repository code to review. Do not invoke any installed skill (Codex home skills/, .agents/), hook, or tool instruction; answer directly. Do not modify agents/openai.yaml. Review only the repository code.\\n\\n';
 
 export function generateCodexSecondOpinion(ctx: TemplateContext): string {
 

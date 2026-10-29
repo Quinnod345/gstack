@@ -180,6 +180,10 @@ describe('the packet prose and the generated SKILL.md prose are one text', () =>
     expect(read('ship/sections/review-army.md')).toContain(P.packetBrief('<file>', '<out>'));
     expect(read('ship/sections/adversarial.md')).toContain(P.packetBrief('<file>', '<out>'));
   });
+  test('the outside voice boundary the safety-rule registry pins in the resolver is the packet\'s boundary', () => {
+    const line = read('scripts/resolvers/outside-voice-steps.ts').split('\n').find(l => l.startsWith('const CODEX_BOUNDARY = '))!;
+    expect(line).toBe(`const CODEX_BOUNDARY = '${P.CODEX_BOUNDARY_TEXT}\\\\n\\\\n';`);
+  });
   test('the resolvers import the prompt bodies instead of holding a copy', () => {
     for (const f of ['scripts/resolvers/review-army.ts', 'scripts/resolvers/outside-voice-steps.ts', 'scripts/resolvers/fix-check.ts', 'scripts/resolvers/defensive-review.ts']) {
       const src = read(f);
