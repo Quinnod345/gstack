@@ -432,6 +432,32 @@ jobs:
           sudo install -T -o root -g root -m 4755 "$helper" "$installed"
           test "$(stat -c '%u:%a' "$installed")" = '0:4755'
           cmp -s "$helper" "$installed"
+      - name: DIAG chromium launch on this image
+        run: |
+          set +e
+          grep -m1 -E 'Version' /etc/os-release; uname -a
+          cat "$RUNNER_TEMP/../../.setup_info" 2>/dev/null | head -20
+          for k in kernel.apparmor_restrict_unprivileged_userns kernel.apparmor_restrict_unprivileged_unconfined kernel.unprivileged_userns_clone user.max_user_namespaces kernel.yama.ptrace_scope; do echo "$k=$(sysctl -n $k 2>&1)"; done
+          findmnt -T "$HOME"; findmnt -T /tmp; findmnt -T /dev/shm
+          chrome=$(bun -e 'import { chromium } from "playwright"; console.log(chromium.executablePath())')
+          ls -l "${chrome%/*}/chrome-sandbox" "$chrome"
+          sudo aa-status 2>&1 | head -40
+          ls /etc/apparmor.d | head -60
+          unshare -Ur true && echo "unshare userns OK" || echo "unshare userns FAILED"
+          d=$(mktemp -d)
+          "$chrome" --headless=new --user-data-dir="$d/a" --dump-dom about:blank 2>&1 | tail -20; echo "plain exit=$?"
+          "$chrome" --headless=new --no-zygote --user-data-dir="$d/b" --dump-dom about:blank 2>&1 | tail -5; echo "nozygote exit=$?"
+          "$chrome" --headless=new --disable-namespace-sandbox --user-data-dir="$d/c" --dump-dom about:blank 2>&1 | tail -10; echo "suid-only exit=$?"
+          "$chrome" --headless=new --no-sandbox --user-data-dir="$d/e" --dump-dom about:blank 2>&1 | tail -5; echo "nosandbox exit=$?"
+          DEBUG=pw:browser node -e '
+            const { chromium } = require("playwright");
+            (async () => {
+              try { const c = await chromium.launchPersistentContext(process.argv[1], { headless: true, chromiumSandbox: true, args: ["--remote-debugging-pipe"] }); console.log("PW OK"); await c.close(); }
+              catch (e) { console.log("PW ERR", e.message.slice(0, 4000)); }
+            })();' "$d/pw" 2>&1 | tail -60
+          sudo dmesg 2>&1 | tail -30
+          sudo journalctl -k --no-pager 2>&1 | grep -iE 'apparmor|denied|audit' | tail -20
+          exit 1
 
       # Headed-browser tests (handoff, extension sidepanel DOM) need a real
       # DISPLAY — first Linux run failed with Playwright's "launched a headed
