@@ -954,6 +954,22 @@ receipt when the base moves:
 | a merge of the base whose resolution changed product code | a fresh /ship (`RECEIPT_CARRY_PRODUCT_CHANGED`) |
 | a rebase or force-push onto a tree the receipt covers, product diff against the new base unchanged | carries (`carry.ancestry: rewritten`) |
 | any other rebase or force-push | a fresh /ship (`RECEIPT_CARRY_TREE_MISMATCH`) |
+| a stacked PR whose parent landed (squash or merge), retargeted to the base with the base merged in, HEAD's product diff exactly the one reviewed against the parent branch | carries (reason `stack parent <branch> landed`) |
+
+**Stacked PRs (#3570).** A child PR's receipt is written against its parent
+branch, so its `base` names that branch and its `product_patch_id` is the
+child's own range. After the parent lands, the PR is retargeted to the base, and
+/ship's carry check runs with `--base <base>`. When that base differs from the
+receipt's, the carry compares the reviewed range (the recorded
+`product_patch_id`, or for an older receipt the range against
+`origin/<parent>` while that branch still resolves) with HEAD's whole product
+diff against the base, computed the way `write` records it, so a parent's
+release-metadata change that never reached the base counts too. Equal means
+the parent fully landed and the child is unchanged, so the receipt carries
+and from then on names the base it was carried to. A parent that has not landed, a child edited
+since, or a parent that landed with changes the child never merged all leave a
+different diff and refuse with `RECEIPT_CARRY_PRODUCT_CHANGED`. An older
+receipt whose parent branch is gone refuses with `RECEIPT_CARRY_REFUSED`.
 
 Since the release that added `review_scope`. A `/ship` receipt names the head it
 reviewed, so a conflict-only merge of the base or a test-only fix used to
