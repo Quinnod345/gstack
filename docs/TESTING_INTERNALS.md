@@ -1412,7 +1412,8 @@ never masks it. `bun run eval:pass-rates` lists only the local ledger
 Other repositories get the same rule per test with `bin/gstack-flaky run`
 ([docs/flaky.md](flaky.md)): it reads a JUnit report from any runner, reruns
 each failed test once, and writes `flaky-pass` and `rerun-fail` lines to its
-own ledger (`flake-ledger-junit.jsonl`).
+own ledger (`flake-ledger-junit.jsonl`, or `GSTACK_FLAKE_LEDGER_JUNIT`), kept apart
+from this file-level ledger.
 
 The aggregate job of `free-tests.yml` downloads every `flake-ledger-*` artifact
 of the run and appends `bun run scripts/test-health-report.ts flake-summary <dir>`

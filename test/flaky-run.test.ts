@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { JunitError, parseJunit, readJunit, testId } from '../lib/junit';
-import { renderResult, rerunSelection, runFlaky, safeExcerpt, stepSummary, unreportedFailures } from '../lib/flaky-run';
+import { appendLedger, incompleteRun, ledgerPath, renderResult, rerunSelection, runFlaky, safeExcerpt, stepSummary, unreportedFailures, workflowEscape } from '../lib/flaky-run';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIX = path.join(ROOT, 'test', 'fixtures', 'junit');
@@ -77,15 +77,27 @@ describe('rerun selection', () => {
     const t = parseJunit(fixture('bun.xml')).tests[1]!;
     expect(rerunSelection('bun', t)).toEqual(['a.test.ts', '--test-name-pattern', '^outer inner fails$']);
   });
-  test('generic: templates substitute into single argv elements; none given is a coded refusal', () => {
-    const t = parseJunit('<testsuites><testsuite name="s"><testcase name="a b; rm x" file="t.py"><failure/></testcase></testsuite></testsuites>').tests[0]!;
-    expect(rerunSelection('generic', t, ['{file}', '-k', '{title}'])).toEqual(['t.py', '-k', 'a b; rm x']);
-    expect(() => rerunSelection('generic', t)).toThrow(JunitError);
+});
+
+describe('complete-run proof for a targeted rerun', () => {
+  test('a complete run needs exit 1 and the runner summary without an early stop', () => {
+    expect(incompleteRun('bun', ' 4 pass\n 1 fail\nRan 5 tests across 2 files. [9ms]\n', 1)).toBeNull();
+    expect(incompleteRun('bun', 'Bailed out after 1 failure\nRan 1 test across 1 file.\n', 1)).toContain('--bail');
+    expect(incompleteRun('bun', ' 1 fail\n', 1)).toContain('no run summary');
+    expect(incompleteRun('bun', 'Ran 5 tests across 2 files.\n', 2)).toContain('exited 2');
+    expect(incompleteRun('playwright', '  1 failed\n    [alpha] x\n  4 passed (1s)\n', 1)).toBeNull();
+    expect(incompleteRun('playwright', 'Testing stopped early after 1 maximum allowed failures.\n  1 failed\n  2 did not run\n', 1)).toContain('2 did not run');
+    expect(incompleteRun('playwright', '  1 failed\n  3 interrupted\n', 1)).toContain('3 interrupted');
+    expect(incompleteRun('playwright', 'Timed out waiting 600s for the test suite to run\nTimed out waiting 600s for the entire test run\n  1 failed\n', 1)).toContain('stopped early');
+    expect(incompleteRun('playwright', '', 1)).toContain('no summary');
+    expect(incompleteRun('generic', 'Ran 5 tests', 1)).toContain('generic');
   });
 });
 
 /** A fake runner: argv selection decides which canned report the attempt writes. */
-function fakeRun(reports: (argv: string[], n: number) => string | null, exits: (argv: string[], n: number) => number, outputs: (argv: string[], n: number) => string = () => '') {
+const BUN_SUMMARY = 'Ran 2 tests across 1 file. [3ms]\n';
+
+function fakeRun(reports: (argv: string[], n: number) => string | null, exits: (argv: string[], n: number) => number, outputs: (argv: string[], n: number) => string = () => BUN_SUMMARY, signals: (n: number) => string | undefined = () => undefined) {
   const calls: string[][] = [];
   return {
     calls,
@@ -94,7 +106,8 @@ function fakeRun(reports: (argv: string[], n: number) => string | null, exits: (
         calls.push(argv);
         const xml = reports(argv, calls.length);
         if (xml !== null) fs.writeFileSync(path.resolve(cwd, junit), xml);
-        return { exit: exits(argv, calls.length), output: outputs(argv, calls.length) };
+        const signal = signals(calls.length);
+        return { exit: exits(argv, calls.length), output: outputs(argv, calls.length), ...(signal ? { signal } : {}) };
       };
     },
   };
@@ -191,6 +204,14 @@ describe('runFlaky', () => {
     expect(f.calls).toHaveLength(2);
   });
 
+  test('a runner-caught flake is ledgered even when a duplicate execution of the test was skipped', async () => {
+    const dir = tmp();
+    const caught = '<testcase name="b" classname="" file="a.test.ts"><flakyFailure message="x"/></testcase>';
+    const r = await base(fakeRun(() => suite(caught + '<testcase name="b" classname="" file="a.test.ts"><skipped/></testcase>'), () => 0), dir);
+    expect(r.exitCode).toBe(0);
+    expect(r.ledger.map(l => [l.kind, l.rerun_by])).toEqual([['flaky-pass', 'runner']]);
+  });
+
   test('the Playwright environment flag reaches every attempt', async () => {
     const dir = tmp();
     const seen: string[] = [];
@@ -218,6 +239,84 @@ describe('runFlaky', () => {
     expect(unreportedFailures('generic', '5 failed', 0)).toBeNull();
   });
 
+  test('a run that stopped early reruns the whole command, so tests it never reached must pass too', async () => {
+    const dir = tmp();
+    const bail = () => 'Bailed out after 1 failure\nRan 1 test across 1 file.\n';
+    const green = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b') + pass('never-reached')), (_a, n) => n === 1 ? 1 : 0, bail);
+    const r = await base(green, dir);
+    expect(green.calls).toEqual([['bun', 'test'], ['bun', 'test']]);
+    expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'bun stopped early (--bail)' });
+    expect(r.ledger[0]).toMatchObject({ kind: 'flaky-pass', rerun_scope: 'command' });
+    expect(renderResult(r, '/l')).toContain('FLAKY_RERUN: scope=command (bun stopped early (--bail))');
+    const red = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b') + fail('never-reached')), () => 1, bail);
+    expect((await base(red, dir)).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the command exited 1' });
+  });
+
+  test('generic runners always rerun the whole command', async () => {
+    const dir = tmp();
+    const f = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b')), (_a, n) => n === 1 ? 1 : 0);
+    const r = await base(f, dir, { runner: 'generic' });
+    expect(f.calls[1]).toEqual(['bun', 'test']);
+    expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'a generic runner cannot prove every test ran' });
+  });
+
+  test('an incomplete run that is already red is not rerun as a whole', async () => {
+    const dir = tmp();
+    const f = fakeRun(() => suite(fail('b') + pass('b') + fail('c')), () => 1, () => '');
+    const r = await base(f, dir);
+    expect(f.calls).toHaveLength(1);
+    expect(r.outcomes.find(o => o.test.id.endsWith('::c'))!.reason).toContain('already red');
+  });
+
+  test('a rerun the runner retried again does not clear the test', async () => {
+    const dir = tmp();
+    const f = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite('<testcase name="b" classname="" file="a.test.ts"><flakyFailure message="x"/></testcase>'), (_a, n) => n === 1 ? 1 : 0);
+    expect((await base(f, dir)).outcomes[0]).toMatchObject({ status: 'rerun-fail', attempts: ['fail', 'fail', 'pass'] });
+  });
+
+  test('a killed runner is never green and stops further reruns', async () => {
+    const dir = tmp();
+    expect(await base(fakeRun(() => suite(fail('b')), () => 128, undefined, () => 'SIGTERM'), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_COMMAND_KILLED' });
+    const f = fakeRun((_a, n) => n === 1 ? suite(fail('b') + fail('c')) : suite(pass('b') + pass('c')), (_a, n) => n === 1 ? 1 : 128, undefined, n => n === 2 ? 'SIGTERM' : undefined);
+    const r = await base(f, dir);
+    expect(f.calls).toHaveLength(2);
+    expect(r.outcomes.map(o => o.reason)).toEqual(['rerun: killed by SIGTERM', 'not rerun: an earlier rerun was killed']);
+    expect(r.exitCode).toBe(1);
+  });
+
+  test('the first report is restored at --junit and each rerun report is kept beside it', async () => {
+    const dir = tmp();
+    const firstXml = suite(pass('a') + fail('b'));
+    await base(fakeRun((_a, n) => n === 1 ? firstXml : suite(pass('b')), (_a, n) => n === 1 ? 1 : 0), dir);
+    expect(fs.readFileSync(path.join(dir, 'r.xml'), 'utf-8')).toBe(firstXml);
+    expect(fs.readFileSync(path.join(dir, 'r.rerun-1.xml'), 'utf-8')).toBe(suite(pass('b')));
+  });
+
+  test('credentials in a test title never reach the ledger, the result lines or the step summary', async () => {
+    const dir = tmp();
+    const key = ['sk', 'ant', 'api03', 'B'.repeat(93) + 'AA'].join('-');
+    const r = await base(fakeRun((_a, n) => n === 1 ? suite(fail(`login with ${key}`)) : suite(pass(`login with ${key}`)), (_a, n) => n === 1 ? 1 : 0), dir);
+    expect(r.exitCode).toBe(0);
+    expect(JSON.stringify(r.ledger)).not.toContain(key);
+    expect(renderResult(r, '/l').join('\n')).not.toContain(key);
+    expect(stepSummary(r)).not.toContain(key);
+  });
+
+  test('workflow commands escape a title that would end or start a command', () => {
+    expect(workflowEscape('a%b\r\n::error::x')).toBe('a%25b%0D%0A::error::x');
+  });
+
+  test('ledger: a write error is a warning; the path comes from --ledger, then GSTACK_FLAKE_LEDGER_JUNIT, then the state root', () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, 'file'), '');
+    const warns: string[] = [];
+    appendLedger([{ ts: 't', runner: 'junit', kind: 'flaky-pass', id: 'x', file: 'x', rerun_by: 'gstack-flaky', attempts: [], excerpt: [] }], path.join(dir, 'file', 'l.jsonl'), w => warns.push(w));
+    expect(warns[0]).toContain('FLAKY_LEDGER_WRITE_FAILED');
+    expect(ledgerPath('/flag', { GSTACK_FLAKE_LEDGER_JUNIT: '/env' })).toBe('/flag');
+    expect(ledgerPath(undefined, { GSTACK_FLAKE_LEDGER_JUNIT: '/env', GSTACK_FLAKE_LEDGER: '/free' })).toBe('/env');
+    expect(ledgerPath(undefined, { GSTACK_STATE_ROOT: dir, GSTACK_FLAKE_LEDGER: '/free' })).toBe(path.join(dir, 'flake-ledger-junit.jsonl'));
+  });
+
   test('credentials in failure text never reach the ledger', () => {
     const key = ['sk', 'ant', 'api03', 'A'.repeat(93) + 'AA'].join('-');
     const out = safeExcerpt([`Error: request failed with key ${key}`]);
@@ -232,7 +331,7 @@ describe('bin/gstack-flaky', () => {
     fs.writeFileSync(runner, [
       '#!/usr/bin/env bash',
       'n=$(cat count 2>/dev/null || echo 0); echo $((n+1)) > count',
-      `if [ "$n" = 0 ]; then printf '%s' '${suite(pass('a') + fail('b'))}' > r.xml; exit 1; fi`,
+      `if [ "$n" = 0 ]; then printf '%s' '${suite(pass('a') + fail('b'))}' > r.xml; echo 'Ran 2 tests across 1 file.' >&2; exit 1; fi`,
       '[ "$1" = a.test.ts ] && [ "$2" = --test-name-pattern ] && [ "$3" = "^b$" ] || exit 9',
       `printf '%s' '${suite(pass('b'))}' > r.xml`,
     ].join('\n'), { mode: 0o755 });
@@ -244,14 +343,28 @@ describe('bin/gstack-flaky', () => {
     expect(JSON.parse(fs.readFileSync(ledger, 'utf-8').trim()).kind).toBe('flaky-pass');
   });
 
-  test('usage and missing reports exit with their codes', () => {
+  test('usage, a command that cannot start, and missing reports exit with their codes', () => {
     const dir = tmp();
     const bin = path.join(ROOT, 'bin', 'gstack-flaky');
     expect(spawnSync(bin, ['run', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
+    fs.writeFileSync(path.join(dir, 'keep.ts'), 'x');
+    expect(spawnSync(bin, ['run', '--junit', 'keep.ts', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
+    expect(fs.existsSync(path.join(dir, 'keep.ts'))).toBe(true);
+    const missing = spawnSync(bin, ['run', '--junit', 'r.xml', '--', path.join(dir, 'no-such-runner')], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
+    expect(missing.status).toBe(3);
+    expect(missing.stderr).toContain('(FLAKY_COMMAND_NOT_STARTED)');
     const r = spawnSync(bin, ['run', '--junit', 'r.xml', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
     expect(r.status).toBe(3);
     expect(r.stderr).toContain('(FLAKY_NO_RESULTS)');
     expect(r.stderr).toContain('fix: ');
+  });
+
+  test('every FLAKY_ code the bin and the library emit is in the docs table', () => {
+    const doc = fs.readFileSync(path.join(ROOT, 'docs', 'flaky.md'), 'utf-8');
+    const src = fs.readFileSync(path.join(ROOT, 'bin', 'gstack-flaky'), 'utf-8') + fs.readFileSync(path.join(ROOT, 'lib', 'flaky-run.ts'), 'utf-8') + fs.readFileSync(path.join(ROOT, 'lib', 'junit.ts'), 'utf-8');
+    const codes = [...new Set(src.match(/FLAKY_[A-Z_]+(?=['":])/g))].filter(c => c !== 'FLAKY_RESULT' && c !== 'FLAKY_RERUN');
+    expect(codes.length).toBeGreaterThan(5);
+    expect(codes.filter(c => !doc.includes(`| \`${c}\` |`))).toEqual([]);
   });
 
   test('ids prints one id per test', () => {
