@@ -569,6 +569,8 @@ jobs:
           EVALS_CACHE_DIR: ${{ steps.reuse.outputs.reuse == 'on' && '/tmp/gstack-eval-input-cache' || '' }}
           # Dispatch diff base (CEO-17): a screen's merge-commit first parent, else the exact merge-base, else the named base branch, else detection.
           EVALS_BASE: ${{ needs.route.outputs.screen_base || inputs.base_sha || (inputs.base_ref != '' && format('origin/{0}', inputs.base_ref)) || '' }}
+          # A broad screen (`ready --screen --broad`) keeps every derived dependent; screens and eval:bg:pr default to narrow.
+          EVALS_SCREEN_POLICY: ${{ inputs.screen_policy || 'narrow' }}
         run: EVALS_TIER=gate bun --no-install run scripts/test-paid-shards.ts --tier gate --emit-plan /tmp/paid-plan/manifest.json --slice-budget 420 --jobs 2 --max-parallel 20
 
       # R2a/R2: reuse holds only when this head's own plan selects exactly the

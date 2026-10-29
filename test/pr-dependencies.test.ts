@@ -326,3 +326,48 @@ describe('deleted files (paths absent from the head tree)', () => {
       .referencers('test/helpers/gone.ts')).toEqual(['test/skill-e2e-alpha.test.ts']);
   });
 });
+
+describe('narrow screens leave hub files to the train gate', () => {
+  const plan = (changedFiles: string[], policy = 'narrow', profile: 'pr' | 'full' = 'pr') =>
+    computePaidCaseSelection({ profile, env: { EVALS_SCREEN_POLICY: policy }, changedFiles, packageVersionOnly: true });
+  const hub = 'lib/restamp.ts';
+
+  test('a hub file reaches every gate case only through the derived closure', () => {
+    expect(gate.every(id => real.e2e.get(hub)?.has(id))).toBe(true);
+  });
+
+  test('a hub-only diff selects no case on a narrow screen and names the hub file', () => {
+    const result = plan([hub]);
+    expect(result.coverage?.hubFiles).toEqual([hub]);
+    expect(result.coverage?.mode).toBe('pr');
+    expect(result.selection.e2e).toEqual([]);
+    expect(result.reason).toContain(`train gate's full census runs them: ${hub}`);
+  });
+
+  test('a broad screen, an unset policy and the full profile keep every dependent of a hub file', () => {
+    expect(computePaidCaseSelection({ profile: 'pr', env: {}, changedFiles: [hub], packageVersionOnly: true }).selection.e2e).toEqual(gate.sort());
+    const broad = plan([hub], 'broad');
+    expect(broad.coverage?.mode).toBe('dependents');
+    expect(broad.coverage?.hubFiles).toEqual([]);
+    expect(broad.selection.e2e).toEqual(gate.sort());
+    expect(plan([hub], 'narrow', 'full')).toEqual(plan([hub], 'broad', 'full'));
+  });
+
+  test('a hub file beside a shared runtime input, an unknown file or a full-gate file still runs the full gate', () => {
+    for (const other of ['scripts/resolvers/preamble/generate-voice-directive.ts', 'SECURITY.md', 'bun.lock']) {
+      expect({ other, e2e: plan([hub, other]).selection.e2e }).toEqual({ other, e2e: gate.sort() });
+    }
+  });
+
+  test('a hub file beside a direct edit keeps that edit\'s own cases', () => {
+    const direct = plan(['browse/src/retired-module.ts']).selection.e2e;
+    expect(direct).toContain('browse-basic');
+    expect(plan([hub, 'browse/src/retired-module.ts']).selection.e2e).toEqual(direct);
+  });
+
+  test('size-ledger baselines select only the cases that read them, none in the gate', () => {
+    const result = plan(['test/size-ledger/ship/base.json']);
+    expect(result.coverage?.unknownFiles).toEqual([]);
+    expect(result.selection.e2e).toEqual([]);
+  });
+});

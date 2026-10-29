@@ -414,7 +414,12 @@ case counts and the recommendation only. A lane that already ran focused
 local cases says so in the READY block and may pass `--no-screen`. `--screen`
 dispatches `gate_workflow` with `screen_pr`, `screen_merge_sha` (the
 `refs/pull/<n>/merge` SHA) and `screen_policy` (`narrow`, or `broad` with
-`--broad`, today's full PR selection). The nonce key carries the purpose and
+`--broad`, the full PR selection). A narrow screen, and `eval:bg:pr`, skip a
+changed file whose derived references reach every gate case and nothing
+narrower selects: the plan's reason names it, and the train gate's full
+census runs those cases. Full-gate files, shared runtime and paid-runner
+inputs, and files the derivation cannot place still run the full gate on a
+narrow screen. The nonce key carries the purpose and
 the policy, so a repeat follows the same run and a broad screen never adopts
 a narrow one. The READY block gains `screen: …`, and the receipt is written
 locally and to the notes ref. `--dry-run` prints the dispatch without sending
@@ -749,7 +754,7 @@ reorder with `--order`. The default command is `bun --no-env-file
 
 **Escape hatches.** Remove the `train` block on the base branch to return
 every lane to the per-PR queue at once. `--urgent` ships one PR alone,
-`--no-screen` skips the paid screen, `--broad` widens it to today's selection,
+`--no-screen` skips the paid screen, `--broad` widens it to the full PR selection,
 and `train build --prs <list without it>` drops a PR at any step.
 
 <a id="ship"></a>
