@@ -193,7 +193,7 @@ export async function runPlanSkillFloorCheck(opts: PlanSkillFloorOptions): Promi
     since: 0, commandStartedAt: 0, targetDelivery: undefined, saveSnapshot: undefined, nativeCandidates: [],
     validatedPendingQuestion: undefined, sampledAt: undefined, lastCheckpointAt: 0, lastCheckpointState: '',
     artifactError: undefined, finished: false, started: false, start: 0, deadlineAt: 0, screenDeadlineAt: 0,
-    permissionUnansweredSince: undefined,
+    permissionUnansweredSince: undefined, idleVisible: undefined, idleSince: 0,
   } as unknown as FloorRun;
   return runPtySession<PlanSkillFloorObservation>({
     driver, budgetMs: timeoutMs,
@@ -272,6 +272,9 @@ interface FloorRun {
   screenDeadlineAt: number;
   /** When the current permission render was first left unanswered by this actor. */
   permissionUnansweredSince: number | undefined;
+  /** The idle turn end with an error panel being settled, and when it was first seen unchanged. */
+  idleVisible: string | undefined;
+  idleSince: number;
 }
 
 async function floorStart(run: FloorRun, session: ClaudePtySession): Promise<undefined> {
@@ -405,10 +408,20 @@ async function floorTick(run: FloorRun, session: ClaudePtySession): Promise<PtyS
   const assessed = floorAssess(run, session, visible);
   if (assessed !== 'continue') return assessed;
   const idle = idleTurnEnd(visible);
-  return idle?.apiError ? finish({ auqObserved: false, outcome: 'api_error',
+  if (!idle?.apiError || visible !== run.idleVisible) {
+    run.idleVisible = idle?.apiError ? visible : undefined;
+    run.idleSince = driver.now();
+    return 'continue';
+  }
+  if (driver.now() - run.idleSince < IDLE_SETTLE_MS) return 'continue';
+  return finish({ auqObserved: false, outcome: 'api_error',
     summary: `the CLI turn ended at an idle prompt (${idle.done}) after its public error panel: ${idle.apiError}`,
-    evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt }) : 'continue';
+    evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
 }
+
+/** An idle turn end must hold still this long, re-reading the transcript each tick, before its error panel ends the
+ * check, so a question whose transcript line lands after the screen draws "done" is still credited. */
+const IDLE_SETTLE_MS = 10_000;
 
 /** This actor answers only owned file grants; any other permission render fails fast with a named cause. */
 const PERMISSION_UNANSWERED_MS = 20_000;

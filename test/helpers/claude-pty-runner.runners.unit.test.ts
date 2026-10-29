@@ -222,7 +222,7 @@ describe('runPlanSkillFloorCheck through the fake driver', () => {
     expect(live.obs).toMatchObject({ outcome: 'timeout', summary: 'no qualifying finding question within 30000ms' });
   });
 
-  test.skipIf(process.platform === 'win32')('a prose finding question earlier in the idle turn is assessed before the provider error panel ends the check', async () => {
+  test.skipIf(process.platform === 'win32')('a prose finding question earlier in the idle turn is assessed before the provider error panel ends the check, even when its transcript line lands after the screen goes idle', async () => {
     const plan: string = JSON.parse(fs.readFileSync(new URL('../fixtures/pty-idle-turn-end.json', import.meta.url), 'utf8')).planModeApiErrorIdle.visible;
     const prose = 'Which TTHW target should this journey be measured against?\nA) Champion (< 2 min)\nB) Competitive (2-5 min)';
     const screen = plan.replace('●API Error:', `${prose.replace(/\n/g, '\r\n')}\r\n●API Error:`);
@@ -232,10 +232,13 @@ describe('runPlanSkillFloorCheck through the fake driver', () => {
     const saved = process.env.BROWSE_TERMINAL_BINARY;
     process.env.BROWSE_TERMINAL_BINARY = stub;
     try {
-      const { obs } = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen,
-        effect: ctx => { delivered(ctx); journal(ctx, floorSession(ctx), 'assistant', [{ type: 'text', text: prose }]); } }]);
-      expect(obs).toMatchObject({ outcome: 'auq_observed', auqObserved: true });
-      expect(obs.summary).toContain('Current prose question addresses the owned seeded finding');
+      const asked = (ctx: FakeSessionContext) => journal(ctx, floorSession(ctx), 'assistant', [{ type: 'text', text: prose }]);
+      const sameTick = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen, effect: ctx => { delivered(ctx); asked(ctx); } }]);
+      const lateLine = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen, effect: delivered }, { afterMs: 4000, screen, effect: asked }]);
+      for (const { obs } of [sameTick, lateLine]) {
+        expect(obs).toMatchObject({ outcome: 'auq_observed', auqObserved: true });
+        expect(obs.summary).toContain('Current prose question addresses the owned seeded finding');
+      }
     } finally {
       if (saved === undefined) delete process.env.BROWSE_TERMINAL_BINARY; else process.env.BROWSE_TERMINAL_BINARY = saved;
       fs.rmSync(stubDir, { recursive: true, force: true });
