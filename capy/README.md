@@ -126,7 +126,7 @@ sent back each merge sha.
 
 **Evals with preregistered bars.** A prompt or skill change that claims to
 help is judged by a before/after with fixed trials and a bar written down
-before the first paid call ([/eval-plan](../docs/skills.md)), never by vibes.
+before the first paid call ([/eval-plan](../docs/skills.md#eval-plan)), never by vibes.
 Good evals here have a no-skill arm and a length-matched placebo, a check that
 the treatment actually arrived, decoys verified clean, and spend quoted from
 the meter. They report losses as plainly as wins. One preregistered eval found
