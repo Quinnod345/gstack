@@ -18,12 +18,12 @@ The 14 days from the 2026-10-15 fix waves (the Captain took over
 the next day) against the 14 days before, measured from git and GitHub[^1]:
 
 - **197 PRs merged to gstack's main, up from 65 (3.0x).** That is 98.5 a week.
-- **194 versions shipped, 13.9 a day, up from 62 (3.1x).** Every merged PR
-  ships as its own version.
-- **Twice gstack's best fortnight before Capy.** The March launch shipped 99
-  versions in its busiest 14 days; this fortnight shipped 194.
-- **36 PRs merged and 36 versions shipped in one day**, on October 25 and again
-  on October 26.
+- **194 versions shipped, 13.9 a day, up from 62 (3.1x).** Under stamp-at-merge,
+  each merged PR ships as its own version.
+- **Nearly twice gstack's best fortnight before Capy.** The March launch
+  shipped 99 versions in its busiest 14 days; this fortnight shipped 194.
+- **36 PRs merged and 36 versions shipped in one day** (UTC), on October 25
+  and again on October 26.
 - **A reported issue is fixed in a median 2.4 days**, from the issue opening to the
   fixing PR's merge, across the 52 issues closed by a PR in the window.
 - **1,874 PRs merged across eight of Garry's repositories** in the same 14 days.
@@ -117,10 +117,10 @@ automation starts a lane that fixes the worst repeat offender with a PR that
 shows it red before green. Nothing is retried into green and no threshold moves.
 
 **Peer Captains route findings, not chatter.** Captains message each other
-with evidence. gstack-evals' replay showed `/review` downgrading real bugs; it
-was a fix lane in gstack within the hour. Another eval Captain's $5.78 panel found that
-OpenClaw refused to load a 78 KB gstack skill; gstack had a fix up the same
-afternoon ([#3610](https://github.com/garrytan/gstack/pull/3610)). When Garry
+with evidence. gstack-evals' replay showed `/review` downgrading real bugs, and
+within the hour gstack had a lane on it. Another eval Captain's $5.78 panel found that
+OpenClaw refused to load a 78 KB gstack skill, and gstack had a fix up the
+same day ([#3610](https://github.com/garrytan/gstack/pull/3610)). When Garry
 said "hurry up" to one Captain, another reordered its merge queue for it and
 sent back each merge sha.
 
@@ -132,8 +132,8 @@ the treatment actually arrived, decoys verified clean, and spend quoted from
 the meter. They report losses as plainly as wins. One preregistered eval found
 that with the skill loaded every time, gstack still lost to the placebo on a
 cheap model, and that result now drives gstack's work on its review rubric.
-Another showed a facts block winning by 16 points on a held-out set, and only
-then did it go on by default.
+In gbrain, a facts block won by 16 points on a held-out set, and only then
+did it go on by default.
 
 ## Why we think it is the best software factory
 
@@ -169,7 +169,8 @@ then did it go on by default.
 5. **Don't merge main every time it moves.** Each merge recreates the
    CHANGELOG conflict and voids the receipt. Merge once, at your slot.
 6. **Size review to the diff.** A docs PR doesn't need a red team. Full-depth
-   review on small diffs is how `/ship` once cost about 50M tokens per PR.
+   review on small diffs is how `/ship` once cost about 50M tokens per
+   gate-class PR.
 7. **Keep threads small.** A long-lived parent context reached 1.36B tokens.
    Hand long steps to fresh children and read the token counter instead of
    estimating.
@@ -179,8 +180,9 @@ then did it go on by default.
 9. **Measure before you choose.** Time the queue, count the PRs, run the real
    system. A runner option that looked cheaper in quiet hours failed in a busy
    one.
-10. **Severe fixes jump the queue.** A trust-escalation bug went from report to
-    merged fix in about three hours; explain it afterwards.
+10. **Severe fixes go first, through the same gates.** In gbrain a
+    trust-escalation bug went from report to merged fix in about three hours,
+    with its receipt, green checks and merge owner unchanged.
 
 ## How Garry uses it
 
