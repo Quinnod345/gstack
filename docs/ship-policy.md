@@ -149,7 +149,8 @@ ship receipt into the coordinator protocol, so nobody proves a stamp diff by
 hand. Lanes own their PRs and never merge; the coordinator owns the order and
 every merge. Each step ends in a line the other side acts on, then
 `GSTACK_RESULT: skill=ship-queue status=complete|refused run=<path>`. Nothing
-here pushes.
+here pushes, except `ready` under `changelog_fragments` (its READY receipt goes
+to `refs/notes/gstack-trains`) and [`land`](#land).
 
 **1. Lane: report ready (unstamped).** After the gate and pregate pass on the
 pushed head:
@@ -784,6 +785,7 @@ which carry the workflow consequences the skill prose would otherwise spell out:
 | `ship: preregistration: …` | `gstack-evidence ancestor --from-policy --base <base>` must print only `ANCESTOR: ok` before push |
 | `ship: release_tool: …` | the command runs only inside `gstack-restamp` (staging worktree, outputs confined to `release_outputs`) |
 | `ship: review_scope …` | Step 9.4 item 0 runs `gstack-review-scope classify` on each pass's findings; see [review_scope](#review-scope) |
+| `ship: changelog_fragments <dir>: …` | Step 12 writes no version; Step 13 writes the entry as `<dir>/<branch-slug>.md` (entry text only, `bump:` front matter only when the change warrants more than the policy bump), never an `[Unreleased]` section, linted with `gstack-prose-lint <file> --gate`; `gstack-ship-queue land` assigns the version; see [changelog fragments](#changelog-fragments) |
 
 The PR body's first section is the ship receipt (`gstack-ship-receipt write … --body`),
 written by the pr-body section of `/ship` after the body is composed.
@@ -1209,8 +1211,9 @@ valid fragment (a legacy `[Unreleased]`-only entry passes during migration;
 a `[bot]` author, such as Dependabot, needs none). Other manifest edits, a
 dependency or a script, pass. A head made by the merge step, a commit whose
 parents are [pin, base], must carry the base's version plus the effective
-bump of the fragments its pin adds. `gstack-ship-queue ready` applies the same
-rule.
+bump of the fragments its pin adds. Under a train policy `gstack-ship-queue
+ready` applies the same rule itself; without one, `ready` requires the head's
+checks green, Version Gate included.
 
 <a id="land"></a>
 ## `gstack-ship-queue land`: the per-PR merge step
@@ -1222,7 +1225,8 @@ stamp commit. Steps, each journaled in
 command:
 
 1. **Refuse** a fork head, a closed PR, a PR whose base is another branch, a
-   pin without a READY receipt (`gstack-ship-queue ready --pr <n>` records one
+   base policy with `changelog_fragments` off (`QUEUE_NOT_READY`), a pin
+   without a READY receipt (`gstack-ship-queue ready --pr <n>` records one
    on `refs/notes/gstack-trains` once its pregate, full_e2e and receipt checks
    pass; land checks nothing weaker), a /ship receipt that is missing or
    bound to another head (`QUEUE_RECEIPT_MISSING`, `QUEUE_RECEIPT_STALE`), and
@@ -1250,8 +1254,10 @@ command:
    keeps the reviewed pin apart from the last pushed head, so a rerun leases
    on what it pushed and never on a head someone else pushed
    (`QUEUE_TRAIN_MOVED`, never overwritten).
-5. **Wait** for the PR's checks on the stamp commit with `gstack-pr-wait`
-   (`--no-wait` prints the command instead; `--timeout <min>`, default 60).
+5. **Wait** for the PR's checks on the stamp commit, polling every 30 seconds
+   with the same check read the pin passed (`--timeout <min>`, default 60). `--no-wait`
+   stops after the push and prints `gstack-pr-wait <n> --until green &&
+   gstack-ship-queue land --pr <n>` to run instead.
    CI runs for real on the stamp commit in this mode.
 6. **Merge.** Re-read the base first: if it moved, restamp from the new base
    and push again under the last-pushed lease, at most twice
@@ -1311,7 +1317,8 @@ Hunks are classified per file type: the version file (old → new only), the
 manifest (`version` key only), npm and bun lockfiles (root `version` keys
 only, where `gstack-version-bump` writes; a dependency entry is `changed`),
 the CHANGELOG (a heading move or re-heading, compared as an order-independent
-multiset of entries), `stamp_paths` and `release_outputs` (every
+multiset of entries; under `changelog_fragments`, also exactly the deleted
+fragments folded under the new heading, and those deletions are stamps), `stamp_paths` and `release_outputs` (every
 removed/added pair must be an exact `(was X)` / `since: X` / `vX` rewrite (a quote around X in the first two forms included) with
 X the gated version, or a newer version of the repo's width that the
 stamp_paths stage moves (a tentative `*_KEY_VERSION` written as the next

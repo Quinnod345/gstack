@@ -21,7 +21,8 @@
  *
  * Every subcommand takes --base <branch> (default origin/HEAD, else main) and
  * ends with GSTACK_RESULT: skill=ship-queue status=complete|refused run=<path>.
- * gstack-restamp stays the primitive. Nothing here pushes, except under a
+ * gstack-restamp stays the primitive. Nothing here pushes, except land, ready
+ * under changelog_fragments (its READY receipt note), and under a
  * ship policy with a `train` block: merge trains push train/<nonce> branches
  * and the refs/notes/gstack-trains records, and dispatch through eval-bg.
  * Logic: lib/ship-queue.ts, lib/ship-queue-gate.ts, lib/ship-queue-train*.ts
@@ -66,7 +67,7 @@ const HELP = `gstack-ship-queue — the shared merge queue's protocol steps (doc
                                            docs/ship-policy.md#run-a-merge-train); ready then takes --screen|--no-screen
 
 --base <branch>: base branch (default: origin/HEAD, else main). Nothing here pushes, except land (the stamp commit and the
-refs/notes/gstack-land lock) and merge trains.
+refs/notes/gstack-land lock), ready under changelog_fragments (its READY receipt note) and merge trains.
 ${exitTableHelp()}`;
 
 function flag(args: string[], name: string): string | undefined {
