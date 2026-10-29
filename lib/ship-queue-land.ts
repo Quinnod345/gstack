@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import { mergeChangelogs, parseChangelog } from './changelog-check';
 import { fragmentSlug, readFragments } from './changelog-fragments';
 import { restamp, versionAtRef } from './restamp';
+import { BIN_DIR, runScriptSync } from './script-invocation';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 import { ciAtHead, loadBasePolicy, type QueueContext, type StepOutput } from './ship-queue';
 import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from './ship-queue-gate';
@@ -193,8 +194,7 @@ function prInfo(ctx: QueueContext, pr: string): PrInfo | QueueFailure {
 }
 
 function waitGreen(ctx: QueueContext, pr: string, minutes: number): boolean {
-  const bin = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'bin', 'gstack-pr-wait');
-  const r = spawnSync(bin, [pr, '--until', 'green', '--timeout', String(minutes)], { cwd: ctx.repoRoot, stdio: ['ignore', 'inherit', 'inherit'], timeout: (minutes + 5) * 60_000 });
+  const r = runScriptSync(path.join(BIN_DIR, 'gstack-pr-wait'), [pr, '--until', 'green', '--timeout', String(minutes)], { cwd: ctx.repoRoot, stdio: ['ignore', 'inherit', 'inherit'], timeout: (minutes + 5) * 60_000 });
   return r.status === 0;
 }
 
