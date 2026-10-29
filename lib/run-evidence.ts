@@ -36,6 +36,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { sha256Hex, writeReceipt } from './egress-receipt';
 
 export interface RunProfile { workflow: string; events: string[]; jobs: string[]; artifact: string; max_age_hours?: number; os?: string }
 export interface RemoteGateRuns { profiles: string[]; inventory: string }
@@ -197,7 +198,12 @@ export function parseRunReceipt(receipt: string): { runs: string[]; profiles: st
   return { runs: runs.split(','), profiles: profiles.split(','), tree: /\btree=([0-9a-f]{12})\b/.exec(receipt)?.[1] ?? null };
 }
 
+/** Egress receipts for the reads below (fail-open, like contributor-mode): only this repository's name, run ids and a commit sha leave the machine. */
+const receiptFor = (host: string, payloadClass: string, request: string) => ({ sink: 'run-evidence', host, payloadClass, bytes: 0, sha256: sha256Hex(request), consent: 'user ran gstack-pregate clear --run (or --run-url on a profiled lane); reads its own repository\'s Actions runs and fetches a run head by sha' });
+const receiptFailed = (err: unknown) => process.stderr.write(`[run-evidence] egress receipt could not be written (${(err as Error).message}); proceeding (fail-open)\n`);
+
 function gh(args: string[], timeoutMs = 60_000): string {
+  try { writeReceipt(receiptFor('api.github.com', 'actions-run-read', args.join(' '))); } catch (err) { receiptFailed(err); }
   const r = spawnSync('gh', args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
   if (r.status !== 0 || r.error) throw new Error(`gh ${args.slice(0, 2).join(' ')} failed: ${(r.stderr || String(r.error ?? '')).trim().slice(0, 300)}`);
   return r.stdout;
@@ -227,7 +233,11 @@ export function ghRunDeps(repo: string, repoRoot: string): RunDeps {
     commitTree: sha => {
       const read = () => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${sha}^{tree}`], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 });
       let r = read();
-      if (r.status !== 0) { spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', sha], { cwd: repoRoot, timeout: 120_000 }); r = read(); }
+      if (r.status !== 0) {
+        try { writeReceipt(receiptFor('origin', 'git-fetch-by-sha', sha)); } catch (err) { receiptFailed(err); }
+        spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', sha], { cwd: repoRoot, timeout: 120_000 });
+        r = read();
+      }
       const tree = (r.stdout ?? '').trim();
       return r.status === 0 && /^[0-9a-f]{40,64}$/.test(tree) ? tree : null;
     },
