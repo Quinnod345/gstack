@@ -91,7 +91,7 @@ export function stampChain(o: StampChainOptions): { stamped: StampedPrefix[]; li
       git(o.repoRoot, ['worktree', 'remove', '--force', wt]);
       fs.rmSync(wt, { recursive: true, force: true });
     }
-    const c = git(o.repoRoot, ['commit-tree', tree, '-p', pred, '-p', slot.head, '-m', `train S${i + 1}: merge #${slot.pr} at ${slot.head.slice(0, 12)} v${version}`], { ...process.env, ...IDENTITY });
+    const c = git(o.repoRoot, ['commit-tree', '--no-gpg-sign', tree, '-p', pred, '-p', slot.head, '-m', `train S${i + 1}: merge #${slot.pr} at ${slot.head.slice(0, 12)} v${version}`], { ...process.env, ...IDENTITY });
     if (!c.ok) return { code: 'QUEUE_TRAIN_STAMP_MISMATCH', message: `commit-tree failed for S${i + 1}: ${c.err.slice(0, 120)}` };
     const plain = o.plain[i + 1];
     const why = plain ? stampMismatch(o, m.commit, c.out, plain.tree) : `no plain prefix T${i + 1}`;

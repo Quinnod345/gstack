@@ -56,10 +56,13 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   };
   const rerun = `${Q} train land --train ${t.nonce} --pr ${o.pr}`;
   const lines = [`TRAIN_LAND: ${t.nonce} slot ${i + 1}/${t.slots.length} #${o.pr} pin ${pin} -> S${s.index} v${s.version} tree ${s.tree}`];
-  if (git(root, ['rev-parse', `${s.commit}^{tree}`]).out !== s.tree || !git(root, ['merge-base', '--is-ancestor', s.commit, t.head]).ok) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the record's S${s.index} is not a commit with tree ${s.tree.slice(0, 12)} on the gated head ${t.head.slice(0, 12)}` }, lines, `${Q} train status --train ${t.nonce}`, run);
+  if (git(root, ['rev-parse', `${t.head}~${t.stamped.length - s.index}`]).out !== s.commit || git(root, ['rev-parse', `${s.commit}^{tree}`]).out !== s.tree) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the record's S${s.index} is not the gated head ${t.head.slice(0, 12)}'s prefix ${s.index} with tree ${s.tree.slice(0, 12)}` }, lines, `${Q} train status --train ${t.nonce}`, run);
   let main = mainNow();
   if ('error' in main) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: main.error }, lines, rerun, run);
   if (main.tree === s.tree) return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `main: ${main.sha} is S${s.index} exactly`]);
+  const mainTree = main.tree;
+  const earlier = t.stamped.slice(0, Math.max(i - 1, 0)).find(p => p.tree === mainTree);
+  if (earlier) return outRefused({ code: 'QUEUE_TRAIN_TREE_MISMATCH', message: `main is S${earlier.index}; land #${t.stamped[earlier.index]!.pr} (slot ${earlier.index + 1}) first` }, lines, `${Q} train land --train ${t.nonce} --pr ${t.stamped[earlier.index]!.pr}`, run);
   if (main.tree !== pred.tree) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main ${main.sha.slice(0, 12)} is neither S${pred.index} nor S${s.index} exactly`, main.sha, lines, true);
 
   const file = path.join(path.dirname(run), `land-${o.pr}.json`);
@@ -72,7 +75,7 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   const wrongBase = retargeted(info.baseRefName);
   if (wrongBase) return wrongBase;
   if (!j || j.base !== main.sha || info.headRefOid !== j.stamp_commit) {
-    const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`], { ...process.env, ...STAMP_IDENTITY }).out;
+    const commit = git(root, ['commit-tree', '--no-gpg-sign', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`], { ...process.env, ...STAMP_IDENTITY }).out;
     if (!isSha(commit)) return outFailed({ code: 'QUEUE_LAND_CONFLICT', message: `cannot create the stamp commit for tree ${s.tree.slice(0, 12)}; nothing pushed` }, lines, `${Q} train status --train ${t.nonce}`, run);
     if (![pin, commit, j?.stamp_commit].includes(info.headRefOid)) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not its pin ${pin.slice(0, 12)}`, main.sha, lines, true);
     const shipped = bindShippedReceipt(root, `refs/remotes/${env.remote}/${ctx.base}`, info.body, o.pr, [pin]);

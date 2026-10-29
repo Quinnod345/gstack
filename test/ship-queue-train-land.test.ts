@@ -118,15 +118,16 @@ describe('stamped trains: build and land', () => {
     expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
   }, 300_000);
 
-  test('a record whose S_i tree is not on the gated chain pushes nothing and leaves the PR branch in place', () => {
+  test('a record whose S_i is not the gated head\'s prefix i pushes nothing and leaves the PR branch in place', () => {
     const { fx, h1, nonce } = stampedTrain();
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
     const file = path.join(fx.state, 'ship-queue', 'trains', nonce, 'train.json');
     const t = trainJson(fx, nonce);
-    t.stamped[0].tree = 'f'.repeat(40);
+    t.stamped[0] = { ...t.stamped[0], commit: h1, tree: fx.repo.git('rev-parse', h1 + '^{tree}') };
     fs.writeFileSync(file, JSON.stringify(t));
     const r = land(fx, nonce, '1');
-    expect(r.err).toMatch(/is not a commit with tree ffffffffffff on the gated head.*\(QUEUE_PROOF_MISSING\)/);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toMatch(/is not the gated head \S+'s prefix 1 with tree.*\(QUEUE_PROOF_MISSING\)/);
     expect(r.out).not.toMatch(/^PUSHED:/m);
     expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
   }, 180_000);
@@ -153,6 +154,20 @@ describe('stamped trains: build and land', () => {
     expect(again.err).not.toContain('QUEUE_TRAIN_MOVED');
     expect(again.out).toContain(`PUSHED: ${stamp}`);
     expect(land(fx, nonce, '1').status).toBe(EXIT.ok);
+  }, 300_000);
+
+  test('a slot landed out of order after an earlier slot merged refuses without freezing and names the next slot', () => {
+    const fx = trainFixture(POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
+    const heads = ['1', '2', '3'].map(pr => fragmentPr(fx, pr));
+    fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+    const nonce = nonceOf(queue(fx, ['train', 'build', '--prs', heads.map((h, i) => `${i + 1}@${h}`).join(',')]).out);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    land(fx, nonce, '1');
+    expect(land(fx, nonce, '1').status).toBe(EXIT.ok);
+    const early = land(fx, nonce, '3');
+    expect(early.err).toMatch(/main is S1; land #2 \(slot 2\) first.*\(QUEUE_TRAIN_TREE_MISMATCH\)/);
+    expect(early.out).not.toMatch(/^QUEUE_TRAIN_FROZEN:/m);
+    expect(line(early.out, 'NEXT:')).toBe(`NEXT: gstack-ship-queue train land --train ${nonce} --pr 2`);
   }, 300_000);
 
   test('a PR retargeted off the train base refuses before any push', () => {
