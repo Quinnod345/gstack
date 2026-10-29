@@ -222,6 +222,26 @@ describe('runPlanSkillFloorCheck through the fake driver', () => {
     expect(live.obs).toMatchObject({ outcome: 'timeout', summary: 'no qualifying finding question within 30000ms' });
   });
 
+  test.skipIf(process.platform === 'win32')('a prose finding question earlier in the idle turn is assessed before the provider error panel ends the check', async () => {
+    const plan: string = JSON.parse(fs.readFileSync(new URL('../fixtures/pty-idle-turn-end.json', import.meta.url), 'utf8')).planModeApiErrorIdle.visible;
+    const prose = 'Which TTHW target should this journey be measured against?\nA) Champion (< 2 min)\nB) Competitive (2-5 min)';
+    const screen = plan.replace('●API Error:', `${prose.replace(/\n/g, '\r\n')}\r\n●API Error:`);
+    const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'floor-judge-stub-'));
+    const stub = path.join(stubDir, 'claude');
+    fs.writeFileSync(stub, '#!/bin/sh\ncat >/dev/null\necho \'{"kind":"finding","seedId":"seed-1","questionId":"prose-1","optionId":"prose-1","reason":"the stub judge credits the staged prose question"}\'\n', { mode: 0o755 });
+    const saved = process.env.BROWSE_TERMINAL_BINARY;
+    process.env.BROWSE_TERMINAL_BINARY = stub;
+    try {
+      const { obs } = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen,
+        effect: ctx => { delivered(ctx); journal(ctx, floorSession(ctx), 'assistant', [{ type: 'text', text: prose }]); } }]);
+      expect(obs).toMatchObject({ outcome: 'auq_observed', auqObserved: true });
+      expect(obs.summary).toContain('Current prose question addresses the owned seeded finding');
+    } finally {
+      if (saved === undefined) delete process.env.BROWSE_TERMINAL_BINARY; else process.env.BROWSE_TERMINAL_BINARY = saved;
+      fs.rmSync(stubDir, { recursive: true, force: true });
+    }
+  });
+
   test('permission prompt: an unowned permission is neither granted nor counted', async () => {
     const { obs, fake } = await floor([
       { onInput: '/plan-devex-review PLAN.md\r', screen: PERMISSION, effect: delivered },

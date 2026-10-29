@@ -352,10 +352,6 @@ async function floorTick(run: FloorRun, session: ClaudePtySession): Promise<PtyS
   if (isRejectedSlashCommand(visible, opts.slashCommand)) return finish({ auqObserved: false, outcome: 'exited',
     summary: `claude rejected ${opts.slashCommand} as unknown command`,
     evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
-  const idle = idleTurnEnd(visible);
-  if (idle?.apiError) return finish({ auqObserved: false, outcome: 'api_error',
-    summary: `the CLI turn ended at an idle prompt (${idle.done}) after its public error panel: ${idle.apiError}`,
-    evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
 
   if (run.targetDelivery.status !== 'ready') {
     run.targetDelivery = readPlanFloorTarget(session.hermeticConfigDir, fixture.cwd,
@@ -406,7 +402,12 @@ async function floorTick(run: FloorRun, session: ClaudePtySession): Promise<PtyS
   }
   const question = floorQuestion(run, session, currentCalls);
   if (question) return question;
-  return floorAssess(run, session, visible);
+  const assessed = floorAssess(run, session, visible);
+  if (assessed !== 'continue') return assessed;
+  const idle = idleTurnEnd(visible);
+  return idle?.apiError ? finish({ auqObserved: false, outcome: 'api_error',
+    summary: `the CLI turn ended at an idle prompt (${idle.done}) after its public error panel: ${idle.apiError}`,
+    evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt }) : 'continue';
 }
 
 /** This actor answers only owned file grants; any other permission render fails fast with a named cause. */
