@@ -136,8 +136,8 @@ export function renderGate(list: GateList, page = 1, pageSize = PAGE_SIZE): stri
 
 /** The ELI5 block: the summary, then each approvals-shape section under its title. An empty summary says so (CAPTAIN_BRIEF_INCOMPLETE). */
 export function renderEli5(e: GateEli5): string[] {
-  const lines = ['ELI5', e.summary.trim() || 'ELI5: missing (add ## ELI5 to the plan: 5-10 plain sentences) (CAPTAIN_BRIEF_INCOMPLETE)'];
-  for (const [key, title] of ELI5_FIELDS) if (e[key].trim()) lines.push('', `${title}:`, e[key].trim());
+  const lines = e.summary.trim() ? ['ELI5', e.summary.trim()] : [];
+  for (const [key, title] of ELI5_FIELDS) if (e[key].trim()) lines.push(...(lines.length ? [''] : []), `${title}:`, e[key].trim());
   return lines;
 }
 

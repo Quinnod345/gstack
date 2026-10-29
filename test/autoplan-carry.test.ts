@@ -115,14 +115,50 @@ describe('carry-forward', () => {
     expect(d.stdout).toMatch(/^CARRIED: gate_rev=2 <- gate_rev=1 .*reason="do it" covers \w+; plan unchanged/m);
     expect(d.stdout).toMatch(/^CARRIED_UNDER_DO_IT: \w+ Split the backoff into its own PR .*\(the owner has not seen this item\)$/m);
     expect(decisions(doIt.out).find(x => x.gate_rev === 2 && /Split the backoff/.test(x.title))).toMatchObject({ carried_under: 'do it' });
+    const loaded = loadBriefInputs(doIt.out);
+    if ('error' in loaded) throw new Error(String(loaded.error));
+    expect(renderCaptainBrief(loaded.inputs, { outDir: doIt.out }).text).toContain('Taken under "do it" without being shown to the owner: Split the backoff into its own PR.');
     const rec = answeredAndRevised([], 'rec');
     phaseVia(r, rec.out, 'ceo', NONE);
     expect(phaseVia(r, rec.out, 'eng', PKG).outside.stdout).toMatch(/^CARRY: no \(new item \w+: Split the backoff/m);
   });
 
+test('an earlier answer in item tokens, or one that left an item unanswered, is not carried', () => {
+    const dir = path.join(r.host.base, `carry${++n}`);
+    const out = path.join(dir, 'run');
+    expect(r.ap(['next', '--out', out, '--plan', writePlan(dir), '--no-ui']).status).toBe(0);
+    phaseVia(r, out, 'ceo', AGREE);
+    phaseVia(r, out, 'eng', NONE);
+    const g = gateOf(out);
+    const tokens = g.items.map((i: any) => `${i.id}${i.recommended}`).join(' ');
+    expect(r.ap(['answer', '--out', out, '--gate-rev', '1', '--reply', tokens, '--by', 'human']).status).toBe(0);
+    const v2 = path.join(dir, 'plan-v2.md');
+    fs.writeFileSync(v2, V2);
+    expect(r.ap(['revise', '--out', out, '--plan', v2, '--incorporates', 'uc1']).status).toBe(0);
+    phaseVia(r, out, 'ceo', NONE);
+    expect(phaseVia(r, out, 'eng', NONE).outside.stdout).toMatch(/^CARRY: no \(gate_rev 1 was answered with item tokens, not rec or "do it"\)$/m);
+  });
+
+  test('an answer that left an approval item pending is not carried', () => {
+    const dir = path.join(r.host.base, `carry${++n}`);
+    const out = path.join(dir, 'run');
+    expect(r.ap(['next', '--out', out, '--plan', writePlan(dir), '--no-ui']).status).toBe(0);
+    phaseVia(r, out, 'ceo', AGREE);
+    phaseVia(r, out, 'eng', NONE);
+    const p1 = gateOf(out).items.find((i: any) => i.id === 'p1');
+    const ans = r.ap(['answer', '--out', out, '--gate-rev', '1', '--reply', `p1${p1.recommended}`, '--by', 'human']);
+    expect(ans.status, ans.stderr).toBe(0);
+    expect(decisions(out).some(x => x.gate_rev === 1 && x.status === 'pending')).toBe(true);
+    const v2 = path.join(dir, 'plan-v2.md');
+    fs.writeFileSync(v2, V2);
+    expect(r.ap(['revise', '--out', out, '--plan', v2]).status).toBe(0);
+    phaseVia(r, out, 'ceo', NONE);
+    expect(phaseVia(r, out, 'eng', NONE).outside.stdout).toMatch(/^CARRY: no \(gate_rev 1 left \S+ unanswered\)$/m);
+  });
+
   test('isDoIt reads the owner\'s words, not a Captain\'s', () => {
     for (const w of ['Do it', 'do it.', 'Garry: Do it', 'Garry Tan: do it!']) expect(isDoIt(w)).toBe(true);
-    for (const w of ['rec', 'accept all', 'Captain: Do it', "Captain: rec, Highs as build tasks under Garry's 'Do it'", 'Do it and also improve it']) expect(isDoIt(w)).toBe(false);
+    for (const w of ['rec', 'accept all', 'Captain: Do it', 'GStack Captain: do it', 'p3b: do it', "Captain: rec, Highs as build tasks under Garry's 'Do it'", 'Do it and also improve it']) expect(isDoIt(w)).toBe(false);
   });
 });
 
@@ -178,6 +214,55 @@ describe('the delta check before a carry', () => {
     expect(none.stdout).toMatch(/^CARRY: no \(delta check unavailable: no other family online\)$/m);
     expect(JSON.parse(fs.readFileSync(path.join(u.out, 'spend.json'), 'utf8')).released.map((x: any) => x.attempt)).toContain(u.check.attempt);
   });
+
+  // Value: protects=a delta check over --carry-check-cap or with the wrong --attempt never carries the owner's answer;
+  // fails_when=the cap comparison or the attempt guard is dropped or inverted; why_new=tests above run at the default cap
+  // with the right attempt only; seam=none; no_claim=real reviewer dispatch (simulated Capy host)
+  test('a check over --carry-check-cap refuses the carry; a wrong --attempt is refused', () => {
+    const over = answeredAndRevised(['--max-rounds', '1', '--carry-check-cap', '1']);
+    expect(over.rev.stdout).toMatch(/^CARRY: no \(delta check estimate 5\.00 is over the per-gate cap 1\.00 \(--carry-check-cap\)\)$/m);
+    expect(over.rev.stdout).not.toMatch(/^CARRY_CHECK:/m);
+    expect(readRunJson(over.out).status).toBe('gate_pending');
+    const s = capped();
+    result(s.check.result, s.check.delta_sha256, []);
+    const wrong = r.ap(['check', '--out', s.out, '--attempt', 'not-the-attempt', '--result', s.check.result, '--model', 'openai/gpt-6.1-sol']);
+    expect(wrong.status).toBe(3);
+    expect(wrong.stderr).toContain('ATTEMPT_MISMATCH');
+    expect(readRunJson(s.out).status).toBe('gate_pending');
+  });
+
+  test('an owner answer at the gate voids a pending delta check and releases its reservation', () => {
+    const s = capped();
+    const ans = r.ap(['answer', '--out', s.out, '--gate-rev', '2', '--reply', 'p1c', '--by', 'human']);
+    expect(ans.status, ans.stderr).toBe(0);
+    expect(ans.stdout).toContain(`CARRY: no (delta check ${s.check.attempt} void: the owner answered gate_rev 2)`);
+    result(s.check.result, s.check.delta_sha256, []);
+    const late = r.ap(['check', '--out', s.out, '--attempt', s.check.attempt, '--result', s.check.result, '--model', 'openai/gpt-6.1-sol']);
+    expect(late.status).toBe(3);
+    expect(late.stderr).toContain('PHASE_NOT_AWAITING');
+    expect(readRunJson(s.out).status).not.toBe('complete');
+    expect(decisions(s.out).some(x => x.gate_rev === 2 && x.carried_gate_from)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(s.out, 'spend.json'), 'utf8')).released.map((x: any) => x.attempt)).toContain(s.check.attempt);
+  });
+
+  test('a plan edited after the check was dispatched is not carried on that check', () => {
+    const s = capped();
+    fs.appendFileSync(readRunJson(s.out).active_plan, '\nA line the reviewer never saw.\n');
+    result(s.check.result, s.check.delta_sha256, []);
+    const c = r.ap(['check', '--out', s.out, '--attempt', s.check.attempt, '--result', s.check.result, '--model', 'openai/gpt-6.1-sol']);
+    expect(c.status, c.stderr).toBe(0);
+    expect(c.stdout).toContain('void: the plan changed after the delta check was dispatched');
+    expect(c.stdout).not.toMatch(/^CARRIED:/m);
+    expect(readRunJson(s.out).status).toBe('gate_pending');
+  });
+
+  test('--same-family binds a same-family reviewer and records why', () => {
+    const s = capped();
+    result(s.check.result, s.check.delta_sha256, []);
+    const ok = r.ap(['check', '--out', s.out, '--attempt', s.check.attempt, '--result', s.check.result, '--model', 'anthropic/claude-opus-5-5', '--same-family', 'no other family online']);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(gateOf(s.out).carry_check.model).toBe('anthropic/claude-opus-5-5 (same family: no other family online)');
+  });
 });
 
 describe('the review estimate', () => {
@@ -217,9 +302,11 @@ describe('gate eli5', () => {
     expect(brief.text.indexOf('### ELI5')).toBeLessThan(brief.text.indexOf('### Before → after'));
   });
 
-  test('a plan without ## ELI5: the Captain brief is not ready and names it; the gate render says it is missing', () => {
+  test('a plan without ## ELI5: the Captain brief is not ready and names it; the plain gate render does not ask for it', () => {
     const out = gated('no-eli5', SMALL_PLAN + SECTIONS);
-    expect(renderGate(gateOf(out))).toContain('ELI5: missing (add ## ELI5 to the plan: 5-10 plain sentences) (CAPTAIN_BRIEF_INCOMPLETE)');
+    const page = renderGate(gateOf(out));
+    expect(page).not.toContain('CAPTAIN_BRIEF_INCOMPLETE');
+    expect(page).toContain('Before → after:');
     const loaded = loadBriefInputs(out);
     if ('error' in loaded) throw new Error(String(loaded.error));
     const brief = renderCaptainBrief(loaded.inputs, { outDir: out });

@@ -27,15 +27,15 @@ import { BOUNDARY, RESULT_FORMAT, REVIEWER_TRAILER } from './autoplan-prompts';
 import { parseReviewResult } from './autoplan-reconcile';
 import { FILES, RunError, journal, now, readDecisions, readJournal, readState, writeDecisions, writeState, type RunState } from './autoplan-state';
 import { appendTrailRow } from './decision-trail';
-import { decisionId, type GateItem, type GateList } from './gate-list';
+import { decisionId, parseReply, type GateItem, type GateList } from './gate-list';
 import { readJsonl } from './headless-artifacts';
 import { modelFamily } from './outside-voice-runner';
 import { release, reserve, settle } from './spend-ledger';
 
 export const DEFAULT_CARRY_CHECK_CAP_USD = 5;
 const HIGH = ['Critical', 'High'];
-const DO_IT = /^\s*(?:(?!captain\b)[a-z][\w .'-]{0,40}:\s*)?do it[\s.!]*$/i;
-/** The owner's verbatim words are a "do it" (optionally after their name), not a Captain's words naming one. */
+const DO_IT = /^\s*(?:(?![^:]*\bcaptain\b)[a-z]+(?: [a-z]+){0,2}:\s*)?do it[\s.!]*$/i;
+/** The owner's verbatim words are a "do it" (optionally after their name), not a Captain's words or an item token (`p3b: do it`) naming one. */
 export const isDoIt = (words: string | undefined): boolean => !!words && DO_IT.test(words);
 
 export interface CarryCheck {
@@ -74,6 +74,24 @@ function record(state: RunState, c: Omit<CarryRecord, 'at'>): CarryRecord {
 }
 const refuse = (state: RunState, rev: number, from: number | undefined, reason: string) => record(state, { gate_rev: rev, from_gate_rev: from, verdict: 'refused', reason, lines: [`CARRY: no (${reason})`] });
 
+/** Drop a delta check still waiting for its reviewer (the owner answered, the plan was revised, a new gate was written) and release its reservation. */
+export function voidPendingCheck(state: RunState, why: string): string[] {
+  const c = state.carry;
+  if (c?.verdict !== 'check_pending' || !c.check) return [];
+  release(path.join(state.out, FILES.spend), c.check.attempt);
+  const out = refuse(state, c.gate_rev, c.from_gate_rev, `delta check ${c.check.attempt} void: ${why}`);
+  out.check = { ...c.check, status: 'unavailable' };
+  return out.lines;
+}
+
+/** The reviewed plan's changes since the copy taken when the owner was asked at `rev`, and their hash. */
+function deltaSince(state: RunState, rev: number): { diff: string; sha: string } | undefined {
+  const before = atGateCopy(state.out, rev);
+  if (!fs.existsSync(before)) return undefined;
+  const diff = lineDiff(fs.readFileSync(before, 'utf8'), fs.readFileSync(state.active_plan, 'utf8')).filter(l => l.op !== ' ').map(l => `${l.op} ${l.text}`).join('\n');
+  return { diff, sha: sha256(diff) };
+}
+
 interface Source { id: string; gate_rev: number; words: string; by?: string }
 type Plan = { source: Source; doIt: GateItem[]; deltas: GateItem[] } | { reason: string; from?: number };
 
@@ -83,8 +101,11 @@ function assess(state: RunState, prev: GateList, list: GateList): Plan {
   if (state.carry_forward === false) return { reason: 'carry-forward is off for this run (--no-carry-forward)', from };
   const p1 = readDecisions(state.out).find(r => r.gate_rev === from && (r.label ?? '').toLowerCase() === 'p1');
   if (!p1 || p1.status === 'pending' || !p1.answered_at) return { reason: `gate_rev ${from} was not answered`, from };
+  const unanswered = readDecisions(state.out).find(r => r.gate_rev === from && r.status === 'pending');
+  if (unanswered) return { reason: `gate_rev ${from} left ${unanswered.label ?? unanswered.id} unanswered`, from };
   if (p1.chosen !== 'a' && p1.chosen !== 'b') return { reason: `gate_rev ${from} answer was p1${p1.chosen}, not an approval`, from };
   if (p1.carried_gate_from) return { reason: `gate_rev ${from} was itself carried; the owner answers this one`, from };
+  if (parseReply(p1.reply ?? '', prev).mode !== 'rec') return { reason: `gate_rev ${from} was answered with item tokens, not rec or "do it"`, from };
   const words = p1.owner_reply ?? (p1.answered_by === 'human' ? p1.reply : undefined);
   if (!words?.trim()) return { reason: `no owner words recorded at gate_rev ${from}`, from };
   const amendments = (state.amendments ?? []).filter(a => a.gate_rev === from);
@@ -104,7 +125,7 @@ function assess(state: RunState, prev: GateList, list: GateList): Plan {
     if (item.id === 'p1' || item.carried) continue;
     const option = item.options.find(o => o.key === item.recommended);
     if (item.cap?.kind === 'delta' && !option?.changes_plan && item.recommended === 'a') { deltas.push(item); continue; }
-    if (isDoIt(words) && item.kind === 'auto' && !item.cap && !['scope', 'cost', 'direction'].includes(item.changes ?? '')) { doIt.push(item); continue; }
+    if (isDoIt(words) && item.kind === 'auto' && !item.cap && !option?.changes_plan && !['scope', 'cost', 'direction'].includes(item.changes ?? '')) { doIt.push(item); continue; }
     return { reason: `new item ${item.id}: ${item.title}`, from };
   }
   return { source: { id: p1.id, gate_rev: from, words, by: p1.answered_by }, doIt, deltas };
@@ -112,6 +133,7 @@ function assess(state: RunState, prev: GateList, list: GateList): Plan {
 
 /** Called by finishGate once gate_rev N+1 is written (status gate_pending): carry, set up the delta check, or say why not. */
 export function evaluateCarry(state: RunState, prev: GateList | undefined, list: GateList): CarryRecord | undefined {
+  voidPendingCheck(state, `gate_rev ${list.gate_rev} was written`);
   if (!prev || list.gate_rev < 2) return undefined;
   try {
     const plan = assess(state, prev, list);
@@ -119,6 +141,7 @@ export function evaluateCarry(state: RunState, prev: GateList | undefined, list:
     if (plan.deltas.length) return dispatchCheck(state, prev, list, plan);
     return carry(state, list, plan.source, plan.doIt, plan.deltas);
   } catch (e: any) {
+    if (readDecisions(state.out).some(r => r.gate_rev === list.gate_rev && r.answered_at && !r.carried_from)) throw e;
     return refuse(state, list.gate_rev, prev.gate_rev, `error: ${e instanceof RunError ? `${e.detail} (${e.code})` : e?.message ?? e}`);
   }
 }
@@ -128,11 +151,10 @@ function dispatchCheck(state: RunState, prev: GateList, list: GateList, plan: Ex
   const cap = state.carry_check_cap_usd ?? DEFAULT_CARRY_CHECK_CAP_USD;
   const estimate = attemptEstimate(state, undefined, process.env).usd;
   if (estimate > cap) return refuse(state, rev, prev.gate_rev, `delta check estimate ${estimate.toFixed(2)} is over the per-gate cap ${cap.toFixed(2)} (--carry-check-cap)`);
-  const before = atGateCopy(state.out, prev.gate_rev);
-  if (!fs.existsSync(before)) return refuse(state, rev, prev.gate_rev, `no copy of the plan the owner answered at gate_rev ${prev.gate_rev}`);
+  const delta = deltaSince(state, prev.gate_rev);
+  if (!delta) return refuse(state, rev, prev.gate_rev, `no copy of the plan the owner answered at gate_rev ${prev.gate_rev}`);
   const current = fs.readFileSync(state.active_plan, 'utf8');
-  const diff = lineDiff(fs.readFileSync(before, 'utf8'), current).filter(l => l.op !== ' ').map(l => `${l.op} ${l.text}`).join('\n');
-  const deltaSha = sha256(diff);
+  const { diff, sha: deltaSha } = delta;
   const attempt = `${state.run}-c${rev}`;
   const prompt = path.join(state.out, `carry-check-g${rev}-prompt.md`);
   const result = path.join(state.out, `carry-check-g${rev}.md`);
@@ -177,6 +199,13 @@ export function submitCarryCheck(o: CheckOptions): { state: RunState; lines: str
   if (!c || c.verdict !== 'check_pending' || !c.check || state.status !== 'gate_pending' || c.gate_rev !== state.gate_rev) throw new RunError('PHASE_NOT_AWAITING', `no delta check is pending (run is ${state.status}, gate_rev=${state.gate_rev ?? 'none'})`, 3);
   const check = c.check;
   if (o.attempt !== check.attempt) throw new RunError('ATTEMPT_MISMATCH', `pass --attempt ${check.attempt}`, 3);
+  const stale = readDecisions(state.out).some(r => r.gate_rev === c.gate_rev && r.answered_at && !r.carried_from) ? `the owner answered gate_rev ${c.gate_rev}`
+    : deltaSince(state, c.from_gate_rev ?? 0)?.sha !== check.delta_sha256 ? 'the plan changed after the delta check was dispatched' : undefined;
+  if (stale) {
+    const lines = voidPendingCheck(state, stale);
+    writeState(state);
+    return { state, lines };
+  }
   const gateFile = path.join(state.out, 'gate.json');
   const list = JSON.parse(fs.readFileSync(gateFile, 'utf8')) as GateList;
   const spend = path.join(state.out, FILES.spend);

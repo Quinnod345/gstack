@@ -34,7 +34,7 @@ import * as path from 'node:path';
 import { amendmentSteps, answerGate, closeDeferred, finishGate, recommendGate } from '../lib/autoplan-gate';
 import { gateCost, gateCostPayload, renderGateCost, type GateCost } from '../lib/autoplan-gate-cost';
 import { attemptEstimate, changeBudget, escalateLine, liftStop } from '../lib/autoplan-budget';
-import { carryLines, submitCarryCheck } from '../lib/autoplan-carry';
+import { DEFAULT_CARRY_CHECK_CAP_USD, carryLines, submitCarryCheck } from '../lib/autoplan-carry';
 import { ANSWERED_BY_RE } from '../lib/gate-list';
 import { checkpointLines, checkpointRun, restoreCheckpoint, type CheckpointMoment } from '../lib/autoplan-checkpoint';
 import { admit, touchInstallLease } from '../lib/autoplan-admission';
@@ -63,7 +63,7 @@ DRIVER: ${driverFile()}
           --scaffold (first next): a plan missing one of its two sections is reviewed from <out>/plan-source.md with the heading added
           --light loads each phase's checklist plus the sections its scope needs (the unattended default); interactive kinds load everything
           --no-carry-forward (first next): every later gate revision goes to the owner, even one that asks nothing new
-          --carry-check-cap <usd> (first next): the most one delta check may reserve before a carry (default 5.00)
+          --carry-check-cap <usd> (first next): the most one delta check may reserve before a carry (default ${DEFAULT_CARRY_CHECK_CAP_USD.toFixed(2)})
           the first next prints REVIEW_ESTIMATE: the most the review can reserve at this scope and round cap
           prepare the current phase; one ATTEMPT: line per voice; ends awaiting_result
   submit  --out <dir> --phase <p> --voice native|outside --result <file> | --record <file> [--attest <reason>]

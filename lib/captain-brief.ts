@@ -80,7 +80,7 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
   const rowOf = (id: string) => inputs.decisions.filter(d => d.gate_rev === list.gate_rev).find(d => (d.label ?? '').toLowerCase() === id);
   const p1Row = p1 ? rowOf('p1') : undefined;
   const pending = !p1Row || p1Row.status === 'pending';
-  const eli5 = list.eli5;
+  const eli5 = list.eli5 ? buildEli5(plan.text, plan.file ?? 'plan.md') : undefined;
   const fromGate = eli5 ? [eli5.before_after, eli5.why, eli5.cause, eli5.decisions] : [];
   const sections = BRIEF_SECTIONS.map((s, i) => ({ title: s.title, found: eli5 ? { body: fromGate[i]! } : findSection(plan.text, [...s.aliases]) }));
   const missing = [...(eli5 && !eli5.summary.trim() ? [ELI5_SECTION.title] : []), ...sections.filter(s => !s.found || !s.found.body.trim()).map(s => s.title)];
@@ -95,7 +95,9 @@ export function renderCaptainBrief(inputs: BriefInputs, o: { outDir: string }): 
 
   let header: string[];
   if (!pending && p1Row?.carried_gate_from) {
-    header = [`**Nothing pending.** Carried forward from gate_rev ${p1Row.carried_gate_rev}: ${P1_DONE[p1Row?.chosen ?? ''] ?? 'answered'} under the owner's words “${p1Row?.owner_reply ?? ''}”, because nothing new needed deciding.`];
+    const unseen = inputs.decisions.filter(d => d.gate_rev === list.gate_rev && d.carried_under).map(d => (d.title ?? '').replace(/\s*\[[^\]]*\]\s*$/, ''));
+    header = [`**Nothing pending.** Carried forward from gate_rev ${p1Row.carried_gate_rev}: ${P1_DONE[p1Row?.chosen ?? ''] ?? 'answered'} under the owner's words “${p1Row?.owner_reply ?? ''}”, because nothing new needed deciding.`,
+      ...(unseen.length ? ['', `Taken under "do it" without being shown to the owner: ${unseen.join('; ')}.`] : [])];
   } else if (!pending) {
     header = [`**Nothing pending.** Already decided${p1Row?.answered_at ? ` on ${p1Row.answered_at.slice(0, 10)}` : ''}: ${P1_DONE[p1Row?.chosen ?? ''] ?? 'answered'}${p1Row?.owner_reply ?? p1Row?.reply ? ` (“${p1Row?.owner_reply ?? p1Row?.reply}”)` : ''}.`];
   } else if (missing.length) {

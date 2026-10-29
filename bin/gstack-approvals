@@ -76,11 +76,15 @@ function importStack(cmd: string, flags: Record<string, string>, json: boolean):
   const runDir = path.resolve(flags['--autoplan']);
   const results: Array<{ branch: string; added: string[]; skipped: number; file: string; mirror: string | null; error?: string }> = [];
   let firstError: RecordError | undefined;
+  const plans: Array<{ branch: string; loc: StoreLocation; rows: ReturnType<typeof importAutoplan> & unknown[] }> = [];
   for (const branch of branches) {
     const loc = locate({ cwd, env: process.env, branch });
     if ('code' in loc) return fail(cmd, loc);
     const rows = importAutoplan(runDir, branch, flags['--by']);
     if ('code' in rows) return fail(cmd, rows);
+    plans.push({ branch, loc, rows });
+  }
+  for (const { branch, loc, rows } of plans) {
     const res = appendRows(loc, rows);
     if ('code' in res) { firstError ??= res; results.push({ branch, added: [], skipped: 0, file: loc.file, mirror: loc.mirror ?? null, error: res.message }); continue; }
     if (res.mirrorError) firstError ??= res.mirrorError;
