@@ -14,8 +14,8 @@ reference is [docs/captain.md](../docs/captain.md).
 
 ## The numbers
 
-The 14 days after the first Captain took over gstack (2026-10-15) against the
-14 days before, measured from git and GitHub[^1]:
+The 14 days from the first fix waves (2026-10-15, with the Captain taking over
+the next day) against the 14 days before, measured from git and GitHub[^1]:
 
 - **197 PRs merged to gstack's main, up from 65 (3.0x).** That is 98.5 a week.
 - **194 versions shipped, 13.9 a day, up from 62 (3.1x).** Every merged PR
@@ -37,9 +37,9 @@ went up, from a median of 1.1 hours to 5.6, because trains batch merges.
 ## What we did
 
 Capy threads started writing gstack PRs on 2026-09-15. On 2026-10-15 Garry
-started running gstack's own development through a Capy Captain, GStack
-Minder, and gave it one standing job: keep `garrytan/gstack` moving and keep
-main green. Within two weeks there were seven Captains (gstack, gbrain,
+approved the first fix waves, and the next day he handed gstack's development
+to a Capy Captain, GStack Minder. Its standing job is to keep
+`garrytan/gstack` moving and main green. Within two weeks there were seven Captains (gstack, gbrain,
 alphaclaw, two eval projects, a game, and a magazine), each directing its own
 crew of threads.
 
