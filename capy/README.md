@@ -24,7 +24,7 @@ The 14 days after the first Captain took over gstack (2026-10-15) against the
   versions in its busiest 14 days; this fortnight shipped 194.
 - **36 PRs merged and 36 versions shipped in one day**, on October 25 and again
   on October 26.
-- **A reported bug is fixed in a median 2.4 days**, from the issue opening to the
+- **A reported issue is fixed in a median 2.4 days**, from the issue opening to the
   fixing PR's merge, across the 52 issues closed by a PR in the window.
 - **1,874 PRs merged across eight of Garry's repositories** in the same 14 days.
 
