@@ -230,7 +230,7 @@ export interface JUnitCensus {
   deselected: Map<string, number>;
   /** Per shard key: skip reason -> skipped testcase count. */
   shardSkipReasons: Map<string, Map<string, number>>;
-  /** Session cost no collector record carries; the headline adds it to the collectors' total_cost_usd. */
+  /** Streamed session cost (sessions without a terminal result), which no collector record carries; the headline adds it to the collectors' total_cost_usd. */
   ledgerCostUsd: number;
   /** `<shard key> :: <test name> (<outcome>)` for every testcase no rule attributes. */
   unattributed: string[];
@@ -253,15 +253,10 @@ export const MODEL_FREE_CASES: ReadonlySet<string> = new Set(['timeline-event-fl
  */
 export function caseCost(id: string, records: any[], sessions: SessionLedgerRow[]): { cost_usd: number; cost_known?: false } {
   if (!records.length && !sessions.length) return MODEL_FREE_CASES.has(id) ? { cost_usd: 0 } : { cost_usd: 0, cost_known: false };
-  const unrecorded = unrecordedCosts(records, sessions);
+  const unrecorded = sessions.map(s => s.billed !== false ? (records.length ? 0 : s.cost_usd) : s.streamed_cost_usd);
   const known = records.every(r => r?.cost_known !== false) && unrecorded.every(c => typeof c === 'number' && Number.isFinite(c));
   const total = records.reduce((sum, r) => sum + (Number(r?.cost_usd) || 0), 0) + knownSum(unrecorded);
   return { cost_usd: Math.round(total * 100) / 100, ...(known ? {} : { cost_known: false as const }) };
-}
-
-/** Session costs no collector record carries (so no collector total_cost_usd counts them): streamed usage, and a billed session's own cost when the trial has no record. */
-function unrecordedCosts(records: any[], sessions: SessionLedgerRow[]): Array<number | undefined> {
-  return sessions.map(s => s.billed !== false ? (records.length ? 0 : s.cost_usd) : s.streamed_cost_usd);
 }
 
 const knownSum = (costs: Array<number | undefined>) => costs.reduce<number>((sum, c) => sum + (typeof c === 'number' && Number.isFinite(c) ? c : 0), 0);
@@ -311,7 +306,7 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
           : failed.failureType === 'TimeoutError' ? 'timeout' : failedRecord ? failureClassOf(failedRecord) : 'assertion';
         const sessions = caseSessions(ledger, id, byCase.size === 1);
         const cost = caseCost(id, mine, sessions);
-        census.ledgerCostUsd += knownSum(unrecordedCosts(mine, sessions));
+        census.ledgerCostUsd += knownSum(sessions.map(s => s.billed === false ? s.streamed_cost_usd : 0));
         const credentials = failed && recorded !== 'contract' ? credentialRejection({ error: `${failedRecord?.error ?? ''}\n${failed.message ?? ''}`, sessions }) : undefined;
         const failureClass = credentials ? 'infra' : recorded;
         const rawError = credentials ? `credentials rejected: ${credentials}` : failedRecord?.error ?? failed?.message;

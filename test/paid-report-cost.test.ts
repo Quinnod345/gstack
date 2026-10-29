@@ -23,6 +23,8 @@ describe('pricing usage', () => {
       .toBeCloseTo(4 + 20 + 0.2 + 5, 6);
     expect(anthropicUsageCostUsd({ cache_creation_input_tokens: 3_000_000, cache_creation: { ephemeral_5m_input_tokens: 1_000_000, ephemeral_1h_input_tokens: 2_000_000 } }, 'claude-opus-5-5'))
       .toBeCloseTo(5 + 16, 6);
+    expect(anthropicUsageCostUsd({ cache_creation_input_tokens: 3_000_000, cache_creation: { ephemeral_1h_input_tokens: 2_000_000 } }, 'claude-opus-5-5'))
+      .toBeCloseTo(5 + 16, 6);
     expect(anthropicUsageCostUsd({ input_tokens: 10 }, 'no-such-model')).toBeUndefined();
   });
 

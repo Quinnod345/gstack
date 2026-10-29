@@ -166,7 +166,8 @@ export function anthropicUsageCostUsd(usage: AnthropicUsage, model: string | und
   if (!row) return undefined;
   const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
   const oneHour = count(usage.cache_creation?.ephemeral_1h_input_tokens);
-  const fiveMinute = usage.cache_creation ? count(usage.cache_creation.ephemeral_5m_input_tokens) : count(usage.cache_creation_input_tokens);
+  const fiveMinute = typeof usage.cache_creation?.ephemeral_5m_input_tokens === 'number'
+    ? count(usage.cache_creation.ephemeral_5m_input_tokens) : Math.max(0, count(usage.cache_creation_input_tokens) - oneHour);
   const cachedRate = row.cached_input_per_mtok ?? row.input_per_mtok * 0.1;
   return (count(usage.input_tokens) * row.input_per_mtok
     + count(usage.cache_read_input_tokens) * cachedRate
