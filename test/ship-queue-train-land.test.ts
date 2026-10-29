@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { cleanup } from './helpers/restamp-fixture';
 import {
-  GREEN_GATE, TRAIN_POLICY, line, nonceOf, openPr, queue, readyReceipt, trainFixture, trainJson, type TrainFixture,
+  GREEN_GATE, TRAIN_POLICY, line, nonceOf, openPr, queue, readyReceipt, shippedBody, trainFixture, trainJson, type TrainFixture,
 } from './helpers/ship-queue-train-fixture';
 
 const POLICY = { ...TRAIN_POLICY, release_tool: null, release_outputs: [], changelog_fragments: { dir: 'changelog.d' }, min_gstack_version: '1.92.0.0' };
@@ -117,6 +117,16 @@ describe('stamped trains: build and land', () => {
     expect(drift.err).toContain('(QUEUE_TRAIN_TREE_MISMATCH)');
     expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
   }, 300_000);
+
+  test('the receipt check is the depth-checked one train build uses: a receipt whose writer records depth but which records none refuses, nothing pushed', () => {
+    const { fx, h1, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    fx.write(d => { (d.prs['1'] as any).body = shippedBody('1', h1, { gstack_version: '1.91.307.0' }); });
+    const r = land(fx, nonce, '1');
+    expect(r.err).toContain('(QUEUE_RECEIPT_DEPTH_RAISED)');
+    expect(r.out).toMatch(/^REVIEW_DEPTH: receipt=none required=/m);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
+  }, 180_000);
 
   test('a plain train refuses train land and keeps the slot-stamp path', () => {
     const fx = trainFixture(TRAIN_POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);

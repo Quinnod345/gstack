@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import { ciAtHead, type QueueContext } from './ship-queue';
 import { git, writeJsonAtomic } from './ship-queue-gate';
 import { waitChecks } from './ship-queue-land';
-import { bindReceipt } from './ship-receipt';
+import { bindShippedReceipt } from './ship-receipt-depth';
 import { checkRun, prInfo } from './ship-queue-train-github';
 import { activeFreeze, attemptsOf, trainFile } from './ship-queue-train-record';
 import { fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed, outOk, outPending, outRefused, trainEnv, type TrainOut } from './ship-queue-train';
@@ -59,8 +59,8 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   if (info.isCrossRepository) return outRefused({ code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr} is a fork head; train land pushes only crew branches` }, lines, 'none', run);
   if (!j || j.base !== main.sha) {
     if (info.headRefOid !== pin && info.headRefOid !== j?.stamp_commit) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not its pin ${pin.slice(0, 12)}`, main.sha, lines, true);
-    const shipped = bindReceipt(info.body, o.pr, [pin]);
-    lines.push(shipped.line);
+    const shipped = bindShippedReceipt(root, `refs/remotes/${env.remote}/${ctx.base}`, info.body, o.pr, [pin]);
+    lines.push(shipped.line, ...(shipped.depthLine ? [shipped.depthLine] : []));
     if (!shipped.ok) return outRefused({ code: shipped.code, message: shipped.message }, lines, `#${o.pr}'s lane runs /ship at its pin and READYs again`, run);
     const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`]).out;
     const label = ctx.gh(['pr', 'edit', o.pr, '--add-label', 'evals-no-debounce']);
