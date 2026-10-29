@@ -67,6 +67,10 @@ describe('registry: add, renew, release', () => {
     expect(renewEntry(expired, id, { owner: 'sam', evidence: ['https://run/9'], days: 3 }, at(10)).expiresAt).toBe(at(13).toISOString());
     const twice = { ...e, renewals: [...e.renewals, { ...e.renewals[0]!, evidence: ['https://run/3'] }] };
     expect(entryProblems(id, twice, at(6)).join()).toContain('one renewal is allowed');
+    const farFuture = { ...e, expiresAt: at(400).toISOString(), renewals: [{ ...e.renewals[0]!, renewedAt: at(393).toISOString(), expiresAt: at(400).toISOString() }] };
+    expect(entryProblems(id, farFuture, at(6)).join()).toContain('a renewal is dated before the entry or in the future');
+    expect(liveQuarantine({ schema: 1, entries: { [id]: farFuture }, released: [] }, at(6)).ids.size).toBe(0);
+    expect(entryProblems(id, { ...e, renewals: [null as never] }, at(6)).join()).toContain('a renewal is not an object');
   });
 
   test('release moves the entry to released with its reason and PR', () => {
@@ -172,6 +176,17 @@ describe('check --base against a git fixture', () => {
     expect(checkRegistry(dir, { base: 'main' }, NOW).problems).toEqual([
       'test/b.test.ts::::other: added in the same change that edits test/b.test.ts; a change cannot quarantine the test it touches (land the entry on its own, or fix the test)',
     ]);
+  });
+
+  test('a non-ASCII test path is matched too (git would quote it by default)', () => {
+    const { dir, reg } = fixtureRepo();
+    fs.writeFileSync(path.join(dir, 'test', 'über.test.ts'), '// ü\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'add über');
+    const next = clone(reg);
+    add(next, 'test/über.test.ts::::t', { suiteIds: ['test/über.test.ts::::t', 'test/a.test.ts::::slow'] });
+    writeRegistry(dir, next);
+    expect(checkRegistry(dir, { base: 'main' }, NOW).problems.join('\n')).toContain('test/über.test.ts::::t: added in the same change that edits test/über.test.ts');
   });
 
   test('the bin: check exits 1 with QUARANTINE_REFUSED lines, and an unknown base exits 3', () => {

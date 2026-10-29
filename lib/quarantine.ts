@@ -146,10 +146,13 @@ export function entryProblems(id: string, e: QuarantineEntry, now: Date): string
   if (entered > now.getTime() + DAY) p.push('enteredAt is in the future');
   if (!Array.isArray(e.renewals)) return [...p, 'renewals is not a list'];
   if (e.renewals.length > 1) p.push(`renewed ${e.renewals.length} times; one renewal is allowed, then fix the test or release it`);
-  const firstExpiry = e.renewals.length ? Date.parse(e.renewals[0]!.previousExpiresAt) : expires;
+  const firstExpiry = e.renewals.length ? Date.parse(e.renewals[0]?.previousExpiresAt) : expires;
   if (!(firstExpiry > entered)) p.push('expires before it entered');
   if (firstExpiry - entered > MAX_DAYS * DAY) p.push(`expires more than ${MAX_DAYS} days after it entered`);
   for (const r of e.renewals) {
+    if (!r || typeof r !== 'object') { p.push('a renewal is not an object'); continue; }
+    const renewed = Date.parse(r.renewedAt);
+    if (!(renewed >= entered && renewed <= now.getTime() + DAY)) p.push('a renewal is dated before the entry or in the future');
     if (!filled(r?.owner)) p.push('a renewal names no owner');
     if (!filledList(r?.evidence) || r.evidence.every(x => filledList(e.evidence) && e.evidence.includes(x))) p.push('a renewal carries no new evidence');
     const from = Math.max(Date.parse(r?.renewedAt), Date.parse(r?.previousExpiresAt));
@@ -281,9 +284,9 @@ export function checkRegistry(cwd: string, o: { base?: string; suiteTests?: numb
     const commit = resolveCommit(o.base, root);
     const mb = git(['merge-base', commit, 'HEAD'], root);
     if (!mb.ok) throw new QuarantineError('FLAKY_QUARANTINE_BASE', `no merge base between ${o.base} and HEAD (a shallow clone?)`);
-    const changed = git(['diff', '--name-only', mb.out.trim()], root);
+    const changed = git(['-c', 'core.quotePath=false', 'diff', '--name-only', '-z', mb.out.trim()], root);
     if (!changed.ok) throw new QuarantineError('FLAKY_QUARANTINE_BASE', `cannot diff against the merge base of ${o.base}`);
-    problems.push(...baseProblems(registryAt(mb.out.trim(), root, `the merge base of ${o.base}`), head, changed.out.split('\n').filter(Boolean)));
+    problems.push(...baseProblems(registryAt(mb.out.trim(), root, `the merge base of ${o.base}`), head, changed.out.split('\0').filter(Boolean)));
   }
   const live = liveEntries(head, now);
   const tests = o.suiteTests ?? smallestSuite(live);
