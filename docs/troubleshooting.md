@@ -4734,7 +4734,9 @@ is not the reviewed one. The reviewed verdict does not cover HEAD, so the
 receipt is not carried. The refusal names the changed product paths.
 
 **Fix.** Run /ship on the new head. The receipt carries only across a
-conflict-only base merge, a test-only change or release metadata, which the
+conflict-only base merge, a test-only change, release metadata, a registered
+output the pregate's regen check proved, or a rebase onto a covered tree with
+the recorded product diff, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 

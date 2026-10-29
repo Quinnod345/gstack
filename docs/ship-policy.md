@@ -777,7 +777,8 @@ written by the pr-body section of `/ship` after the body is composed.
 
 The ```` ```gstack-ship-receipt ```` block is the handoff record: identifiers
 first (`pr`, `head`, `version`, `base`), then the evidence (`gate`, `ci`,
-`pregate`, `issues`, `approval`, `docs`, `review_loop`, `carry`), validated
+`head_tree`, `product_patch_id`, `pregate`, `issues`, `approval`, `docs`,
+`review_loop`, `carry`), validated
 against the `ship-receipt` schema (`gstack-artifact schema ship-receipt`) and
 read back by `gstack-ship-receipt read`, `result`, `carry` and the queue.
 
@@ -944,7 +945,9 @@ full rerun because a merge changed its generated index's diff). A base merge
 contributes no product change of its own. A receipt carried twice keeps the reviewed head as
 `carry.from` and adds up the merges and paths. The carried receipt records
 `carry: { from, reason, product_patch_id, changed_paths, merge_commits,
-range_diff, covers, reruns }` with the `git range-diff` evidence, prints
+range_diff, covers, reruns, ancestry, trees }` (`ancestry` is `linear`
+along the receipt's own history, `rewritten` once any hop was a rebase;
+`trees` lists the earlier covered trees) with the `git range-diff` evidence, prints
 `CARRY: carried from <old> to <new> (<reason>)` and the `GSTACK_RESULT:
 skill=ship status=complete` line, and its summary line ends with
 `carried_from=<old12>`. `CARRY: current` means the receipt already names HEAD;
