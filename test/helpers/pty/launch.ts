@@ -2,6 +2,7 @@
  * Spawn `claude` in a real PTY (launchClaudePty) and the session handle. Moved from claude-pty-runner.ts.
  * Import through test/helpers/claude-pty-runner.ts from tests; pty/ modules import siblings directly.
  */
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { resolveEvalModel } from '../../../lib/eval-model';
 import { hermeticChildEnv, hermeticSkillsConfigDir, isHermeticEnabled } from '../hermetic-env';
@@ -15,6 +16,7 @@ import { trustDialogInput } from '../pty-trust-dialog';
 import { resolveClaudeBinary } from './binary';
 import { createPtyScreen, screenPanelEnd, stripAnsi } from './screen';
 import { appendSessionLedger, sessionKey } from '../session-ledger';
+import { pricedTranscript } from './transcript-cost';
 
 export interface ClaudePtyOptions {
   /** Register the repo's shipped skills in the child's user scope via
@@ -129,6 +131,8 @@ export interface ClaudePtySession {
    * the dir name ends in `/.claude` by contract).
    */
   hermeticConfigDir: string | null;
+  /** The Claude session id the launcher pinned (or the caller's --session-id): its transcript prices the session ledger row. */
+  sessionId?: string;
   /** Owned HOME/.gstack created by the seeded launcher; absent for caller overrides. */
   hermeticSkillStateRoot?: string;
   /** Owned pre-tool identity record, removed by close(). */
@@ -249,7 +253,8 @@ export async function launchClaudePty(
       recorded = true;
       const elapsed = performance.now() - startedMono;
       appendSessionLedger({ key: sessionKey('pty', undefined), runner: 'pty', started_at: startedAt, budget_ms: timeoutMs,
-        elapsed_ms: elapsed, end: elapsed >= timeoutMs ? 'session_timeout' : 'completed', ...screenPanelEnd(handle.visibleText()), billed: false });
+        elapsed_ms: elapsed, end: elapsed >= timeoutMs ? 'session_timeout' : 'completed', ...screenPanelEnd(handle.visibleText()), billed: false,
+        ...pricedTranscript(handle) });
     }
     return close();
   } });
@@ -263,6 +268,7 @@ interface LaunchSetup {
   hermeticSkillStateRoot: string | undefined;
   autoplanArtifactStateRoot: string | undefined;
   autoplanEngTestPlanStateRoot: string | undefined;
+  sessionId: string | undefined;
 }
 
 function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
@@ -283,6 +289,10 @@ function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
   // Before opts.extraArgs so a test could theoretically supply --mcp-config.
   const hermetic = isHermeticEnabled();
   if (hermetic) args.push('--strict-mcp-config');
+  const extra = opts.extraArgs ?? [];
+  const resumes = extra.some(arg => ['--resume', '-r', '--continue', '-c'].includes(arg));
+  let sessionId = extra.includes('--session-id') ? extra[extra.indexOf('--session-id') + 1] : undefined;
+  if (hermetic && !sessionId && !resumes) args.push('--session-id', sessionId = randomUUID());
   if (opts.extraArgs) args.push(...opts.extraArgs);
 
   // Hermetic by default (test/helpers/hermetic-env.ts): operator session
@@ -319,7 +329,7 @@ function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
 
   const autoplanEngTestPlanStateRoot = opts.approveAutoplanArtifactEdits && opts.autoplanArtifactState !== undefined
     ? hermeticSkillStateRoot : undefined;
-  return { args, childEnv, hermetic, hermeticSkillStateRoot, autoplanArtifactStateRoot, autoplanEngTestPlanStateRoot };
+  return { args, childEnv, hermetic, hermeticSkillStateRoot, autoplanArtifactStateRoot, autoplanEngTestPlanStateRoot, sessionId };
 }
 
 interface LaunchRecorders {
@@ -568,6 +578,7 @@ function sessionHandle(pty: PtyProcess, launch: LaunchSetup, wallTimer: ReturnTy
     exited: () => pty.exited,
     exitCode: () => pty.exitCode,
     hermeticConfigDir: launch.hermetic ? launch.childEnv.CLAUDE_CONFIG_DIR ?? null : null,
+    sessionId: launch.sessionId,
     hermeticSkillStateRoot: launch.hermeticSkillStateRoot,
     pendingPlanReadyFile: pendingExit?.file,
     pendingQuestionFile: pendingQuestion?.file,

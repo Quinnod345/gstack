@@ -39,7 +39,7 @@ describe('launchClaudePty model pin', () => {
     expect(opts.model).toBe('claude-sonnet-4-6');
   });
 
-  test.skipIf(process.platform === 'win32')('spawn args pin --model from the fallback chain, before extraArgs, with hermetic MCP gating', () => {
+  test.skipIf(process.platform === 'win32')('spawn args pin --model from the fallback chain, before extraArgs, with hermetic MCP gating and a pinned session id', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pty-model-pin-'));
     try {
       const fake = join(dir, 'fake-claude');
@@ -56,7 +56,9 @@ const argv = async (opts, evalsModel) => {
 };
 process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
   fallback: await argv({}, undefined), env: await argv({}, 'env-model'), explicit: await argv({ model: 'opts-model' }, 'env-model'),
-  extra: await argv({ extraArgs: ['--model', 'override'] }, undefined) }));
+  extra: await argv({ extraArgs: ['--model', 'override'] }, undefined),
+  pinned: await argv({ extraArgs: ['--session-id', '11111111-2222-4333-8444-555555555555'] }, undefined),
+  resumed: await argv({ extraArgs: ['--resume', 'prior'] }, undefined) }));
 `);
       const run = (hermetic: string) => {
         const result = spawnSync(process.execPath, [worker], { cwd: join(import.meta.dir, '../..'), encoding: 'utf8', timeout: 30_000,
@@ -73,6 +75,13 @@ process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
       expect(hermetic.extra.slice(-2)).toEqual(['--model', 'override']);
       expect(hermetic.fallback).toContain('--strict-mcp-config');
       expect(run('0').fallback).not.toContain('--strict-mcp-config');
+      const sessionIds = (args: string[]) => args.flatMap((arg, i) => arg === '--session-id' ? [args[i + 1]] : []);
+      expect(sessionIds(hermetic.fallback)).toHaveLength(1);
+      expect(sessionIds(hermetic.fallback)[0]).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+      expect(sessionIds(hermetic.extra)).toHaveLength(1);
+      expect(sessionIds(hermetic.pinned)).toEqual(['11111111-2222-4333-8444-555555555555']);
+      expect(sessionIds(hermetic.resumed)).toEqual([]);
+      expect(sessionIds(run('0').fallback)).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 });
