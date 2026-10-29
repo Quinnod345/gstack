@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.309.0] - 2026-10-29
 
 **The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
 
@@ -19,6 +19,89 @@
 
 ### Gate integrity
 - No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
+## [1.91.308.0] - 2026-10-29
+
+**`gstack-restamp` no longer cuts a four-part package.json version to three parts in a repo whose convention is four.** On garrytan/gbrain#7878, `/ship` restamped gbrain's `package.json` to `"0.60.483"` beside `VERSION` `0.60.483.0`; gbrain requires the two to match and its CI version gate fails when they drift, so the stamp had to be reverted by hand. The version stage called `gstack-version-bump write`, which always stores the npm-valid three-part form in the manifest (decision 11, which is why gstack's own `package.json` reads `1.91.298`).
+
+### Fixed
+- **`lib/restamp.ts`**: the version stage keeps the full version in the manifest when the policy lists it in `stamp_paths` or `stamp_files` and the base's copy holds four parts, and the stage detail says so (`wrote 0.60.483.0 (package.json keeps four parts: …)`). The form is read at the base, like the policy, so a branch an earlier restamp already cut to three parts goes back to four. Every other repo, gstack included, still gets the npm-valid form, and a four-part manifest the policy does not list still migrates to three parts as decision 11 says.
+- **`bin/gstack-version-bump write`**: new `--manifest-form npm|full` (default `npm`); `full` writes the version as given to the manifest and its npm lockfiles. It has no effect when the version path is itself a JSON manifest.
+
+### Tests
+- `test/restamp-four-part-manifest.test.ts`: a gbrain-shaped fixture (four-part `VERSION` and `package.json`, the manifest in `stamp_files`, bun, no npm lockfile) restamped from an unstamped branch and from a branch already carrying its stamp (both failed before the fix with `"0.60.483"`), from a branch an older restamp cut to three parts, and with the manifest listed through `stamp_paths`. gstack's shape (three-part manifest and lockfile) and an unlisted four-part manifest keep their current results.
+- `test/gstack-version-bump.test.ts`: `--manifest-form full` keeps four parts in the manifest and lockfile; an unknown form exits 2 before anything is written.
+
+## [1.91.307.0] - 2026-10-29
+
+**/ship now reviews in proportion to what the diff can break: light, standard or full depth.** A diff with 50 or fewer runtime lines gets one batched specialist plus the native adversarial pass, a larger runtime diff gets the class's specialists scoped to their hunks, and gate code or any classifier error gets the full review as before. The receipt records the depth and the queue refuses a receipt below what the head needs. Before this, a 12-line fix paid for the same reviewer fan-out as a change to the merge gate. The backtest that would have let light depth drop the adversarial pass was inconclusive (9 light-eligible PRs, 5 with attributable findings, below the 15 the plan required), so light keeps it.
+
+### Added
+- **Review depth** (`lib/review-depth.ts`, `lib/review-collect.ts`, `gstack-review-plan`): `REVIEW_DEPTH:` (depth, runtime lines, the rules hash, reasons), `GATE_SCAN:` bound to HEAD, one `DEPTH_ERROR:` per input that fails closed to full (with the input, the cause and the repair), and per-reviewer `DIFF_CMD:` pathspecs. Runtime lines leave out docs, tests and outputs registered with a command in the base branch's `.gstack/generated.json`, read at the base commit. `--depth-floor standard|full` only raises the depth. A fixed or open blocker, or a CRITICAL, raises light to standard for the rest of the invocation.
+- **Receipt fields**: `gstack_version` and `review_depth` (`{ depth, class, runtime_lines, rules, base, registry, gate_scan: { tagged, head }, reasons }`), computed at the checked-out head. `write --head` must be HEAD. `review_loop_exception` (`write --review-loop-exception`) records an owner-accepted stop after a fix-check edit with the fix-check's head and findings, and the PR body repeats its line word for word (Fixes #3559).
+- **Queue checks** (`gstack-ship-queue ready`, `train build`): the depth the head needs is recomputed from git and a lower receipt is `QUEUE_RECEIPT_DEPTH_RAISED`, with the receipt's depth, the required depth, reasons and inputs on a `REVIEW_DEPTH:` line. A malformed owner exception, a body that dropped its line, or a fix-check head that is not the bound head or its ancestor is `QUEUE_RECEIPT_EXCEPTION_INVALID`. The queue reads the same committed range as the writer and trusts a recorded gate scan only when it names the full bound commit. A receipt with neither new field predates depth receipts and is accepted as legacy.
+
+### Changed
+- **Carry and depth**: a carry recomputes the depth at the new head, rebinds the gate scan, and refuses when the new head needs more (a test change that skips a test is gate class). It also refuses a `--head` other than the checked-out HEAD, a receipt with `gstack_version` but no `review_depth`, and an owner exception that no longer stands, since the queue would refuse each of them. Tracked edits in the checkout make the write-time gate scan unavailable, which records `full`.
+- **`gstack-diff-scope <base> --head <sha>`**: the scope signals for the committed range only, with no working-tree or untracked files; an unknown sha is `SCOPE_ERROR=no_head` and a missing merge base `SCOPE_ERROR=no_merge_base`.
+- **`.gstack/ship-policy.json`**: `min_gstack_version` rises from 1.91.146.0 to 1.91.299.0.
+
+### Tests
+- `test/ship-receipt-depth.test.ts`: write records the depth bound to HEAD and refuses another `--head`. The queue refuses light on a standard head, a current receipt with no depth and an unbound gate scan, and accepts a legacy receipt. A plain test change carries and rebinds the scan, while a skipped test refuses the carry. The review-loop exception is refused without a fix-check, with a foreign head or without its body line, and the queue refuses a body that dropped the line.
+- `test/review-depth.test.ts`, `test/review-collect.test.ts`, `test/review-plan-cli.test.ts`: the depth matrix, the fixed light set, fail-closed errors and the registry read at the base commit. A `package.json` version line that also carries other keys is not stamp-only.
+- `test/diff-scope.test.ts`: `--head` reads the committed range and ignores working-tree edits, and refuses an unknown sha.
+
+## [1.91.306.0] - 2026-10-29
+
+**A /ship receipt now survives a base merge that only regenerates outputs, and a rebase onto the tree it reviewed.** On gstack-evals, two full /ship reruns came from a merge of main that changed a generated file's diff (U1 paid about 28M tokens for its rerun), and one came from a rebase whose tree was byte-identical to the reviewed one (about 60M). Each re-reviewed code the receipt already covered. For crews the rule is now a single line. Merge main into a reviewed branch, and never rebase it.
+
+### Changed
+- **`gstack-ship-receipt carry`**: an output of an entry with a `command` in origin/<base>'s `.gstack/generated.json` counts as `generated`, not product, when the `--pregate` result for HEAD lists it under the `regen` check's new `proven` paths and that check ran the same base registry. Without that evidence, for a file that matches an output glob but that the command never writes, and for an entry with no command or one only the branch registers, the output stays product.
+- **`gstack-pregate` `regen` check**: a fresh entry with touched outputs runs its command a second time in the scratch worktree with those outputs deleted, and records the ones it recreates byte-identically as `proven`. The verdict still comes from the first run, so a generator that reads its own output passes as before and proves nothing.
+- **Carry across rewritten history**: `write` records `head_tree` and `product_patch_id`, and each carry rebinds both and keeps earlier trees in `carry.trees`. A head that is no longer an ancestor carries only when its tree is one the receipt covers and its product patch-id against the current base matches; it records `carry.ancestry: rewritten` and needs no old commit, so a fresh clone carries too. A different tree is the new `RECEIPT_CARRY_TREE_MISMATCH`. The reviewed tree on a base that moved under it is `RECEIPT_CARRY_PRODUCT_CHANGED`.
+- **Docs**: docs/ship-policy.md#receipt-carry opens with a four-row table: merge with the product unchanged, merge that changes product, rebase onto a covered tree, and any other rebase. docs/captain.md and captain/templates/CREW.md say to merge main in and never rebase a reviewed branch, and the troubleshooting entries for the carry refusals match the new rules.
+
+### Tests
+- `test/ship-receipt-carry-rewrite.test.ts`: a rebase onto the covered tree carries from a fresh clone that never fetched the old head, a different tree refuses with `RECEIPT_CARRY_TREE_MISMATCH`, the reviewed tree on a moved base refuses, and a merge that changes only a registered output's diff carries with a pregate whose regen check proved it and refuses without one or with a pregate from another registry, and a hand-written file under an output glob that the generator never writes stays product.
+- `test/gstack-ship-receipt.test.ts`: the written receipt's key order includes `head_tree` and `product_patch_id`.
+
+## [1.91.305.0] - 2026-10-29
+
+**You can now render gstack with whole skills, skill sections, model overlays or preamble pieces left out, as a byte-exact tree with a lock file, so an eval can measure which instructions a model actually needs.** Garry asked for "95% of the outcome but with 50% of the token use", and the free ceiling measurement on train gate run 40705984271 found skill text is about 21% of billed eval cost (35 of 103 tests), so trimming it per model is worth measuring. Nothing changes for anyone today. Every model rung and unknown models load `full`, and the committed SKILL.md files are byte-identical to the previous release. A smaller loadout ships only after GSTA-2 measures it.
+
+### Added
+- **`bin/gstack-modules`**: `list` prints every module id (`skill:`, `section:`, `overlay:`, `preamble:`) with its source and pin; `validate` checks `modules/loadouts.json`; `render --host <h> (--loadout <name> | --modules full,-<id>,+<id>) --out-dir <d>` renders one loadout with the same `--model`, `--install-root` and `--plan-mode` setup uses, and writes `loadout.lock.json` (spec sha256, excluded ids, per-file sha256 and bytes).
+- **`modules/loadouts.json`** (with a JSON schema): rungs `frontier`, `strong`, `mid`, `light`, the model-id table, pinned modules and named loadouts. Every rung and `unknown` map to `full`.
+- **Safety pins**: the start command, plan-mode rules, the question format, completion status, the unattended profile, /ship's review army and adversarial pass, the router and `/gstack-upgrade` can never be excluded, directly or by excluding the skill that holds them (`MODULE_PINNED`).
+- **Renders refuse instead of guessing**: an unknown loadout or module, a malformed spec, a rendered file that still points at an excluded skill or section (`MODULE_EXCLUSION_UNSAFE`), or an `--out-dir` that an earlier render did not write (`RENDER_DEST_NOT_OWNED`) each exit 2 with a fix line and a `docs/troubleshooting.md` anchor, and never fall back to `full`. A failed render leaves the earlier one in place.
+- **`docs/loadouts.md`**: terms, commands, how to build an eval arm, and how a loadout changes (only with a cited GSTA-2 run).
+
+### Changed
+- `gen:skill-docs` accepts `--loadout` and `--modules` with an `--out-dir` outside the checkout; a selection with exclusions aimed at the committed tree is refused. Excluded sections render a one-line `Not loaded in the <loadout> loadout` stub, and `{{IF_SECTION:<id>}}` guards remove skeleton text that belongs to a section (office-hours' second-opinion offer and visual-design phase, plan-design-review's review-sections self-check). `gstack/llms.txt` lists only the skills a render includes.
+
+### For contributors
+- New `test/module-loadouts.test.ts` covers the manifest, selection, pins, the render filter, the CLI and the byte-identical `full` render. `.gstack/pregate.json` allows the two new `modules/` files as strays. `test/gen-skill-docs-prune-stale.test.ts`'s copied fixture now links `scripts/modules.ts`; no assertion, threshold or budget changed.
+
+## [1.91.304.0] - 2026-10-29
+
+**Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
+
+### Fixed
+- **`bin/gstack-capy-install`**: an ok run keeps what an earlier ok install certified for the same checkout, project, HEAD and Bun. The verdict's `required` list becomes the union, pins count as planning-only only when both runs skipped them, and `for` lists every workflow (`for=ship,document-release`). The installer says so in one line. A failing run, a new HEAD or another Bun still replaces the verdict, and the review-voice profile still never narrows a fuller one.
+
+### Tests
+- `test/gstack-capy-install.test.ts`: `--for ship` then `--for document-release` leaves one ok verdict that admits both workflows through `verdictProblem`; a `--check --for ship` keeps it; after a new commit, `--for document-release` replaces it and ship is refused again. It failed before this change.
+
+## [1.91.303.0] - 2026-10-29
+
+**`gstack-pr-shots` no longer edits your `.gitignore` in the middle of /ship, so the pregate stays fresh and the ship receipt gets written.** When a repository tracks files under `.gstack/` (`pregate.json`, `ship-policy.json`), git does not read `.gstack/` as ignored, and the browse daemon that `gstack-pr-shots` starts appended `.gstack/` to the tracked `.gitignore`. The tree changed after pregate and the receipt writer refused with PREGATE_STALE (#3560, seen on gstack-evals#13).
+
+### Fixed
+- **`browse/src/config.ts`**: the browse state dir still writes its own `.gstack/.gitignore` (`*`), and when git does not already ignore `.gstack/` the line goes to the repository's `info/exclude` (resolved with `git rev-parse --git-path`, so linked worktrees share it). The project's `.gitignore` is never written. Outside a git repository nothing is written beyond the state dir.
+
+### Tests
+- `test/pr-shots.test.ts`: a repository that tracks `.gstack/pregate.json` runs `gstack-pr-shots` with a browse stub that runs the daemon's real state-dir setup; the `gstack-wtree` fingerprint and the `.gitignore` are unchanged afterwards. It failed before this change.
+- `browse/test/config.test.ts`: the cases that pinned the `.gitignore` append now pin `info/exclude`: written once, no duplicate, a missing trailing newline added, `info/` created when absent, a warning in `browse-server.log` when it cannot be written, and nothing written outside a repository.
 
 ## [1.91.302.0] - 2026-10-29
 
