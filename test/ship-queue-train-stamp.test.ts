@@ -82,6 +82,38 @@ describe('stamped train prefixes', () => {
     expect(out.stamped.map(s => JSON.parse(show(r, s.commit + ':package.json')).version)).toEqual(['1.2.4.0', '1.2.5.0']);
   }, 60_000);
 
+  test('a pin\'s manifest edit beside the version line survives the predecessor\'s bump', () => {
+    const r = makeFixtureRepo({ policy: POLICY, prefix: 'train-stamp-' }); repos.push(r);
+    const a = pin(r, 'a', 'origin/main', '- a change\n');
+    r.git('checkout', '-q', '-B', 'b', 'origin/main');
+    const file = path.join(r.work, 'package.json');
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), name: 'fixture-b' }, null, 2) + '\n');
+    fs.mkdirSync(path.join(r.work, 'changelog.d'), { recursive: true });
+    fs.writeFileSync(path.join(r.work, 'changelog.d', 'b.md'), '- b change\n');
+    r.git('add', '-A'); r.git('commit', '-q', '-m', 'b');
+    const out = stampChain(chain(r, [['1', a], ['2', r.git('rev-parse', 'HEAD')]]));
+    if ('code' in out) throw new Error(out.message);
+    const s1 = JSON.parse(show(r, out.stamped[0]!.commit + ':package.json'));
+    const s2 = JSON.parse(show(r, out.stamped[1]!.commit + ':package.json'));
+    expect(s1.version).toBe('1.2.4');
+    expect(s2).toMatchObject({ name: 'fixture-b', version: '1.2.5', dependencies: { 'left-pad': '1.2.3' } });
+  }, 60_000);
+
+  test('a pin whose CHANGELOG is a symlink refuses before the stamp writes anything outside', () => {
+    const r = makeFixtureRepo({ policy: POLICY, prefix: 'train-stamp-' }); repos.push(r);
+    const outside = path.join(r.root, 'outside.md');
+    fs.writeFileSync(outside, 'keep\n');
+    r.git('checkout', '-q', '-B', 'l', 'origin/main');
+    fs.rmSync(path.join(r.work, 'CHANGELOG.md'));
+    fs.symlinkSync(outside, path.join(r.work, 'CHANGELOG.md'));
+    fs.mkdirSync(path.join(r.work, 'changelog.d'), { recursive: true });
+    fs.writeFileSync(path.join(r.work, 'changelog.d', 'l.md'), '- l change\n');
+    r.git('add', '-A'); r.git('commit', '-q', '-m', 'l');
+    const out = stampChain(chain(r, [['1', r.git('rev-parse', 'HEAD')]]));
+    expect('code' in out ? out.message : 'stamped').toMatch(/CHANGELOG\.md is a symlink in the merged tree/);
+    expect(fs.readFileSync(outside, 'utf8')).toBe('keep\n');
+  }, 60_000);
+
   test('a tampered earlier version or a product change in S_i is refused', () => {
     const r = makeFixtureRepo({ policy: POLICY, prefix: 'train-stamp-' }); repos.push(r);
     const a = pin(r, 'a', 'origin/main', '- a change\n');

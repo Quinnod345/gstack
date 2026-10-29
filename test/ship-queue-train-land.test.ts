@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { EXIT } from '../lib/headless-artifacts';
 import { cleanup } from './helpers/restamp-fixture';
 import {
-  GREEN_GATE, TRAIN_POLICY, line, nonceOf, openPr, queue, readyReceipt, shippedBody, trainFixture, trainJson, type TrainFixture,
+  GREEN_GATE, RED_GATE, TRAIN_POLICY, line, nonceOf, openPr, queue, readyReceipt, shippedBody, trainFixture, trainJson, type TrainFixture,
 } from './helpers/ship-queue-train-fixture';
 
 const POLICY = { ...TRAIN_POLICY, release_tool: null, release_outputs: [], changelog_fragments: { dir: 'changelog.d' }, min_gstack_version: '1.92.0.0' };
@@ -51,11 +51,11 @@ function fragmentPr(fx: TrainFixture, pr: string, fragment = `- #${pr} change\n`
   readyReceipt(fx, pr, head);
   return head;
 }
-function stampedTrain() {
+function stampedTrain(gate = GREEN_GATE) {
   const fx = trainFixture(POLICY, 'gstack-train-land-'); fixtures.push(fx); wrap(fx);
   const h1 = fragmentPr(fx, '1');
   const h2 = fragmentPr(fx, '2', '---\nbump: minor\n---\n- #2 change\n');
-  fx.write(d => { d.rules['evals.yml'] = GREEN_GATE; });
+  fx.write(d => { d.rules['evals.yml'] = gate; });
   const built = queue(fx, ['train', 'build', '--prs', `1@${h1},2@${h2}`]);
   const nonce = nonceOf(built.out);
   return { fx, h1, h2, built, nonce };
@@ -117,6 +117,49 @@ describe('stamped trains: build and land', () => {
     expect(drift.err).toContain('(QUEUE_TRAIN_TREE_MISMATCH)');
     expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
   }, 300_000);
+
+  test('a stamp commit that cannot be written pushes nothing and leaves the PR branch in place', () => {
+    const { fx, h1, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const file = path.join(fx.state, 'ship-queue', 'trains', nonce, 'train.json');
+    const t = trainJson(fx, nonce);
+    t.stamped[0].tree = 'f'.repeat(40);
+    fs.writeFileSync(file, JSON.stringify(t));
+    const r = land(fx, nonce, '1');
+    expect(r.status).not.toBe(EXIT.ok);
+    expect(r.out).not.toMatch(/^PUSHED:/m);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
+  }, 180_000);
+
+  test('a rerun after the stamp push but before the journal recognizes its own stamp and merges', () => {
+    const { fx, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    const pushed = land(fx, nonce, '1');
+    const stamp = /^PUSHED: ([0-9a-f]{40})/m.exec(pushed.out)![1]!;
+    fs.rmSync(path.join(fx.state, 'ship-queue', 'trains', nonce, 'land-1.json'));
+    const resumed = land(fx, nonce, '1');
+    expect(resumed.status, resumed.err).toBe(EXIT.ok);
+    expect(resumed.out).toContain("main's tree is S1 exactly");
+    expect(fx.read().prs['1']).toMatchObject({ state: 'MERGED' });
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'main^{tree}')).toBe(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', stamp + '^{tree}'));
+  }, 300_000);
+
+  test('a PR retargeted off the train base refuses before any push', () => {
+    const { fx, h1, nonce } = stampedTrain();
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
+    fx.write(d => { (d.prs['1'] as any).baseRefName = 'release'; });
+    const r = land(fx, nonce, '1');
+    expect(r.err).toMatch(/targets release, not main.*\(QUEUE_NOT_READY\)/);
+    expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
+  }, 180_000);
+
+  test('a red stamped train bisects its stamped chain: T0 and S1..Sk, each an ancestor of the train head', () => {
+    const { fx, nonce } = stampedTrain(RED_GATE);
+    expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.fail);
+    const dry = queue(fx, ['train', 'bisect', '--train', nonce, '--spend-cap', '5', '--dry-run']);
+    expect(dry.err).not.toContain('QUEUE_TRAIN_PREFIX_INVALID');
+    expect(dry.out).toContain('BISECT: cases c1 prefixes T0,T1,T2 need results');
+  }, 180_000);
 
   test('the receipt check is the depth-checked one train build uses: a receipt whose writer records depth but which records none refuses, nothing pushed', () => {
     const { fx, h1, nonce } = stampedTrain();

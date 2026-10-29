@@ -20,6 +20,9 @@ import { fetchBase, fetchTrainBranch, findTrain, frozenLines, nextFor, outFailed
 import { confirmMerged, stopped } from './ship-queue-train-verify';
 
 const Q = 'gstack-ship-queue';
+const STAMP_IDENTITY = { GIT_AUTHOR_NAME: 'gstack-ship-queue', GIT_AUTHOR_EMAIL: 'ship-queue@gstack.local', GIT_COMMITTER_NAME: 'gstack-ship-queue',
+  GIT_COMMITTER_EMAIL: 'ship-queue@gstack.local', GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' };
+const isSha = (s: string) => /^[0-9a-f]{40,64}$/.test(s);
 interface SlotJournal { schema_version: 1; pr: string; pin: string; stamp_commit: string; base: string }
 
 export async function trainLand(ctx: QueueContext, o: { train: string; pr: string; noWait?: boolean; timeoutMin?: number }): Promise<TrainOut> {
@@ -45,9 +48,16 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   const s = t.stamped[i]!;
   const pred = i === 0 ? { index: 0, tree: t.prefixes[0]!.tree } : t.stamped[i - 1]!;
   const pin = t.slots[i]!.head;
-  const mainNow = () => { fetchBase(ctx); const sha = git(root, ['rev-parse', `${env.remote}/${ctx.base}`]).out; return { sha, tree: git(root, ['rev-parse', `${sha}^{tree}`]).out }; };
+  const mainNow = (): { sha: string; tree: string } | { error: string } => {
+    const error = fetchBase(ctx);
+    if (error) return { error };
+    const sha = git(root, ['rev-parse', `${env.remote}/${ctx.base}`]).out;
+    return { sha, tree: git(root, ['rev-parse', `${sha}^{tree}`]).out };
+  };
+  const rerun = `${Q} train land --train ${t.nonce} --pr ${o.pr}`;
   const lines = [`TRAIN_LAND: ${t.nonce} slot ${i + 1}/${t.slots.length} #${o.pr} pin ${pin} -> S${s.index} v${s.version} tree ${s.tree}`];
   let main = mainNow();
+  if ('error' in main) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: main.error }, lines, rerun, run);
   if (main.tree === s.tree) return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `main: ${main.sha} is S${s.index} exactly`]);
   if (main.tree !== pred.tree) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main ${main.sha.slice(0, 12)} is neither S${pred.index} nor S${s.index} exactly`, main.sha, lines, true);
 
@@ -55,37 +65,46 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   let j: SlotJournal | null = null;
   try { j = JSON.parse(fs.readFileSync(file, 'utf8')) as SlotJournal; } catch { j = null; }
   const info = prInfo(ctx, o.pr);
-  if ('error' in info) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: info.error }, lines, `${Q} train land --train ${t.nonce} --pr ${o.pr}`, run);
+  if ('error' in info) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: info.error }, lines, rerun, run);
   if (info.isCrossRepository) return outRefused({ code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr} is a fork head; train land pushes only crew branches` }, lines, 'none', run);
+  const retargeted = (b?: string) => b && b !== ctx.base ? outRefused({ code: 'QUEUE_NOT_READY', message: `#${o.pr} targets ${b}, not ${ctx.base}; train land merges only PRs on the base the train stamped` }, lines, `retarget #${o.pr} to ${ctx.base}, then ${rerun}`, run) : null;
+  const wrongBase = retargeted(info.baseRefName);
+  if (wrongBase) return wrongBase;
   if (!j || j.base !== main.sha) {
-    if (info.headRefOid !== pin && info.headRefOid !== j?.stamp_commit) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not its pin ${pin.slice(0, 12)}`, main.sha, lines, true);
+    const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`], { ...process.env, ...STAMP_IDENTITY }).out;
+    if (!isSha(commit)) return outFailed({ code: 'QUEUE_LAND_CONFLICT', message: `cannot create the stamp commit for tree ${s.tree.slice(0, 12)}; nothing pushed` }, lines, `${Q} train status --train ${t.nonce}`, run);
+    if (![pin, commit, j?.stamp_commit].includes(info.headRefOid)) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not its pin ${pin.slice(0, 12)}`, main.sha, lines, true);
     const shipped = bindShippedReceipt(root, `refs/remotes/${env.remote}/${ctx.base}`, info.body, o.pr, [pin]);
     lines.push(shipped.line, ...(shipped.depthLine ? [shipped.depthLine] : []));
     if (!shipped.ok) return outRefused({ code: shipped.code, message: shipped.message }, lines, `#${o.pr}'s lane runs /ship at its pin and READYs again`, run);
-    const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', main.sha, '-m', `v${s.version} stamp: train ${t.nonce} S${s.index} (#${o.pr})`]).out;
     const label = ctx.gh(['pr', 'edit', o.pr, '--add-label', 'evals-no-debounce']);
     lines.push(`LABEL: evals-no-debounce ${label.ok ? 'added' : `not added (${(label.err ?? label.out).trim().slice(0, 80)}); the 10-minute quiet window applies`}`);
-    const lease = j?.stamp_commit && info.headRefOid === j.stamp_commit ? j.stamp_commit : pin;
-    const push = git(root, ['push', '-q', `--force-with-lease=refs/heads/${info.headRefName}:${lease}`, env.remote, `${commit}:refs/heads/${info.headRefName}`]);
-    if (!push.ok) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s branch moved off ${lease.slice(0, 12)} before the stamp push; train land never overwrites it`, main.sha, lines, true);
     j = { schema_version: 1, pr: o.pr, pin, stamp_commit: commit, base: main.sha };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
     writeJsonAtomic(file, j);
-    lines.push(`PUSHED: ${commit} (tree S${s.index}, parents [pin, main ${main.sha.slice(0, 12)}]) to ${info.headRefName}`);
+    const pushed = info.headRefOid !== commit;
+    if (pushed) {
+      const push = git(root, ['push', '-q', `--force-with-lease=refs/heads/${info.headRefName}:${info.headRefOid}`, env.remote, `${commit}:refs/heads/${info.headRefName}`]);
+      if (!push.ok) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s branch moved off ${info.headRefOid.slice(0, 12)} before the stamp push; train land never overwrites it`, main.sha, lines, true);
+    }
+    lines.push(`${pushed ? 'PUSHED' : 'RESUMED'}: ${commit} (tree S${s.index}, parents [pin, main ${main.sha.slice(0, 12)}]) ${pushed ? 'to' : 'is already the head of'} ${info.headRefName}`);
     const next = `gstack-pr-wait ${o.pr} --until green && ${Q} train land --train ${t.nonce} --pr ${o.pr}`;
-    if (o.noWait) return outPending({ code: 'QUEUE_NOT_READY', message: `checks run on the stamp commit ${commit.slice(0, 12)}` }, lines, next, run);
-    waitChecks(ctx, commit, o.timeoutMin ?? 60);
+    if (o.noWait && pushed) return outPending({ code: 'QUEUE_NOT_READY', message: `checks run on the stamp commit ${commit.slice(0, 12)}` }, lines, next, run);
+    if (!o.noWait) waitChecks(ctx, commit, o.timeoutMin ?? 60);
   }
   const head = prInfo(ctx, o.pr);
   if ('error' in head || head.headRefOid !== j.stamp_commit) return stopped(env, t, 'QUEUE_TRAIN_MOVED', `#${o.pr}'s head is not the stamp commit ${j.stamp_commit.slice(0, 12)}`, main.sha, lines, true);
+  const movedBase = retargeted(head.baseRefName);
+  if (movedBase) return movedBase;
   const ci = ciAtHead(ctx, j.stamp_commit);
   lines.push(`CI: ${ci.line}`);
   if (!ci.green) return outPending({ code: 'QUEUE_NOT_READY', message: `checks on the stamp commit ${j.stamp_commit.slice(0, 12)} are not green` }, lines, `gstack-pr-wait ${o.pr} --until green && ${Q} train land --train ${t.nonce} --pr ${o.pr}`, run);
   main = mainNow();
+  if ('error' in main) return outPending({ code: 'QUEUE_PROOF_MISSING', message: main.error }, lines, rerun, run);
   if (main.sha !== j.base) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `main moved to ${main.sha.slice(0, 12)} during the slot's checks (stamped on ${j.base.slice(0, 12)})`, main.sha, lines, true);
   const m = ctx.gh(['pr', 'merge', o.pr, '--squash', '--match-head-commit', j.stamp_commit]);
-  if (!m.ok) return outFailed({ code: 'QUEUE_NOT_READY', message: `gh pr merge refused: ${(m.err ?? m.out).trim().slice(0, 200)}` }, lines, `${Q} train land --train ${t.nonce} --pr ${o.pr}`, run);
+  if (!m.ok) return outFailed({ code: 'QUEUE_NOT_READY', message: `gh pr merge refused: ${(m.err ?? m.out).trim().slice(0, 200)}` }, lines, rerun, run);
   main = mainNow();
+  if ('error' in main) return outPending({ code: 'QUEUE_PROOF_MISSING', message: `merged; ${main.error}` }, lines, rerun, run);
   if (main.tree !== s.tree) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `after the merge main ${main.sha.slice(0, 12)} is not S${s.index} exactly`, main.sha, lines, true);
   return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `MERGED: #${o.pr} as ${main.sha}; main's tree is S${s.index} exactly`]);
 }

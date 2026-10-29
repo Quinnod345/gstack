@@ -16,6 +16,7 @@ import { parseChangelog } from './changelog-check';
 import { restamp, versionAtRef, versionFiles } from './restamp';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 import { git, type QueueFailure } from './ship-queue-gate';
+import { linkedReleaseFile } from './ship-queue-land';
 import { mergeCommit } from './ship-queue-train';
 import type { StampedPrefix, TrainPrefix, TrainSlot } from './ship-queue-train-record';
 import { buildReceipt } from './tree-receipt';
@@ -77,6 +78,9 @@ export function stampChain(o: StampChainOptions): { stamped: StampedPrefix[]; li
     let tree = '';
     let version = '';
     try {
+      const at = versionAtRef(o.repoRoot, m.commit);
+      const linked = linkedReleaseFile(wt, o.policy, 'rel' in at ? at.rel : 'VERSION');
+      if (linked) return { code: 'QUEUE_TRAIN_STAMP_MISMATCH', message: `S${i + 1} (#${slot.pr}): ${linked} is a symlink in the merged tree; the stamp writes release files only inside the repository` };
       const r = restamp({ repoRoot: wt, base: o.base, baseRef: pred, next: true, policyFrom: 'base', allowRepoCommands: o.allowRepoCommands, dryRun: false, now: new Date(`${date}T12:00:00Z`), env: process.env });
       if (r.status !== 'stamped') return { code: r.code ?? 'QUEUE_TRAIN_STAMP_MISMATCH', message: `S${i + 1} (#${slot.pr}): restamp ${r.status}: ${r.message ?? ''}`, fix: r.fix };
       git(wt, ['add', '-A']);

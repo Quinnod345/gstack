@@ -22,6 +22,7 @@ import { baseOverlapLine } from './pr-wait';
 import { versionAtRef, versionFiles } from './restamp';
 import type { LoadedPolicy, ShipPolicy, TrainPolicy } from './ship-policy';
 import { loadBasePolicy, type QueueContext } from './ship-queue';
+import { mergeManifest } from './ship-queue-land';
 import { bindShippedReceipt } from './ship-receipt-depth';
 import { git, sha256, withIndex, type QueueFailure } from './ship-queue-gate';
 import { recordVerdict, screenVerdict, verdictLines } from './ship-queue-screen';
@@ -144,7 +145,8 @@ function unionChangelog(ours: string, theirs: string): string {
 
 /**
  * One train merge, in object storage: the PR head onto the previous prefix.
- * Version files take the prefix's side; the CHANGELOG merges by section (the
+ * VERSION takes the prefix's side, a manifest merges three-way with the prefix's
+ * version (mergeManifest), and the CHANGELOG merges by section (the
  * gate-ahead rule with the merge base, which also carries a stacked child
  * past its released parent, else a union of sections, since each heading is
  * restamped at merge; the union takes the carried side too, so a prefix that
@@ -185,7 +187,14 @@ export function mergeStep(repoRoot: string, pred: string, head: string, policy: 
       const own = (base && carryReleasedParent(text(ours), text(theirs), text(base))?.text) || text(ours);
       const blob = git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged ?? unionChangelog(own, text(theirs)));
       if (blob.ok) resolved.push({ path: file, blob: blob.out }); else conflicts.push(file);
-    } else if (stampFiles.includes(file)) resolved.push({ path: file, blob: theirs });
+    } else if (file === stampFiles[0]) resolved.push({ path: file, blob: theirs });
+    else if (stampFiles.includes(file)) {
+      const base = entry.get(1);
+      const text = (sha: string) => git(repoRoot, ['cat-file', 'blob', sha]).out + '\n';
+      const merged = base ? mergeManifest(text(base), text(ours), text(theirs)) : null;
+      const blob = merged === null ? null : git(repoRoot, ['hash-object', '-w', '--stdin'], undefined, merged);
+      if (blob?.ok) resolved.push({ path: file, blob: blob.out }); else conflicts.push(file);
+    }
     else conflicts.push(file);
   }
   if (conflicts.length) return { conflicts: conflicts.sort() };
