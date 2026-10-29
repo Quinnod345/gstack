@@ -204,7 +204,8 @@ describe('free-tests workflow wiring', () => {
       expect(override.status).toBe(0);
       expect(override.outputs.runner).toBe('ubicloud-standard-4');
       expect(override.args).toContain('--shards 16');
-      for (const bad of [{ RUNNER_OVERRIDE: 'ubuntu-24.04' }, { RUNNER_OVERRIDE: 'ubicloud-standard-8 x' }, { SHARDS_OVERRIDE: '0' }, { SHARDS_OVERRIDE: '41' }, { SHARDS_OVERRIDE: '16; true' }]) {
+      const refusals: Record<string, string>[] = [{ RUNNER_OVERRIDE: 'ubuntu-24.04' }, { RUNNER_OVERRIDE: 'ubicloud-standard-8 x' }, { SHARDS_OVERRIDE: '0' }, { SHARDS_OVERRIDE: '41' }, { SHARDS_OVERRIDE: '16; true' }];
+      for (const bad of refusals) {
         const refused = resolve(bad);
         expect(refused.status, JSON.stringify(bad)).not.toBe(0);
         expect(refused.outputs.runner, JSON.stringify(bad)).toBeUndefined();
