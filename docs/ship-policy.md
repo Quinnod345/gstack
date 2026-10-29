@@ -1212,19 +1212,20 @@ rule.
 ## `gstack-ship-queue land`: the per-PR merge step
 
 `land --pr <n>` merges one READY PR whose head is unstamped. It replaces the
-lane's stamp round trip: nobody stamps by hand, and the stamp commit is made
-and pushed by the tool. Steps, each journaled in
+lane's stamp round trip. Nobody stamps by hand; the tool makes and pushes the
+stamp commit. Steps, each journaled in
 `.gstack/tmp/ship-queue/land/<n>.json` and resumable by rerunning the same
 command:
 
-1. **Refuse** a fork head, a closed PR, a /ship receipt that is missing or
+1. **Refuse** a fork head, a closed PR, a PR whose base is another branch, a /ship receipt that is missing or
    bound to another head (`QUEUE_RECEIPT_MISSING`, `QUEUE_RECEIPT_STALE`), and
    required checks that are not green at the pin.
 2. **Lock.** Take the repository land lock, `refs/notes/gstack-land` (its own
    ref, never the trains notes ref), by exact lease. It records the PR, holder,
    phase and journal. A held lock is `QUEUE_LAND_LOCKED` naming the holder;
    `--break-lock` takes over a crashed holder's lock and is refused while that
-   holder is mid-push.
+   holder entered a push or a merge less than 10 minutes ago, and for a drift
+   lock. A refusal before the push releases the lock.
 3. **Merge and stamp.** In a scratch worktree, merge the base into the pin.
    Conflicts in release fields only (the version file and `release_outputs`
    take the base's side, the CHANGELOG merges by section, a manifest or npm
@@ -1232,7 +1233,8 @@ command:
    so a clean dependency edit survives) are resolved; anything else is
    `QUEUE_LAND_CONFLICT`, nothing pushed, back to the lane. A legacy pin that
    bumped VERSION itself has its release fields put back to its merge base
-   first and its entry re-headed `[Unreleased]`. A PR with no entry gets a
+   first and its entry re-headed `[Unreleased]` (a manifest version source
+   keeps its other edits; a symlinked release file refuses). A PR with no entry gets a
    fragment written from its title. Then `gstack-restamp --next` folds and
    allocates (`restamp_command` and `release_tool` need
    `--allow-repo-commands`, as everywhere).
@@ -1246,17 +1248,20 @@ command:
    CI runs for real on the stamp commit in this mode.
 6. **Merge.** Re-read the base first: if it moved, restamp from the new base
    and push again under the last-pushed lease, at most twice
-   (`QUEUE_LAND_BASE_BUSY` on a third move). Then
-   `gh pr merge --squash --match-head-commit <stamp>` and confirm the base's
+   (`QUEUE_LAND_BASE_BUSY` on a third move, which releases the lock). Then
+   `gh pr merge --squash --match-head-commit <stamp>` (`--merge` under
+   `history: merge-only`) and confirm the base's
    tree is the stamped tree on the base land stamped. The stamp date is taken
-   once and reused by every restamp.
+   once and reused by every restamp. A rerun after GitHub merged the PR
+   (an error reply, a crash) goes straight to that tree check.
 7. **Drift.** GitHub's merge API cannot bind the base, so a merge made outside
    `land` can slip in between the check and the squash. The post-merge check
    then fails with `QUEUE_LAND_DRIFT` and keeps the lock.
    `land --pr <n> --repair` opens a PR from the base whose only change is a
    fragment for what the outside merge brought (its unfolded fragments, moved,
-   or one entry naming its commits); /ship and land that PR, and its land takes
-   over the drift lock and releases it.
+   or one entry naming its commits) and records it on the lock; /ship and land
+   that PR, from any checkout, and its land takes over the drift lock and
+   releases it. A rerun of `--repair` finds the PR it already opened.
 
 `--dry-run` merges and stamps in a scratch worktree and prints the version and
 tree, taking no lock and pushing nothing.
@@ -1265,7 +1270,7 @@ tree, taking no lock and pushing nothing.
 ### Migrating to fragments
 
 Before turning the key on, run `gstack-ship-queue land --census` (read-only).
-It prints one line per open PR: fold its fragments, re-head a legacy
+It prints one line per open PR, saying whether land would fold its fragments, re-head a legacy
 `[Unreleased]`, rewrite a tentative per-PR VERSION bump, resolve a
 release-field-only conflict, write an entry from the title, or refuse on a
 product conflict. Then set `changelog_fragments` and `min_gstack_version` in

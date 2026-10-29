@@ -4229,8 +4229,8 @@ the name already landed. Then rerun.
 race it for the next version. The line names the holder, its PR and phase.
 
 **Fix.** Wait for the holder to finish. If it crashed, rerun with
-`--break-lock`; that is refused while the holder's last phase is a push less
-than 10 minutes old. A lock in phase `drift` is released by landing its
+`--break-lock`; that is refused while the holder entered a push or a merge
+less than 10 minutes ago. A lock in phase `drift` is released by landing its
 repair PR ([QUEUE_LAND_DRIFT](#queue-land-drift)).
 
 <a id="queue-land-conflict"></a>
@@ -4264,8 +4264,8 @@ merged outside `land`.
 the two allowed restamps, so `land` stopped instead of restamping again.
 
 **Fix.** Find what is merging outside `land` (every merge should go through
-it), then rerun `gstack-ship-queue land --pr <n>`; it resumes from its
-journal.
+it), then rerun `gstack-ship-queue land --pr <n>`; the lock was released and
+the rerun restamps from the pin.
 
 <a id="queue-train-moved"></a>
 ### `QUEUE_TRAIN_MOVED`

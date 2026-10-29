@@ -44,7 +44,12 @@ describe('version gate: changelog fragments', () => {
     write(r, 'VERSION', '1.2.9.0\n');
     const early = run(r, commit(r, 'g'));
     expect(early.code).toBe(1);
-    expect(early.out).toContain('must carry v1.2.4.0');
+    expect(early.out).toContain('under changelog_fragments only the merge step stamps');
+    r.git('checkout', '-q', '-B', 'self', 'origin/main');
+    write(r, 'VERSION', '1.2.4.0\n'); write(r, 'self.txt', 'self\n');
+    const self = run(r, commit(r, 'a lane stamps the expected version itself, with no fragment'));
+    expect(self.code).toBe(1);
+    expect(self.out).toContain('under changelog_fragments only the merge step stamps');
     r.git('checkout', '-q', '-B', 'h', 'origin/main');
     write(r, 'h.txt', 'h\n');
     const head = commit(r, 'h');

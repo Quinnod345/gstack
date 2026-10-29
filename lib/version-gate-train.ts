@@ -116,9 +116,13 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
   } else touched.push(...outputs);
   if (touched.length) {
     // A merge-step stamp commit has parents [pin, base]: the fragments it folded are the pin's own.
-    const pin = git(o.repoRoot, ['rev-parse', '--verify', '--quiet', `${o.head}^2`]) ? `${o.head}^1` : mergeBase;
+    const second = git(o.repoRoot, ['rev-parse', '--verify', '--quiet', `${o.head}^2`])?.trim();
+    const pin = second ? `${o.head}^1` : mergeBase;
+    if (fragDir && (!second || git(o.repoRoot, ['merge-base', '--is-ancestor', second, base]) === null)) return { kind: 'invalid', reason: `under changelog_fragments only the merge step stamps (a commit with parents [pin, ${base}]); leave VERSION, package.json and the release outputs at the merge base's values and add a fragment` };
+    const folded = fragDir ? readFragments(o.repoRoot, pin, fragDir, base) : null;
+    if (folded?.errors.length) return { kind: 'invalid', reason: `${folded.errors[0]!.path}: ${folded.errors[0]!.message}` };
     const level = policy.bump === 'patch' ? 'patch' : 'micro';
-    const expected = bumpVersion(baseVersion, fragDir ? effectiveBump(level, readFragments(o.repoRoot, pin, fragDir, base).fragments) : (policy.bump ?? 'patch'));
+    const expected = bumpVersion(baseVersion, folded ? effectiveBump(level, folded.fragments) : (policy.bump ?? 'patch'));
     return expected ? { kind: 'stamped', expected, fragments: !!fragDir } : { kind: 'invalid', reason: `${base}:VERSION is not a 4-part version` };
   }
 

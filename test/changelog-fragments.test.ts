@@ -177,3 +177,18 @@ describe('restamp: an explicit --bump', () => {
     expect(fs.existsSync(path.join(repo.work, 'changelog.d', 'feat-d.md'))).toBe(false);
   });
 });
+
+// /ship adversarial review (GSTA-154 PR A): the carried-back check matched substrings of released text.
+describe('readFragments: text already released at the base', () => {
+  // Value: protects=a carried-back fragment refuses only when its whole lines are released; fails_when=a short entry that is a substring of an old line is refused; why_new=the land case checks only an exact carry; seam=none; no_claim=a reworded carry (not detected)
+  test('whole released lines refuse; a substring of a released line does not', () => {
+    const repo = fixture();
+    const base = readFile(repo, 'CHANGELOG.md');
+    const line = base.split('\n').find(l => l.startsWith('- '))!;
+    fragmentPr(repo, 'feat-r', { 'short.md': line.slice(0, 5) + '\n', 'carried.md': line + '\n' });
+    const set = readFragments(repo.work, 'HEAD', 'changelog.d', 'origin/main', 'CHANGELOG.md');
+    expect(set.fragments.map(f => f.path)).toEqual(['changelog.d/short.md']);
+    expect(set.errors.map(e => e.path)).toEqual(['changelog.d/carried.md']);
+    expect(set.errors[0]!.message).toContain('already released in CHANGELOG.md');
+  });
+});

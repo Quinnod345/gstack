@@ -46,7 +46,9 @@ function setup(policy: Record<string, unknown> = POLICY): Fx {
     "  if(head!==want){console.error('Head branch was modified');process.exit(1)}",
     "  if(d.mergeRefuse){console.error('Pull request is not mergeable: the base branch policy prohibits the merge');process.exit(1)}",
     "  if(d.driftOnMerge){const m=g('rev-parse','refs/heads/main');const t=g('rev-parse',m+'^{tree}');g('update-ref','refs/heads/main',g('commit-tree',t,'-p',m,'-m','outside merge'));d.driftOnMerge=false}",
-    "  const main=g('rev-parse','refs/heads/main');const sq=g('commit-tree',g('rev-parse',want+'^{tree}'),'-p',main,'-m','squash #'+a[2]);g('update-ref','refs/heads/main',sq);if(d.outsideAfter){g('update-ref','refs/heads/main',g('commit-tree',g('rev-parse',sq+'^{tree}'),'-p',sq,'-m','outside after'));d.outsideAfter=false}d.mergeArgs=a.slice(3);p.state='MERGED';save();process.exit(0)}",
+    "  const main=g('rev-parse','refs/heads/main');const sq=g('commit-tree',g('rev-parse',want+'^{tree}'),'-p',main,'-m','squash #'+a[2]);g('update-ref','refs/heads/main',sq);if(d.outsideAfter){g('update-ref','refs/heads/main',g('commit-tree',g('rev-parse',sq+'^{tree}'),'-p',sq,'-m','outside after'));d.outsideAfter=false}d.mergeArgs=a.slice(3);p.state='MERGED';save();if(d.mergeErrorAfter){d.mergeErrorAfter=false;save();console.error('HTTP 502: Bad Gateway');process.exit(1)}process.exit(0)}",
+    "if(a[0]==='pr'&&a[1]==='create'&&d.createFail){d.createFail=false;save();console.error('timeout');process.exit(1)}",
+    "if(a[0]==='pr'&&a[1]==='create'){const h=a[a.indexOf('--head')+1];const had=Object.entries(d.prs).find(([,p])=>p.headRefName===h&&p.state==='OPEN');if(had){console.error('a pull request for branch \"'+h+'\" into branch \"main\" already exists:\\nhttps://github.com/o/r/pull/'+had[0]);process.exit(1)}}",
     "if(a[0]==='pr'&&a[1]==='create'){const n=String(Math.max(0,...Object.keys(d.prs).map(Number))+1);d.prs[n]={state:'OPEN',headRefName:a[a.indexOf('--head')+1],isCrossRepository:false,title:a[a.indexOf('--title')+1],body:''};save();console.log('https://github.com/o/r/pull/'+n);process.exit(0)}",
     "console.error('gh shim: unsupported '+a.join(' '));process.exit(1);",
     '',
@@ -184,6 +186,11 @@ describe('land: lock, races and refusals', () => {
     bump(2); expect(land(fx, ['--pr', '1']).status).toBe(EXIT.ok);
     bump(3);
     expect(land(fx, ['--pr', '1']).err).toContain('(QUEUE_LAND_BASE_BUSY)');
+    fx.repo.git('fetch', '-q', 'origin', '+refs/notes/gstack-land:refs/notes/gstack-land');
+    expect(show(fx, 'refs/notes/gstack-land:lock.json')).toContain('"released": true');
+    const later = land(fx, ['--pr', '1']);
+    expect(later.err).toBe('');
+    expect(later.out).toMatch(/^BASE_MOVED: /m);
   }, 90_000);
 
   test('a missing receipt refuses before the lock; a foreign push after the stamp is never overwritten', () => {
@@ -539,5 +546,88 @@ describe('land: one pass, base, lock and history', () => {
     expect(r.err).toBe('');
     expect(r.out).toContain('LANDED: ');
     expect(JSON.parse(fs.readFileSync(fx.data, 'utf8')).mergeArgs).toContain('--merge');
+  }, 90_000);
+});
+
+// /ship adversarial (Claude) and outside-voice (Codex) findings (GSTA-154 PR A): each case failed or was unreachable before its fix.
+describe('land: merged-after-error, live locks, repair recovery, legacy release files', () => {
+  // Value: protects=a merge GitHub completed but reported as failed reconciles on rerun; fails_when=the rerun refuses "is MERGED" and the lock stays held; why_new=no case merged with an error; seam=none; no_claim=GitHub's real error shapes
+  test('gh pr merge errors after GitHub merged: the rerun verifies the tree and releases the lock', () => {
+    const fx = setup();
+    openPr(fx, '20');
+    land(fx, ['--pr', '20']);
+    fx.write(d => { d.mergeErrorAfter = true; });
+    expect(land(fx, ['--pr', '20']).err).toContain('HTTP 502');
+    const again = land(fx, ['--pr', '20']);
+    expect(again.err).toBe('');
+    expect(again.out).toContain('LANDED: ');
+    expect(again.out).toContain('LOCK: released');
+    openPr(fx, '24');
+    expect(land(fx, ['--pr', '24']).status).toBe(EXIT.ok);
+  }, 90_000);
+
+  // Value: protects=--break-lock never breaks a holder that entered merging moments ago; fails_when=two landers squash the same version; why_new=only the push phase was guarded; seam=none; no_claim=none beyond protects
+  test('--break-lock refuses a lock whose holder entered merging moments ago', () => {
+    const fx = setup();
+    openPr(fx, '21'); openPr(fx, '22');
+    land(fx, ['--pr', '21']);
+    fx.write(d => { d.mergeRefuse = true; });
+    expect(land(fx, ['--pr', '21']).err).toContain('gh pr merge refused');
+    expect(land(fx, ['--pr', '22', '--break-lock']).err).toMatch(/#21's holder is mid-merge \(\d+ s ago\); --break-lock refused.*\(QUEUE_LAND_LOCKED\)/);
+  }, 90_000);
+
+  // Value: protects=--repair resumes after its branch was pushed but PR creation failed, and the repair PR takes over from the lock alone; fails_when=every retry fails the branch lease, or a clean checkout cannot take over the drift lock; why_new=the drift case keeps the journal and creates the PR first time; seam=none; no_claim=gh's exact "already exists" wording
+  test('--repair resumes after a failed PR create; the repair PR takes over the drift lock with no local journal', () => {
+    const fx = setup();
+    openPr(fx, '23');
+    land(fx, ['--pr', '23']);
+    fx.write(d => { d.driftOnMerge = true; });
+    expect(land(fx, ['--pr', '23']).err).toContain('(QUEUE_LAND_DRIFT)');
+    fx.write(d => { d.createFail = true; });
+    expect(land(fx, ['--pr', '23', '--repair']).err).toContain('gh pr create failed');
+    Bun.sleepSync(1100);
+    const rep = land(fx, ['--pr', '23', '--repair']);
+    expect(rep.err).toBe('');
+    expect(rep.out).toContain('already on origin');
+    const n = /REPAIR_PR: #(\d+) gstack-land-repair\/23/.exec(rep.out)!;
+    const head = remote(fx, 'gstack-land-repair/23');
+    fx.write(d => { d.prs[n[1]!].body = shippedBody(n[1]!, head); });
+    fs.rmSync(path.join(fx.repo.work, '.gstack', 'tmp', 'ship-queue', 'land', '23.json'));
+    expect(land(fx, ['--pr', n[1]!]).out).toContain("LOCK: taking over #23's drift lock for its repair");
+    const merged = land(fx, ['--pr', n[1]!]);
+    expect(merged.status).toBe(EXIT.ok);
+    expect(merged.out).toContain('LOCK: released');
+  }, 120_000);
+
+  // Value: protects=land never writes through a PR-controlled symlink while unstamping a legacy pin; fails_when=a VERSION link chain overwrites a file outside the checkout, even in --dry-run; why_new=only the title fragment was guarded; seam=none; no_claim=Windows symlink semantics
+  test('a legacy pin whose VERSION is a symlink refuses in --dry-run and writes nothing outside', () => {
+    const fx = setup();
+    const outside = path.join(fx.repo.root, 'outside.txt');
+    fs.writeFileSync(outside, 'keep\n');
+    openPr(fx, '25', { edit: w => { fs.rmSync(path.join(w, 'VERSION')); fs.symlinkSync('1.2.9.0', path.join(w, 'VERSION')); fs.symlinkSync(outside, path.join(w, '1.2.9.0')); } });
+    const r = land(fx, ['--pr', '25', '--dry-run']);
+    expect(r.err).toMatch(/VERSION is a symlink at the pin.*\(QUEUE_LAND_CONFLICT\)/);
+    expect(fs.readFileSync(outside, 'utf8')).toBe('keep\n');
+  }, 90_000);
+
+  // Value: protects=a legacy pin in a repo whose version source is package.json keeps its dependency and script edits; fails_when=the whole manifest is reset to the merge base; why_new=every case used a VERSION file; seam=none; no_claim=lockfile shapes beyond package.json
+  test('version source package.json: a legacy pin keeps its dependency and script edits', () => {
+    const fx = setup();
+    fx.repo.git('checkout', '-q', '-B', 'vp', 'origin/main');
+    fs.mkdirSync(path.join(fx.repo.work, '.gstack'), { recursive: true });
+    fs.writeFileSync(path.join(fx.repo.work, '.gstack', 'version-path'), 'package.json\n');
+    const base = JSON.parse(readFile(fx.repo, 'package.json')); base.version = '1.2.3.0';
+    fs.writeFileSync(path.join(fx.repo.work, 'package.json'), JSON.stringify(base, null, 2) + '\n');
+    fx.repo.git('add', '-A'); fx.repo.git('commit', '-q', '-m', 'version from package.json'); fx.repo.git('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    fx.repo.git('fetch', '-q', 'origin');
+    openPr(fx, '26', { edit: w => { const p = JSON.parse(fs.readFileSync(path.join(w, 'package.json'), 'utf8')); p.version = '1.2.9.0'; p.dependencies['right-pad'] = '2.0.0'; p.scripts = { ...p.scripts, build: 'node build.js' }; fs.writeFileSync(path.join(w, 'package.json'), JSON.stringify(p, null, 2) + '\n'); } });
+    const r = land(fx, ['--pr', '26', '--dry-run']);
+    expect(r.err).toBe('');
+    expect(r.out).toMatch(/^legacy: the pin stamped 1\.2\.9\.0 itself/m);
+    const tree = /^STAMP_TREE: ([0-9a-f]+)/m.exec(r.out)![1]!;
+    const pkg = JSON.parse(show(fx, tree + ':package.json'));
+    expect(pkg.dependencies['right-pad']).toBe('2.0.0');
+    expect(pkg.scripts.build).toBe('node build.js');
+    expect(pkg.version).toBe('1.2.4');
   }, 90_000);
 });
