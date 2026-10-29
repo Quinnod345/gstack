@@ -10,14 +10,22 @@
 - **`gstack-flaky ids --junit <file>`** prints the test ids a report holds (`<file>::<project>::<describe > title>`).
 - Exit codes: 0 pass (flaky passes included), 1 a test failed, 2 usage, 3 no usable report, a crash or a killed runner, each with a `FLAKY_<CODE>` and a `fix:` line. A missing, stale, empty or malformed report never passes, and an existing `--junit` file that is not a JUnit report is refused rather than deleted.
 
+### Added
+- **Quarantine registry, `gstack-flaky quarantine add|renew|release|check|report`** (`.gstack/quarantine.json`, GSTA-158 P2): a test that keeps flaking while someone fixes it gets a larger attempt budget instead of a skip. When every test an attempt failed is quarantined, the whole command may run again, up to 3 attempts; the run is green only when an attempt reaches the runner's own full green verdict, so a coverage threshold or other exit outside the report stays red. A quarantined test that fails all 3 is a `hard-break`, a quarantined id missing from a run that included its file is red, and quarantined tests are listed (`FLAKY_RESULT ... quarantined=<n>`) and ledgered (`quarantined-pass`, `quarantined-fail`, `hard-break`) on every run, never counted as passes.
+- **Entries are owned and expire**: owner, ledger link, class (`detector`, `harness`, `timing`, `model-latency`; `product` and `infra` refused), evidence, 7 days by default and 14 at most, one renewal of up to 7 days with new evidence. An expired entry stops applying with no edit and prints the renew and release commands. Live entries are capped at 10% of the suite (at least 1, and 5 under 50 tests).
+- **`run --base <ref>`** reads the registry from the base branch, so a change cannot quarantine the test it breaks; **`check --base`** refuses an entry added in the change that edits its test's file, an entry removed without a release record, a removed release record and rewritten history. **`report --ledger <file|dir>`** lists entries soonest-expiring first and marks those with 10 consecutive clean passes ready to release. gstack's own `CASE_QUARANTINE` / `EVAL_POLICY` is unchanged and shares no schema with it.
+
 ### Docs
 - `docs/flaky.md`: the GitHub Actions setup, runners, rerun scope and its preconditions, rules, output and exit codes. `docs/TESTING_INTERNALS.md#flake-ledger` points other repositories to it.
+- `docs/flaky.md#quarantine`: quarantine commands, rules, expiry, cap, classes, the `CASE_QUARANTINE` separation and the daily-pass `gh run download` + `report` loop; `captain/templates/automation-flaky-pass.md` and `docs/captain.md` run `report` and fix expiring entries first.
 
 ### Tests
 - `test/flaky-run.test.ts` with captured Playwright 1.64 and bun 1.4 JUnit reports under `test/fixtures/junit/`: flaky pass, real red, rerun scopes, coverage-threshold and early-stop runs, unreported failures, cancelled runs, report deletion and ledger redaction.
+- `test/quarantine.test.ts`: add refusals (cap, more than 14 days, no evidence, product or infra class, unknown id), one renewal, release, `check --base` against git fixtures, expiry, a hard break across 3 attempts, the false-green regression (exit 1 outside the report while only a quarantined test fails stays red), missing ids with their file present or absent, and the registry read from the base branch.
 
 ### Gate integrity
 - `test/helpers/free-fixtures-data.ts`: registers `test/fixtures/junit/**` to `test/flaky-run.test.ts`. No assertion, threshold or skip changed.
+- `test/flaky-run.test.ts`: the exact `FLAKY_RESULT` line it expects gains the new `quarantined=0` field. No other assertion, threshold or skip changed.
 
 ## [1.91.320.0] - 2026-10-29
 
