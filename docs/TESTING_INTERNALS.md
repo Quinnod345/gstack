@@ -1409,6 +1409,11 @@ prints a run's ledgers as a table. A flaky file is fixed at source; the retry
 never masks it. `bun run eval:pass-rates` lists only the local ledger
 (`flakeLedgerPath()`, overridden by `GSTACK_FLAKE_LEDGER`).
 
+Other repositories get the same rule per test with `bin/gstack-flaky run`
+([docs/flaky.md](flaky.md)): it reads a JUnit report from any runner, reruns
+each failed test once, and writes `flaky-pass` and `rerun-fail` lines to its
+own ledger (`flake-ledger-junit.jsonl`).
+
 The aggregate job of `free-tests.yml` downloads every `flake-ledger-*` artifact
 of the run and appends `bun run scripts/test-health-report.ts flake-summary <dir>`
 to its job summary. The Windows lane uploads `flake-ledger-windows-<shard>`.
