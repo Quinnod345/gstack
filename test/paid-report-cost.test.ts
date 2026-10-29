@@ -11,6 +11,7 @@ import { MODEL_FREE_CASES, caseCost, junitCensus } from '../scripts/lib/paid-rep
 import { anthropicUsageCostUsd, streamedUsageCostUsd } from '../lib/pricing';
 import { E2E_TOUCHFILES } from './helpers/touchfiles-data';
 import type { SessionLedgerRow } from './helpers/session-ledger';
+import { recordE2E } from './helpers/e2e-helpers';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const session = (over: Partial<SessionLedgerRow>): SessionLedgerRow => ({ key: 'k', runner: 'agent-sdk', started_at: 't', elapsed_ms: 1, end: 'aborted', ...over });
@@ -65,6 +66,23 @@ describe('caseCost', () => {
       const body = end === -1 ? rest : rest.slice(0, end);
       expect(body, id).not.toMatch(/runSkillTest|runAgentSdkTest|runCodex|launchClaudePty|runPtySession|claude-pty|callJudge|judge\w*\(/);
     }
+  });
+});
+
+describe('recordE2E cost_case_id', () => {
+  const entry = (name: string, testName?: string) => {
+    const tests: any[] = [];
+    const result: any = { toolCalls: [], browseErrors: [], exitReason: 'success', duration: 1, output: '', transcript: [], model: 'claude-opus-5-5',
+      costEstimate: { estimatedCost: 0.05, turnsUsed: 1, estimatedTokens: 1 }, ...(testName ? { testName } : {}) };
+    recordE2E({ addTest: (t: any) => tests.push(t) } as any, name, 'suite', result);
+    return tests[0];
+  };
+
+  test('a display-label record carries its registered runSkillTest testName as cost_case_id, and nothing else does', () => {
+    expect(entry('browse basic commands', 'browse-basic')).toMatchObject({ name: 'browse basic commands', cost_case_id: 'browse-basic' });
+    expect(entry('browse-basic', 'browse-basic').cost_case_id).toBeUndefined();
+    expect(entry('browse basic commands', 'not-a-registered-case').cost_case_id).toBeUndefined();
+    expect(entry('browse basic commands').cost_case_id).toBeUndefined();
   });
 });
 
