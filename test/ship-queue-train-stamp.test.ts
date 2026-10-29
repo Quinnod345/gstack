@@ -67,6 +67,21 @@ describe('stamped train prefixes', () => {
     expect(top).not.toContain('- parent change');
   }, 60_000);
 
+  test('a base with a four-part package.json listed in stamp_files keeps four parts in every S_i, read from S_(i-1)', () => {
+    const policy = { ...POLICY, stamp_files: ['VERSION', 'package.json', 'CHANGELOG.md', 'changelog.d/*.md'], stamp_patterns: ['"version": "{version}"'] };
+    const r = makeFixtureRepo({ policy, prefix: 'train-stamp-' }); repos.push(r);
+    const pkg = JSON.parse(fs.readFileSync(path.join(r.work, 'package.json'), 'utf8'));
+    fs.writeFileSync(path.join(r.work, 'package.json'), JSON.stringify({ ...pkg, version: '1.2.3.0' }, null, 2) + '\n');
+    fs.rmSync(path.join(r.work, 'package-lock.json'));
+    r.git('add', '-A'); r.git('commit', '-q', '-m', 'four-part manifest'); r.git('push', '-q', 'origin', 'main');
+    const a = pin(r, 'a', 'origin/main', '- a change\n');
+    const b = pin(r, 'b', 'origin/main', '- b change\n');
+    const o = { ...chain(r, [['1', a], ['2', b]]), policy: mergePolicy(policy, 'test').policy };
+    const out = stampChain(o);
+    if ('code' in out) throw new Error(out.message);
+    expect(out.stamped.map(s => JSON.parse(show(r, s.commit + ':package.json')).version)).toEqual(['1.2.4.0', '1.2.5.0']);
+  }, 60_000);
+
   test('a tampered earlier version or a product change in S_i is refused', () => {
     const r = makeFixtureRepo({ policy: POLICY, prefix: 'train-stamp-' }); repos.push(r);
     const a = pin(r, 'a', 'origin/main', '- a change\n');
