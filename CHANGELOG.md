@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**`sealed.local_path` now flags a home path inside a shell default, `${UBI_RUNNER:-/home/user/...}`, as it already flagged the same path after `?? "/home/..."` in TypeScript.** gstack-evals `quick/laneb/runner/launch.sh:9` passed the scan because the `-` before the path counted as part of a word (#3568).
+
+### Fixed
+- **`sealed.local_path`** (`lib/sealed-guard.ts`): a home path directly after `${NAME:-` or `${NAME-` (a name or a positional number) now matches. `:=`, `:+` and `:?` already matched, because `=`, `+` and `?` were never word characters. A hyphen anywhere else still excludes the match, so `docs-/home/x/`, `$VAR-/home/...` and `${VAR}-/home/...` stay unflagged.
+
+### Gate integrity
+- This is a gate edit that only tightens: the guard now refuses lines it passed before. No existing test, threshold or allowlist changed. A new case in `test/sealed-guard.test.ts` covers all five operators, a positional parameter, a Windows path and the TypeScript `??` form, and checks six negative controls (hyphenated words, `$VAR-`, `${VAR}-`, a relative default). It fails without the fix, missing the four `-` forms.
+
 ## [1.91.301.0] - 2026-10-29
 
 **Four paid gate cases that went red on 2026-10-28 without a product defect now pass on the runs that failed them.** Each repair replays the failing run as a free test that fails without it.

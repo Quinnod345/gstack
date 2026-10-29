@@ -785,8 +785,9 @@ gstack-pregate sealed [--range <a..b>] [--remote origin] [--base <branch>] [--js
 - **Rules.** `sealed.path` and `sealed.transcript` check every path a commit
   adds, renames or copies, whatever its content (binary, empty, deleted again
   in a later commit); `sealed.answer`, `sealed.seed` and `sealed.local_path`
-  (`/home/<user>/`, `/Users/<user>/`, `C:\Users\<user>\`) check each commit's added
-  lines. Findings print rule, `file[:line]` and commit, never the text.
+  (`/home/<user>/`, `/Users/<user>/`, `C:\Users\<user>\`, including after a shell
+  default such as `${VAR:-/home/<user>/}` or `${VAR-…}`; a path glued to a word
+  by a hyphen, `docs-/home/x/`, is not flagged) check each commit's added lines. Findings print rule, `file[:line]` and commit, never the text.
 - **Policy.** The union of the destination base branch's `sealed` and the
   pushed commit's: a push can tighten it, never relax it. A malformed or
   unreadable policy refuses. Waivers come only from the base branch's
