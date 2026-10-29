@@ -135,15 +135,26 @@ describe('runFlaky', () => {
     const dir = tmp();
     const cov = () => '----|---------|---------|\nAll files | % Funcs | % Lines |\nRan 2 tests across 1 file.\n';
     const f = fakeRun((_a, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(pass('a') + pass('b')), () => 1, cov);
-    const r = await base(f, dir);
+    const r = await base(f, dir, { rerunScope: 'test' });
     expect(f.calls[1]).toEqual(['bun', 'test']);
     expect(r).toMatchObject({ exitCode: 1, wholeRerun: 'coverage is measured, and a narrowed rerun cannot reproduce a coverage failure' });
+  });
+
+  test('by default the rerun is the whole command and counts only on its full green verdict', async () => {
+    const dir = tmp();
+    const green = fakeRun((_a, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(pass('a') + pass('b')), (_a, n) => n === 1 ? 1 : 0);
+    const r = await base(green, dir);
+    expect(green.calls).toEqual([['bun', 'test'], ['bun', 'test']]);
+    expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'the default; --rerun-scope test reruns the failed test alone' });
+    expect(r.ledger[0]).toMatchObject({ kind: 'flaky-pass', rerun_scope: 'command' });
+    const otherFails = fakeRun((_a, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(fail('a') + pass('b')), (_a, n) => n === 1 ? 1 : 0);
+    expect((await base(otherFails, dir)).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: 1 test(s) failed in the whole-command rerun' });
   });
 
   test('a failed test that passes on rerun is a flaky pass and goes on the ledger', async () => {
     const dir = tmp();
     const f = fakeRun((argv, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(pass('b')), (_a, n) => n === 1 ? 1 : 0);
-    const r = await base(f, dir);
+    const r = await base(f, dir, { rerunScope: 'test' });
     expect(r.exitCode).toBe(0);
     expect(f.calls[1]).toEqual(['bun', 'test', 'a.test.ts', '--test-name-pattern', '^b$']);
     expect(r.outcomes.map(o => [o.status, o.attempts.join(',')])).toEqual([['flaky-pass', 'fail,pass']]);
@@ -218,7 +229,7 @@ describe('runFlaky', () => {
     const r = parseJunit(suite(pass('b') + fail('b')));
     expect(r.tests[0]).toMatchObject({ executions: 2, attempts: ['pass', 'fail'] });
     const f = fakeRun(() => suite(fail('b') + pass('b') + fail('c')), () => 1);
-    const out = await base(f, dir);
+    const out = await base(f, dir, { rerunScope: 'test' });
     expect(out.outcomes.find(o => o.test.id.endsWith('::b'))).toMatchObject({ status: 'fail', reason: 'it ran 2 times in this report and one failed; not rerun' });
     expect(f.calls).toHaveLength(2);
   });
@@ -262,19 +273,19 @@ describe('runFlaky', () => {
     const dir = tmp();
     const bail = () => 'Bailed out after 1 failure\nRan 1 test across 1 file.\n';
     const green = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b') + pass('never-reached')), (_a, n) => n === 1 ? 1 : 0, bail);
-    const r = await base(green, dir);
+    const r = await base(green, dir, { rerunScope: 'test' });
     expect(green.calls).toEqual([['bun', 'test'], ['bun', 'test']]);
     expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'bun stopped early (--bail)' });
     expect(r.ledger[0]).toMatchObject({ kind: 'flaky-pass', rerun_scope: 'command' });
     expect(renderResult(r, '/l')).toContain('FLAKY_RERUN: scope=command (bun stopped early (--bail))');
     const red = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b') + fail('never-reached')), () => 1, bail);
-    expect((await base(red, dir)).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the command exited 1' });
+    expect((await base(red, dir, { rerunScope: 'test' })).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the command exited 1' });
   });
 
-  test('generic runners always rerun the whole command', async () => {
+  test('generic runners rerun the whole command even when a targeted rerun is asked for', async () => {
     const dir = tmp();
     const f = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b')), (_a, n) => n === 1 ? 1 : 0);
-    const r = await base(f, dir, { runner: 'generic' });
+    const r = await base(f, dir, { runner: 'generic', rerunScope: 'test' });
     expect(f.calls[1]).toEqual(['bun', 'test']);
     expect(r).toMatchObject({ exitCode: 0, wholeRerun: 'a generic runner cannot prove every test ran' });
   });
@@ -309,7 +320,7 @@ describe('runFlaky', () => {
     const dir = tmp();
     expect(await base(fakeRun(() => suite(fail('b')), () => 128, undefined, () => 'SIGTERM'), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_COMMAND_KILLED' });
     const f = fakeRun((_a, n) => n === 1 ? suite(fail('b') + fail('c')) : suite(pass('b') + pass('c')), (_a, n) => n === 1 ? 1 : 128, undefined, n => n === 2 ? 'SIGTERM' : undefined);
-    const r = await base(f, dir);
+    const r = await base(f, dir, { rerunScope: 'test' });
     expect(f.calls).toHaveLength(2);
     expect(r.outcomes.map(o => o.reason)).toEqual(['rerun: killed by SIGTERM', 'not rerun: an earlier rerun was killed']);
     expect(r.exitCode).toBe(1);
@@ -367,7 +378,7 @@ describe('bin/gstack-flaky', () => {
       `printf '%s' '${suite(pass('b'))}' > r.xml`,
     ].join('\n'), { mode: 0o755 });
     const ledger = path.join(dir, 'ledger.jsonl');
-    const r = spawnSync(path.join(ROOT, 'bin', 'gstack-flaky'), ['run', '--junit', 'r.xml', '--runner', 'bun', '--ledger', ledger, '--', runner], { cwd: dir, encoding: 'utf-8', timeout: 30_000, env: { ...process.env, GITHUB_ACTIONS: '', GITHUB_STEP_SUMMARY: '' } });
+    const r = spawnSync(path.join(ROOT, 'bin', 'gstack-flaky'), ['run', '--junit', 'r.xml', '--runner', 'bun', '--rerun-scope', 'test', '--ledger', ledger, '--', runner], { cwd: dir, encoding: 'utf-8', timeout: 30_000, env: { ...process.env, GITHUB_ACTIONS: '', GITHUB_STEP_SUMMARY: '' } });
     expect(r.stdout).toContain('FLAKY: flaky-pass a.test.ts::::b attempts=fail,pass');
     expect(r.stdout).toContain(`verdict=pass ledger=${ledger}`);
     expect(r.status).toBe(0);
@@ -384,6 +395,12 @@ describe('bin/gstack-flaky', () => {
     fs.writeFileSync(path.join(dir, 'pom.xml'), '<project><modelVersion>4.0.0</modelVersion></project>');
     expect(spawnSync(bin, ['run', '--junit', 'pom.xml', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
     expect(fs.existsSync(path.join(dir, 'pom.xml'))).toBe(true);
+    expect(spawnSync(bin, ['run', '--junit', 'r.xml', '--rerun-scope', 'file', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
+    fs.writeFileSync(path.join(dir, 'locked.xml'), '<testsuites/>', { mode: 0o000 });
+    if (process.getuid?.() !== 0) {
+      const locked = spawnSync(bin, ['run', '--junit', 'locked.xml', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
+      expect([locked.status, locked.stderr.includes('cannot be read')]).toEqual([2, true]);
+    }
     const missing = spawnSync(bin, ['run', '--junit', 'r.xml', '--', path.join(dir, 'no-such-runner')], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
     expect(missing.status).toBe(3);
     expect(missing.stderr).toContain('(FLAKY_COMMAND_NOT_STARTED)');

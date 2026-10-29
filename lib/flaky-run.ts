@@ -1,6 +1,6 @@
 /**
- * gstack-flaky run (GSTA-158): run a test command, read its JUnit, rerun each
- * failed test once, and record flaky passes on a ledger. This is CREW rule 16
+ * gstack-flaky run (GSTA-158): run a test command, read its JUnit, rerun once
+ * when tests failed, and record flaky passes on a ledger. This is CREW rule 16
  * ("run the failed test again and note that it is flaky") for any runner that
  * writes JUnit, the per-test form of the free suite's GSTACK_FREE_RETRY_FLAKY.
  *
@@ -9,11 +9,15 @@
  *   at most maxReruns tests failed; more failures are a real red and nothing
  *   is rerun. When the runner retried (Playwright `retries` with retry-aware
  *   JUnit), its attempts stand and nothing is rerun again.
- * - A targeted rerun (the failed test alone) needs proof that the first run
- *   was complete: the runner's own summary, its test-failure exit status 1 and
- *   no early stop (bail, max-failures, interrupt, global timeout). Without that
- *   proof, and always for generic runners, the rerun is the whole command, so a
- *   test the first run never reached still has to pass.
+ * - The rerun repeats the whole command by default, and counts only on the
+ *   runner's own full green verdict: exit 0, no failed test, every first-run
+ *   test present, nothing counted outside the report. Only that verdict covers
+ *   every reason a run can fail (a test it never reached, a coverage
+ *   threshold, a fail-on-flaky policy).
+ * - rerunScope 'test' (opt-in) reruns the failed test alone, and only with
+ *   proof that the first run was complete: the runner's own summary, its
+ *   test-failure exit status 1, no early stop, no coverage and no runner-flaky
+ *   test; otherwise, and always for generic runners, the whole command reruns.
  * - A rerun makes a flaky pass only when its command exited 0 and the test ran
  *   exactly once and passed on its first attempt. The command is an argv run
  *   without a shell; a targeted rerun appends the adapter's selection, each one
@@ -58,6 +62,8 @@ export interface RunOptions {
   junit: string;
   runner?: JunitRunner;
   maxReruns: number;
+  /** 'command' (default): rerun the whole command. 'test': rerun the failed test alone when the first run is proven complete. */
+  rerunScope?: 'command' | 'test';
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   /** Runs one attempt; resolves with its exit status and the tail of its combined output. */
@@ -82,7 +88,7 @@ export interface RunResult {
   commandExit: number;
   outcomes: TestOutcome[];
   reruns: number;
-  /** Why the rerun was the whole command; absent for targeted reruns. */
+  /** Why the rerun was the whole command (the default, or why a requested targeted rerun was refused); absent for targeted reruns. */
   wholeRerun?: string;
   ledger: LedgerLine[];
 }
@@ -285,7 +291,9 @@ export async function runFlaky(opts: RunOptions): Promise<RunResult> {
     else if (failed.length > opts.maxReruns) outcomes.push({ test: t, status: 'fail', attempts: t.attempts, reason: `${failed.length} tests failed, more than --max-reruns ${opts.maxReruns}; not rerun` });
     else eligible.push(t);
   }
-  const wholeRerun = eligible.length ? incompleteRun(report.runner, first.output, first.exit, opts.command, runnerFlaky.length) ?? undefined : undefined;
+  const wholeRerun = !eligible.length ? undefined
+    : opts.rerunScope !== 'test' ? 'the default; --rerun-scope test reruns the failed test alone'
+    : incompleteRun(report.runner, first.output, first.exit, opts.command, runnerFlaky.length) ?? undefined;
   const junit = path.resolve(cwd, opts.junit);
   const firstXml = fs.readFileSync(junit);
   let reruns = 0;

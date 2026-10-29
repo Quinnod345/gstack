@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
- * gstack-flaky (GSTA-158): rerun a failed test once and record the flake, for
+ * gstack-flaky (GSTA-158): rerun failed tests once and record the flake, for
  * any runner that writes JUnit (Playwright, bun, jest, pytest, vitest). CREW
  * rule 16 for every repository: "you can just run the failed test again and
  * note that it is flaky". The rules live in lib/flaky-run.ts; docs/flaky.md is
@@ -12,18 +12,20 @@ import { JunitError, readJunit, type JunitRunner } from '../lib/junit';
 
 const USAGE = `Usage:
   gstack-flaky run --junit <file.xml> [--runner playwright|bun|generic] [--max-reruns <n>]
-                   [--ledger <file>] -- <test command...>
+                   [--rerun-scope command|test] [--ledger <file>] -- <test command...>
   gstack-flaky ids --junit <file> [--runner playwright|bun|generic]
   gstack-flaky --help
 
 run: runs the command (an argv, no shell), reads the JUnit report it writes at
 --junit, and reruns each failed test once when the runner made no retries and
-at most --max-reruns (${DEFAULT_MAX_RERUNS}) tests failed. When the runner's summary proves
-the first run complete, a rerun appends the runner's selection to the same
-command (playwright: <file> --grep <title> --project <p>; bun: <file>
---test-name-pattern <title>); otherwise, and always for generic runners, the
-rerun is the whole command. A test that passes its rerun once, with the rerun
-exiting 0, is a flaky pass: green, and one line on the ledger (--ledger, else
+at most --max-reruns (${DEFAULT_MAX_RERUNS}) tests failed. The rerun repeats the whole
+command and counts only on the runner's full green verdict (exit 0, no failed
+or missing test). --rerun-scope test reruns the failed test alone (playwright:
+<file> --grep <title> --project <p>; bun: <file> --test-name-pattern <title>)
+when the runner's summary proves the first run complete and nothing but the
+failed tests can fail it (no coverage, no runner-flaky test); otherwise, and
+always for generic runners, the whole command reruns. A test that passes its
+rerun once, with the rerun exiting 0, is a flaky pass: green, and one line on the ledger (--ledger, else
 GSTACK_FLAKE_LEDGER_JUNIT, else <state root>/flake-ledger-junit.jsonl). --junit
 holds the first run's report afterwards; reruns' reports sit beside it as
 <name>.rerun-<n>.xml. The command runs with PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1
@@ -59,7 +61,7 @@ function coded(e: JunitError): never {
 }
 
 function parse(argv: string[]) {
-  const o: { junit?: string; runner?: JunitRunner; maxReruns: number; ledger?: string; command: string[] } = { maxReruns: DEFAULT_MAX_RERUNS, command: [] };
+  const o: { junit?: string; runner?: JunitRunner; maxReruns: number; rerunScope: 'command' | 'test'; ledger?: string; command: string[] } = { maxReruns: DEFAULT_MAX_RERUNS, rerunScope: 'command', command: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     const val = () => { const v = argv[++i]; if (v === undefined) die(`${a} needs a value`); return v; };
@@ -73,6 +75,10 @@ function parse(argv: string[]) {
       const n = Number(val());
       if (!Number.isInteger(n) || n < 0) die('--max-reruns must be a whole number');
       o.maxReruns = n;
+    } else if (a === '--rerun-scope') {
+      const v = val();
+      if (v !== 'command' && v !== 'test') die(`--rerun-scope must be command or test, got ${JSON.stringify(v)}`);
+      o.rerunScope = v;
     } else if (a === '--ledger') o.ledger = val();
     else die(`unknown option ${a}\n${USAGE}`);
   }
@@ -95,12 +101,15 @@ if (sub !== 'run') die(`unknown command ${sub}\n${USAGE}`);
 const o = parse(rest);
 if (!o.junit) die('run needs --junit <file.xml>');
 if (!/\.xml$/i.test(o.junit) || fs.statSync(o.junit, { throwIfNoEntry: false })?.isDirectory()) die(`--junit must name a .xml file (it is deleted before every attempt), got ${JSON.stringify(o.junit)}`);
-const existing = fs.statSync(o.junit, { throwIfNoEntry: false }) && fs.readFileSync(o.junit, 'utf-8').slice(0, 4096);
+let existing: string | false | undefined;
+try { existing = fs.statSync(o.junit, { throwIfNoEntry: false }) && fs.readFileSync(o.junit, 'utf-8').slice(0, 4096); } catch (e) {
+  die(`--junit ${JSON.stringify(o.junit)} exists but cannot be read (${(e as Error).message}); gstack-flaky deletes that path before every attempt, so it refuses to touch it`);
+}
 if (existing && existing.trim() && !/<testsuites?[\s>/]/.test(existing)) die(`--junit ${JSON.stringify(o.junit)} exists and is not a JUnit report; gstack-flaky deletes that path before every attempt, so it refuses to touch it`);
 if (!o.command.length) die('run needs the test command after --');
 let result;
 try {
-  result = await runFlaky({ command: o.command, junit: o.junit, runner: o.runner, maxReruns: o.maxReruns });
+  result = await runFlaky({ command: o.command, junit: o.junit, runner: o.runner, maxReruns: o.maxReruns, rerunScope: o.rerunScope });
 } catch (e) { if (e instanceof JunitError) coded(e); throw e; }
 const ledger = ledgerPath(o.ledger);
 appendLedger(result.ledger, ledger, s => process.stderr.write(`gstack-flaky: ${s}\n`));

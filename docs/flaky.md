@@ -1,8 +1,8 @@
 # Flaky tests: rerun once and record it (`gstack-flaky`)
 
 `gstack-flaky run` runs your test command, reads the JUnit report it writes,
-and reruns each failed test once. A test that passes on its rerun is a
-**flaky pass**: the job stays green and the flake is recorded on a ledger, so
+and when tests failed, runs the command once more. A test that passes on its
+rerun is a **flaky pass**: the job stays green and the flake is recorded on a ledger, so
 the daily flaky pass can fix it at the source. A test that fails twice is red.
 This is CREW rule 16 ("run the failed test again and note that it is flaky")
 for any runner that writes JUnit: Playwright, `bun test`, jest, vitest and
@@ -37,50 +37,67 @@ the run before anyone reads the ledger.
 
 ## Runners
 
-| Runner | Command after `--` | Rerun |
+| Runner | Command after `--` | Notes |
 |---|---|---|
-| Playwright | `npx playwright test --reporter=line,junit` with `PLAYWRIGHT_JUNIT_OUTPUT_NAME=<file>` | The failed test alone (`<file> --grep <title> --project <project>`) when the summary proves the run complete, else the whole command. `gstack-flaky` sets `PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1` so Playwright's own `retries` are reported; with retries configured, those attempts stand and nothing is rerun again. |
-| bun | `bun test --reporter=junit --reporter-outfile=<file>` | The failed test alone (`<file> --test-name-pattern <title>`) when the summary proves the run complete, else the whole command. |
-| jest, vitest, pytest (`--runner generic`) | your command, writing JUnit | Always the whole command: a generic runner's output cannot prove that every test ran. |
+| Playwright | `npx playwright test --reporter=line,junit` with `PLAYWRIGHT_JUNIT_OUTPUT_NAME=<file>` | `gstack-flaky` sets `PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1` so Playwright's own `retries` are reported; with retries configured, those attempts stand and nothing is rerun again. |
+| bun | `bun test --reporter=junit --reporter-outfile=<file>` | |
+| jest, vitest, pytest (`--runner generic`) | your command, writing JUnit | Always reruns the whole command, even with `--rerun-scope test`. |
 
 The command after `--` runs without a shell. When it needs one, wrap it as
 `bash -c '<script> "$@"' _` so a targeted rerun's selection arguments reach
-the runner. A targeted rerun appends its selection to the same command, each
-one argument, so a title with shell or regex characters selects only itself.
+the runner.
+
+## Rerun scope
+
+**Default: the whole command.** The rerun repeats your command exactly, and
+counts only on the runner's own full green verdict: it exits 0, no test fails,
+every test of the first run is in its report, and the runner counts no failure
+outside the report. That verdict covers every reason a run can fail, including
+the ones a narrowed rerun cannot see: a test the first run never reached
+(`--bail`, `--max-failures`, `-x`), a coverage threshold (however coverage is
+configured, `bunfig.toml` and lcov included), a fail-on-flaky policy, a
+global setup error. A test that failed in the first run and passes once in this
+rerun is a flaky pass. It costs one more run of the suite, which is still far
+cheaper than rerunning the CI job by hand.
+
+**Opt-in: `--rerun-scope test`.** Reruns the failed test alone (Playwright:
+`<file> --grep <title> --project <project>`; bun: `<file> --test-name-pattern <title>`)
+and clears it when that rerun exits 0. Use it only when the first run's exit
+status can come from failed tests alone: no coverage threshold in any form, no
+`--fail-on-flaky-tests`, no other step inside the command that can fail. As a
+safety net, `gstack-flaky` still reruns the whole command
+(`FLAKY_RERUN: scope=command (<why>)`) when the runner exited anything but
+1, its summary is missing, it stopped early (bun `Bailed out`, Playwright
+`did not run`, `interrupted`, `Testing stopped early`, a global timeout), it
+printed a coverage table or got `--coverage`, or it retried flaky tests itself.
+It cannot see a coverage threshold configured without console output (for
+example `coverageReporter = ["lcov"]` in `bunfig.toml`), which is why this
+scope is opt-in.
 
 ## Rules
 
 - **One rerun, small failures only.** A failed test gets one rerun when the
   runner made no retries and at most `--max-reruns` (3) tests failed. More
-  failures than that is a real red, and nothing is rerun.
-- **A targeted rerun needs a complete first run.** The failed test is rerun
-  alone only when the runner exited 1 (its test-failure status) and its own
-  summary is present with no early stop: bun's `Ran N tests` line without
-  `Bailed out`, Playwright's `N failed` line without `did not run`,
-  `interrupted`, `Testing stopped early` or a global timeout. Otherwise the
-  rerun repeats the whole command (`FLAKY_RERUN: scope=command (<why>)`), so
-  a test the first run never reached (`--bail`, `--max-failures`, `-x`)
-  still has to pass. Coverage (`--coverage`, a coverage table in the output)
-  and runner-flaky tests in the same run also force a whole-command rerun: a
-  coverage threshold or `--fail-on-flaky-tests` fails the run for a reason a
-  narrowed rerun cannot reproduce. When the run is already red for another test, a
-  whole-command rerun is skipped.
+  failures than that is a real red, and nothing is rerun. When the run is
+  already red for a test that cannot be rerun, a whole-command rerun is
+  skipped.
 - **A rerun clears a test only cleanly.** The rerun's command must exit 0 and
   the test must run once and pass on its first attempt; a rerun the runner
   retried again does not count.
 - **Never green by accident.** The report is deleted before every attempt, and
   a report that attempt did not write counts as missing. A missing, empty,
   zero-test or malformed report fails, as does a non-zero exit with no failed
-  test (a crash or a non-test step) and a runner killed by a signal. When the
-  runner's summary counts failures its JUnit omits (a bun file that fails to
-  load, a Playwright error outside any test), the run is red and nothing is
-  rerun.
+  test (a crash or a non-test step) and a runner killed by a signal. Cancelling
+  `gstack-flaky` (SIGINT, SIGTERM) is passed to the runner and latched: nothing
+  is rerun after it, whatever exit the runner chooses. When the runner's
+  summary counts failures its JUnit omits (a bun file that fails to load, a
+  Playwright error outside any test), the run is red and nothing is rerun.
 - **Reports.** After the run, `--junit` holds the first run's report, so a
   later upload or test reporter sees what failed. Each rerun's report is kept
   beside it as `<name>.rerun-<n>.xml`. Other reporters' outputs (Playwright's
   `test-results/` and HTML report) are rewritten by a rerun; upload the JUnit
-  report as the record. An existing `--junit` file that is not a JUnit report
-  is refused (usage, exit 2), never deleted.
+  report as the record. An existing `--junit` file that is not a JUnit report,
+  or cannot be read, is refused (usage, exit 2), never deleted.
 - **Ids.** A test is `<file>::<project>::<describe > title>`, with the project
   empty outside Playwright, so a test in two browser projects is two tests.
   `gstack-flaky ids --junit <file>` prints them.
@@ -105,7 +122,7 @@ rerun repeated the whole command, then
 |---|---|
 | 0 | Every test passed, flaky passes included |
 | 1 | A test failed (after its rerun, or with no rerun), including `FLAKY_UNREPORTED_FAILURES` |
-| 2 | Usage error, including a `--junit` path that is not a `.xml` file |
+| 2 | Usage error, including a `--junit` path that is not a `.xml` file, or an existing file there that is not a readable JUnit report |
 | 3 | No usable report, a crash, or a killed runner (a code below on stderr) |
 
 | Code | Exit | Cause | Fix |
