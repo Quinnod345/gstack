@@ -12,31 +12,30 @@ export function pricedTranscript(session: { hermeticConfigDir?: string | null; s
  * Price one PTY session from the transcripts Claude Code wrote under its owned config dir:
  * `projects/<dir>/<sessionId>.jsonl` (inline sidechains included) and `projects/<dir>/<sessionId>/subagents/*.jsonl`,
  * rows deduplicated by message id. Undefined (cost-unknown, never $0) without a config dir, session id, transcript or
- * usage, or when a message's model has no price row.
+ * usage, when a message's model has no price row, or when any read fails: it runs in ledger writers before close and
+ * cleanup, so it never throws.
  */
 export function ptyTranscriptCostUsd(configDir: string | null | undefined, sessionId: string | undefined): number | undefined {
   if (!configDir || !sessionId) return undefined;
-  const projects = path.join(configDir, 'projects');
-  let dirs: fs.Dirent[];
   try {
-    dirs = fs.readdirSync(projects, { withFileTypes: true });
+    const projects = path.join(configDir, 'projects');
+    const files: string[] = [];
+    for (const dir of fs.readdirSync(projects, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      const main = path.join(projects, dir.name, `${sessionId}.jsonl`);
+      if (fs.existsSync(main)) files.push(main);
+      const subagents = path.join(projects, dir.name, sessionId, 'subagents');
+      if (fs.existsSync(subagents)) files.push(...fs.readdirSync(subagents).filter(f => f.endsWith('.jsonl')).map(f => path.join(subagents, f)));
+    }
+    const rows = files.flatMap(file => fs.readFileSync(file, 'utf8').split('\n').flatMap(line => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    }));
+    return streamedUsageCostUsd(rows);
   } catch {
     return undefined;
   }
-  const files: string[] = [];
-  for (const dir of dirs) {
-    if (!dir.isDirectory()) continue;
-    const main = path.join(projects, dir.name, `${sessionId}.jsonl`);
-    if (fs.existsSync(main)) files.push(main);
-    const subagents = path.join(projects, dir.name, sessionId, 'subagents');
-    if (fs.existsSync(subagents)) files.push(...fs.readdirSync(subagents).filter(f => f.endsWith('.jsonl')).map(f => path.join(subagents, f)));
-  }
-  const rows = files.flatMap(file => fs.readFileSync(file, 'utf8').split('\n').flatMap(line => {
-    try {
-      return [JSON.parse(line)];
-    } catch {
-      return [];
-    }
-  }));
-  return streamedUsageCostUsd(rows);
 }

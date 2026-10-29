@@ -45,6 +45,7 @@ describe('ptyTranscriptCostUsd', () => {
     const unpriced = fixture(project => fs.writeFileSync(path.join(project, `${SID}.jsonl`),
       assistant('msg_a', 'claude-opus-5-5', { output_tokens: 1 }) + '\n' + assistant('msg_b', 'some-unpriced-model', { output_tokens: 1 }) + '\n'));
     const empty = fixture(project => fs.writeFileSync(path.join(project, `${SID}.jsonl`), JSON.stringify({ type: 'user', sessionId: SID }) + '\n'));
+    const unreadable = fixture(project => fs.mkdirSync(path.join(project, `${SID}.jsonl`)));
     try {
       expect(ptyTranscriptCostUsd(unpriced, SID)).toBeUndefined();
       expect(ptyTranscriptCostUsd(empty, SID)).toBeUndefined();
@@ -53,6 +54,7 @@ describe('ptyTranscriptCostUsd', () => {
       expect(ptyTranscriptCostUsd(null, SID)).toBeUndefined();
       expect(ptyTranscriptCostUsd(path.join(empty, 'missing'), SID)).toBeUndefined();
       expect(pricedTranscript(undefined)).toEqual({});
-    } finally { for (const dir of [unpriced, empty]) fs.rmSync(dir, { recursive: true, force: true }); }
+      expect(ptyTranscriptCostUsd(unreadable, SID)).toBeUndefined();
+    } finally { for (const dir of [unpriced, empty, unreadable]) fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
