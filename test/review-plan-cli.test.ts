@@ -206,7 +206,25 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
     expect(out).toMatch(/^REVIEW_DEPTH: standard /m);
     expect(out).toMatch(/^NEXT: full \(a blocking finding was fixed and a fix touched a gate-class path/m);
     expect(JSON.parse(run(r, [...pass2, '--range-base', rangeBase, '--json']).stdout)).toMatchObject({ next: { step: 'full' }, fix_range: { touched_gate: true } });
-  });
+  }, 30_000);
+  test.each([
+    ['an auth revert', 'src/auth/login.ts', 'export const login = (u: string) => u.length > 0;\n'],
+    ['a migration revert', 'db/migrate/001_a.sql', 'ALTER TABLE users ADD COLUMN email text;\n'],
+  ])('%s keeps the full pass 2: the range and the diff at the range base carry scope and gate-scan input', (_n, file, text) => {
+    const r = repo({ 'src/a.ts': code(80) });
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
+    const write = (body: string) => { fs.mkdirSync(path.dirname(path.join(r.dir, file)), { recursive: true }); fs.writeFileSync(path.join(r.dir, file), body); };
+    git('checkout', '-q', 'main'); write(text); git('add', '.'); git('commit', '-qm', 'base file');
+    git('checkout', '-q', 'feat'); git('merge', '-q', '--no-edit', 'main');
+    write(text + '-- edited\n'); git('add', '.'); git('commit', '-qm', 'feat edit');
+    const rangeBase = git('rev-parse', 'HEAD').stdout.trim();
+    write(text);
+    fs.writeFileSync(path.join(r.dir, 'src', 'b.ts'), code(2, 'b'));
+    git('add', '.'); git('commit', '-qm', 'fix: revert the edit');
+    const out = run(r, [...pass2, '--range-base', rangeBase]).stdout;
+    expect(out).not.toMatch(/^REVIEW_CLASS: gate/m);
+    expect(out).toMatch(/^NEXT: full \(a blocking finding was fixed and a fix touched a gate-class path/m);
+  }, 30_000);
   test('--depth-floor full opts out of the scoped pass', () => {
     const { r, rangeBase } = fixed(10);
     expect(run(r, [...pass2, '--range-base', rangeBase, '--depth-floor', 'full']).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the diff is at full depth/m);
