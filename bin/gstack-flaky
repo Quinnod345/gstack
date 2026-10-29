@@ -41,6 +41,7 @@ const FIX: Record<string, string> = {
   FLAKY_RETRIES_HIDDEN: 'set PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1 where the report is written',
   FLAKY_COMMAND_FAILED: 'read the command output above: the suite crashed or a non-test step failed; that is a real red',
   FLAKY_COMMAND_NOT_STARTED: 'check the command after -- (it runs without a shell; wrap it as bash -c "<script>" when it needs one)',
+  FLAKY_UNREPORTED_FAILURES: 'the runner counted failures its JUnit omits (a test file that failed to load, an error outside any test); fix that first, it is a real red',
   FLAKY_RERUN_UNSUPPORTED: 'pass --runner playwright|bun, or --rerun-arg templates that select one test (for example --rerun-arg {file} --rerun-arg -k --rerun-arg {title})',
 };
 
@@ -94,7 +95,7 @@ if (!o.junit) die('run needs --junit <file>');
 if (!o.command.length) die('run needs the test command after --');
 let result;
 try {
-  result = runFlaky({ command: o.command, junit: o.junit, runner: o.runner, maxReruns: o.maxReruns, rerunArgs: o.rerunArgs });
+  result = await runFlaky({ command: o.command, junit: o.junit, runner: o.runner, maxReruns: o.maxReruns, rerunArgs: o.rerunArgs });
 } catch (e) { if (e instanceof JunitError) coded(e); throw e; }
 const ledger = ledgerPath(o.ledger);
 appendLedger(result.ledger, ledger, s => process.stderr.write(`gstack-flaky: ${s}\n`));

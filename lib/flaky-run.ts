@@ -16,11 +16,13 @@
  *   a pass only when its command also exited 0.
  * - The JUnit file is removed before every attempt; a report that attempt did
  *   not write is missing. Missing, unreadable or empty JUnit is never green, and
- *   a non-zero exit with no failed test is a crash, never green.
+ *   a non-zero exit with no failed test is a crash, never green. When the
+ *   runner's own summary counts failures or errors the JUnit omits (bun files
+ *   that fail to load), the run is red and nothing is rerun.
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn as spawnChild, spawnSync } from 'child_process';
 import { finalAttempt, JunitError, readJunit, type JunitReport, type JunitRunner, type JunitTest } from './junit';
 import { redactFindingSpans } from './redact-engine';
 import { resolveStateRoot } from './state-root';
@@ -52,7 +54,8 @@ export interface RunOptions {
   rerunArgs?: string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-  spawn?: (argv: string[], env: NodeJS.ProcessEnv, cwd: string) => number;
+  /** Runs one attempt; resolves with its exit status and the tail of its combined output. */
+  spawn?: (argv: string[], env: NodeJS.ProcessEnv, cwd: string) => Promise<Attempted>;
   now?: () => Date;
 }
 
@@ -62,6 +65,8 @@ export interface TestOutcome {
   attempts: string[];
   reason?: string;
 }
+
+export interface Attempted { exit: number; output: string }
 
 export interface RunResult {
   exitCode: 0 | 1 | 3;
@@ -91,10 +96,42 @@ export function rerunSelection(runner: JunitRunner, t: JunitTest, generic: strin
   return generic.map(a => a.replaceAll('{file}', t.file).replaceAll('{title}', title).replaceAll('{pattern}', pattern));
 }
 
-function defaultSpawn(argv: string[], env: NodeJS.ProcessEnv, cwd: string): number {
-  const r = spawnSync(argv[0]!, argv.slice(1), { stdio: 'inherit', env, cwd });
-  if (r.error) throw new JunitError('FLAKY_COMMAND_NOT_STARTED', `could not start ${argv[0]}: ${r.error.message}`);
-  return r.status ?? (r.signal ? 128 : 1);
+const OUTPUT_TAIL = 256 * 1024;
+
+/** Stream the child's output live (a quiet runner trips CI idle watchdogs) and keep its tail for reconciliation. */
+function defaultSpawn(argv: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<Attempted> {
+  return new Promise((resolve, reject) => {
+    let tail = '';
+    const keep = (chunk: Buffer) => { tail = (tail + chunk.toString('utf-8')).slice(-OUTPUT_TAIL); };
+    const child = spawnChild(argv[0]!, argv.slice(1), { stdio: ['inherit', 'pipe', 'pipe'], env, cwd });
+    child.stdout!.on('data', (c: Buffer) => { process.stdout.write(c); keep(c); });
+    child.stderr!.on('data', (c: Buffer) => { process.stderr.write(c); keep(c); });
+    child.on('error', e => reject(new JunitError('FLAKY_COMMAND_NOT_STARTED', `could not start ${argv[0]}: ${e.message}`)));
+    child.on('close', (code, signal) => resolve({ exit: code ?? (signal ? 128 : 1), output: tail }));
+  });
+}
+
+/**
+ * Failures a runner counted that its JUnit omits: bun leaves files that fail to
+ * load out of the report ("N errors"), Playwright reports errors outside any
+ * test. A rerun cannot clear those, so they keep the run red.
+ */
+export function unreportedFailures(runner: JunitRunner, output: string, reportedFailed: number): string | null {
+  const text = output.replace(/\x1b\[[0-9;]*m/g, '');
+  const last = (re: RegExp) => { const m = [...text.matchAll(re)].pop(); return m ? Number(m[1]) : 0; };
+  if (runner === 'bun') {
+    const errors = last(/^\s*(\d+) errors?\s*$/gm);
+    const fails = last(/^\s*(\d+) fail\s*$/gm);
+    if (errors > 0) return `bun reported ${errors} error(s) outside the JUnit report (a file failed to load or threw between tests)`;
+    if (fails > reportedFailed) return `bun counted ${fails} failing tests, the JUnit report ${reportedFailed}`;
+  }
+  if (runner === 'playwright') {
+    const outside = last(/(\d+) errors? (?:was|were) not a part of any test/g);
+    const fails = last(/^\s*(\d+) failed\s*$/gm);
+    if (outside > 0) return `Playwright reported ${outside} error(s) outside any test`;
+    if (fails > reportedFailed) return `Playwright counted ${fails} failed tests, the JUnit report ${reportedFailed}`;
+  }
+  return null;
 }
 
 function git(args: string[], cwd: string): string | undefined {
@@ -122,23 +159,23 @@ export function safeExcerpt(lines: string[]): string[] {
 }
 
 /** One attempt: remove the report, run, and read a report this attempt wrote. */
-function attempt(opts: RunOptions, argv: string[], cwd: string, env: NodeJS.ProcessEnv): { exit: number; report?: JunitReport; error?: JunitError } {
+async function attempt(opts: RunOptions, argv: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<{ exit: number; output: string; report?: JunitReport; error?: JunitError }> {
   const junit = path.resolve(cwd, opts.junit);
   fs.rmSync(junit, { force: true });
-  const exit = (opts.spawn ?? defaultSpawn)(argv, env, cwd);
-  if (!fs.existsSync(junit)) return { exit, error: new JunitError('FLAKY_NO_RESULTS', `the command wrote no JUnit report at ${opts.junit} (exit ${exit})`) };
-  try { return { exit, report: readJunit(junit, opts.runner) }; } catch (e) {
-    if (e instanceof JunitError) return { exit, error: e };
+  const { exit, output } = await (opts.spawn ?? defaultSpawn)(argv, env, cwd);
+  if (!fs.existsSync(junit)) return { exit, output, error: new JunitError('FLAKY_NO_RESULTS', `the command wrote no JUnit report at ${opts.junit} (exit ${exit})`) };
+  try { return { exit, output, report: readJunit(junit, opts.runner) }; } catch (e) {
+    if (e instanceof JunitError) return { exit, output, error: e };
     throw e;
   }
 }
 
-export function runFlaky(opts: RunOptions): RunResult {
+export async function runFlaky(opts: RunOptions): Promise<RunResult> {
   const cwd = opts.cwd ?? process.cwd();
   const env = { ...(opts.env ?? process.env), PLAYWRIGHT_JUNIT_INCLUDE_RETRIES: '1' };
   const now = opts.now ?? (() => new Date());
   const empty = { tests: 0, outcomes: [], reruns: 0, ledger: [] };
-  const first = attempt(opts, opts.command, cwd, env);
+  const first = await attempt(opts, opts.command, cwd, env);
   if (!first.report) return { exitCode: 3, code: first.error!.code, message: first.error!.message, commandExit: first.exit, ...empty };
   const report = first.report;
   if (report.retriesHidden) {
@@ -150,6 +187,12 @@ export function runFlaky(opts: RunOptions): RunResult {
   if (first.exit !== 0 && failed.length === 0) {
     return { exitCode: 3, code: 'FLAKY_COMMAND_FAILED', commandExit: first.exit, ...empty, tests: report.tests.length,
       message: `the command exited ${first.exit} but its JUnit reports no failed test; a crash or a non-test step failed` };
+  }
+  const unreported = unreportedFailures(report.runner, first.output, failed.length);
+  if (unreported) {
+    return { exitCode: 1, code: 'FLAKY_UNREPORTED_FAILURES', commandExit: first.exit, ...empty, tests: report.tests.length,
+      outcomes: failed.map(t => ({ test: t, status: 'fail' as const, attempts: t.attempts, reason: 'not rerun: the runner reported failures outside the JUnit report' })),
+      message: `${unreported}; nothing was rerun` };
   }
   const prov = provenance(cwd, env);
   const line = (t: JunitTest, kind: LedgerKind, by: LedgerLine['rerun_by'], attempts: string[]): LedgerLine =>
@@ -164,7 +207,7 @@ export function runFlaky(opts: RunOptions): RunResult {
     if (!rerunnable) { outcomes.push({ test: t, status: 'fail', attempts: t.attempts, reason: `${failed.length} tests failed, more than --max-reruns ${opts.maxReruns}; not rerun` }); continue; }
     const argv = [...opts.command, ...rerunSelection(report.runner, t, opts.rerunArgs)];
     reruns++;
-    const again = attempt(opts, argv, cwd, env);
+    const again = await attempt(opts, argv, cwd, env);
     const match = again.report?.tests.find(x => x.id === t.id);
     if (!match) {
       outcomes.push({ test: t, status: 'rerun-fail', attempts: [...t.attempts, 'fail'], reason: again.error ? `rerun: ${again.error.message}` : 'rerun: the report does not contain this test' });

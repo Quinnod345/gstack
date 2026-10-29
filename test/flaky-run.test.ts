@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { JunitError, parseJunit, readJunit, testId } from '../lib/junit';
-import { renderResult, rerunSelection, runFlaky, safeExcerpt, stepSummary } from '../lib/flaky-run';
+import { renderResult, rerunSelection, runFlaky, safeExcerpt, stepSummary, unreportedFailures } from '../lib/flaky-run';
 
 const ROOT = path.resolve(import.meta.dir, '..');
 const FIX = path.join(ROOT, 'test', 'fixtures', 'junit');
@@ -85,16 +85,16 @@ describe('rerun selection', () => {
 });
 
 /** A fake runner: argv selection decides which canned report the attempt writes. */
-function fakeRun(reports: (argv: string[], n: number) => string | null, exits: (argv: string[], n: number) => number) {
+function fakeRun(reports: (argv: string[], n: number) => string | null, exits: (argv: string[], n: number) => number, outputs: (argv: string[], n: number) => string = () => '') {
   const calls: string[][] = [];
   return {
     calls,
     spawn(junit: string) {
-      return (argv: string[], _env: NodeJS.ProcessEnv, cwd: string) => {
+      return async (argv: string[], _env: NodeJS.ProcessEnv, cwd: string) => {
         calls.push(argv);
         const xml = reports(argv, calls.length);
         if (xml !== null) fs.writeFileSync(path.resolve(cwd, junit), xml);
-        return exits(argv, calls.length);
+        return { exit: exits(argv, calls.length), output: outputs(argv, calls.length) };
       };
     },
   };
@@ -108,10 +108,10 @@ describe('runFlaky', () => {
   const base = (spawn: ReturnType<typeof fakeRun>, dir: string, extra: Partial<Parameters<typeof runFlaky>[0]> = {}) =>
     runFlaky({ command: ['bun', 'test'], junit: 'r.xml', maxReruns: 3, cwd: dir, spawn: spawn.spawn('r.xml'), env: {}, now: () => new Date('2026-10-29T00:00:00Z'), ...extra });
 
-  test('a failed test that passes on rerun is a flaky pass and goes on the ledger', () => {
+  test('a failed test that passes on rerun is a flaky pass and goes on the ledger', async () => {
     const dir = tmp();
     const f = fakeRun((argv, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(pass('b')), (_a, n) => n === 1 ? 1 : 0);
-    const r = base(f, dir);
+    const r = await base(f, dir);
     expect(r.exitCode).toBe(0);
     expect(f.calls[1]).toEqual(['bun', 'test', 'a.test.ts', '--test-name-pattern', '^b$']);
     expect(r.outcomes.map(o => [o.status, o.attempts.join(',')])).toEqual([['flaky-pass', 'fail,pass']]);
@@ -121,19 +121,19 @@ describe('runFlaky', () => {
     expect(stepSummary(r)).toContain('a.test.ts::::b');
   });
 
-  test('a test that fails its rerun is red and is ledgered as rerun-fail', () => {
+  test('a test that fails its rerun is red and is ledgered as rerun-fail', async () => {
     const dir = tmp();
     const f = fakeRun(() => suite(fail('b')), () => 1);
-    const r = base(f, dir);
+    const r = await base(f, dir);
     expect(r.exitCode).toBe(1);
     expect(r.outcomes[0]).toMatchObject({ status: 'rerun-fail', attempts: ['fail', 'fail'] });
     expect(r.ledger[0]!.kind).toBe('rerun-fail');
   });
 
-  test('more failures than --max-reruns: a real red, nothing rerun', () => {
+  test('more failures than --max-reruns: a real red, nothing rerun', async () => {
     const dir = tmp();
     const f = fakeRun(() => suite(fail('a') + fail('b') + fail('c') + fail('d')), () => 1);
-    const r = base(f, dir);
+    const r = await base(f, dir);
     expect(r.exitCode).toBe(1);
     expect(f.calls).toHaveLength(1);
     expect(r.reruns).toBe(0);
@@ -141,10 +141,10 @@ describe('runFlaky', () => {
     expect(r.ledger).toEqual([]);
   });
 
-  test('runner retries stand: no second rerun, and a runner flaky pass is ledgered', () => {
+  test('runner retries stand: no second rerun, and a runner flaky pass is ledgered', async () => {
     const dir = tmp();
     const f = fakeRun(() => fixture('playwright-r2-inc.xml'), () => 1);
-    const r = base(f, dir);
+    const r = await base(f, dir);
     expect(f.calls).toHaveLength(1);
     expect(r.exitCode).toBe(1);
     expect(r.ledger.filter(l => l.kind === 'flaky-pass').map(l => [l.id, l.rerun_by])).toEqual([
@@ -153,53 +153,69 @@ describe('runFlaky', () => {
     expect(r.outcomes.filter(o => o.status === 'fail').every(o => /already retried \(3 attempts\)/.test(o.reason!))).toBe(true);
   });
 
-  test('hidden Playwright retries refuse with a code instead of a guess', () => {
+  test('hidden Playwright retries refuse with a code instead of a guess', async () => {
     const dir = tmp();
-    const r = base(fakeRun(() => fixture('playwright-r2.xml'), () => 1), dir);
+    const r = await base(fakeRun(() => fixture('playwright-r2.xml'), () => 1), dir);
     expect([r.exitCode, r.code]).toEqual([3, 'FLAKY_RETRIES_HIDDEN']);
   });
 
-  test('no report, a stale report, and a crash with no failed test are never green', () => {
+  test('no report, a stale report, and a crash with no failed test are never green', async () => {
     const dir = tmp();
-    expect(base(fakeRun(() => null, () => 0), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_NO_RESULTS' });
+    expect(await base(fakeRun(() => null, () => 0), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_NO_RESULTS' });
     fs.writeFileSync(path.join(dir, 'r.xml'), suite(pass('stale')));
-    expect(base(fakeRun(() => null, () => 0), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_NO_RESULTS' });
-    expect(base(fakeRun(() => suite(pass('a')), () => 2), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_COMMAND_FAILED', commandExit: 2 });
+    expect(await base(fakeRun(() => null, () => 0), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_NO_RESULTS' });
+    expect(await base(fakeRun(() => suite(pass('a')), () => 2), dir)).toMatchObject({ exitCode: 3, code: 'FLAKY_COMMAND_FAILED', commandExit: 2 });
   });
 
-  test('a rerun that does not report the targeted test fails it; other tests in the rerun are ignored', () => {
+  test('a rerun that does not report the targeted test fails it; other tests in the rerun are ignored', async () => {
     const dir = tmp();
     const f = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('other')), (_a, n) => n === 1 ? 1 : 0);
-    const r = base(f, dir);
+    const r = await base(f, dir);
     expect(r.exitCode).toBe(1);
     expect(r.outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the report does not contain this test' });
   });
 
-  test('a rerun whose command exits non-zero is not a flaky pass, even with a passing report', () => {
+  test('a rerun whose command exits non-zero is not a flaky pass, even with a passing report', async () => {
     const dir = tmp();
     const f = fakeRun((_a, n) => n === 1 ? suite(fail('b')) : suite(pass('b')), () => 1);
-    expect(base(f, dir).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the command exited 1' });
+    expect((await base(f, dir)).outcomes[0]).toMatchObject({ status: 'rerun-fail', reason: 'rerun: the command exited 1' });
   });
 
-  test('a test reported twice with one failure is red and not rerun', () => {
+  test('a test reported twice with one failure is red and not rerun', async () => {
     const dir = tmp();
     const r = parseJunit(suite(pass('b') + fail('b')));
     expect(r.tests[0]).toMatchObject({ executions: 2, attempts: ['pass', 'fail'] });
     const f = fakeRun(() => suite(fail('b') + pass('b') + fail('c')), () => 1);
-    const out = base(f, dir);
+    const out = await base(f, dir);
     expect(out.outcomes.find(o => o.test.id.endsWith('::b'))).toMatchObject({ status: 'fail', reason: 'it ran 2 times in this report and one failed; not rerun' });
     expect(f.calls).toHaveLength(2);
   });
 
-  test('the Playwright environment flag reaches every attempt', () => {
+  test('the Playwright environment flag reaches every attempt', async () => {
     const dir = tmp();
     const seen: string[] = [];
-    runFlaky({ command: ['x'], junit: 'r.xml', maxReruns: 3, cwd: dir, env: {}, spawn: (_a, env, cwd) => {
+    await runFlaky({ command: ['x'], junit: 'r.xml', maxReruns: 3, cwd: dir, env: {}, spawn: async (_a, env, cwd) => {
       seen.push(env.PLAYWRIGHT_JUNIT_INCLUDE_RETRIES ?? '');
       fs.writeFileSync(path.join(cwd, 'r.xml'), suite(seen.length === 1 ? fail('b') : pass('b')));
-      return seen.length === 1 ? 1 : 0;
+      return { exit: seen.length === 1 ? 1 : 0, output: '' };
     } });
     expect(seen).toEqual(['1', '1']);
+  });
+
+  test('bun load errors the JUnit omits keep the run red and nothing is rerun', async () => {
+    const dir = tmp();
+    const f = fakeRun(() => suite(fail('b')), () => 1, () => '\n 0 pass\n 3 fail\n 2 errors\nRan 3 tests across 3 files.\n');
+    const r = await base(f, dir);
+    expect(r).toMatchObject({ exitCode: 1, code: 'FLAKY_UNREPORTED_FAILURES', reruns: 0 });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  test('runner summaries: Playwright errors outside tests and count mismatches are unreported failures', () => {
+    expect(unreportedFailures('playwright', '  1 error was not a part of any test, see above for details\n  1 failed\n', 1)).toContain('outside any test');
+    expect(unreportedFailures('playwright', '  2 failed\n  10 passed\n', 1)).toContain('counted 2 failed');
+    expect(unreportedFailures('playwright', '  1 failed\n  [chromium] x\n  10 passed\n', 1)).toBeNull();
+    expect(unreportedFailures('bun', ' 4 pass\n 1 fail\n', 1)).toBeNull();
+    expect(unreportedFailures('generic', '5 failed', 0)).toBeNull();
   });
 
   test('credentials in failure text never reach the ledger', () => {
