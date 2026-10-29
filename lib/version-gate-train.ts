@@ -18,7 +18,7 @@ import { matchesAny } from './ship-policy';
 export type TrainHead =
   | { kind: 'off' }
   | { kind: 'unstamped'; fragments?: number; entry?: 'fragment' | 'unreleased' | 'none-bot' }
-  | { kind: 'stamped'; expected: string }
+  | { kind: 'stamped'; expected: string; fragments?: boolean }
   | { kind: 'invalid'; reason: string };
 
 function git(repoRoot: string, args: string[]): string | null {
@@ -119,7 +119,7 @@ export function classifyTrainHead(o: { repoRoot: string; baseRef: string; head: 
     const pin = git(o.repoRoot, ['rev-parse', '--verify', '--quiet', `${o.head}^2`]) ? `${o.head}^1` : mergeBase;
     const level = policy.bump === 'patch' ? 'patch' : 'micro';
     const expected = bumpVersion(baseVersion, fragDir ? effectiveBump(level, readFragments(o.repoRoot, pin, fragDir, base).fragments) : (policy.bump ?? 'patch'));
-    return expected ? { kind: 'stamped', expected } : { kind: 'invalid', reason: `${base}:VERSION is not a 4-part version` };
+    return expected ? { kind: 'stamped', expected, fragments: !!fragDir } : { kind: 'invalid', reason: `${base}:VERSION is not a 4-part version` };
   }
 
   const file = typeof policy.changelog === 'string' ? policy.changelog : 'CHANGELOG.md';

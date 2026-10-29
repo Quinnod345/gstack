@@ -58,9 +58,10 @@ export function parseFragment(rel: string, text: string): Fragment | FragmentErr
  * The fragments in `dir` of a tree-ish (a commit or tree id), or of the index when `treeish` is
  * null. `exclude` names a tree-ish whose fragments are not this change's own (the base branch, or a
  * stacked pin's parent): a path present there with the same blob is skipped, a path present there
- * with other bytes is an error.
+ * with other bytes is an error. With `changelog`, a fragment whose text is already in a released section of
+ * that file at `exclude` is an error too: a landed PR's fragment carried back in by stacked history.
  */
-export function readFragments(cwd: string, treeish: string | null, dir: string, exclude?: string | null): FragmentSet {
+export function readFragments(cwd: string, treeish: string | null, dir: string, exclude?: string | null, changelog?: string | null): FragmentSet {
   const prefix = dir.replace(/\/+$/, '') + '/';
   const list = (t: string | null) => {
     const r = t === null ? git(cwd, ['ls-files', '-s', '-z', '--', prefix]) : git(cwd, ['ls-tree', '-r', '-z', '--full-tree', t, '--', prefix]);
@@ -73,6 +74,8 @@ export function readFragments(cwd: string, treeish: string | null, dir: string, 
     return out;
   };
   const excluded = new Map((exclude ? list(exclude) : []).map(e => [e.path, e.sha]));
+  const shown = exclude && changelog ? git(cwd, ['show', `${exclude}:${changelog}`]) : null;
+  const released = shown?.ok ? parseChangelog(shown.out).sections.filter(s => !s.unreleased).map(s => s.lines.join('\n')).join('\n') : '';
   const fragments: Fragment[] = [];
   const errors: FragmentError[] = [];
   for (const e of list(treeish).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
@@ -90,7 +93,9 @@ export function readFragments(cwd: string, treeish: string | null, dir: string, 
     const blob = git(cwd, ['cat-file', 'blob', e.sha]);
     if (!blob.ok) { err('blob unreadable'); continue; }
     const parsed = parseFragment(e.path, blob.out);
-    if ('code' in parsed) errors.push(parsed); else fragments.push(parsed);
+    if ('code' in parsed) errors.push(parsed);
+    else if (released && released.includes(parsed.body)) err(`its text is already released in ${changelog} on the base (a landed PR's fragment carried in by stacked history); delete it from this branch`);
+    else fragments.push(parsed);
   }
   return { fragments, errors };
 }

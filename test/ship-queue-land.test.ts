@@ -46,7 +46,7 @@ function setup(policy: Record<string, unknown> = POLICY): Fx {
     "  if(head!==want){console.error('Head branch was modified');process.exit(1)}",
     "  if(d.mergeRefuse){console.error('Pull request is not mergeable: the base branch policy prohibits the merge');process.exit(1)}",
     "  if(d.driftOnMerge){const m=g('rev-parse','refs/heads/main');const t=g('rev-parse',m+'^{tree}');g('update-ref','refs/heads/main',g('commit-tree',t,'-p',m,'-m','outside merge'));d.driftOnMerge=false}",
-    "  const main=g('rev-parse','refs/heads/main');const sq=g('commit-tree',g('rev-parse',want+'^{tree}'),'-p',main,'-m','squash #'+a[2]);g('update-ref','refs/heads/main',sq);p.state='MERGED';save();process.exit(0)}",
+    "  const main=g('rev-parse','refs/heads/main');const sq=g('commit-tree',g('rev-parse',want+'^{tree}'),'-p',main,'-m','squash #'+a[2]);g('update-ref','refs/heads/main',sq);if(d.outsideAfter){g('update-ref','refs/heads/main',g('commit-tree',g('rev-parse',sq+'^{tree}'),'-p',sq,'-m','outside after'));d.outsideAfter=false}d.mergeArgs=a.slice(3);p.state='MERGED';save();process.exit(0)}",
     "if(a[0]==='pr'&&a[1]==='create'){const n=String(Math.max(0,...Object.keys(d.prs).map(Number))+1);d.prs[n]={state:'OPEN',headRefName:a[a.indexOf('--head')+1],isCrossRepository:false,title:a[a.indexOf('--title')+1],body:''};save();console.log('https://github.com/o/r/pull/'+n);process.exit(0)}",
     "console.error('gh shim: unsupported '+a.join(' '));process.exit(1);",
     '',
@@ -221,6 +221,7 @@ describe('land: lock, races and refusals', () => {
     expect(r.err).toContain('(QUEUE_LAND_DRIFT)');
     openPr(fx, '10');
     expect(land(fx, ['--pr', '10']).err).toMatch(/#9 holds the land lock .*phase drift.*\(QUEUE_LAND_LOCKED\)/);
+    expect(land(fx, ['--pr', '10', '--break-lock']).err).toMatch(/#9 holds a drift lock; --break-lock never breaks it.*\(QUEUE_LAND_DRIFT\)/);
     const rep = land(fx, ['--pr', '9', '--repair']);
     expect(rep.status).toBe(EXIT.ok);
     expect(rep.out).toContain('entry: changelog.d/repair-9.md names 1 outside commit(s)');
@@ -455,5 +456,88 @@ describe('land: failures after the push, repair branches and census rows', () =>
     expect(c.out).toMatch(/^#4 [0-9a-f]{12}: re-head legacy \[Unreleased\]; rewrite its tentative 1\.2\.9\.0 through restamp$/m);
     expect(remote(fx, 'main')).toBe(mainBefore);
     expect(fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-land')).toBe('');
+  }, 90_000);
+});
+
+// /ship pre-landing review fixes (GSTA-154 PR A, pass 1): each case below failed or was unreachable before its fix.
+describe('land: one pass, base, lock and history', () => {
+  // Value: protects=land without --no-wait pushes, waits and merges in one run; fails_when=the pushed phase compares a pre-push head; why_new=every other case passes --no-wait; seam=none; no_claim=GitHub check scheduling latency (gh shim reports green at once)
+  test('without --no-wait one run pushes the stamp, sees its checks green and merges', () => {
+    const fx = setup();
+    openPr(fx, '7');
+    const r = runBin(fx.repo, 'gstack-ship-queue', ['land', '--pr', '7', '--base', 'main', '--allow-repo-commands'], fx.env);
+    expect(r.err).toBe('');
+    expect(r.status).toBe(EXIT.ok);
+    expect(r.out).toContain('PUSHED: ');
+    expect(r.out).toContain('MERGED: #7');
+    expect(r.out).toContain('LOCK: released');
+  }, 90_000);
+
+  // Value: protects=land refuses a PR whose base is not the base it stamps; fails_when=a stacked PR gets main merged and squashed into its parent branch; why_new=no case set baseRefName; seam=none; no_claim=gh pr view field names (shim)
+  test('a PR that targets another branch refuses before the lock, with nothing pushed', () => {
+    const fx = setup();
+    const pin = openPr(fx, '8');
+    fx.write(d => { d.prs['8'].baseRefName = 'feature'; });
+    const r = land(fx, ['--pr', '8']);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toMatch(/#8 targets feature, not main.*\(QUEUE_NOT_READY\)/);
+    expect(remote(fx, 'pr-8')).toBe(pin);
+    expect(fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-land')).toBe('');
+  }, 90_000);
+
+  // Value: protects=a stamp that fails before any push releases the land lock; fails_when=one conflicting PR blocks every other land until --break-lock; why_new=the conflict case checks only the branch; seam=none; no_claim=none beyond protects
+  test('a product conflict releases the lock, so the next PR lands without --break-lock', () => {
+    const fx = setup();
+    openPr(fx, '4', { edit: w => fs.writeFileSync(path.join(w, 'shared.txt'), 'four\n') });
+    openPr(fx, '5', { edit: w => fs.writeFileSync(path.join(w, 'shared.txt'), 'five\n') });
+    openPr(fx, '6');
+    land(fx, ['--pr', '4']); land(fx, ['--pr', '4']);
+    expect(land(fx, ['--pr', '5']).err).toContain('(QUEUE_LAND_CONFLICT)');
+    fx.repo.git('fetch', '-q', 'origin', '+refs/notes/gstack-land:refs/notes/gstack-land');
+    expect(show(fx, 'refs/notes/gstack-land:lock.json')).toContain('"released": true');
+    expect(land(fx, ['--pr', '6']).status).toBe(EXIT.ok);
+  }, 90_000);
+
+  // Value: protects=a landed PR's fragment carried in by a stacked branch is refused, not folded twice; fails_when=the child PR's stamp repeats the parent's entry and bump; why_new=no case stacks a PR on an unlanded pin; seam=none; no_claim=exact-text match only (a reworded copy is not caught)
+  test('a fragment already released on the base (stacked history) refuses instead of folding twice', () => {
+    const fx = setup();
+    const pin1 = openPr(fx, '1', { fragment: '- #1 the parent change\n' });
+    land(fx, ['--pr', '1']); land(fx, ['--pr', '1']);
+    fx.repo.git('checkout', '-q', '-B', 'pr-11', pin1);
+    fs.writeFileSync(path.join(fx.repo.work, 'changelog.d', 'pr-11.md'), '- #11 child change\n');
+    fx.repo.git('add', '-A'); fx.repo.git('commit', '-q', '-m', 'child');
+    fx.repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/pr-11');
+    const head = fx.repo.git('rev-parse', 'HEAD');
+    fx.write(d => { d.prs['11'] = { state: 'OPEN', headRefName: 'pr-11', isCrossRepository: false, title: 'child', body: shippedBody('11', head) }; });
+    fx.repo.git('checkout', '-q', '--detach', 'origin/main');
+    const r = land(fx, ['--pr', '11']);
+    expect(r.status).toBe(EXIT.refused);
+    expect(r.err).toMatch(/changelog\.d\/pr-1\.md: its text is already released in CHANGELOG\.md.*\(CHANGELOG_FRAGMENT_INVALID\)/);
+    expect(remote(fx, 'pr-11')).toBe(head);
+  }, 90_000);
+
+  // Value: protects=a lost local journal resumes from the stamp commit's pin; fails_when=the stamp commit is treated as the pin and the receipt refuses; why_new=resume cases keep the journal; seam=none; no_claim=none beyond protects
+  test('with the local journal gone, a head that is land\'s stamp commit resumes from its pin', () => {
+    const fx = setup();
+    const pin = openPr(fx, '12');
+    expect(land(fx, ['--pr', '12']).status).toBe(EXIT.ok);
+    fs.rmSync(path.join(fx.repo.work, '.gstack', 'tmp', 'ship-queue', 'land', '12.json'));
+    const again = land(fx, ['--pr', '12']);
+    expect(again.err).toBe('');
+    expect(again.out).toContain(`pin=${pin} (the head `);
+    expect(again.out).toContain('PUSHED: ');
+    expect(land(fx, ['--pr', '12']).out).toContain('MERGED: #12');
+  }, 90_000);
+
+  // Value: protects=history merge-only lands with a merge commit, and a merge after land's own is not drift; fails_when=land squashes under merge-only, or flags a later outside merge as drift; why_new=no case sets history or merges after the squash; seam=none; no_claim=GitHub's merge-commit shape (the shim records the flag)
+  test('merge-only lands with --merge; an outside merge after the squash is not drift', () => {
+    const fx = setup({ ...POLICY, history: 'merge-only' });
+    openPr(fx, '13');
+    land(fx, ['--pr', '13']);
+    fx.write(d => { d.outsideAfter = true; });
+    const r = land(fx, ['--pr', '13']);
+    expect(r.err).toBe('');
+    expect(r.out).toContain('LANDED: ');
+    expect(JSON.parse(fs.readFileSync(fx.data, 'utf8')).mergeArgs).toContain('--merge');
   }, 90_000);
 });

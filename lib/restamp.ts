@@ -493,7 +493,7 @@ function runStages(o: RestampOptions, plan: Plan, staging: string, since: string
     const date = (o.now ?? new Date()).toISOString().slice(0, 10);
     const from = o.was ?? plan.branchStamp;
     const dir = plan.policy.changelog_fragments?.dir;
-    const frags = dir ? readFragments(staging, null, dir, plan.baseSha) : null;
+    const frags = dir ? readFragments(staging, null, dir, plan.baseSha, clRel) : null;
     if (frags?.errors.length) { cl.status = 'failed'; cl.detail = `${frags.errors[0]!.path}: ${frags.errors[0]!.message}`; throw new Refusal('CHANGELOG_FRAGMENT_INVALID', `${cl.detail}; nothing written to the branch`); }
     for (const f of frags?.fragments ?? []) fs.rmSync(path.join(staging, f.path));
     const r = reheadChangelog(foldIntoUnreleased(fs.readFileSync(clPath, 'utf8'), frags?.fragments ?? []), { from, to: plan.newVersion, date, file: clRel! });
@@ -652,10 +652,10 @@ function applyToBranch(o: RestampOptions, staging: string, wtree: string, files:
 }
 
 /** The fragments this change adds (absent from origin/<base>), read from the working-tree fingerprint the staging worktree is seeded from. */
-function fragmentsOf(o: RestampOptions, dir: string): FragmentSet {
+function fragmentsOf(o: RestampOptions, dir: string, changelog: string | null): FragmentSet {
   const fp = wtreeFingerprint({ cwd: o.repoRoot });
   if ('error' in fp) throw new Refusal('RESTAMP_CONFLICT', `cannot fingerprint the working tree (${fp.error}); nothing written`);
-  const set = readFragments(o.repoRoot, fp.tree, dir, `origin/${o.base}`);
+  const set = readFragments(o.repoRoot, fp.tree, dir, `origin/${o.base}`, changelog);
   if (set.errors.length) throw new Refusal('CHANGELOG_FRAGMENT_INVALID', `${set.errors[0]!.path}: ${set.errors[0]!.message}; nothing written`);
   return set;
 }
@@ -677,7 +677,7 @@ export function restamp(o: RestampOptions): RestampResult {
       throw new Refusal('REPO_COMMANDS_NOT_ALLOWED', `repo commands not executed (pass --allow-repo-commands): ${commands.map(c => `${c.key}: ${c.command}`).join('; ')}; nothing written`, { commands });
     }
     const fragDir = loaded.policy.changelog_fragments?.dir ?? null;
-    const frags = fragDir ? fragmentsOf(o, fragDir) : null;
+    const frags = fragDir ? fragmentsOf(o, fragDir, loaded.policy.changelog) : null;
     const plan = planVersions(frags && !o.bump ? { ...o, bump: effectiveBump(loaded.policy.bump === 'patch' ? 'patch' : 'micro', frags.fragments) } : o, loaded, label);
     const headSha = git(o.repoRoot, ['rev-parse', 'HEAD']).out;
     const common: Partial<RestampResult> = {

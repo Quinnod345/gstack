@@ -17,7 +17,6 @@ import * as path from 'node:path';
 import { mergeChangelogs, parseChangelog } from './changelog-check';
 import { fragmentSlug, readFragments } from './changelog-fragments';
 import { restamp, versionAtRef } from './restamp';
-import { BIN_DIR, runScriptSync } from './script-invocation';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 import { ciAtHead, loadBasePolicy, type QueueContext, type StepOutput } from './ship-queue';
 import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from './ship-queue-gate';
@@ -48,8 +47,9 @@ function readLock(root: string): { sha: string; lock: LandLock | null } {
   const sha = git(root, ['rev-parse', '--verify', '--quiet', LAND_LOCK_REF]).out;
   if (!sha) return { sha: '', lock: null };
   const body = git(root, ['show', `${sha}:lock.json`]);
-  const lock = body.ok ? (JSON.parse(body.out) as LandLock | { released: true }) : null;
-  return { sha, lock: lock && 'pr' in lock ? lock : null };
+  let lock: LandLock | { released: true } | null = null;
+  try { lock = body.ok ? JSON.parse(body.out) : null; } catch { lock = null; }
+  return { sha, lock: lock && 'pr' in lock && /^\d+$/.test(String(lock.pr)) ? lock : null };
 }
 
 function writeLock(root: string, expected: string, value: LandLock | { released: true; by: string; at: string }): { ok: boolean; sha: string } {
@@ -165,10 +165,13 @@ function buildStamp(ctx: QueueContext, policy: ShipPolicy, o: { pin: string; bas
     }
     const dir = policy.changelog_fragments?.dir;
     if (dir && policy.changelog) {
-      const own = readFragments(wt, null, dir, o.baseSha);
+      const own = readFragments(wt, null, dir, o.baseSha, policy.changelog);
       const cl = fs.existsSync(path.join(wt, policy.changelog)) ? fs.readFileSync(path.join(wt, policy.changelog), 'utf8') : '';
       if (!own.errors.length && !own.fragments.length && !parseChangelog(cl).sections.some(s => s.unreleased)) {
         const rel = `${dir.replace(/\/+$/, '')}/land-${fragmentSlug(o.pr)}.md`;
+        const segs = rel.split('/').slice(0, -1);
+        const link = segs.findIndex((_, i) => { try { return fs.lstatSync(path.join(wt, ...segs.slice(0, i + 1))).isSymbolicLink(); } catch { return false; } });
+        if (link >= 0) return { code: 'CHANGELOG_FRAGMENT_INVALID', message: `${segs.slice(0, link + 1).join('/')} is a symlink at the pin; land writes a fragment only inside the repository` };
         fs.mkdirSync(path.dirname(path.join(wt, rel)), { recursive: true });
         fs.writeFileSync(path.join(wt, rel), `- ${o.title.replace(/\s+/g, ' ').trim()} (#${o.pr})\n`);
         git(wt, ['add', '--', rel]);
@@ -187,15 +190,26 @@ function buildStamp(ctx: QueueContext, policy: ShipPolicy, o: { pin: string; bas
   }
 }
 
-interface PrInfo { state: string; headRefName: string; headRefOid: string; isCrossRepository: boolean; body: string; title: string }
+interface PrInfo { state: string; baseRefName?: string; headRefName: string; headRefOid: string; isCrossRepository: boolean; body: string; title: string }
 function prInfo(ctx: QueueContext, pr: string): PrInfo | QueueFailure {
-  const r = ctx.gh(['pr', 'view', pr, '--json', 'state,headRefName,headRefOid,isCrossRepository,body,title']);
+  const r = ctx.gh(['pr', 'view', pr, '--json', 'state,baseRefName,headRefName,headRefOid,isCrossRepository,body,title']);
   try { return JSON.parse(r.out) as PrInfo; } catch { return { code: 'QUEUE_NOT_READY', message: `gh pr view ${pr} failed: ${(r.err ?? r.out).trim().slice(0, 160)}` }; }
 }
 
-function waitGreen(ctx: QueueContext, pr: string, minutes: number): boolean {
-  const r = runScriptSync(path.join(BIN_DIR, 'gstack-pr-wait'), [pr, '--until', 'green', '--timeout', String(minutes)], { cwd: ctx.repoRoot, stdio: ['ignore', 'inherit', 'inherit'], timeout: (minutes + 5) * 60_000 });
-  return r.status === 0;
+/** Poll the stamp commit's checks (the same read as the pin's) until they are green, one is red, or the time runs out. */
+function waitChecks(ctx: QueueContext, sha: string, minutes: number): void {
+  const deadline = Date.now() + minutes * 60_000;
+  for (let ci = ciAtHead(ctx, sha); !ci.green && !ci.line.startsWith('red') && Date.now() < deadline; ci = ciAtHead(ctx, sha)) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+  }
+}
+
+/** A head that is land's own stamp commit ([pin, base], `(land)` subject for this PR): its pin, when the local journal is gone. */
+function stampPin(root: string, branch: string, head: string, pr: string): string | null {
+  git(root, ['fetch', '-q', 'origin', `refs/heads/${branch}`]);
+  const [parents = '', subject = ''] = git(root, ['log', '-1', '--format=%P%n%s', head]).out.split('\n');
+  const p = parents.split(' ').filter(Boolean);
+  return p.length === 2 && subject.endsWith(` into #${pr} (land)`) ? p[0]! : null;
 }
 
 /** `land --census`: what land would do with each open PR before a repository turns fragments on. Reads only. */
@@ -212,14 +226,15 @@ export function census(ctx: QueueContext): StepOutput {
   const at = versionAtRef(root, baseSha);
   const versionRel = 'rel' in at ? at.rel : 'VERSION';
   const lines = [`CENSUS: ${prs.length} open PR(s) against origin/${ctx.base}@${baseSha.slice(0, 12)} (fragments: ${policy.changelog_fragments ? policy.changelog_fragments.dir : 'off'})`];
+  const heads = prs.filter(p => !p.isCrossRepository).map(p => `refs/pull/${p.number}/head`);
+  if (heads.length && !git(root, ['fetch', '-q', 'origin', ...heads]).ok) for (const h of heads) git(root, ['fetch', '-q', 'origin', h]);
   for (const p of prs.sort((a, b) => a.number - b.number)) {
     if (p.isCrossRepository) { lines.push(`#${p.number} fork: refused (QUEUE_TRAIN_UNTRUSTED)`); continue; }
-    git(root, ['fetch', '-q', 'origin', `+refs/pull/${p.number}/head:refs/gstack-census/${p.number}`]);
     const head = p.headRefOid;
     const mt = git(root, ['merge-tree', '--write-tree', '--name-only', '--no-messages', baseSha, head]);
     const conflicts = mt.ok ? [] : mt.out.split('\n').slice(1).filter(Boolean);
     const product = conflicts.filter(c => c !== policy.changelog && c !== versionRel && !matchesAny(policy.release_outputs, c) && !['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].includes(path.basename(c)));
-    const frags = policy.changelog_fragments ? readFragments(root, head, policy.changelog_fragments.dir, baseSha) : { fragments: [], errors: [] };
+    const frags = policy.changelog_fragments ? readFragments(root, head, policy.changelog_fragments.dir, baseSha, policy.changelog) : { fragments: [], errors: [] };
     const cl = policy.changelog ? git(root, ['show', `${head}:${policy.changelog}`]).out : '';
     const legacy = parseChangelog(cl).sections.some(s => s.unreleased);
     const hv = versionAtRef(root, head);
@@ -293,10 +308,12 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   if ('code' in info) return fail([], info, run);
   if (info.isCrossRepository) return fail([], { code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr} is a fork head; land stamps and pushes only crew branches` }, run);
   if (info.state !== 'OPEN') return fail([], { code: 'QUEUE_NOT_READY', message: `#${o.pr} is ${info.state}` }, run);
+  if (info.baseRefName && info.baseRefName !== ctx.base) return fail([], { code: 'QUEUE_NOT_READY', message: `#${o.pr} targets ${info.baseRefName}, not ${ctx.base}; land merges only PRs on the base it stamps (retarget it, or land its parent first)` }, run);
   let j = readJson<LandJournal>(file);
-  if (j && (j.phase === 'landed' || j.reviewed_pin !== info.headRefOid && j.last_pushed_head !== info.headRefOid)) j = null;
-  const pin = j?.reviewed_pin ?? info.headRefOid;
-  const lines = [`LAND: #${o.pr} branch=${info.headRefName} pin=${pin}${j ? ` (resuming at ${j.phase})` : ''}`];
+  if (j && (j.phase === 'landed' || ![j.reviewed_pin, j.last_pushed_head, j.stamp_commit].includes(info.headRefOid))) j = null;
+  const recovered = j ? null : stampPin(root, info.headRefName, info.headRefOid, o.pr);
+  const pin = j?.reviewed_pin ?? recovered ?? info.headRefOid;
+  const lines = [`LAND: #${o.pr} branch=${info.headRefName} pin=${pin}${j ? ` (resuming at ${j.phase})` : recovered ? ` (the head ${info.headRefOid.slice(0, 12)} is land's stamp commit; restamping from its pin)` : ''}`];
   git(root, ['fetch', '-q', 'origin', ctx.base]);
   const receipt = bindShippedReceipt(root, `origin/${ctx.base}`, info.body ?? '', o.pr, [pin]);
   lines.push(receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []));
@@ -314,11 +331,13 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   }
 
   let { sha: lockSha, lock } = readLock(root);
-  const repairOf = lock && lock.pr !== o.pr && lock.phase === 'drift' ? readJson<LandJournal>(path.join(root, lock.journal)) : null;
+  const drifted = lock && lock.pr !== o.pr && lock.phase === 'drift' ? lock.pr : null;
+  const repairOf = drifted ? readJson<LandJournal>(path.join(root, landJournalRel(drifted))) : null;
   if (repairOf?.repair_pr === o.pr) lines.push(`LOCK: taking over #${lock!.pr}'s drift lock for its repair`);
   else if (lock && lock.pr !== o.pr) {
     const age = now().getTime() - Date.parse(lock.started_at);
     if (!o.breakLock) return fail(lines, { code: 'QUEUE_LAND_LOCKED', message: `#${lock.pr} holds the land lock (${lock.holder}, phase ${lock.phase}, since ${lock.started_at})` }, run);
+    if (lock.phase === 'drift') return fail(lines, { code: 'QUEUE_LAND_DRIFT', message: `#${lock.pr} holds a drift lock; --break-lock never breaks it, only its repair PR's land takes it over`, fix: `gstack-ship-queue land --pr ${lock.pr} --repair` }, run);
     if (lock.phase === 'pushing' && age < PUSH_STALE_MS) return fail(lines, { code: 'QUEUE_LAND_LOCKED', message: `#${lock.pr}'s holder is mid-push (${Math.round(age / 1000)} s ago); --break-lock refused` }, run);
     lines.push(`LOCK: broke #${lock.pr}'s lock (${lock.holder}, phase ${lock.phase})`);
   }
@@ -331,7 +350,7 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   const save = () => writeJsonAtomic(file, j);
   const failed = setLock(j?.phase === 'pushed' ? 'waiting' : 'stamping');
   if (failed) return fail(lines, failed, run);
-  if (!j) { j = { schema_version: 1, pr: o.pr, branch: info.headRefName, reviewed_pin: pin, last_pushed_head: null, stamp_commit: null, stamp_tree: null, base_sha: null, version: null, date: null, restamps: 0, phase: 'locked' }; save(); }
+  if (!j) { j = { schema_version: 1, pr: o.pr, branch: info.headRefName, reviewed_pin: pin, last_pushed_head: recovered ? info.headRefOid : null, stamp_commit: null, stamp_tree: null, base_sha: null, version: null, date: null, restamps: 0, phase: 'locked' }; save(); }
 
   for (;;) {
     git(root, ['fetch', '-q', 'origin', ctx.base]);
@@ -343,7 +362,11 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
     }
     if (j.phase === 'locked') {
       const s = buildStamp(ctx, policy, { pin, baseSha: baseNow, pr: o.pr, title: info.title, allowRepoCommands: !!o.allowRepoCommands, now: j.date ? new Date(`${j.date}T12:00:00Z`) : now() });
-      if ('code' in s) { setLock('stamping'); return fail([...lines], s, run); }
+      if ('code' in s) {
+        if (repairOf?.repair_pr === o.pr) setLock('stamping');
+        else writeLock(root, lockSha, { released: true, by: holder, at: now().toISOString() });
+        return fail([...lines], s, run);
+      }
       lines.push(...s.lines);
       const commit = git(root, ['commit-tree', s.tree, '-p', pin, '-p', baseNow, '-m', `v${s.version} stamp: merge ${ctx.base} ${baseNow.slice(0, 12)} into #${o.pr} (land)`]).out;
       Object.assign(j, { stamp_commit: commit, stamp_tree: s.tree, base_sha: baseNow, version: s.version, date: j.date ?? now().toISOString().slice(0, 10), phase: 'stamped' });
@@ -360,33 +383,37 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
         if (remote !== j.stamp_commit) return fail(lines, { code: 'QUEUE_TRAIN_MOVED', message: `#${o.pr}'s branch is at ${remote?.slice(0, 12) || 'unknown'}, not ${lease.slice(0, 12)}: someone else pushed; land never overwrites it` }, run);
       }
       j.last_pushed_head = j.stamp_commit; j.phase = 'pushed'; save();
-      setLock('waiting');
+      const fw = setLock('waiting');
+      if (fw) return fail(lines, fw, run);
       lines.push(`PUSHED: ${j.stamp_commit} to ${j.branch} (lease ${lease.slice(0, 12)})`);
       if (o.noWait) return { ok: true, run, lines: [...lines, `NEXT: gstack-pr-wait ${o.pr} --until green && gstack-ship-queue land --pr ${o.pr}`] };
-      if (!waitGreen(ctx, o.pr, o.waitTimeoutMin ?? 60)) return fail(lines, { code: 'QUEUE_NOT_READY', message: `checks did not go green on ${j.stamp_commit!.slice(0, 12)}`, fix: `fix the failure, then gstack-ship-queue land --pr ${o.pr} (it resumes)` }, run);
+      waitChecks(ctx, j.stamp_commit!, o.waitTimeoutMin ?? 60);
       continue;
     }
     if (j.phase === 'pushed') {
-      if (info.headRefOid !== j.stamp_commit) return fail(lines, { code: 'QUEUE_TRAIN_MOVED', message: `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not the stamp commit ${j.stamp_commit?.slice(0, 12)}` }, run);
+      const head = git(root, ['ls-remote', 'origin', `refs/heads/${j.branch}`]).out.split('\t')[0] ?? '';
+      if (head !== j.stamp_commit) return fail(lines, { code: 'QUEUE_TRAIN_MOVED', message: `#${o.pr}'s head is ${head.slice(0, 12) || 'unknown'}, not the stamp commit ${j.stamp_commit?.slice(0, 12)}` }, run);
       const ci = ciAtHead(ctx, j.stamp_commit!);
       lines.push(`CI: ${ci.line}`);
       if (!ci.green) return { ok: !ci.line.startsWith('red'), run, lines: [...lines, `NEXT: gstack-pr-wait ${o.pr} --until green && gstack-ship-queue land --pr ${o.pr}`], failure: ci.line.startsWith('red') ? { code: 'QUEUE_NOT_READY', message: `a check failed on the stamp commit ${j.stamp_commit!.slice(0, 12)}` } : undefined };
-      setLock('merging');
-      const m = ctx.gh(['pr', 'merge', o.pr, '--squash', '--match-head-commit', j.stamp_commit!]);
+      const fm = setLock('merging');
+      if (fm) return fail(lines, fm, run);
+      const m = ctx.gh(['pr', 'merge', o.pr, policy.history === 'merge-only' ? '--merge' : '--squash', '--match-head-commit', j.stamp_commit!]);
       if (!m.ok) return fail(lines, { code: 'QUEUE_NOT_READY', message: `gh pr merge refused: ${(m.err ?? m.out).trim().slice(0, 200)}` }, run);
       j.phase = 'merged'; save();
     }
     if (j.phase === 'merged') {
       git(root, ['fetch', '-q', 'origin', ctx.base]);
-      const main = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
+      const tip = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
+      const main = git(root, ['rev-list', '--first-parent', '--reverse', `${j.base_sha}..${tip}`]).out.split('\n')[0] || tip;
       const tree = git(root, ['rev-parse', `${main}^{tree}`]).out;
       const parent = git(root, ['rev-parse', `${main}^1`]).out;
       if (tree !== j.stamp_tree || parent !== j.base_sha) {
-        j.phase = 'drift'; j.drift_main = main; save(); setLock('drift');
-        return fail([...lines, `MAIN: ${main} tree=${tree} parent=${parent}`], { code: 'QUEUE_LAND_DRIFT', message: `origin/${ctx.base} ${main.slice(0, 12)} is not the stamped tree on ${j.base_sha?.slice(0, 12)} (a merge outside land slipped in)`, fix: `gstack-ship-queue land --pr ${o.pr} --repair opens the PR that gives the outside merge its own release; /ship and land it, which releases the lock` }, run);
+        j.phase = 'drift'; j.drift_main = tip; save(); setLock('drift');
+        return fail([...lines, `MAIN: ${tip} first=${main} tree=${tree} parent=${parent}`], { code: 'QUEUE_LAND_DRIFT', message: `origin/${ctx.base} ${main.slice(0, 12)} is not the stamped tree on ${j.base_sha?.slice(0, 12)} (a merge outside land slipped in)`, fix: `gstack-ship-queue land --pr ${o.pr} --repair opens the PR that gives the outside merge its own release; /ship and land it, which releases the lock` }, run);
       }
       j.phase = 'landed'; save();
-      if (repairOf?.repair_pr === o.pr) writeJsonAtomic(path.join(root, landJournalRel(repairOf.pr)), { ...repairOf, phase: 'landed' });
+      if (drifted && repairOf?.repair_pr === o.pr) writeJsonAtomic(path.join(root, landJournalRel(drifted)), { ...repairOf, phase: 'landed' });
       const rel = writeLock(root, lockSha, { released: true, by: holder, at: now().toISOString() });
       return { ok: true, run, lines: [...lines, `MERGED: #${o.pr} as ${main} (${j.version})`, `LANDED: origin/${ctx.base} tree ${tree} equals the stamped tree`, `LOCK: ${rel.ok ? 'released' : 'release push failed (the next land takes it over)'}`] };
     }

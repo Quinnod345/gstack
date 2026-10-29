@@ -53,6 +53,10 @@ if (process.env.BASE_REF && process.env.HEAD_SHA) {
     console.log(`::error::${tag} claims v${prVersionEnv}, but under the base's ship policy a stamped head must carry v${train.expected} (base + the effective bump, what gstack-restamp --next allocates at the merge step). Leave VERSION, package.json and the release outputs at the base's values until the merge step stamps them.`);
     process.exit(1);
   }
+  if (train.kind === "stamped" && train.fragments) {
+    console.log(`✓ ${tag} carries v${train.expected}, what the merge step allocates under changelog_fragments; the land lock serializes allocation, so open claims do not apply.`);
+    process.exit(0);
+  }
 }
 
 if (parsed.offline === true) {

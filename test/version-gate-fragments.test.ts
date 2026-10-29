@@ -16,9 +16,9 @@ afterEach(() => { while (repos.length) cleanup(repos.pop()!); });
 const fixture = () => { const r = makeFixtureRepo({ policy: POLICY, prefix: 'version-gate-frag-' }); repos.push(r); return r; };
 const write = (r: FixtureRepo, rel: string, text: string) => { fs.mkdirSync(path.dirname(path.join(r.work, rel)), { recursive: true }); fs.writeFileSync(path.join(r.work, rel), text); };
 const commit = (r: FixtureRepo, msg: string) => { r.git('add', '-A'); r.git('commit', '-q', '-m', msg); return r.git('rev-parse', 'HEAD'); };
-function run(r: FixtureRepo, head: string, extra: Record<string, string> = {}) {
+function run(r: FixtureRepo, head: string, extra: Record<string, string> = {}, claimed: unknown[] = []) {
   const next = path.join(r.root, 'next.json');
-  fs.writeFileSync(next, JSON.stringify({ version: '1.2.4.0', base_version: '1.2.3.0', claimed: [] }));
+  fs.writeFileSync(next, JSON.stringify({ version: '1.2.4.0', base_version: '1.2.3.0', claimed }));
   const prVersion = r.git('show', head + ':VERSION').trim();
   const out = Bun.spawnSync([process.execPath, 'run', SCRIPT, next, '3600'], { cwd: r.work, env: { ...process.env, ...r.env, PR_VERSION: prVersion, BASE_REF: 'main', HEAD_SHA: head, PR_AUTHOR: 'garrytan', ...extra }, timeout: 30_000, stdout: 'pipe', stderr: 'pipe' });
   return { code: out.exitCode, out: out.stdout.toString() + out.stderr.toString() };
@@ -84,6 +84,9 @@ describe('version gate: changelog fragments', () => {
       return r.git('commit-tree', r.git('write-tree'), '-p', pin, '-p', r.git('rev-parse', 'origin/main'), '-m', 'v' + version + ' stamp');
     };
     expect(run(r, stamp('1.3.0.0')).code).toBe(0);
+    const claimedToo = run(r, stamp('1.3.0.0'), {}, [{ pr: 77, branch: 'legacy', version: '1.3.0.0' }]);
+    expect(claimedToo.code).toBe(0);
+    expect(claimedToo.out).toContain('the land lock serializes allocation, so open claims do not apply');
     const wrong = run(r, stamp('1.2.4.0'));
     expect(wrong.code).toBe(1);
     expect(wrong.out).toContain('must carry v1.3.0.0');
