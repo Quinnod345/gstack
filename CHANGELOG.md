@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.91.323.0] - 2026-10-29
 
 ### Tests
 - `test/review-depth.test.ts`: the #19 shape plans fix-check, Red Team and native adversarial; full depth, a fail-closed classification, `--depth-floor full`, a 151-line, missing or unread range and a gate-touching fix keep the full pass; a forced specialist and changed numbers keep their reviewers; 150, 151 and a docs-only range; the scoped pass counts toward the cap and a blocker it leaves stops; `DEPTH_RULES` moves with the constant.
@@ -15,6 +15,95 @@
 - Addition to the 1.91.316.0 entry below: **Step 9** (`ship/sections/review-army.md`): the repeat decision passes `--range-base $PASS_HEAD` and maps `NEXT: scoped` to decision 3; a scoped pass logs a full-pass `review` row with `"scope":"scoped"`, so it counts toward the cap and its roles land in `review_loop.dispatches` with no receipt schema change.
 - Addition to the 1.91.316.0 entry below: **`raised_by` on classified findings** (`gstack-review-scope classify`, `lib/review-scope.ts`): the reviewer that raised each finding (`core`, `qa`, a specialist, `red-team`, `adversarial-native`, `outside-voice`, `fix-check`), from the finding's `raised_by` or `specialist` tag, else `unknown`. Step 9 copies it into the review-log row. Older rows without it still summarize.
 - Addition to the 1.91.316.0 entry below: **Docs**: docs/review-policy.md (rule 3, the transitions table, a scoped-pass section and Behavior changes) and docs/ship-policy.md rule 3.
+
+## [1.91.322.0] - 2026-10-29
+
+**A PR screen no longer runs the whole paid gate just because a changed file sits on every case's import path.** Editing a file like `lib/restamp.ts` reached all 113 gate cases through the derived-reference closure, so 19 of the 41 full screens between Oct 20 and 29 ran the full $33 gate for that reason alone. A narrow screen (`gstack-ship-queue ready --screen`, and `bun run eval:bg:pr`) now leaves such a file's cases to the train gate's full census, which runs every case before anything merges. Replayed on those 41 screens with today's maps, this saves about $457 a week, and the screens that caught real PR-caused reds (#3434, #3453) still run the full gate.
+
+### Changed
+- **Narrow screens** (`scripts/test-pr-profile.ts`, `scripts/lib/paid-select.ts`): a changed file whose derived references reach every gate case and that nothing narrower selects is a hub file. On a narrow screen it selects no case or judge; the paid plan's reason and the coverage summary name it and say the train gate runs those cases. Full-gate files, shared runtime and build inputs, paid-runner inputs, files the derivation cannot place and files deleted by the PR select exactly what they did before. `ready --screen --broad`, `pull_request` runs (the merge gate when the base has no `train` block), the train gate, `eval:bg:gate`, periodic and release runs are unchanged.
+- **The READY screen preview** (`lib/ship-queue-train-ready.ts`) and the per-push screening summary now show the narrow screen's selection.
+- **`test/size-ledger/**`** is a touchfile of the 20 cases that read `test/helpers/size-ledger.ts` (all periodic or marathon), so a size-ledger baseline change no longer restores the full gate. `careful/bin/mask-commit-message.awk`, loaded only by the free-tested `check-careful.sh` hook, is free-only.
+
+### Tests
+- `test/pr-dependencies.test.ts`: a hub-only diff selects nothing on a narrow screen and every gate case on a broad one or with no policy set; a hub beside a shared runtime input, an unknown file or a full-gate file still runs the full gate; a hub beside a direct edit keeps that edit's cases; a deleted file is never a hub; the PR workflow plans narrow only for dispatches; size-ledger baselines select no gate case.
+
+## [1.91.321.0] - 2026-10-29
+
+**Free Tests passes again on Ubicloud runner image 20261026.1.0.** Every Linux job that landed on that image failed the cookie-import Playwright pipe smoke, in-shard and again on the serial retry, and a rerun passed only when it happened to land on the older 20261021.1.0 image. Both images keep `kernel.apparmor_restrict_unprivileged_userns=1`, but 20261026 loads three AppArmor profiles instead of 123, so nothing grants the bundled Chromium a user namespace and its sandbox aborts with `credentials.cc:131 ... Permission denied`. The two Linux jobs that launch Chromium now grant user namespaces to that one binary, the way Ubuntu's own `chrome` profile does.
+
+### Fixed
+- **`.github/workflows/free-tests.yml`**: `free-suite` and `quick-bun-default` gain a step after the SUID sandbox helper step. It resolves Playwright's Chromium, refuses any path outside `~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome`, and loads an AppArmor profile that grants `userns` to that path alone. The kernel restriction stays on for every other binary. The SUID helper step is unchanged, and no step passes `--no-sandbox` or runs `sysctl`. Diagnostic dispatch 40921806393 ran 17 jobs: all 9 on 20261026 failed the smoke without the profile and passed with it, and all 8 on 20261021 passed throughout.
+
+### Tests
+- `test/chromium-sandbox-ci.test.ts`: four cases, two per job, run the real step with stubbed `bun` and `sudo`. They check that the step sits after the helper and before the suite, the exact profile bytes and the `apparmor_parser -r` call, that no protection-lowering flag appears, and that an unexpected Chromium path is refused before any privileged call. They fail against main's workflow.
+
+## [1.91.320.0] - 2026-10-29
+
+**A branch that adds its own pregate lane now learns why it still fails, and `gstack-post pr-body` no longer keeps a stale copy of a section.** Pregate reads its policy from the base branch so a branch cannot loosen its own gate. A branch that had already declared a lane in its own `.gstack/pregate.json` was still told to declare it, and went round in a circle. Separately, a PR body that held `## What changed` twice (an old description pasted under the /ship body) kept the old copy every time /ship reposted.
+
+### Fixed
+- **`PREGATE_NO_LANE`**: when the branch edits `.gstack/pregate.json` and the policy comes from the base copy or the user-owned file, the fix line names that policy, says a lane the branch adds counts only once it is on the base, and offers both routes: land the policy change in its own PR first, or rerun with `--policy-from head --allow-repo-commands`, which records the run as unreviewed. Pregate still never reads the branch's policy on its own. (#3574)
+- **`gstack-post pr-body`**: when the PR's current body holds a title from the file more than once, it posts nothing, exits 64 and says to rerun with `--replace` and the whole body. /ship's PR-body step stops on that refusal and reports the duplicated titles instead of reposting with `--replace` itself, since a person chooses which copy stays. (#3575)
+
+### Docs
+- `docs/troubleshooting.md#pregate-no-lane-own-policy` explains the own-policy case and its two routes; `docs/pregate.md`'s trust boundary links it. The `gstack-post-pr-body-merge` entry covers the duplicate-title refusal.
+
+### Tests
+- `test/pregate-selection.test.ts`: the own-policy fix line under the base policy; a head-policy run and a branch that deletes `pregate.json` get the plain fix.
+- `test/pregate-user-policy.test.ts`: the own-policy line names the user file as the policy source.
+- `test/gstack-post.test.ts`: a doubled title refuses and posts nothing, `--replace` posts the file, and a body with two receipt blocks refuses too.
+
+### Gate integrity
+- `test/gstack-post.test.ts`: the duplicate-titles assertion that expected the first copy replaced and the second kept now expects the refusal, plus a case where duplicates the file does not touch are still kept.
+
+## [1.91.319.0] - 2026-10-29
+
+**`gstack-pregate sealed` no longer prints a line that reads like a push confirmation.** On gstack-evals#29 the lane read `pushed aeb2413` in the `SEALED:` line as the push landing, while the remote stayed at 9036ab1 (#3565). `sealed` never pushes: it checks the commits a push would publish. `pushed <sha>` was its label for the commit whose `sealed` policy it read beside the base branch's.
+
+### Fixed
+- **`lib/sealed-guard.ts`**: that label now reads `commit <sha12>` (`policy=origin/main + commit aeb2413f0ca1`), in the `SEALED:` line, in the managed pre-push hook's messages and in the unreadable-policy error.
+- **`gstack-pregate --help`** and **docs/pregate.md#sealed** say the command never pushes and that `git ls-remote <remote> <ref>` confirms a push.
+
+### Tests
+- `test/sealed-guard.test.ts`: `gstack-pregate sealed` names the checked commit, prints no `pushed`, and leaves the remote's refs exactly as they were. It failed before the fix on `policy=origin/main + pushed <sha>`.
+
+## [1.91.318.0] - 2026-10-29
+
+**/office-hours now has eval tasks for the shared skill eval, and /write-skill's diet locks its tasks before a paid run.** gstack-evals' Lane A will re-check the office-hours diet from #3525. To do that it needs office-hours' tasks in gstack's contract format, a sidecar for what Lane A adds, and a diet step that commits the lock a paid run requires. #3525 never committed the task set GSTA-134 ran, so these tasks rebuild it from the pilot's written summary.
+
+### Added
+- **`test/fixtures/skill-evals/office-hours/`**: 11 tasks on a CSV-merge idea, with a `seed.sh` that makes the git repo and the `.gstack-home` state root. Nine follow the pilot's set, which covered the mode question, the first startup question, pushback on vague evidence, builder mode, the premise challenge, the second-opinion offer, alternatives, the UI visual step and the backend skip. Two are new safety tasks. One allows no code during a session (the hard gate), and the other allows no design doc before the user picks an approach (the Phase 4 stop). `no-code-mvp` failed in every arm of the pilot and is left out.
+- **`tasks.ext.json`** beside it, in Lane A's sidecar format: every task is interactive, with a persona and scripted replies, a judge rubric per behavior task, and a violating `mutant` per safety task. Reply category names are provisional until gstack-evals publishes its list.
+
+### Changed
+- **/write-skill diet step 6** starts with `gstack-evals skill-eval --lock` and a commit of `tasks.lock.json`. Without that commit the shared eval refuses a paid run (LOCK_MISSING).
+- **`docs/designs/SKILL_EVAL_CONTRACT.md`** adds notes for implementers. The harness should set both `GSTACK_STATE_ROOT` and `GSTACK_HOME` to `<work dir>/.gstack-home`. A verdict may carry an optional `resumable` field. The notes also cover the lock, the sidecar, and an open question about what `must` patterns grade when a host answers an interactive task's questions.
+
+### Tests
+- `test/skill-eval-tasks.test.ts` checks office-hours' `tasks.json` against the contract. It also checks that each `tasks.ext.json` entry names a task in `tasks.json` and uses only known keys. No existing test, threshold or allowlist changed.
+
+## [1.91.317.0] - 2026-10-29
+
+**Registered gstack skills now say when to use them where the harness model reads them, and OpenClaw lists the task skills directly.** HARN-5's paid cells showed OpenClaw and Hermes listing gstack's skills while the model rarely opened them. Router lines kept only each skill's first sentence and dropped its "Use when asked to ..." trigger, and Hermes's skills index shows only the first 57 characters of a description, which for gstack was capability prose. This release changes only what gstack writes into its own skills folders. Use rates are not claimed yet: HARN-5's fixed panel measures them next.
+
+### Changed
+- **Router lines lead with the trigger** (`gstack-harness`, every router-mode target: OpenClaw, dots, `generic` and `--print`). Each line opens with the skill's own trigger sentence, or, when the description has none, `Use for:` and the skill's `triggers:` list, within 160 characters. The router's description now leads with task verbs (review, debug, QA test, plan, ship) in its first 200 characters, within the 300-character budget. The wording rule lives in `lib/skill-triggers.ts`.
+- **Hermes descriptions open with a trigger list of at most 57 characters** (`frontmatter.descriptionLead` in `hosts/hermes.ts`), for example `Use for: review this pr, code review, check my diff.`, followed by the description without its own trigger sentence, which the lead repeats, so no Hermes render grows. Claude Code and every other host render their descriptions as before.
+- **OpenClaw registers in `hybrid` mode by default**: `gstack-review`, `gstack-investigate`, `gstack-qa`, `gstack-ship` and `gstack-plan-eng-review` are top-level skills and the `gstack` router carries the rest. Dumped through OpenClaw 2026.10.6's own `buildSkillSnapshot`/`prepareSkillsForPrompt` with its 19 eligible bundled skills, hybrid's skills section is 10,290 characters in full format (budget 18,000). `--skills all` falls to compact format at 17,971 characters, and `--skills router` is 6,701. `--skills router` and `--skills all` remain, and a mode switch now removes the empty folders the previous mode left behind.
+- **`--context <file>` is opt-in for OpenClaw and Hermes too**: the block is written only into the file named, after a `gstack-harness: context block: <file> (<profile|project> scope)` line. Setup, upgrades and refresh never add one and do not re-add a block you deleted. A second `--context` file keeps the first, because the ledger keys blocks by file. The block text follows the mode (with `--skills all` it names no router path). Uninstall now restores each file byte for byte (the blank separator line, a missing final newline and a file gstack created are undone).
+- `HARNESS_MODE_UNSUPPORTED`'s fix text and docs/hosts.md describe Hermes's listing, not its loader, and docs/hosts.md states registered, listed and used as separate facts.
+
+### Fixed
+- Re-registering an OpenClaw, Hermes or dots registration without `--context` (what setup and `gstack-harness auto` do) no longer cuts a block the user opted into.
+
+### Added
+- `HARNESS_CONTEXT_REFUSED`: `--context` refuses `SOUL.md` (in any letter case), and for Hermes a new rules file that would outrank rules Hermes loads now: a file of an earlier group (`.hermes.md`/`HERMES.md` before `AGENTS.md` before `CLAUDE.md`), an earlier name in the same folder (`.hermes.md` before `HERMES.md`, `AGENTS.override.md` before `AGENTS.md`), or a `.hermes.md`/`HERMES.md` below one in a parent folder, which Hermes takes as the nearest.
+
+### Gate integrity
+- `test/harness-register.test.ts`: three expectations change with the byte-for-byte restore and blocks keyed by file. The generic cut now expects the original bytes, without the extra newline. The second `--context` case now expects both blocks kept and both restored where it used to expect the first block cut. The OpenClaw router case passes `mode: 'router'` because the default is now hybrid. New cases cover router lines, Hermes leads (at most 57 characters), hybrid with mode switches through refresh and uninstall, context opt-in, refusal and scope, the CLI scope line, and Hermes's threat scanner on every block variant. The scanner case runs when `GSTACK_HERMES_SRC` names a Hermes checkout and is skipped otherwise. More new cases cover the same-folder and nearest-parent refusals, pre-blockpad ledgers, refresh keeping a block the user edited, `--json --context` output, and the Hermes check outside a git repository; new `test/skill-triggers.test.ts` covers the wording rule's fallbacks and cuts.
+- `test/fixtures/skill-md-size-allowlist.json`: the Hermes pins for `gstack-autoplan` (108,982 to 108,891) and `gstack-plan-eng-review` (128,708 to 128,655) go down to the new render sizes, as the size guard directs.
+- New `test/session-kind-marker.test.ts`: a marker-only environment (`GSTACK_SESSION_KIND=spawned`, no `GSTACK_CAPY`) gets the same soft admission from `bin/gstack-install-verdict.sh` and `lib/install-verdict.ts`. A ratchet fails when a file in `bin/`, `lib/`, `hosts/` or `scripts/` reads or sets `GSTACK_SESSION_KIND` outside its 13-file inventory; a planted-reader control and a comments-only control check it.
 
 ## [1.91.316.0] - 2026-10-29
 

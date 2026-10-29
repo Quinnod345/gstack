@@ -25,7 +25,10 @@ passes. Standalone, `gstack-regen check` lists the commands and exits 3
 (`REPO_COMMANDS_NOT_ALLOWED`); `gstack-pregate` marks `regen` and `lanes`
 `incomplete`, never `pass`. `--policy-from head` (a PR that introduces or
 changes a pin file) is accepted only with `--allow-repo-commands` and the record
-says `policy head (unreviewed)`. An unresolvable base exits 3 with
+says `policy head (unreviewed)`. So a lane or allowlist entry a branch adds to
+its own `pregate.json` counts only once it is on the base; `PREGATE_NO_LANE`'s
+fix line says so when the branch edits the file
+([troubleshooting](troubleshooting.md#pregate-no-lane-own-policy)). An unresolvable base exits 3 with
 `POLICY_SOURCE_UNAVAILABLE`. Globs are repo-relative (no `..`, no absolute
 paths, at most 64 per list); commands are one line under 512 bytes.
 
@@ -825,7 +828,10 @@ gstack-pregate sealed [--range <a..b>] [--remote origin] [--base <branch>] [--js
   `.gstack/ship-policy.json` to that release before landing either key.
 - **Policy.** The union of the destination base branch's `sealed` and the
   pushed commit's: a push can tighten it, never relax it (`allow_paths` come
-  from the base branch alone, and a pushed deny glob cannot override one). A malformed or
+  from the base branch alone, and a pushed deny glob cannot override one). The
+  `SEALED:` line names both as `policy=<remote>/<base> + commit <sha12>`.
+  `gstack-pregate sealed` only checks and never pushes, so confirm a push with
+  `git ls-remote <remote> <ref>`. A malformed or
   unreadable policy refuses. Waivers come only from the base branch's
   `.gstack/sealed-allow.tsv` (`rule<TAB>path<TAB>sha<TAB>reason`) and are
   listed on every push.

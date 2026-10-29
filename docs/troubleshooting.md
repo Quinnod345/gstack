@@ -2516,11 +2516,20 @@ holding only its first section therefore no longer wipes the rest of the PR.
 The redaction scan runs on the merged bytes, so a MEDIUM or HIGH finding can
 come from a kept section; the `RULE:` line's `LINE:` is in the merged text.
 When the current body cannot be read (`gh pr view --json body` fails) nothing
-is posted, exit 3.
+is posted, exit 3. When the current body holds a title the file rewrites more
+than once (an earlier description pasted below a `---` under the new one, as
+on gstack-evals#19), the file's section matches no single copy, so nothing is
+posted, exit 64: `gstack-post: the PR's current body holds "What changed" more
+than once, so the file's copy matches no single section; nothing was posted.
+Rerun with --replace and the whole body`. Merging would replace one copy and
+keep the stale other beside it.
 
 **Fix.** Nothing, when the kept sections are wanted. To overwrite the whole
 body with the file, rerun with `--replace`. To drop a section, post the body
-with `--replace` or edit it on the host.
+with `--replace` or edit it on the host. For the duplicate-title refusal, write
+the whole body you want (keep the earlier description under a title of its own,
+such as `## Original description`, if it should stay) and post it with
+`--replace`.
 
 <a id="redact-prepush-email"></a>
 ### `MEDIUM  pii.email  <file>:<line>` from the pre-push hook
@@ -3360,6 +3369,27 @@ specifiers in test files that resolved to no repo file (for example a
 `extends` hop that was not followed (only relative `extends`, at most 4 hops). If
 a test does cover the file, declare it under `dependencies`; if the resolver
 should have found it, report the specifier as a resolver gap.
+
+<a id="pregate-no-lane-own-policy"></a>
+**The branch adds the lane itself.** A branch that edits `.gstack/pregate.json`
+to give its own new files a lane still gets this error: pregate reads the policy
+from `origin/<base>` (or the user-owned file), never from the branch, so a
+branch cannot loosen its own gate ([trust boundary](pregate.md#trust-boundary)).
+That is intended, and pregate never switches to the branch's copy on its own.
+The fix line then opens `this branch edits .gstack/pregate.json, but the policy
+comes from origin/<base>@<sha>:.gstack/pregate.json so a branch cannot loosen
+its own gate, and a lane it adds counts only once it is on <base>` and names the
+two routes:
+
+1. Land the policy change in its own PR first (the reviewed route), then merge
+   the base into this branch and rerun.
+2. Rerun with `--policy-from head --allow-repo-commands`. The run reads the
+   branch's copy and its record says `policy head (unreviewed)`, so a
+   reviewer sees that the gate ran under a policy nobody has reviewed yet;
+   `gstack-ship-queue` never accepts a head-policy run as a remote mirror.
+
+An allowlist entry the branch adds to its own `pregate.json` is read the same
+way: it clears a finding only once it is on the base.
 
 <a id="pregate-lane-failed"></a>
 ### `PREGATE_LANE_FAILED`
@@ -5304,7 +5334,7 @@ The name is not one of openclaw, hermes, dots, generic, qm, muse or grok. For a 
 <a id="harness-mode-unsupported"></a>
 ### `gstack-harness: Hermes does not support --skills router` (HARNESS_MODE_UNSUPPORTED)
 
-Hermes opens only skills it has indexed, so a router that points at unlisted files would not load. Drop `--skills` to take the harness's default (Hermes: all; OpenClaw, dots and generic: router).
+Hermes lists in its skills index only the skills registered as folders in its skills tree, so a router would leave every other gstack skill out of the listing the model chooses from (Hermes's `skill_view` can still load an unlisted skill by name, but nothing tells the model it exists). Drop `--skills` to take the harness's default (Hermes: all; OpenClaw: hybrid; dots and generic: router). OpenClaw takes router, hybrid or all.
 
 <a id="harness-unsafe-destination"></a>
 ### `gstack-harness: refusing to write into <dir>: <why>` (HARNESS_UNSAFE_DESTINATION)
@@ -5316,7 +5346,12 @@ The destination is your home folder, the filesystem root, inside the gstack chec
 
 gstack only replaces files its ledger says it wrote. A folder or a skill with the same name is yours (or another tool's), and harnesses resolve skills by name, so gstack stops instead of shadowing it. Rename or move that entry, then register again.
 
-The same code stops `register generic --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
+The same code stops `register <harness> --context <file>` when the file holds a `<!-- gstack:begin harness-routing -->` or `<!-- gstack:end harness-routing -->` line without exactly one partner, or a gstack block someone edited. Delete those marker lines (and the lines between them, once you have kept what you want), then register again.
+
+<a id="harness-context-refused"></a>
+### `gstack-harness: refusing to write the gstack block into <file>: <why>` (HARNESS_CONTEXT_REFUSED)
+
+`--context` writes the routing block only into a file you name, and two kinds of file are refused before anything is written. `SOUL.md` (in any letter case) is the harness's identity file (Hermes and OpenClaw both load it every session), and gstack never edits it. For Hermes, a new `.hermes.md`, `HERMES.md`, `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` that would outrank a rules file Hermes loads now is refused too: Hermes loads one project context type, first match wins (`.hermes.md`/`HERMES.md`, then the `AGENTS.md` chain, then `CLAUDE.md`, then `.cursorrules`), takes the first name it finds in a folder (`.hermes.md` before `HERMES.md`, `AGENTS.override.md` before `AGENTS.md`), and takes the nearest `.hermes.md`/`HERMES.md` walking up to the git root, so creating it would hide those rules. Name the file Hermes already loads instead (the error names it), or a file in `$HERMES_HOME` for every session.
 
 <a id="harness-render-failed"></a>
 ### `gstack-harness: could not render <harness> skills: ...` (HARNESS_RENDER_FAILED)
