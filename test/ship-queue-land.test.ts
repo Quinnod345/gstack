@@ -32,7 +32,7 @@ function setup(policy: Record<string, unknown> = POLICY): Fx {
     "const fs=require('fs');const {execFileSync}=require('child_process');",
     'const D=process.env.LAND_SHIM_DATA, O=process.env.LAND_SHIM_ORIGIN;',
     "const d=JSON.parse(fs.readFileSync(D,'utf8'));const a=process.argv.slice(2);",
-    "const g=(...x)=>execFileSync('git',['--git-dir',O,...x],{encoding:'utf8'}).trim();",
+    "const g=(...x)=>execFileSync('git',['--git-dir',O,...x],{encoding:'utf8',timeout:30000}).trim();",
     "const save=()=>fs.writeFileSync(D,JSON.stringify(d));",
     "if(a[0]==='pr'&&a[1]==='view'){const p=d.prs[a[2]];if(!p){console.error('no pr');process.exit(1)}",
     "  let head='';try{head=g('rev-parse','refs/heads/'+p.headRefName)}catch{};",
