@@ -239,9 +239,10 @@ export function applyReading(l: Ledger, value: number | null, source: 'flag' | '
 
 /** A meter change: close the epoch (its usage carries) and start the next at the new baseline. */
 export function newEpoch(l: Ledger, contract: MeterContract, baseline: number): void {
-  const metered = l.meter.contract.meter === 'estimate' ? 0 : Math.max(0, (l.meter.last ?? l.meter.baseline) - l.meter.baseline);
+  const metered = l.meter.contract.meter === 'estimate' ? l.estimate_used : Math.max(0, (l.meter.last ?? l.meter.baseline) - l.meter.baseline);
   l.epochs.push({ epoch: l.meter.epoch, contract: l.meter.contract, baseline: l.meter.baseline, last: l.meter.last, used: metered });
   l.carried_used += metered;
+  l.estimate_used = 0;
   l.meter = { contract, epoch: l.meter.epoch + 1, baseline, last: baseline };
 }
 
@@ -303,18 +304,20 @@ export function pointMarker(marker: string | undefined, l: Ledger): void {
 function activeLedger(marker: string): Ledger | undefined {
   let pointer: { ledger?: string };
   try { pointer = JSON.parse(fs.readFileSync(marker, 'utf8')); } catch (e: any) { if (e.code === 'ENOENT') return undefined; throw e; }
-  const l = pointer.ledger ? readLedger(pointer.ledger) : undefined;
+  const l = pointer.ledger && fs.existsSync(pointer.ledger) ? readLedger(pointer.ledger) : undefined;
   return l && l.cap !== null && !l.closed_at ? l : undefined;
 }
 
 /**
  * gstack-review-log --start under a cap: the dispatch needs an unspent, one-shot
  * dispatch reservation of the active run, consumed atomically with the start
- * capture. No marker (no cap) runs capture() exactly as before.
+ * capture. No marker (no cap), a marker whose ledger is gone, or a stopped run
+ * started without --reservation (a later uncapped review on the branch) runs
+ * capture() exactly as before.
  */
 export function admitReviewStart(marker: string, reservation: string | undefined, capture: () => string, env: NodeJS.ProcessEnv = process.env): string {
   const active = activeLedger(marker);
-  if (!active) return capture();
+  if (!active || (active.stopped && !reservation)) return capture();
   return mutateLedger(active.file, env, l => {
     const fix = `run gstack-ship-budget check --run ${l.run} --step <s> --next dispatch:<roles> and pass --reservation <id>`;
     if (l.stopped) throw new BudgetError('BUDGET_CAP_REACHED', resultLine('gstack-review-log', 'BUDGET_CAP_REACHED', `run ${l.run} stopped at Step ${l.stopped.step}: ${l.stopped.reason}`), 1);

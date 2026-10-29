@@ -5,6 +5,7 @@
  * headings, and runners for bin/gstack-ship-budget and bin/gstack-review-log.
  */
 import { spawnSync } from 'node:child_process';
+import { bunIsolationArgs } from '../../lib/bun-isolation';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -60,7 +61,8 @@ export function budgetHarness(): Harness {
   fs.writeFileSync(path.join(repo, 'app.ts'), 'export const x = 2;\n');
   git('commit', '-qam', 'change');
   const run = (bin: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Run => {
-    const r = spawnSync(bin, args, { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 60_000 });
+    const argv = bin === REVIEW_LOG_BIN ? ['bash', bin] : [process.execPath, ...bunIsolationArgs(), bin];
+    const r = spawnSync(argv[0], [...argv.slice(1), ...args], { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 60_000 });
     return { code: r.status ?? -1, out: r.stdout ?? '', err: r.stderr ?? '' };
   };
   let records = 0;

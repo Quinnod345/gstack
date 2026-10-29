@@ -116,4 +116,19 @@ describe('gstack-review-log --start under a token cap', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('(BUDGET_CAP_REACHED)');
   });
+
+  test('a stopped run or a lost ledger does not block a later uncapped review on the branch', () => {
+    const h = fresh();
+    const run = capped(h, '20M');
+    expect(h.sb(['check', '--run', run.run, '--step', '9', '--next', 'dispatch:specialist,red-team', '--reading', '9000000']).code).toBe(3);
+    const afterStop = h.reviewLog(['--start', 'review']);
+    expect(afterStop.code).toBe(0);
+    expect(afterStop.out.trim()).toMatch(UUID);
+    const h2 = fresh();
+    const lost = capped(h2);
+    fs.unlinkSync(lost.ledger);
+    const afterLoss = h2.reviewLog(['--start', 'review']);
+    expect(afterLoss.code).toBe(0);
+    expect(afterLoss.out.trim()).toMatch(UUID);
+  });
 });

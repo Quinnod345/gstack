@@ -7,7 +7,7 @@
 **Pass 2 after a blocking fix now reviews the fix in proportion to its size.** When pass 1 fixed a blocking finding on a diff below full depth and the fix range has at most 150 runtime lines, /ship runs a scoped pass: one fix-check, the Red Team and the native adversarial pass on the range, instead of the specialist army. On gstack-evals#19 a 3-file fix range (+18/-6) was planned for nine reviewers. Full depth, `--depth-floor full`, a fix that touched a gate path, a larger range, or a range it cannot read keeps the full pass 2. The two-pass cap and the stop for the owner are unchanged.
 
 ### Added
-- **`gstack-ship-budget`** (`lib/ship-budget.ts`, `lib/ship-budget-cli.ts`, `lib/ship-handoff.ts`): an admission cap on a per-run token ledger under `<state root>/ship-runs/<run>/` (its own schema; only `withFileLock` is shared with `lib/spend-ledger.ts`). `start`, `check` (the `BUDGET:` line, `verdict=continue|delegate|stop`, a `RESERVATION:` id per admitted step or batch), `settle`/`release`, `handoff`/`launch`/`verify-handoff`/`return`/`reconcile`, `resume` (cap raises need `--approved-by` and the owner's words; `--rebuild-from-record`; restore from a private Drive checkpoint) and `close`. Exit 0 continue/delegate, 3 stop, 2 usage. Meters are versioned contracts: the Capy root counter (`--reading`), Claude Code journal usage (`lib/claude-usage.ts`, bound by `--session` or an echoed nonce) or `--meter estimate`.
+- **`gstack-ship-budget`** (`lib/ship-budget.ts`, `lib/ship-budget-cli.ts`, `lib/ship-handoff.ts`): an admission cap on a per-run token ledger under `<state root>/ship-runs/<run>/` (its own schema; only `withFileLock` is shared with `lib/spend-ledger.ts`). `start`, `check` (the `BUDGET:` line, `verdict=continue|delegate|stop`, a `RESERVATION:` id per admitted step or batch), `settle`/`release`, `handoff`/`launch`/`verify-handoff`/`return`/`reconcile`, `resume` (cap raises need `--approved-by` and the owner's words; `--rebuild-from-record`; restore from a private Drive checkpoint) and `close`. Exit 0 continue/delegate, 3 stop, 2 usage. Each meter is a versioned contract, and there are three: the Capy root counter (`--reading`), Claude Code journal usage (`lib/claude-usage.ts`, bound by `--session` or an echoed nonce) and `--meter estimate`.
 - **`gstack-review-log --start ... --reservation <id>`**: under a cap, a dispatch without an unspent, one-shot reservation refuses before launch (`BUDGET_CHECK_SKIPPED`), and `--finish` settles it. Without a cap nothing changes.
 - **/ship**: the skeleton's Budget paragraph (`--token-cap`, `--resume <record>`, `--continue <handoff>`) and a new `budget-handoff` section with the meter recipes, reservations, stop and resume, and the delegate flow per host.
 - **Result codes** `BUDGET_CAP_REACHED`, `BUDGET_READING_MISSING`, `BUDGET_READING_REJECTED`, `BUDGET_METER_UNAVAILABLE`, `BUDGET_LEDGER_INVALID`, `BUDGET_CHECK_SKIPPED`, `HANDOFF_PIN_MOVED` with docs/troubleshooting.md anchors; `lib/ship-budget-calibration.json` seeded from #19, #26 and #31.
@@ -27,6 +27,51 @@
 - `test/review-plan-cli.test.ts`: `--range-base` plans `NEXT: scoped`; a 151-line range, no range, an unknown base and uncommitted fixes plan full.
 - `test/review-scope.test.ts`: `raised_by` from the explicit field, the specialist tag or `unknown`.
 - `test/ship-receipt-depth.test.ts`: the queue binds a receipt whose pass 2 was scoped.
+
+## [1.91.310.0] - 2026-10-29
+
+**The cookie workflow judge now asks for structured output, so a quote the model forgets to escape can no longer fail the gate.** Train 42 went red because both of its `setup-browser-cookies/SKILL.md workflow` samples came back as free text with a bare quote inside `reasoning` ("one --domain per run"), and neither parsed. The GSTA-91 comparison had measured that failure: 2 of 144 free-text samples failed to parse, against 0 of 72 with the schema.
+
+### Changed
+- **Cookie workflow judge transport:** `setup-browser-cookies/SKILL.md workflow` now sends `WORKFLOW_JUDGE_RESPONSE_SCHEMA`, released on GStack Minder's ruling: "GStack Minder, 2026-10-29: release the GSTA-91 hold; a07 is matched by old-b; free-text parse errors cost train 42". Its model, thresholds (4/3/4), sample count and case kind are unchanged. The ruling is recorded in `test/fixtures/judge-calibration/cookie-workflow/release.json`, and the held comparison stays recorded as held.
+
+### Tests
+- `test/cookie-workflow-judge-input.test.ts` runs the registered cookie callback through the real `callJudge` and pins its request to the schema. It replays train 42's two replies (msg_011CgVnRtVj5vyLvb56m6KJH, msg_011CgVne5GStZ6f9pRoCvgWE): their free-text bytes do not parse, and the same judgment returned as schema output scores and passes. `test/judge-calibration.test.ts` reads the release record. Both fail without the transport change.
+
+### Gate integrity
+- Gate edit: the cookie judge's response transport moves from free text to the JSON schema, on the ruling above. No threshold, sample, trial, deadline or case-kind change. The Haiku free-text failure pin in `test/llm-judge-frontier.test.ts` is untouched.
+
+## [1.91.309.0] - 2026-10-29
+
+**The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
+
+### Fixed
+- **`/review` Step 5.8**: an unresolved non-gate defect (an unanswered question) is recorded as `open`, so every finding has a record action. A repeat pass's reruns of superseded probes are revalidation, so they run after smoke expiry, in the same probe directory; earlier provisional QA sections link checkpoints and only the final pass runs the once-only `materialize`.
+- **`/plan-eng-review`**: the shared Voice now loads once. Eng no longer carries a near-copy whose only difference was its em-dash clause; the Scope gate's format precedence says required formats keep their em dashes.
+- **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
+
+### Changed
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, wrapper attempts and 429 waits, HTTP requests and statuses (so the SDK's own retries show), connection, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason (at most 200 characters). Counts only, never content; an observer that throws cannot change a judge result. Deadlines, effort, samples and thresholds are unchanged.
+
+### Tests
+- `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events, one cancelled after headers, an SDK-retried 429, a cancelled 429 wait, an event the observer cannot read and an overlong reason, with no-abort controls; each fails with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
+
+### Gate integrity
+- No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
+## [1.91.308.0] - 2026-10-29
+
+**`gstack-restamp` no longer cuts a four-part package.json version to three parts in a repo whose convention is four.** On garrytan/gbrain#7878, `/ship` restamped gbrain's `package.json` to `"0.60.483"` beside `VERSION` `0.60.483.0`; gbrain requires the two to match and its CI version gate fails when they drift, so the stamp had to be reverted by hand. The version stage called `gstack-version-bump write`, which always stores the npm-valid three-part form in the manifest (decision 11, which is why gstack's own `package.json` reads `1.91.298`).
+
+### Fixed
+- **`lib/restamp.ts`**: the version stage keeps the full version in the manifest when the policy lists it in `stamp_paths` or `stamp_files` and the base's copy holds four parts, and the stage detail says so (`wrote 0.60.483.0 (package.json keeps four parts: …)`). The form is read at the base, like the policy, so a branch an earlier restamp already cut to three parts goes back to four. Every other repo, gstack included, still gets the npm-valid form, and a four-part manifest the policy does not list still migrates to three parts as decision 11 says.
+- **`bin/gstack-version-bump write`**: new `--manifest-form npm|full` (default `npm`); `full` writes the version as given to the manifest and its npm lockfiles. It has no effect when the version path is itself a JSON manifest.
+
+### Tests
+- `test/restamp-four-part-manifest.test.ts`: a gbrain-shaped fixture (four-part `VERSION` and `package.json`, the manifest in `stamp_files`, bun, no npm lockfile) restamped from an unstamped branch and from a branch already carrying its stamp (both failed before the fix with `"0.60.483"`), from a branch an older restamp cut to three parts, and with the manifest listed through `stamp_paths`. gstack's shape (three-part manifest and lockfile) and an unlisted four-part manifest keep their current results.
+- `test/gstack-version-bump.test.ts`: `--manifest-form full` keeps four parts in the manifest and lockfile; an unknown form exits 2 before anything is written.
 
 ## [1.91.307.0] - 2026-10-29
 
