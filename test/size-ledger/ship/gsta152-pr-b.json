@@ -1,4 +1,4 @@
 {
-  "bytes": 439,
-  "why": "GSTA-152 D6: Step 9's scoped second pass (NEXT: scoped, --range-base $PASS_HEAD, the scope=scoped row, its in-pass fix-check) and raised_by on classified findings"
+  "bytes": 521,
+  "why": "Step 9 passes --pass1-depth: a full pass 1 always gets a full pass 2 (GSTA-152 PR B)"
 }

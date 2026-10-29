@@ -4,7 +4,7 @@
  *
  *   gstack-review-plan --base <ref> [--pass <full passes run>] [--last none|full|fix-check] [--fixed-blocking] [--fixed-below]
  *                      [--blocking-open] [--touched-gate] [--critical-found] [--adversarial-ran] [--gate-tagged <n>] [--gated a,b] [--force a,b|all]
- *                      [--reviewed-numbers <fingerprint>] [--depth-floor standard|full] [--range-base <sha>] [--no-tiers] [--json]
+ *                      [--reviewed-numbers <fingerprint>] [--depth-floor standard|full] [--range-base <sha>] [--pass1-depth light|standard|full] [--no-tiers] [--json]
  *   gstack-review-plan --fix-check-prompt --fix-list <file> --hunks <file> --tests <file> [--callers <file>]
  *
  * Reads the diff against the merge base with <ref> (committed, tracked uncommitted
@@ -45,6 +45,7 @@ const HELP = `gstack-review-plan — the review depth of the next /ship step (do
                             committed range of at most ${SCOPED_RANGE_LINES} runtime lines plans a scoped pass; anything unread plans the full pass
   --no-tiers                audits and watchers at the host's default effort too (as gstack-config review_effort_tiers off does)
   --json                    the plan as JSON (depth, runtime_lines, rules, errors with input and repair, gate_scan, per-dispatch exclude)
+  --pass1-depth <d>         pass 1's REVIEW_DEPTH depth: full, or absent, keeps pass 2 full
   --fix-check-prompt        print the fix-check reviewer's prompt from --fix-list, --hunks, --tests and --callers files
 
 Depth: light (runtime lines <= 50), standard (above 50), full (gate class or any DEPTH_ERROR). NEXT: full, scoped
@@ -75,6 +76,8 @@ function main(): number {
   if (!base) { process.stderr.write(`gstack-review-plan: --base <ref> is required\n${HELP}\n`); return EXIT.usage; }
   const last = (flag('--last') ?? 'none') as History['last'];
   if (!['none', 'full', 'fix-check'].includes(last)) { process.stderr.write('gstack-review-plan: --last must be none, full or fix-check\n'); return EXIT.usage; }
+  const pass1Depth = (flag('--pass1-depth') ?? 'full') as Depth;
+  if (!['light', 'standard', 'full'].includes(pass1Depth)) { process.stderr.write('gstack-review-plan: --pass1-depth must be light, standard or full\n'); return EXIT.usage; }
   const pass = Number(flag('--pass') ?? '0');
   if (!Number.isInteger(pass) || pass < 0) { process.stderr.write('gstack-review-plan: --pass needs an integer >= 0\n'); return EXIT.usage; }
   const floor = flag('--depth-floor') as Depth | undefined;
@@ -120,18 +123,15 @@ function main(): number {
     else {
       const commit = collectCommit(root, resolved, 'HEAD');
       const range = classifyDiff({ ...commit, registry, scope: scopeOf([resolved, '--head', 'HEAD']), gateTagged: gateTagsOf([resolved]) });
-      const baseSha = git(['merge-base', base, resolved])?.trim();
-      const atBase = baseSha ? classifyDiff({ ...collectCommit(root, baseSha, resolved), registry, scope: scopeOf([base, '--head', resolved]), gateTagged: gateTagsOf([base, '--commit', resolved]) }) : undefined;
       fixRange = range.errors.length ? unread(range.errors.map(e => `${e.code} ${e.input}`).join('; '))
         : !commit.paths.length ? unread('the fix range is empty: commit the fix after the range base')
-        : !atBase || atBase.errors.length ? unread('the diff at the range base could not be classified')
-        : { base: rangeBase, runtime_lines: range.runtimeLines, ...(range.class === 'gate' || atBase.class === 'gate' ? { touched_gate: true as const } : {}) };
+        : { base: rangeBase, runtime_lines: range.runtimeLines, ...(range.class === 'gate' ? { touched_gate: true as const } : {}) };
     }
   }
   const plan = planReview({
     ...collected, scope, gateTagged, numbers: scanNumbers(added), force, gated: list('--gated'), floor,
     criticalFound: has('--critical-found'), adversarialRan: has('--adversarial-ran'), reviewedNumbers: flag('--reviewed-numbers'),
-    history: { fullPasses: pass, last, fixedBlocking: has('--fixed-blocking'), fixedBelow: has('--fixed-below'), blockingOpen: has('--blocking-open'), touchedGate: has('--touched-gate') || !!fixRange?.touched_gate, rangeRuntimeLines: fixRange?.runtime_lines },
+    history: { fullPasses: pass, last, fixedBlocking: has('--fixed-blocking'), fixedBelow: has('--fixed-below'), blockingOpen: has('--blocking-open'), touchedGate: has('--touched-gate') || !!fixRange?.touched_gate, pass1Depth, rangeRuntimeLines: fixRange?.runtime_lines },
   });
   const gateScan = { tagged: gateTagged, head };
   if (has('--json')) {

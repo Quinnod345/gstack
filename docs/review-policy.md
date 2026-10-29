@@ -124,9 +124,11 @@ logged as a `review-fix-check` row, so it never counts as a pass. No army, no
 Red Team and no outside voice run on it.
 
 <a id="scoped-pass"></a>
-A **scoped pass** is pass 2 after a blocking fix when the diff's depth is below
-full (no gate class, no depth error, no `--depth-floor full`) and the fix range
-`RANGE_BASE..HEAD` has at most `SCOPED_RANGE_LINES` (150) runtime lines, counted
+A **scoped pass** is pass 2 after a blocking fix when pass 1 and the diff both
+ran below full depth (no gate class, no depth error, no `--depth-floor full`).
+A full pass 1 always gets a full pass 2: `--pass1-depth` carries pass 1's
+`REVIEW_DEPTH`, and an absent flag counts as full. The fix range
+`RANGE_BASE..HEAD` must have at most `SCOPED_RANGE_LINES` (150) runtime lines, counted
 as the depth counts them (`gstack-review-plan --range-base $PASS_HEAD` prints
 `FIX_RANGE:`). It dispatches one fix-check on the range, the Red Team on the
 range, the native adversarial pass when the range changes runtime lines, every
@@ -134,9 +136,8 @@ force-included specialist and the outside voice when published numbers changed.
 Step 11's voices that have not run yet stay listed, as on a full pass 2. It
 writes a full-pass `review` row with `"scope":"scoped"`, so it counts toward
 the cap, and a blocker it leaves open stops for the owner as before. A fix that
-touched a gate-class path (read from the range and from the diff at the range
-base, each with its own scope and gate scan, so a revert of a gate, auth or
-migration edit counts without `--touched-gate`), a larger range, an empty range, or a
+touched a gate-class path (read from the range with its own scope and gate
+scan), a larger range, an empty range, or a
 range, classifier or depth it cannot read keeps the full pass 2. The 150-line figure is a starting value from
 a 24-PR backtest (GSTA-152 D6), to revisit once classified findings carry
 `raised_by`.

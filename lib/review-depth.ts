@@ -203,6 +203,7 @@ export interface History {
   touchedGate?: boolean;
   /** Runtime lines of the fix range (RANGE_BASE..HEAD) as classifyDiff counts them, 0 when it touches none; undefined or null when the range was not read. */
   rangeRuntimeLines?: number | null;
+  pass1Depth?: Depth;
 }
 export interface NextStep { step: Step; reason: string }
 
@@ -223,7 +224,7 @@ export function nextStep(h: History, depth?: Depth): NextStep {
   if ((h.fixedBlocking || h.touchedGate) && h.fullPasses < FULL_PASS_CAP) {
     if (!h.fixedBlocking) return { step: 'full', reason: 'a fix touched a gate-class path: full pass on the range' };
     const n = h.rangeRuntimeLines;
-    const keep = h.touchedGate ? 'a fix touched a gate-class path' : depth === undefined ? 'the depth is unknown' : depth === 'full' ? 'the diff is at full depth'
+    const keep = h.touchedGate ? 'a fix touched a gate-class path' : depth === undefined ? 'the depth is unknown' : h.pass1Depth === 'full' ? 'pass 1 ran at full depth' : depth === 'full' ? 'the diff is at full depth'
       : typeof n !== 'number' || !Number.isFinite(n) || n < 0 ? 'the fix range was not read' : n > SCOPED_RANGE_LINES ? `the fix range has ${n} runtime lines (> ${SCOPED_RANGE_LINES})` : null;
     if (keep) return { step: 'full', reason: `a blocking finding was fixed and ${keep}: full pass on the range` };
     return { step: 'scoped', reason: `a blocking finding was fixed on a ${depth} diff with ${n} runtime lines in the fix range (<= ${SCOPED_RANGE_LINES}): scoped pass on the range` };

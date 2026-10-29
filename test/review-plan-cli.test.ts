@@ -167,7 +167,8 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
     git('add', '.'); git('commit', '-qm', 'fix: pre-landing review fixes');
     return { r, rangeBase };
   }
-  const pass2 = ['--pass', '1', '--last', 'full', '--fixed-blocking', '--adversarial-ran'];
+  const pass2 = ['--pass', '1', '--last', 'full', '--fixed-blocking', '--adversarial-ran', '--pass1-depth', 'standard'];
+  const full1 = ['--pass', '1', '--last', 'full', '--fixed-blocking', '--adversarial-ran', '--pass1-depth', 'full'];
   test('--range-base with a small fix range plans NEXT: scoped with a fix-check and the Red Team, and counts it as pass 2', () => {
     const { r, rangeBase } = fixed(24);
     const out = run(r, [...pass2, '--range-base', rangeBase]).stdout;
@@ -184,6 +185,7 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
     const big = fixed(151);
     expect(run(big.r, [...pass2, '--range-base', big.rangeBase]).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the fix range has 151 runtime lines \(> 150\)/m);
     const { r, rangeBase } = fixed(10);
+    expect(run(r, [...pass2.slice(0, -2), '--range-base', rangeBase]).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and pass 1 ran at full depth/m);
     expect(run(r, pass2).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the fix range was not read/m);
     const unknown = run(r, [...pass2, '--range-base', 'f'.repeat(40)]).stdout;
     expect(unknown).toMatch(/^FIX_RANGE: unread \(.*\) base=f{40}$/m);
@@ -210,7 +212,7 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
   test.each([
     ['an auth revert', 'src/auth/login.ts', 'export const login = (u: string) => u.length > 0;\n'],
     ['a migration revert', 'db/migrate/001_a.sql', 'ALTER TABLE users ADD COLUMN email text;\n'],
-  ])('%s keeps the full pass 2: the range and the diff at the range base carry scope and gate-scan input', (_n, file, text) => {
+  ])('%s on a full-depth PR plans the full pass 2', (_n, file, text) => {
     const r = repo({ 'src/a.ts': code(80) });
     const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
     const write = (body: string) => { fs.mkdirSync(path.dirname(path.join(r.dir, file)), { recursive: true }); fs.writeFileSync(path.join(r.dir, file), body); };
@@ -221,9 +223,19 @@ describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
     write(text);
     fs.writeFileSync(path.join(r.dir, 'src', 'b.ts'), code(2, 'b'));
     git('add', '.'); git('commit', '-qm', 'fix: revert the edit');
-    const out = run(r, [...pass2, '--range-base', rangeBase]).stdout;
+    const out = run(r, [...full1, '--range-base', rangeBase]).stdout;
     expect(out).not.toMatch(/^REVIEW_CLASS: gate/m);
-    expect(out).toMatch(/^NEXT: full \(a blocking finding was fixed and a fix touched a gate-class path/m);
+    expect(out).toMatch(/^NEXT: full /m);
+  }, 30_000);
+  test('a fix that un-skips a gate tag added in an earlier pass-1 commit plans the full pass 2 on a full-depth PR', () => {
+    const r = repo({ 'src/a.ts': code(80), 'test/a.test.ts': "test.skip('x', () => {});\n" });
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
+    fs.writeFileSync(path.join(r.dir, 'src', 'c.ts'), code(3, 'c')); git('add', '.'); git('commit', '-qm', 'later pass-1 commit');
+    const rangeBase = git('rev-parse', 'HEAD').stdout.trim();
+    fs.writeFileSync(path.join(r.dir, 'test', 'a.test.ts'), "test('x', () => {});\n");
+    fs.writeFileSync(path.join(r.dir, 'src', 'y.ts'), code(1, 'y'));
+    git('add', '.'); git('commit', '-qm', 'fix: un-skip');
+    expect(run(r, [...full1, '--range-base', rangeBase]).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and pass 1 ran at full depth/m);
   }, 30_000);
   test('--depth-floor full opts out of the scoped pass', () => {
     const { r, rangeBase } = fixed(10);
