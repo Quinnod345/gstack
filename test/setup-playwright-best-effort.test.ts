@@ -279,6 +279,7 @@ describe('setup: Chromium bootstrap block executes best-effort', () => {
       '_wait_with_deadline $! 90 || echo "RC=$?"',
     ].join('\n'), { timeout: 10_000 });
     expect(r.stdout).toBe('RC=3\n');
+    // gstack-timing-ok: a sub-second return is the contract; the old 1 s poll took 1,008 ms, this path takes ~0.2 s
     expect(Date.now() - t0).toBeLessThan(500);
   });
 
