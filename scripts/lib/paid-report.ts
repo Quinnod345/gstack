@@ -9,7 +9,7 @@ import { STALL_WINDOW_MS } from '../../test/helpers/eval-budgets';
 import {
   isFinalizedEvalResultFile, credentialRejection, failureClassOf, panelVerdict, sanitizeTrialError, formatTrialOutcomes, TRIAL_OUTCOME_SCHEMA, TRIAL_OUTCOMES_FILE,
   type EvalCaseKind, type PanelVerdict, type TrialFailureClass, type TrialOutcome, type TrialOutcomeRecord,
-  trialCostKnown, trialFailureFields, trialSessions, type TrialFailureDetail,
+  trialFailureFields, trialSessions, type TrialFailureDetail,
 } from '../../test/helpers/eval-store';
 import { readSessionLedger, type SessionLedgerRow } from '../../test/helpers/session-ledger';
 import { publishedFence, sanitizeFixedFenceLine } from './published-text';
@@ -244,15 +244,18 @@ function caseSessions(rows: SessionLedgerRow[], id: string, onlyCase: boolean): 
 /** Cases that run no model (a binary data flow): with no record and no session they cost a known $0. test/paid-report-cost.test.ts pins each body model-free. */
 export const MODEL_FREE_CASES: ReadonlySet<string> = new Set(['timeline-event-flow']);
 
-/** A trial's cost: its records' sum; with no record, its sessions' billed or streamed cost; a model-free case with neither, $0. */
+/**
+ * A trial's cost: its records' sum plus what no record carries, a session without a terminal result priced from its
+ * streamed usage (streamed_cost_usd). With no record, a billed session counts its own cost_usd (Codex). Unknown when any
+ * record or session cost is; a listed model-free case with neither record nor session is a known $0.
+ */
 export function caseCost(id: string, records: any[], sessions: SessionLedgerRow[]): { cost_usd: number; cost_known?: false } {
-  const cents = (values: number[]) => Math.round(values.reduce((sum, value) => sum + value, 0) * 100) / 100;
-  if (records.length) return { cost_usd: cents(records.map(r => Number(r.cost_usd) || 0)), ...trialCostKnown(records, sessions) };
-  if (sessions.length) {
-    const costs = sessions.map(s => s.billed !== false ? s.cost_usd : s.streamed_cost_usd);
-    return costs.every(c => typeof c === 'number' && Number.isFinite(c)) ? { cost_usd: cents(costs as number[]) } : { cost_usd: 0, cost_known: false };
-  }
-  return MODEL_FREE_CASES.has(id) ? { cost_usd: 0 } : { cost_usd: 0, cost_known: false };
+  if (!records.length && !sessions.length) return MODEL_FREE_CASES.has(id) ? { cost_usd: 0 } : { cost_usd: 0, cost_known: false };
+  const unrecorded = sessions.map(s => s.billed !== false ? (records.length ? 0 : s.cost_usd) : s.streamed_cost_usd);
+  const known = records.every(r => r?.cost_known !== false) && unrecorded.every(c => typeof c === 'number' && Number.isFinite(c));
+  const total = [...records.map(r => Number(r?.cost_usd) || 0), ...unrecorded.filter((c): c is number => typeof c === 'number' && Number.isFinite(c))]
+    .reduce((sum, c) => sum + c, 0);
+  return { cost_usd: Math.round(total * 100) / 100, ...(known ? {} : { cost_known: false as const }) };
 }
 
 /** The artifact holding a slice's shards: the downloaded directory's own name when it is one. */

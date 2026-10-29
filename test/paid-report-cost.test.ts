@@ -35,9 +35,11 @@ describe('pricing usage', () => {
 });
 
 describe('caseCost', () => {
-  test('records decide when present; sessions never add to them', () => {
+  test('a billed session\'s cost is already in the records; a streamed session adds what no record carries', () => {
     expect(caseCost('x', [{ cost_usd: 0.25 }, { cost_usd: 0.1 }], [session({ billed: true, cost_usd: 9 })])).toEqual({ cost_usd: 0.35 });
-    expect(caseCost('x', [{ cost_usd: 0 }], [session({ billed: false, streamed_cost_usd: 0.4 })])).toEqual({ cost_usd: 0, cost_known: false });
+    expect(caseCost('x', [{ cost_usd: 0 }], [session({ billed: false, streamed_cost_usd: 0.4 })])).toEqual({ cost_usd: 0.4 });
+    expect(caseCost('x', [{ cost_usd: 0.2 }], [session({ runner: 'pty', billed: false })])).toEqual({ cost_usd: 0.2, cost_known: false });
+    expect(caseCost('x', [{ cost_usd: 0.2, cost_known: false }], [])).toEqual({ cost_usd: 0.2, cost_known: false });
   });
 
   test('a case with no record takes its sessions\' billed or streamed cost, else stays unknown', () => {
