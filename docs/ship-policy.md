@@ -1184,6 +1184,11 @@ release heading, or one whose name already landed on the base with other text
 is `CHANGELOG_FRAGMENT_INVALID`, and nothing is allocated. Only fragments the
 branch adds against the base count.
 
+**/ship.** `show-effective` prints a `ship: changelog_fragments` line, so /ship
+writes no version in Step 12 and writes Step 13's entry as
+`<dir>/<branch-slug>.md`, linted with `gstack-prose-lint <file> --gate`, never an
+`[Unreleased]` section.
+
 **The fold.** `gstack-restamp` (and so `land`) concatenates the fragment
 bodies in path order above any legacy `[Unreleased]` section, re-heads both as
 one `## [<version>] - <date>` section at the top, and deletes the fragment

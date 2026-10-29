@@ -20,7 +20,7 @@ import { restamp, versionAtRef } from './restamp';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 import { ciAtHead, loadBasePolicy, type QueueContext, type StepOutput } from './ship-queue';
 import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from './ship-queue-gate';
-import { bindReceipt } from './ship-receipt';
+import { bindShippedReceipt } from './ship-receipt-depth';
 
 export const LAND_LOCK_REF = 'refs/notes/gstack-land';
 export const MAX_RESTAMPS = 2;
@@ -297,8 +297,9 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   if (j && (j.phase === 'landed' || j.reviewed_pin !== info.headRefOid && j.last_pushed_head !== info.headRefOid)) j = null;
   const pin = j?.reviewed_pin ?? info.headRefOid;
   const lines = [`LAND: #${o.pr} branch=${info.headRefName} pin=${pin}${j ? ` (resuming at ${j.phase})` : ''}`];
-  const receipt = bindReceipt(info.body ?? '', o.pr, [pin]);
-  lines.push(receipt.line);
+  git(root, ['fetch', '-q', 'origin', ctx.base]);
+  const receipt = bindShippedReceipt(root, `origin/${ctx.base}`, info.body ?? '', o.pr, [pin]);
+  lines.push(receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []));
   if (!receipt.ok) return fail(lines, { code: receipt.code, message: receipt.message, fix: 'run /ship at the pinned head first' }, run);
   if (!j) {
     const ci = ciAtHead(ctx, pin);

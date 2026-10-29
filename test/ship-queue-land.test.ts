@@ -200,6 +200,16 @@ describe('land: lock, races and refusals', () => {
     expect(remote(fx, 'pr-8')).toBe(late);
   }, 90_000);
 
+  test('the receipt check is the depth-checked one READY uses: a receipt whose writer records depth but which records none refuses', () => {
+    const fx = setup();
+    const head = openPr(fx, '31');
+    fx.write(d => { d.prs['31'].body = shippedBody('31', head, { gstack_version: '1.91.307.0' }); });
+    const r = land(fx, ['--pr', '31']);
+    expect(r.err).toContain('(QUEUE_RECEIPT_DEPTH_RAISED)');
+    expect(r.out).toMatch(/^REVIEW_DEPTH: receipt=none required=/m);
+    expect(remote(fx, 'pr-31')).toBe(head);
+  }, 60_000);
+
   test('drift: a merge outside land between the check and the squash fails loudly and keeps the lock', () => {
     const fx = setup();
     openPr(fx, '9');
