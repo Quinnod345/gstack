@@ -118,7 +118,7 @@ describe('stamped trains: build and land', () => {
     expect(line(drift.out, 'QUEUE_TRAIN_FROZEN:')).toMatch(/^QUEUE_TRAIN_FROZEN: train \S+ merged #1/);
   }, 300_000);
 
-  test('a stamp commit that cannot be written pushes nothing and leaves the PR branch in place', () => {
+  test('a record whose S_i tree is not on the gated chain pushes nothing and leaves the PR branch in place', () => {
     const { fx, h1, nonce } = stampedTrain();
     expect(queue(fx, ['train', 'verdict', '--train', nonce]).status).toBe(EXIT.ok);
     const file = path.join(fx.state, 'ship-queue', 'trains', nonce, 'train.json');
@@ -126,7 +126,7 @@ describe('stamped trains: build and land', () => {
     t.stamped[0].tree = 'f'.repeat(40);
     fs.writeFileSync(file, JSON.stringify(t));
     const r = land(fx, nonce, '1');
-    expect(r.status).not.toBe(EXIT.ok);
+    expect(r.err).toMatch(/is not a commit with tree ffffffffffff on the gated head.*\(QUEUE_PROOF_MISSING\)/);
     expect(r.out).not.toMatch(/^PUSHED:/m);
     expect(fx.repo.git('--git-dir', fx.repo.origin, 'rev-parse', 'refs/heads/pr-1')).toBe(h1);
   }, 180_000);

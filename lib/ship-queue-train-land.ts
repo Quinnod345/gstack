@@ -56,6 +56,7 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   };
   const rerun = `${Q} train land --train ${t.nonce} --pr ${o.pr}`;
   const lines = [`TRAIN_LAND: ${t.nonce} slot ${i + 1}/${t.slots.length} #${o.pr} pin ${pin} -> S${s.index} v${s.version} tree ${s.tree}`];
+  if (git(root, ['rev-parse', `${s.commit}^{tree}`]).out !== s.tree || !git(root, ['merge-base', '--is-ancestor', s.commit, t.head]).ok) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: `the record's S${s.index} is not a commit with tree ${s.tree.slice(0, 12)} on the gated head ${t.head.slice(0, 12)}` }, lines, `${Q} train status --train ${t.nonce}`, run);
   let main = mainNow();
   if ('error' in main) return outRefused({ code: 'QUEUE_PROOF_MISSING', message: main.error }, lines, rerun, run);
   if (main.tree === s.tree) return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `main: ${main.sha} is S${s.index} exactly`]);
@@ -105,6 +106,7 @@ export async function trainLand(ctx: QueueContext, o: { train: string; pr: strin
   if (!m.ok) return outFailed({ code: 'QUEUE_NOT_READY', message: `gh pr merge refused: ${(m.err ?? m.out).trim().slice(0, 200)}` }, lines, rerun, run);
   main = mainNow();
   if ('error' in main) return outPending({ code: 'QUEUE_PROOF_MISSING', message: `merged; ${main.error}` }, lines, rerun, run);
+  if (main.sha === j.base) return outPending({ code: 'QUEUE_NOT_READY', message: `merged; main still reads ${j.base.slice(0, 12)}, so the merge is not visible yet` }, lines, rerun, run);
   if (main.tree !== s.tree) return stopped(env, t, 'QUEUE_TRAIN_TREE_MISMATCH', `after the merge main ${main.sha.slice(0, 12)} is not S${s.index} exactly`, main.sha, lines, true);
   return confirmMerged(env, t, o.pr, main.sha, s.index, [...lines, `MERGED: #${o.pr} as ${main.sha}; main's tree is S${s.index} exactly`]);
 }

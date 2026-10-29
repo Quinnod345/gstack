@@ -83,8 +83,9 @@ export function stampChain(o: StampChainOptions): { stamped: StampedPrefix[]; li
       if (linked) return { code: 'QUEUE_TRAIN_STAMP_MISMATCH', message: `S${i + 1} (#${slot.pr}): ${linked} is a symlink in the merged tree; the stamp writes release files only inside the repository` };
       const r = restamp({ repoRoot: wt, base: o.base, baseRef: pred, next: true, policyFrom: 'base', allowRepoCommands: o.allowRepoCommands, dryRun: false, now: new Date(`${date}T12:00:00Z`), env: process.env });
       if (r.status !== 'stamped') return { code: r.code ?? 'QUEUE_TRAIN_STAMP_MISMATCH', message: `S${i + 1} (#${slot.pr}): restamp ${r.status}: ${r.message ?? ''}`, fix: r.fix };
-      git(wt, ['add', '-A']);
+      if (!git(wt, ['add', '-A']).ok) return { code: 'QUEUE_TRAIN_STAMP_MISMATCH', message: `cannot stage the stamp for S${i + 1}` };
       tree = git(wt, ['write-tree']).out;
+      if (!/^[0-9a-f]{40,64}$/.test(tree)) return { code: 'QUEUE_TRAIN_STAMP_MISMATCH', message: `cannot write the stamped tree for S${i + 1}` };
       version = r.newVersion!;
     } finally {
       git(o.repoRoot, ['worktree', 'remove', '--force', wt]);
