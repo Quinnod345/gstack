@@ -17,14 +17,16 @@ const receiptIn = (body: string) => extractReceipt(fs.readFileSync(body, 'utf8')
 const carry = (repo: FixtureRepo, body: string) => runBin(repo, 'gstack-ship-receipt', ['carry', '--body', body, '--base', 'main']);
 const SUB = "exports.add = (a, b) => a + b;\nexports.sub = (a, b) => a - b;\n";
 
+const RETRY4 = "exports.MAX_RETRIES = 4;\nexports.TIMEOUT_MS = 5000;\nexports.retry = (fn) => fn();\n";
+
 /** main <- parent (lib/util.js) <- feature (lib/retry.js, its /ship receipt written against the parent branch). */
-function stack(repo: FixtureRepo): { parent: string; child: string; body: string } {
+function stack(repo: FixtureRepo, parentFiles: Record<string, string> = { 'lib/util.js': SUB }, childFiles: Record<string, string> = { 'lib/retry.js': RETRY4 }): { parent: string; child: string; body: string } {
   repo.git('checkout', '-q', '-b', 'parent');
-  const parent = commit(repo, { 'lib/util.js': SUB }, 'parent: sub');
+  const parent = commit(repo, parentFiles, 'parent: sub');
   repo.git('push', '-q', 'origin', 'parent');
   repo.git('checkout', '-q', 'feature');
   repo.git('reset', '-q', '--hard', parent);
-  const child = commit(repo, { 'lib/retry.js': "exports.MAX_RETRIES = 4;\nexports.TIMEOUT_MS = 5000;\nexports.retry = (fn) => fn();\n" }, 'child: four retries');
+  const child = commit(repo, childFiles, 'child: four retries');
   const body = path.join(repo.root, 'body.md');
   const w = runBin(repo, 'gstack-ship-receipt', ['write', '--pr', '8', '--base', 'parent', '--version', '1.0.0', '--session-kind', 'unattended', '--body', body]);
   expect(w.status).toBe(EXIT.ok);
@@ -61,6 +63,16 @@ describe('carry after a stack parent squash-merges (#3570)', () => {
     expect(r.head).toBe(head);
     expect(r.carry!.reason).toBe('stack parent parent landed + base merge');
     expect(r.product_patch_id).toBe(reviewed);
+    expect(r.base).toBe('main');
+    repo.git('checkout', '-q', 'main');
+    commit(repo, { 'docs/CHANGES.md': '# main moves again\n' }, 'main moves again');
+    repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feature');
+    repo.git('merge', '-q', '--no-edit', 'origin/main');
+    const again = carry(repo, body);
+    expect(again.status).toBe(EXIT.ok);
+    expect(receiptIn(body).carry!.reason).toBe('stack parent parent landed + base merge + base merge');
+    expect(receiptIn(body).product_patch_id).toBe(reviewed);
   }, 90_000);
 
   // Value: protects=a receipt written before product_patch_id still carries while the parent branch resolves, and refuses by
@@ -82,6 +94,19 @@ describe('carry after a stack parent squash-merges (#3570)', () => {
     repo.git('push', '-q', 'origin', `${parent}:refs/heads/parent`);
     repo.git('fetch', '-q', 'origin');
     expect(carry(repo, body).status).toBe(EXIT.ok);
+    expect(receiptIn(body).carry!.reason).toBe('stack parent parent landed + base merge');
+  }, 90_000);
+
+  // Value: protects=a child with no product change of its own (product_patch_id none) still carries once the parent lands;
+  // fails_when=the recorded 'none' is compared as a literal id; seam=none; no_claim=-
+  test('a test-only child carries after its parent lands', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const { body } = stack(repo, { 'lib/util.js': SUB }, { 'test/retry.test.js': "const test = require('node:test');\ntest('retries', () => {});\n" });
+    expect(receiptIn(body).product_patch_id).toBe('none');
+    landOnMain(repo, { 'lib/util.js': SUB });
+    const out = carry(repo, body);
+    expect(out.status).toBe(EXIT.ok);
+    expect(receiptIn(body).carry!.reason).toBe('stack parent parent landed + base merge');
   }, 90_000);
 
   // Value: protects=fail closed: a child changed after the parent merged, or a parent that never reached main, takes a fresh
@@ -105,4 +130,35 @@ describe('carry after a stack parent squash-merges (#3570)', () => {
     expect(abandoned.err).toContain('is not the one reviewed against parent (the parent has not fully landed on main');
     expect(receiptIn(s.body).head).toBe(s.child);
   }, 120_000);
+
+  // Value: protects=fail closed on the parent's release-metadata paths: a package.json change (a dependency and a postinstall
+  // script) the parent made but main never received is product in HEAD's diff against main, though the child never touched it;
+  // fails_when=the comparison takes its pathspec from the reviewed head..HEAD range, where package.json is unchanged; seam=none;
+  // no_claim=-
+  test('a parent package.json change that never reached main refuses', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const pkg = JSON.stringify({ name: 'fixture', version: '1.0.0', scripts: { test: 'node --test test/*.test.js', generate: 'node gen.js', postinstall: 'node gen.js' }, dependencies: { leftpad: '1.0.0' } }, null, 2) + '\n';
+    const { child, body } = stack(repo, { 'lib/util.js': SUB, 'package.json': pkg });
+    landOnMain(repo, { 'lib/util.js': SUB });
+    const out = carry(repo, body);
+    expect(out.status).toBe(EXIT.refused);
+    expect(out.out).toContain('CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)');
+    expect(receiptIn(body).head).toBe(child);
+  }, 90_000);
+
+  // Value: protects=the docs row "a parent that landed with changes the child never merged" refuses; fails_when=a merge that
+  // keeps the child's tree (-s ours) over the landed parent reads as unchanged; seam=none; no_claim=-
+  test('a parent that landed with changes the child never merged refuses', () => {
+    const repo = makeFixtureRepo(); repos.push(repo);
+    const { child, body } = stack(repo);
+    repo.git('checkout', '-q', 'main');
+    commit(repo, { 'lib/util.js': SUB + "exports.mul = (a, b) => a * b;\n" }, 'squash: parent with a review fix (#7)');
+    repo.git('push', '-q', 'origin', 'main');
+    repo.git('checkout', '-q', 'feature');
+    repo.git('merge', '-q', '--no-edit', '-s', 'ours', 'origin/main');
+    const out = carry(repo, body);
+    expect(out.status).toBe(EXIT.refused);
+    expect(out.out).toContain('CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)');
+    expect(receiptIn(body).head).toBe(child);
+  }, 90_000);
 });

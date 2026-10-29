@@ -910,8 +910,10 @@ child's own range. After the parent lands, the PR is retargeted to the base, and
 receipt's, the carry compares the reviewed range (the recorded
 `product_patch_id`, or for an older receipt the range against
 `origin/<parent>` while that branch still resolves) with HEAD's whole product
-diff against the base. Equal means the parent fully landed and the child is
-unchanged, so the receipt carries. A parent that has not landed, a child edited
+diff against the base, computed the way `write` records it, so a parent's
+release-metadata change that never reached the base counts too. Equal means
+the parent fully landed and the child is unchanged, so the receipt carries
+and from then on names the base it was carried to. A parent that has not landed, a child edited
 since, or a parent that landed with changes the child never merged all leave a
 different diff and refuse with `RECEIPT_CARRY_PRODUCT_CHANGED`. An older
 receipt whose parent branch is gone refuses with `RECEIPT_CARRY_REFUSED`.
