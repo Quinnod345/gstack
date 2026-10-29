@@ -5,9 +5,10 @@
  * three runs observed.
  */
 import { describe, expect, test } from 'bun:test';
+import * as path from 'node:path';
 import { fitConstant, loadCalibration, unitConstants } from '../lib/ship-budget';
 
-const cal = loadCalibration();
+const cal = loadCalibration(path.join(import.meta.dir, '..', 'lib/ship-budget-calibration.json'));
 
 describe('ship-budget calibration', () => {
   test('constants equal the conservative fit of their observations', () => {
