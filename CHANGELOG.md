@@ -8,7 +8,7 @@
 - **`sealed.local_path`** (`lib/sealed-guard.ts`): a home path directly after a `${…:-` or `${…-` default now matches, for a name, an array element (`${arr[0]:-`, a subscript of up to 64 characters, so a long line of unclosed `${a[` cannot make the scan quadratic), an indirect name (`${!ref:-`), a positional number or a special parameter (`${@:-`). `:=`, `:+` and `:?` already matched, because `=`, `+` and `?` were never word characters. A hyphen anywhere else still excludes the match, so a path glued to a word (`docs-…`, `$VAR-…`, `${VAR}-…`) stays unflagged; docs/pregate.md lists that as a known limit.
 
 ### Gate integrity
-- This is a gate edit that only tightens: the guard now refuses lines it passed before. No existing test, threshold or allowlist changed. A new case in `test/sealed-guard.test.ts` covers all five operators, a positional parameter, `${@`, an array element, an indirect name, a Windows path and the TypeScript `??` form. It also checks six negative controls: two hyphenated paths, a hyphenated sentence, `$VAR-`, `${VAR}-` and a relative default. Without the fix it misses every `-` form.
+- This is a gate edit that only tightens. The guard now refuses lines it passed before. No existing test, threshold or allowlist changed. A new case in `test/sealed-guard.test.ts` covers all five operators, a positional parameter, `${@`, an array element, an indirect name, a Windows path and the TypeScript `??` form. It also checks six negative controls, which are two hyphenated paths, a hyphenated sentence, `$VAR-`, `${VAR}-` and a relative default. Without the fix it misses every `-` form.
 
 ## [1.91.301.0] - 2026-10-29
 
