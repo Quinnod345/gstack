@@ -2,10 +2,10 @@
 
 ## [Unreleased]
 
-**Capy lanes now know what gstack's review effort tiers mean on Capy.** gstack's review plan prints an effort on every reviewer it dispatches (`effort=full`, `effort=light`, the outside voice's `effort=host`) and on `AUDIT_EFFORT:`. The Capy skill never said how to honour them, so each lane guessed, and GStack Minder's crew kept its own mapping in CREW.md rule 30(c). Garry approved the mapping on 2026-10-29 ("Do it").
+**Capy lanes now know what gstack's review effort tiers mean on Capy.** gstack's review plan prints an effort on every reviewer it dispatches (`effort=full`, or the outside voice's `effort=host`) and on `AUDIT_EFFORT:` for the audits and watchers (`light`, or `host` with tiers off). The Capy skill never said how to honour them, so each lane guessed, and GStack Minder's crew kept its own mapping in CREW.md rule 30(c). Garry approved the mapping on 2026-10-29 ("Do it").
 
 ### Changed
-- **capy/skill/gstack/SKILL.md** maps each tier onto Capy's subagent settings. `effort=full` and `AUDIT_EFFORT: host` leave `model` unset, so the subagent keeps the lane's model and reasoning. `effort=light` uses the lane's own model at `low` or `medium` reasoning, never a cheaper model. The outside voice stays on another model family. Each subagent's first report names the model and reasoning it ran at.
+- **capy/skill/gstack/SKILL.md** maps each tier onto Capy's subagent settings. A blocking reviewer (`effort=full`) is a new subagent at the lane's model and at least `high` reasoning. An audit at `light` uses the lane's own model at `low` or `medium` reasoning, never a cheaper model. The outside voice runs on another family's strongest model at `high` reasoning. Each subagent's first report names the model and reasoning it ran at.
 - **docs/model-policy.md** and **docs/review-policy.md** point Capy readers at that line.
 
 ### Tests
