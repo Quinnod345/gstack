@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+**The train gate's paid report now prices the trials it used to call "cost unknown".** 32 of 139 gate trials had no cost on every gate since Oct 26, so the report's total understated a gate by about $7.50 (GSTA-150 audit). Three of the four causes are fixed here; PTY sessions follow in the next PR.
+
+### Fixed
+- **Label-named records in multi-case shards** (`test/helpers/e2e-helpers.ts`, `scripts/lib/paid-report.ts`): a `claude -p` record named by its display label ("browse basic commands") carries `cost_case_id` from `runSkillTest`'s registered test name, and the report binds its cost to that case. The failed record, failure class and model still come from the records named by case id, so no verdict, class or pass-rate series changes (22 trials: bws, session-intelligence, workflow, skillify, review-attribution, review, gate-integrity, diagram).
+- **Aborted Agent SDK sessions** (`test/helpers/agent-sdk-runner.ts`, `lib/pricing.ts`): a session that ends without a result event logs its streamed usage as `streamed_cost_usd` in the session ledger, priced once per message id at its largest output, subagent turns included, with 5-minute cache writes at 1.25x and 1-hour writes at 2x input. An unpriced model leaves the cost unknown (auq-format-gate).
+- **Model-free cases**: `timeline-event-flow` runs no model, so with no record and no session it is a known $0. A test checks every listed case's body starts no model session.
+- **The headline total** adds session cost that no collector record carries, so newly priced trials reach the gate's `cost $X` line exactly once.
+
+### Tests
+- `test/paid-report-cost.test.ts`: pricing arithmetic, streamed dedupe, `caseCost`, `recordE2E`'s `cost_case_id`, a two-case shard whose label-named records bind by cost without changing the failed record, class or model. `test/paid-report-census.test.ts`: a record-less trial's streamed cost reaches the trial and the verdict total once.
+
 ## [1.91.304.0] - 2026-10-29
 
 **Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
