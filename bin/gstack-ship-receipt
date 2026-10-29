@@ -542,8 +542,23 @@ function cmdCarry(rest: string[], json: boolean): number {
     // planCarry names at most CARRY_NAMED_PATHS differing paths, so the per-path comparison (two patch-ids each) stops there,
     // and it walks only the paths the branch itself touched against the base at either head: a base merge brings in every
     // path the base changed, none of which can differ between the two base diffs.
+    // A stacked child whose parent landed on the base (#3570): the receipt reviewed the child's own range against the
+    // parent branch, and the PR now targets the base. That reviewed range (the recorded product patch-id, else the one
+    // against origin/<receipt base> when it still resolves) must be HEAD's whole product diff against the base: the parent
+    // fully landed and the child is unchanged. Anything else fails closed.
+    const reviewedBase = receipt.base.replace(/^origin\//, '');
+    const retarget = reviewedBase !== base.replace(/^origin\//, '');
+    let reviewed = productFrom;
+    if (retarget) {
+      const parentRef = `origin/${reviewedBase}`;
+      const recorded = receipt.product_patch_id !== undefined ? (receipt.product_patch_id === 'none' ? '' : receipt.product_patch_id)
+        : git(['rev-parse', '--verify', '--quiet', `${parentRef}^{commit}`], repoRoot) ? productPatchAgainstBase(repoRoot, rules, parentRef, from) : { error: `the receipt records no product patch-id and ${parentRef} no longer resolves` };
+      if (typeof recorded !== 'string') return refused('RECEIPT_CARRY_REFUSED', `the receipt was reviewed against ${reviewedBase}, not ${base}, and its reviewed product diff is unavailable: ${recorded.error}; run /ship on ${head.slice(0, 12)}`);
+      reviewed = recorded;
+    }
     const changedProduct: string[] = [];
-    if (productFrom !== productHead) {
+    if (retarget && reviewed !== productHead) changedProduct.push(`HEAD's product diff against ${base} is not the one reviewed against ${reviewedBase} (the parent has not fully landed on ${base}, or the branch changed since)`);
+    else if (productFrom !== productHead && !retarget) {
       const touched = new Set([...(git(['diff', '--name-only', fromBase, from], repoRoot) ?? '').split('\n'), ...(git(['diff', '--name-only', headBase, head], repoRoot) ?? '').split('\n')].filter(Boolean));
       for (const p of [...touched].sort()) {
         if (changedProduct.length >= CARRY_NAMED_PATHS) break;
@@ -557,7 +572,7 @@ function cmdCarry(rest: string[], json: boolean): number {
     // Evidence for the record, never the decision: a slow range-diff is reported unavailable rather than waited for.
     const rangeRaw = spawnSync('git', ['range-diff', '--no-color', `${fromBase}..${from}`, `${headBase}..${head}`], { cwd: repoRoot, encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 * 1024 });
     const rangeDiff = rangeRaw.status === 0 ? (rangeRaw.stdout.trim().split('\n').slice(0, 20).join('\n') || '(empty: identical ranges)') : `unavailable: ${(rangeRaw.stderr ?? '').trim().split('\n')[0] || (rangeRaw.signal ? `range-diff killed by ${rangeRaw.signal} after 15 s` : 'range-diff failed')}`;
-    plan = planCarry({ from, head, changed, productPatchId: { from: productFrom, head: productHead }, testPatchId: { from: testFrom, head: testHead }, changedProduct, mergeCommits: Number(mergeCommits) || 0, rangeDiff });
+    plan = planCarry({ from, head, changed, productPatchId: { from: reviewed as string, head: productHead as string }, testPatchId: { from: testFrom, head: testHead }, changedProduct, mergeCommits: Number(mergeCommits) || 0, rangeDiff, ...(retarget ? { retargetedFrom: reviewedBase } : {}) });
   }
   if (!plan.ok) return refused(plan.code, plan.message);
   // Eligibility is not publication: a receipt that recorded a pregate is rebound only with a pregate current for HEAD,

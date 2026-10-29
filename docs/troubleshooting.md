@@ -4730,7 +4730,10 @@ registered output the pregate's regen check proved (listed under `proven`,
 checked against the same base registry), nor part of the base merge has
 a different patch than the reviewed head had. After a rebase it means HEAD has
 the reviewed tree but the base moved under it, so the diff a reviewer would see
-is not the reviewed one. The reviewed verdict does not cover HEAD, so the
+is not the reviewed one. For a stacked PR retargeted to the base after its
+parent landed, it means HEAD's product diff against the base is not the range
+reviewed against the parent branch: the parent has not fully landed, or the
+branch changed since. The reviewed verdict does not cover HEAD, so the
 receipt is not carried. The refusal names the changed product paths.
 
 **Fix.** Run /ship on the new head. The receipt carries only across a
