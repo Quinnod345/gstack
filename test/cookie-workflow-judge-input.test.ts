@@ -280,7 +280,7 @@ describe('cookie workflow judge input', () => {
       replies: Array<{ id: string; model: string; stop_reason: string; text: string }> };
     expect(replies.map(reply => reply.id)).toEqual(['msg_011CgVnRtVj5vyLvb56m6KJH', 'msg_011CgVne5GStZ6f9pRoCvgWE']);
     const original = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'test-only-key';
+    process.env.ANTHROPIC_API_KEY = 'fake';
     const create = spyOn(Messages.prototype, 'create');
     try {
       for (const reply of replies) {

@@ -7,7 +7,7 @@
   "scope": "cookie workflow judge transport only",
   "recorded_result": "runs/comparison-1.result.json",
   "train_red": {
-    "run": 40809051510,
+    "gate_run": "https://github.com/garrytan/gstack/actions/runs/40809051510",
     "responses": [
       "msg_011CgVnRtVj5vyLvb56m6KJH",
       "msg_011CgVne5GStZ6f9pRoCvgWE"
