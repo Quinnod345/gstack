@@ -32,7 +32,7 @@ import { describeDraft, draftConfig } from '../lib/pregate/init-draft';
 import { buildContext, defaultUserConfigPath, describeRefusal, loadedDotenvFiles } from '../lib/pregate/context';
 import { CHECKS, CHECK_IDS, PREGATE_OUT_REL, PREGATE_TIER2, clearDecision, clearObligation, readPregateFile, renderTable, runPregate, verifyPregate, writePregateFile, type RunCheck } from '../lib/pregate/index';
 import { ghRunDeps } from '../lib/run-evidence';
-import { wtreeFingerprint } from '../lib/script-invocation';
+import { runBashSync, wtreeFingerprint } from '../lib/script-invocation';
 import { describeLane, discoverLanes } from '../lib/pregate/workflows';
 import { REMOTE_GATE_LANE } from '../lib/pregate/checks/lanes';
 import { describeSubstitution } from '../lib/pregate/remote-receipt';
@@ -256,7 +256,7 @@ function runCheck(root: string, lane: string, allowRepoCommands: boolean): RunCh
       if (!allowRepoCommands) return { error: 'the inventory command is a pin-file command; pass --allow-repo-commands' };
       const at = () => { const fp = wtreeFingerprint({ cwd: root }); return 'tree' in fp ? fp.tree : null; };
       if (at() !== tree) return { error: `the working tree is not pregate.json's tree ${tree.slice(0, 12)}; the inventory must list that tree's gate files` };
-      const r = spawnSync('bash', ['-c', command], { cwd: root, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+      const r = runBashSync(command, { cwd: root, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0 || r.error) return { error: `${command} exited ${r.status ?? r.error}: ${(r.stderr ?? '').trim().slice(0, 200)}` };
       if (at() !== tree) return { error: `the working tree changed while ${command} ran` };
       return [...new Set(r.stdout.split('\n').map(l => l.trim()).filter(Boolean))];
