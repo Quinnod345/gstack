@@ -157,3 +157,45 @@ describe('gstack-review-plan: review depth', () => {
   });
 });
 
+describe('gstack-review-plan: the scoped second pass (GSTA-152 D6)', () => {
+  const code = (n: number, tag = 'v') => Array.from({ length: n }, (_, i) => `export const ${tag}${i} = ${i};`).join('\n') + '\n';
+  function fixed(lines: number): { r: { dir: string; state: string }; rangeBase: string } {
+    const r = repo({ 'src/a.ts': code(80) });
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: r.dir, encoding: 'utf8', timeout: 10_000 });
+    const rangeBase = git('rev-parse', 'HEAD').stdout.trim();
+    fs.writeFileSync(path.join(r.dir, 'src', 'fix.ts'), code(lines, 'f'));
+    git('add', '.'); git('commit', '-qm', 'fix: pre-landing review fixes');
+    return { r, rangeBase };
+  }
+  const pass2 = ['--pass', '1', '--last', 'full', '--fixed-blocking', '--adversarial-ran'];
+  test('--range-base with a small fix range plans NEXT: scoped with a fix-check and the Red Team, and counts it as pass 2', () => {
+    const { r, rangeBase } = fixed(24);
+    const out = run(r, [...pass2, '--range-base', rangeBase]).stdout;
+    expect(out).toMatch(/^REVIEW_PLAN: class=code pass=2 next=scoped dispatches=3 /m);
+    expect(out).toContain(`FIX_RANGE: runtime_lines=24 base=${rangeBase}`);
+    expect(out).toMatch(/^NEXT: scoped \(a blocking finding was fixed on a standard diff with 24 runtime lines in the fix range/m);
+    expect(out).toContain('DISPATCH: fix-check fix-check effort=full');
+    expect(out).toContain('DISPATCH: red-team red-team effort=full');
+    expect(out).toContain('DISPATCH: adversarial-native adversarial effort=full');
+    expect(out).not.toContain('DISPATCH: specialist');
+    expect(JSON.parse(run(r, [...pass2, '--range-base', rangeBase, '--json']).stdout)).toMatchObject({ next: { step: 'scoped' }, fix_range: { base: rangeBase, runtime_lines: 24 } });
+  });
+  test('a 151-line range, no --range-base, an unknown range base and uncommitted fixes keep the full pass 2', () => {
+    const big = fixed(151);
+    expect(run(big.r, [...pass2, '--range-base', big.rangeBase]).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the fix range has 151 runtime lines \(> 150\)/m);
+    const { r, rangeBase } = fixed(10);
+    expect(run(r, pass2).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the fix range was not read/m);
+    const unknown = run(r, [...pass2, '--range-base', 'f'.repeat(40)]).stdout;
+    expect(unknown).toMatch(/^FIX_RANGE: unread \(.*\) base=f{40}$/m);
+    expect(unknown).toMatch(/^NEXT: full /m);
+    fs.writeFileSync(path.join(r.dir, 'src', 'fix.ts'), code(12, 'g'));
+    const dirty = run(r, [...pass2, '--range-base', rangeBase]).stdout;
+    expect(dirty).toMatch(/^FIX_RANGE: unread \(uncommitted or untracked edits.*\)/m);
+    expect(dirty).toMatch(/^NEXT: full /m);
+    expect(run(r, [...pass2, '--range-base']).status).toBe(2);
+  });
+  test('--depth-floor full opts out of the scoped pass', () => {
+    const { r, rangeBase } = fixed(10);
+    expect(run(r, [...pass2, '--range-base', rangeBase, '--depth-floor', 'full']).stdout).toMatch(/^NEXT: full \(a blocking finding was fixed and the diff is at full depth/m);
+  });
+});

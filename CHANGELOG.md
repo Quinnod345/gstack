@@ -4,6 +4,8 @@
 
 **/ship takes a token cap and stops cleanly at it, and long runs hand their heavy segments to fresh-context children.** On gstack-evals#31 a /ship spent 54M tokens against a 25M cap because the cap was only a number in a brief; #26, whose agent read the counter after every step, stopped at 39.40M of 40M. `/ship --token-cap 25M` (or `GSTACK_SHIP_TOKEN_CAP`) now admits each step and dispatch batch only when it fits, and a run started from a long-lived context, or one whose per-call charge passes 150k at Step 7 or Step 12, runs that segment in a fresh child.
 
+**Pass 2 after a blocking fix now reviews the fix in proportion to its size.** When pass 1 fixed a blocking finding on a diff below full depth and the fix range has at most 150 runtime lines, /ship runs a scoped pass: one fix-check, the Red Team and the native adversarial pass on the range, instead of the specialist army. On gstack-evals#19 a 3-file fix range (+18/-6) was planned for nine reviewers. Full depth, `--depth-floor full`, a fix that touched a gate path, a larger range, or a range it cannot read keeps the full pass 2. The two-pass cap and the stop for the owner are unchanged.
+
 ### Added
 - **`gstack-ship-budget`** (`lib/ship-budget.ts`, `lib/ship-budget-cli.ts`, `lib/ship-handoff.ts`): an admission cap on a per-run token ledger under `<state root>/ship-runs/<run>/` (its own schema; only `withFileLock` is shared with `lib/spend-ledger.ts`). `start`, `check` (the `BUDGET:` line, `verdict=continue|delegate|stop`, a `RESERVATION:` id per admitted step or batch), `settle`/`release`, `handoff`/`launch`/`verify-handoff`/`return`/`reconcile`, `resume` (cap raises need `--approved-by` and the owner's words; `--rebuild-from-record`; restore from a private Drive checkpoint) and `close`. Exit 0 continue/delegate, 3 stop, 2 usage. Meters are versioned contracts: the Capy root counter (`--reading`), Claude Code journal usage (`lib/claude-usage.ts`, bound by `--session` or an echoed nonce) or `--meter estimate`.
 - **`gstack-review-log --start ... --reservation <id>`**: under a cap, a dispatch without an unspent, one-shot reservation refuses before launch (`BUDGET_CHECK_SKIPPED`), and `--finish` settles it. Without a cap nothing changes.
@@ -11,9 +13,20 @@
 - **Result codes** `BUDGET_CAP_REACHED`, `BUDGET_READING_MISSING`, `BUDGET_READING_REJECTED`, `BUDGET_METER_UNAVAILABLE`, `BUDGET_LEDGER_INVALID`, `BUDGET_CHECK_SKIPPED`, `HANDOFF_PIN_MOVED` with docs/troubleshooting.md anchors; `lib/ship-budget-calibration.json` seeded from #19, #26 and #31.
 - **Docs**: docs/ship-budget.md (linked from docs/unattended.md), and a paragraph each in the Capy skill's SKILL.md and captain.md.
 
+### Changed
+- **`gstack-review-plan --range-base <sha>`** (`lib/review-depth.ts`): counts the committed fix range `<sha>..HEAD` the way the depth counts runtime lines, prints `FIX_RANGE: runtime_lines=<n>|unread (<why>) base=<sha>` (`fix_range` in `--json`), and `NEXT: scoped` when the scoped pass applies. `nextStep` takes the depth and `History.rangeRuntimeLines`; `SCOPED_RANGE_LINES` (150) joins `DEPTH_RULES`, so `rules=` changes. `REVIEW_PLAN:` ends with the step's `reason="…"`. Uncommitted or untracked edits, a range base that is not an ancestor of HEAD, and a range the classifier cannot count all plan the full pass.
+- **Scoped dispatches**: the fix-check, every force-included specialist, the Red Team, the native adversarial pass when the range changes runtime lines, and the outside voice when published numbers changed. Step 11's voices that have not run yet stay listed. A light diff's raise to standard applies to the scoped set only.
+- **Step 9** (`ship/sections/review-army.md`): the repeat decision passes `--range-base $PASS_HEAD` and maps `NEXT: scoped` to decision 3; a scoped pass logs a full-pass `review` row with `"scope":"scoped"`, so it counts toward the cap and its roles land in `review_loop.dispatches` with no receipt schema change.
+- **`raised_by` on classified findings** (`gstack-review-scope classify`, `lib/review-scope.ts`): the reviewer that raised each finding (`core`, `qa`, a specialist, `red-team`, `adversarial-native`, `outside-voice`, `fix-check`), from the finding's `raised_by` or `specialist` tag, else `unknown`. Step 9 copies it into the review-log row. Older rows without it still summarize.
+- **Docs**: docs/review-policy.md (rule 3, the transitions table, a scoped-pass section and Behavior changes) and docs/ship-policy.md rule 3.
+
 ### Tests
 - `test/ship-budget.test.ts`: the cap boundary, batch overshoot, the #31 replay, spend above a reservation, the no-cap path, meters and epochs, exit codes, start and segment delegation, the full handoff chain with an idempotent reconcile, moved pins and a tampered brief, refused and interrupted children, stop and RECOVER, checkpoint restore into an empty state root, ledger rebuild, concurrent ledgers, and an unchanged `gstack-wtree`.
 - `test/ship-budget-review-log.test.ts`, `test/claude-usage.test.ts`, `test/ship-budget-calibration.test.ts` (leave-one-out), `test/ship-budget-section.test.ts`.
+- `test/review-depth.test.ts`: the #19 shape plans fix-check, Red Team and native adversarial; full depth, a fail-closed classification, `--depth-floor full`, a 151-line, missing or unread range and a gate-touching fix keep the full pass; a forced specialist and changed numbers keep their reviewers; 150, 151 and a docs-only range; the scoped pass counts toward the cap and a blocker it leaves stops; `DEPTH_RULES` moves with the constant.
+- `test/review-plan-cli.test.ts`: `--range-base` plans `NEXT: scoped`; a 151-line range, no range, an unknown base and uncommitted fixes plan full.
+- `test/review-scope.test.ts`: `raised_by` from the explicit field, the specialist tag or `unknown`.
+- `test/ship-receipt-depth.test.ts`: the queue binds a receipt whose pass 2 was scoped.
 
 ## [1.91.307.0] - 2026-10-29
 
