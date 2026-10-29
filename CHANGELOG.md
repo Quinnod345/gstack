@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+**Most PRs no longer pay for a solo paid screen before the merge train runs the same cases.** `gstack-ship-queue ready` used to recommend `--screen` whenever a diff touched a skill's own cases, which is almost every PR, and the screens (16 to 19 a day at about $32 each) cost more than the train gates that rerun all 137 cases a few hours later. Of 41 full screens between Oct 20 and 29, the 3 that caught a real bug all came from diffs the selector can't narrow (an unknown dependency or a shared runtime input). The recommendation is now `--screen` only in that case; every other PR rides unscreened and the train gate's full census covers it. Because most PRs now ride unscreened, a train also stopped holding them back: unscreened PRs fill the seats a screened PR leaves.
+
+### Changed
+- **Screen recommendation** (`lib/ship-queue-train-ready.ts`): `--screen` when the paid selector's mode is `full-fallback` or the selector cannot select; otherwise `--no-screen`. The `SCREEN:` lines name the selector's mode and reason.
+- **Slot order** (`lib/ship-queue-train.ts` `orderSlots`): screened PRs first, then unscreened PRs fill the remaining seats in READY order. The rule that built a screened-only train and held every unscreened PR once `max_size` of them waited is gone, along with its `HELD: … (unscreened PRs form their own train)` line. `--order` still overrides.
+- **Train replay model** (`lib/gate-cost-history.ts` `pickTrain`) seats trains the same way.
+- **Not in this change:** a focused paid run of a no-screen PR's own cases, bound to its READY receipt, needs a new `screen_policy: own` route in evals.yml (GSTA-165 1b, deferred).
+
+### Tests
+- `test/ship-queue-train-logic.test.ts`: one screened plus five unscreened at size 5 seats five; a full unscreened pool at size 3 seats three; a skill-template diff recommends `--no-screen`; a `bun.lock` diff recommends `--screen` with its full-fallback reason. `test/ship-queue-train.test.ts` and `test/gate-cost.test.ts` change their ordering expectations on purpose. These tests failed before the change.
+
 **A PR screen no longer runs the whole paid gate just because a changed file sits on every case's import path.** Editing a file like `lib/restamp.ts` reached all 113 gate cases through the derived-reference closure, so 19 of the 41 full screens between Oct 20 and 29 ran the full $33 gate for that reason alone. A narrow screen (`gstack-ship-queue ready --screen`, and `bun run eval:bg:pr`) now leaves such a file's cases to the train gate's full census, which runs every case before anything merges. Replayed on those 41 screens with today's maps, this saves about $457 a week, and the screens that caught real PR-caused reds (#3434, #3453) still run the full gate.
 
 ### Changed
