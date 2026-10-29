@@ -41,11 +41,13 @@ export const HYBRID_SKILLS = ['review', 'investigate', 'qa', 'ship', 'plan-eng-r
  * OpenClaw serves a registered skill's SKILL.md whole or refuses it ("Skill instructions cannot be partially
  * served"), with maxBytes from resolveAdaptiveReadMaxBytes: 32,768 (DEFAULT_READ_PAGE_MAX_BYTES) when the model's
  * context window is unknown (OpenClaw 2026.10.6 dist/agent-tools.read-BIxUGJy-.mjs:168, :189-194, :747, :798,
- * :819-821). A known window adds a live tool-result cap that can be lower (16,000 characters under 100K tokens,
- * dist/tool-result-limits-DNBSu_jg.mjs:61-79); this limit does not cover it. A larger skill is registered as a short
+ * :819-821). A known window also applies the tool-result budget to that read (resolveToolResultBudget,
+ * dist/tool-result-limits-DNBSu_jg.mjs:61-95): 16,000 characters under 100K tokens, 32,000 to 200K, 64,000 above.
+ * 32,000 bytes fits the unknown-window limit and a 100K-200K window; windows under 100K tokens are not covered. The
+ * post-delivery cap defaults to a 200K window (64,000 characters). A larger skill is registered as a short
  * entry that points at its full SKILL.md in a plain tree of every skill, which OpenClaw reads in pages.
  */
-export const OPENCLAW_INSTRUCTION_MAX = 32_768;
+export const OPENCLAW_INSTRUCTION_MAX = 32_000;
 /** The plain tree under --skills all: a dot folder, which OpenClaw's skill scan skips (dist/skill-root-discovery-C2QVZC77.mjs:44). Hybrid and router use the router's own gstack/skills, which the scan never enters because gstack/ holds a SKILL.md (:343). */
 export const OPENCLAW_ALL_TEXTS = '.gstack-skills';
 

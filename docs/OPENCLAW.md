@@ -189,8 +189,8 @@ workflows and helpers itself. Use ACP when the work should happen in a Claude
 Code session with the full install (hooks, Claude tool names); use native
 skills when the OpenClaw agent should do it. Both can be installed together.
 OpenClaw serves a registered skill's `SKILL.md` whole or refuses it, and its
-limit is 32,768 bytes when it does not know the model's context window, so a
-larger skill (review, investigate, ship and plan-eng-review among the five) is
+limit is 32,768 bytes when it does not know the model's context window
+(32,000 characters with a 100K-200K-token one), so a skill over 32,000 bytes (review, investigate, ship and plan-eng-review among the five) is
 registered as a short entry that tells the agent to read the skill's full
 `SKILL.md` in `gstack/skills/`, a plain copy of every skill that OpenClaw
 reads in pages (`.gstack-skills/` under `--skills all`).
