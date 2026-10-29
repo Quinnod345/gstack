@@ -783,6 +783,14 @@ once, plus cleanup. Each still has 120 seconds of model work. Its 17 workflow
 judges own their deadline and abort signal, with five seconds for terminal
 recording inside a ten-second Bun grace; the other 11 retain their existing
 120-second Bun timeout. Late responses cannot create records or cache passes.
+When a judge's abort signal cancels its request, `callJudge`
+(`test/helpers/llm-judge.ts`) prints one `llm-judge-aborted` JSON line to
+stderr: elapsed time, wrapper `attempts` and `retryWaitsMs` (429 waits),
+`httpRequests` and `httpStatuses` (so SDK retries show), `connectedMs`,
+`firstEventMs` and `lastEventMs`, the open `block` type, `thinkingChars` and
+`textChars`, `messageId`, `requestId` and the `reason` (at most 200
+characters). It holds counts and ids only, never content, and changes no
+request, score or verdict.
 
 The ship documentation file reserves 4,920 seconds for four 600-second cases and
 eight 300-second fault cases, run once, plus cleanup; in CI each case runs as its
@@ -967,8 +975,8 @@ with `GSTACK_FREE_RETRY_FLAKY=0`.
 A stock Ubuntu 24.04 VM differs from a GitHub-hosted runner in three ways that
 the scripts correct: the login umask is `002` (group-writable directories fail
 the CSO private-state checks), AppArmor blocks the unprivileged user
-namespaces Chromium's sandbox needs, and `clang` and `python3-venv` are absent
-(required by the Dia readiness and Python runner tests).
+namespaces Chromium's sandbox needs, and `python3-venv` is absent (required by
+the Python runner tests).
 
 VMs are named `ubirun-<owner>-<epoch>-<hex>`, plus a `-t<hours>` TTL suffix
 (below); `<owner>` is `UBI_OWNER` (set it to the thread id on a Capy machine;
@@ -1427,7 +1435,13 @@ Free-suite flake rules:
   every shard child's `GIT_CONFIG_*` pairs as a backstop, so it covers fixtures
   that inherit the environment, and `bun run scripts/ship-measure.ts free
   --backend local` measures with that environment; a fixture with its own
-  replacement env never sees the backstop.
+  replacement env never sees the backstop. Neither does the receiving side of
+  a push to a local path: git's local transport drops `GIT_CONFIG_*` from the
+  `receive-pack` it starts, so every push into a fixture's bare origin still
+  leaves a detached maintenance run in that origin. A fixture that clones such
+  an origin passes `--no-local` (`coordinatorClone` in
+  `test/helpers/ship-queue-fixture.ts`), so the clone reads it through git's
+  transport instead of copying `objects/` entry by entry.
 
 To reproduce a ledger entry, take the shard's exact file list from the CI run's
 `free-plan` artifact, then rerun it with the flaky retry off on a CI-mirrored VM:
@@ -1523,10 +1537,10 @@ on win32, drives a POSIX signal path) leaves it through a
 the file moved.
 
 Native qualification campaigns (Windows cookie extraction, Windows launch
-diagnostics, Dia on macOS) run only on dispatch of `native-qualification.yml`:
+diagnostics) run only on dispatch of `native-qualification.yml`:
 
 ```bash
-gh workflow run native-qualification.yml --ref <branch> -f mode=<cookie-native|windows-native-diagnostics|dia-native|dia-launch-comparison|dia-gui-readiness>
+gh workflow run native-qualification.yml --ref <branch> -f mode=<cookie-native|windows-native-diagnostics>
 ```
 
 ### Real-setup install fixture

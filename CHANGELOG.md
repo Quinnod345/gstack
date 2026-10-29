@@ -22,6 +22,202 @@
 - `test/fixtures/skill-md-size-allowlist.json`: the Hermes pins for `gstack-autoplan` (108,982 to 108,891) and `gstack-plan-eng-review` (128,708 to 128,655) go down to the new render sizes, as the size guard directs.
 - New `test/session-kind-marker.test.ts`: a marker-only environment (`GSTACK_SESSION_KIND=spawned`, no `GSTACK_CAPY`) gets the same soft admission from `bin/gstack-install-verdict.sh` and `lib/install-verdict.ts`. A ratchet fails when a file in `bin/`, `lib/`, `hosts/` or `scripts/` reads or sets `GSTACK_SESSION_KIND` outside its 13-file inventory; a planted-reader control and a comments-only control check it.
 
+## [1.91.309.0] - 2026-10-29
+
+**The judged review and Eng prose each give one rule where the paid judges kept finding two, and a judge that runs out of time now says what it was waiting on.** Every sample of two red panels on #3527's screens (review 40617200857, plan-eng-review 40634787316), attempt and rerun, named the same contradictions; a third red (ship, train 35 gate 40660626349) hit the 120 s judge deadline with nothing logged but "No completed model response".
+
+### Fixed
+- **`/review` Step 5.8**: an unresolved non-gate defect (an unanswered question) is recorded as `open`, so every finding has a record action. A repeat pass's reruns of superseded probes are revalidation, so they run after smoke expiry, in the same probe directory; earlier provisional QA sections link checkpoints and only the final pass runs the once-only `materialize`.
+- **`/plan-eng-review`**: the shared Voice now loads once. Eng no longer carries a near-copy whose only difference was its em-dash clause; the Scope gate's format precedence says required formats keep their em dashes.
+- **`/benchmark` Phase 6 example**: the hero image recommendation no longer suggests lazy-loading (that delays the largest paint) and names one remedy, as the rule under it asks.
+
+### Changed
+- **Judge cancellations leave evidence.** When a judge request is cancelled (the workflow judge deadline), `callJudge` prints one `llm-judge-aborted` line: elapsed time, wrapper attempts and 429 waits, HTTP requests and statuses (so the SDK's own retries show), connection, first and last stream event times, the open block type, thinking and text character counts, message and request ids, and the reason (at most 200 characters). Counts only, never content; an observer that throws cannot change a judge result. Deadlines, effort, samples and thresholds are unchanged.
+
+### Tests
+- `test/review-workflow-clarity.test.ts` and `test/eng-scope-entry-ap.test.ts` pin the repaired rules; both fail with the prose change stashed.
+- `test/llm-judge-stream.test.ts` and `test/llm-judge-abort.test.ts` replay a stream cancelled mid-thinking, a stream with no events, one cancelled after headers, an SDK-retried 429, a cancelled 429 wait, an event the observer cannot read and an overlong reason, with no-abort controls; each fails with the helper change stashed. `test/workflow-judge-cache.test.ts`'s SDK stream stand-ins gain the real stream's `on()`.
+- Focused paid judge runs: review 4/4/4 at 1bdc4ce and again at 3463250, plan-eng-review 3/5/4 at 1bdc4ce ($0.18).
+
+### Gate integrity
+- No threshold, sample, trial, deadline or case-kind change. `scripts/harness-version.json` records the `llm-judge.ts` change as non-behavioral (no series reset). Generated SKILL.md size pins for review and plan-eng-review were lowered to their new sizes on every host.
+
+## [1.91.308.0] - 2026-10-29
+
+**`gstack-restamp` no longer cuts a four-part package.json version to three parts in a repo whose convention is four.** On garrytan/gbrain#7878, `/ship` restamped gbrain's `package.json` to `"0.60.483"` beside `VERSION` `0.60.483.0`; gbrain requires the two to match and its CI version gate fails when they drift, so the stamp had to be reverted by hand. The version stage called `gstack-version-bump write`, which always stores the npm-valid three-part form in the manifest (decision 11, which is why gstack's own `package.json` reads `1.91.298`).
+
+### Fixed
+- **`lib/restamp.ts`**: the version stage keeps the full version in the manifest when the policy lists it in `stamp_paths` or `stamp_files` and the base's copy holds four parts, and the stage detail says so (`wrote 0.60.483.0 (package.json keeps four parts: …)`). The form is read at the base, like the policy, so a branch an earlier restamp already cut to three parts goes back to four. Every other repo, gstack included, still gets the npm-valid form, and a four-part manifest the policy does not list still migrates to three parts as decision 11 says.
+- **`bin/gstack-version-bump write`**: new `--manifest-form npm|full` (default `npm`); `full` writes the version as given to the manifest and its npm lockfiles. It has no effect when the version path is itself a JSON manifest.
+
+### Tests
+- `test/restamp-four-part-manifest.test.ts`: a gbrain-shaped fixture (four-part `VERSION` and `package.json`, the manifest in `stamp_files`, bun, no npm lockfile) restamped from an unstamped branch and from a branch already carrying its stamp (both failed before the fix with `"0.60.483"`), from a branch an older restamp cut to three parts, and with the manifest listed through `stamp_paths`. gstack's shape (three-part manifest and lockfile) and an unlisted four-part manifest keep their current results.
+- `test/gstack-version-bump.test.ts`: `--manifest-form full` keeps four parts in the manifest and lockfile; an unknown form exits 2 before anything is written.
+
+## [1.91.307.0] - 2026-10-29
+
+**/ship now reviews in proportion to what the diff can break: light, standard or full depth.** A diff with 50 or fewer runtime lines gets one batched specialist plus the native adversarial pass, a larger runtime diff gets the class's specialists scoped to their hunks, and gate code or any classifier error gets the full review as before. The receipt records the depth and the queue refuses a receipt below what the head needs. Before this, a 12-line fix paid for the same reviewer fan-out as a change to the merge gate. The backtest that would have let light depth drop the adversarial pass was inconclusive (9 light-eligible PRs, 5 with attributable findings, below the 15 the plan required), so light keeps it.
+
+### Added
+- **Review depth** (`lib/review-depth.ts`, `lib/review-collect.ts`, `gstack-review-plan`): `REVIEW_DEPTH:` (depth, runtime lines, the rules hash, reasons), `GATE_SCAN:` bound to HEAD, one `DEPTH_ERROR:` per input that fails closed to full (with the input, the cause and the repair), and per-reviewer `DIFF_CMD:` pathspecs. Runtime lines leave out docs, tests and outputs registered with a command in the base branch's `.gstack/generated.json`, read at the base commit. `--depth-floor standard|full` only raises the depth. A fixed or open blocker, or a CRITICAL, raises light to standard for the rest of the invocation.
+- **Receipt fields**: `gstack_version` and `review_depth` (`{ depth, class, runtime_lines, rules, base, registry, gate_scan: { tagged, head }, reasons }`), computed at the checked-out head. `write --head` must be HEAD. `review_loop_exception` (`write --review-loop-exception`) records an owner-accepted stop after a fix-check edit with the fix-check's head and findings, and the PR body repeats its line word for word (Fixes #3559).
+- **Queue checks** (`gstack-ship-queue ready`, `train build`): the depth the head needs is recomputed from git and a lower receipt is `QUEUE_RECEIPT_DEPTH_RAISED`, with the receipt's depth, the required depth, reasons and inputs on a `REVIEW_DEPTH:` line. A malformed owner exception, a body that dropped its line, or a fix-check head that is not the bound head or its ancestor is `QUEUE_RECEIPT_EXCEPTION_INVALID`. The queue reads the same committed range as the writer and trusts a recorded gate scan only when it names the full bound commit. A receipt with neither new field predates depth receipts and is accepted as legacy.
+
+### Changed
+- **Carry and depth**: a carry recomputes the depth at the new head, rebinds the gate scan, and refuses when the new head needs more (a test change that skips a test is gate class). It also refuses a `--head` other than the checked-out HEAD, a receipt with `gstack_version` but no `review_depth`, and an owner exception that no longer stands, since the queue would refuse each of them. Tracked edits in the checkout make the write-time gate scan unavailable, which records `full`.
+- **`gstack-diff-scope <base> --head <sha>`**: the scope signals for the committed range only, with no working-tree or untracked files; an unknown sha is `SCOPE_ERROR=no_head` and a missing merge base `SCOPE_ERROR=no_merge_base`.
+- **`.gstack/ship-policy.json`**: `min_gstack_version` rises from 1.91.146.0 to 1.91.299.0.
+
+### Tests
+- `test/ship-receipt-depth.test.ts`: write records the depth bound to HEAD and refuses another `--head`. The queue refuses light on a standard head, a current receipt with no depth and an unbound gate scan, and accepts a legacy receipt. A plain test change carries and rebinds the scan, while a skipped test refuses the carry. The review-loop exception is refused without a fix-check, with a foreign head or without its body line, and the queue refuses a body that dropped the line.
+- `test/review-depth.test.ts`, `test/review-collect.test.ts`, `test/review-plan-cli.test.ts`: the depth matrix, the fixed light set, fail-closed errors and the registry read at the base commit. A `package.json` version line that also carries other keys is not stamp-only.
+- `test/diff-scope.test.ts`: `--head` reads the committed range and ignores working-tree edits, and refuses an unknown sha.
+
+## [1.91.306.0] - 2026-10-29
+
+**A /ship receipt now survives a base merge that only regenerates outputs, and a rebase onto the tree it reviewed.** On gstack-evals, two full /ship reruns came from a merge of main that changed a generated file's diff (U1 paid about 28M tokens for its rerun), and one came from a rebase whose tree was byte-identical to the reviewed one (about 60M). Each re-reviewed code the receipt already covered. For crews the rule is now a single line. Merge main into a reviewed branch, and never rebase it.
+
+### Changed
+- **`gstack-ship-receipt carry`**: an output of an entry with a `command` in origin/<base>'s `.gstack/generated.json` counts as `generated`, not product, when the `--pregate` result for HEAD lists it under the `regen` check's new `proven` paths and that check ran the same base registry. Without that evidence, for a file that matches an output glob but that the command never writes, and for an entry with no command or one only the branch registers, the output stays product.
+- **`gstack-pregate` `regen` check**: a fresh entry with touched outputs runs its command a second time in the scratch worktree with those outputs deleted, and records the ones it recreates byte-identically as `proven`. The verdict still comes from the first run, so a generator that reads its own output passes as before and proves nothing.
+- **Carry across rewritten history**: `write` records `head_tree` and `product_patch_id`, and each carry rebinds both and keeps earlier trees in `carry.trees`. A head that is no longer an ancestor carries only when its tree is one the receipt covers and its product patch-id against the current base matches; it records `carry.ancestry: rewritten` and needs no old commit, so a fresh clone carries too. A different tree is the new `RECEIPT_CARRY_TREE_MISMATCH`. The reviewed tree on a base that moved under it is `RECEIPT_CARRY_PRODUCT_CHANGED`.
+- **Docs**: docs/ship-policy.md#receipt-carry opens with a four-row table: merge with the product unchanged, merge that changes product, rebase onto a covered tree, and any other rebase. docs/captain.md and captain/templates/CREW.md say to merge main in and never rebase a reviewed branch, and the troubleshooting entries for the carry refusals match the new rules.
+
+### Tests
+- `test/ship-receipt-carry-rewrite.test.ts`: a rebase onto the covered tree carries from a fresh clone that never fetched the old head, a different tree refuses with `RECEIPT_CARRY_TREE_MISMATCH`, the reviewed tree on a moved base refuses, and a merge that changes only a registered output's diff carries with a pregate whose regen check proved it and refuses without one or with a pregate from another registry, and a hand-written file under an output glob that the generator never writes stays product.
+- `test/gstack-ship-receipt.test.ts`: the written receipt's key order includes `head_tree` and `product_patch_id`.
+
+## [1.91.305.0] - 2026-10-29
+
+**You can now render gstack with whole skills, skill sections, model overlays or preamble pieces left out, as a byte-exact tree with a lock file, so an eval can measure which instructions a model actually needs.** Garry asked for "95% of the outcome but with 50% of the token use", and the free ceiling measurement on train gate run 40705984271 found skill text is about 21% of billed eval cost (35 of 103 tests), so trimming it per model is worth measuring. Nothing changes for anyone today. Every model rung and unknown models load `full`, and the committed SKILL.md files are byte-identical to the previous release. A smaller loadout ships only after GSTA-2 measures it.
+
+### Added
+- **`bin/gstack-modules`**: `list` prints every module id (`skill:`, `section:`, `overlay:`, `preamble:`) with its source and pin; `validate` checks `modules/loadouts.json`; `render --host <h> (--loadout <name> | --modules full,-<id>,+<id>) --out-dir <d>` renders one loadout with the same `--model`, `--install-root` and `--plan-mode` setup uses, and writes `loadout.lock.json` (spec sha256, excluded ids, per-file sha256 and bytes).
+- **`modules/loadouts.json`** (with a JSON schema): rungs `frontier`, `strong`, `mid`, `light`, the model-id table, pinned modules and named loadouts. Every rung and `unknown` map to `full`.
+- **Safety pins**: the start command, plan-mode rules, the question format, completion status, the unattended profile, /ship's review army and adversarial pass, the router and `/gstack-upgrade` can never be excluded, directly or by excluding the skill that holds them (`MODULE_PINNED`).
+- **Renders refuse instead of guessing**: an unknown loadout or module, a malformed spec, a rendered file that still points at an excluded skill or section (`MODULE_EXCLUSION_UNSAFE`), or an `--out-dir` that an earlier render did not write (`RENDER_DEST_NOT_OWNED`) each exit 2 with a fix line and a `docs/troubleshooting.md` anchor, and never fall back to `full`. A failed render leaves the earlier one in place.
+- **`docs/loadouts.md`**: terms, commands, how to build an eval arm, and how a loadout changes (only with a cited GSTA-2 run).
+
+### Changed
+- `gen:skill-docs` accepts `--loadout` and `--modules` with an `--out-dir` outside the checkout; a selection with exclusions aimed at the committed tree is refused. Excluded sections render a one-line `Not loaded in the <loadout> loadout` stub, and `{{IF_SECTION:<id>}}` guards remove skeleton text that belongs to a section (office-hours' second-opinion offer and visual-design phase, plan-design-review's review-sections self-check). `gstack/llms.txt` lists only the skills a render includes.
+
+### For contributors
+- New `test/module-loadouts.test.ts` covers the manifest, selection, pins, the render filter, the CLI and the byte-identical `full` render. `.gstack/pregate.json` allows the two new `modules/` files as strays. `test/gen-skill-docs-prune-stale.test.ts`'s copied fixture now links `scripts/modules.ts`; no assertion, threshold or budget changed.
+
+## [1.91.304.0] - 2026-10-29
+
+**Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
+
+### Fixed
+- **`bin/gstack-capy-install`**: an ok run keeps what an earlier ok install certified for the same checkout, project, HEAD and Bun. The verdict's `required` list becomes the union, pins count as planning-only only when both runs skipped them, and `for` lists every workflow (`for=ship,document-release`). The installer says so in one line. A failing run, a new HEAD or another Bun still replaces the verdict, and the review-voice profile still never narrows a fuller one.
+
+### Tests
+- `test/gstack-capy-install.test.ts`: `--for ship` then `--for document-release` leaves one ok verdict that admits both workflows through `verdictProblem`; a `--check --for ship` keeps it; after a new commit, `--for document-release` replaces it and ship is refused again. It failed before this change.
+
+## [1.91.303.0] - 2026-10-29
+
+**`gstack-pr-shots` no longer edits your `.gitignore` in the middle of /ship, so the pregate stays fresh and the ship receipt gets written.** When a repository tracks files under `.gstack/` (`pregate.json`, `ship-policy.json`), git does not read `.gstack/` as ignored, and the browse daemon that `gstack-pr-shots` starts appended `.gstack/` to the tracked `.gitignore`. The tree changed after pregate and the receipt writer refused with PREGATE_STALE (#3560, seen on gstack-evals#13).
+
+### Fixed
+- **`browse/src/config.ts`**: the browse state dir still writes its own `.gstack/.gitignore` (`*`), and when git does not already ignore `.gstack/` the line goes to the repository's `info/exclude` (resolved with `git rev-parse --git-path`, so linked worktrees share it). The project's `.gitignore` is never written. Outside a git repository nothing is written beyond the state dir.
+
+### Tests
+- `test/pr-shots.test.ts`: a repository that tracks `.gstack/pregate.json` runs `gstack-pr-shots` with a browse stub that runs the daemon's real state-dir setup; the `gstack-wtree` fingerprint and the `.gitignore` are unchanged afterwards. It failed before this change.
+- `browse/test/config.test.ts`: the cases that pinned the `.gitignore` append now pin `info/exclude`: written once, no duplicate, a missing trailing newline added, `info/` created when absent, a warning in `browse-server.log` when it cannot be written, and nothing written outside a repository.
+
+## [1.91.302.0] - 2026-10-29
+
+**Three flaky gate cases from the 2026-10-28 daily flaky pass are repaired: shared-libs-review-index-flags, ship-exploratory-late-input (with ship-exploratory-plan-checks, which failed the same way), and the real-Chromium cookie-auth positive case.** Each red was diagnosed from its captured run before the fix, and each repair has a free test that fails without it.
+
+### Fixed
+- **Shared-code reuse no longer lets a review rewrite the index flags it checks.** In train gate 40619718717, the reviewer ran `git update-index --really-refresh` while gathering evidence. That cleared the assume-unchanged flag the checker reads, so the trial's prerequisites went stale. Step 1 of the /review and /ship shared-code reuse section now says evidence gathering is read-only and names that command. Nearby wording was tightened so the section keeps its exact size.
+- **The /ship exploratory-QA cases follow Step 9's review plan again.** Since #3527, Step 9 runs `gstack-review-plan --base main`. The fixture refused that command (paid screen 40707142223, both ship-exploratory-plan-checks trials) and never said that the plan's adversarial-native and outside-voice lines belong to Step 11, which is outside the fixture's Steps 8–9 excerpt. In gate 40664336141, ship-exploratory-late-input reported pass while listing that Step 11 pass as remaining work. Once the plan ran, it dispatched the state-machines specialist, and review-army tells the parent to write the merge-base sha into that specialist's diff command. The fixture refused `git diff <merge-base sha>`, which failed both ship-exploratory-unavailable trials in this PR's screen 40737741454.
+- **The real-browser cookie-auth checks no longer time out under load.** The positive case and the rejection cases that return early now use the product's default 15 s limit instead of a 400 ms test-only value. That value timed out twice on Windows and once on a Ubicloud VM.
+
+### Gate integrity
+- `test/helpers/qa-callers-fixture.ts`: the caller command interface now admits the `gstack-review-plan` forms ship Step 9 names (`--base main` with its `--pass`, `--last` and finding flags, or `--fix-check-prompt` with literal file arguments), only at the fixture's installed helper path. Pipes, other arguments, other binaries and calls without the fixture's runtime are refused, and `test/qa-caller-review-plan.test.ts` checks these as negative controls. The ship prompt names the Step 11 boundary. The interface also admits the fixture's own merge base (at least 7 hex characters) as a literal diff base, bare or in review-army's `DIFF_BASE=<sha> && git diff "$DIFF_BASE"` specialist form, and the prompt declares it. Any other sha, a shorter prefix, other Git options and composition are still refused. No threshold, trial count, case kind or timeout changed.
+- `browse/test/cookie-auth-verification.test.ts`: GStack Minder approved dropping the shared `timeoutMs: 400`, which came from a84b0b5b6 (#2964) as a fixture value no product path uses (`--verify-auth` callers run under `MAX_TIMEOUT_MS` 15000). The identity mismatch, missing and ambiguous cases keep 400 ms because they resolve only at the deadline, and the 15 s default would exceed bun's 5 s test timeout. The explicit 100 ms, 30 ms, 60 s-cap and invalid-timeout tests are unchanged.
+- New free tests: `test/qa-caller-review-plan.test.ts` (replays both 40707142223 captures and both 40737741454 ship-exploratory-unavailable captures, and runs the real plan for all four ship cases) and `test/shared-libs-index-flags-readonly.test.ts` (replays the captured refresh against the assume-unchanged fixture, with a read-only control).
+- `scripts/lib/windows-curation.ts`: `test/shared-libs-index-flags-readonly.test.ts` is curated off the Windows subset. Its fixture starts the review through `bin/gstack-review-log`, a bash script, which windows-latest cannot launch (Windows Free Tests run 40727825859, shard 5).
+
+## [1.91.301.0] - 2026-10-29
+
+**Four paid gate cases that went red on 2026-10-28 without a product defect now pass on the runs that failed them.** Each repair replays the failing run as a free test that fails without it.
+
+### Fixed
+- **plan-design-with-ui-scope**: the Design focus question counts when it puts "review all 7 areas or focus" in its rated title and letters its options ("A) Review all 7 areas"), as gate 40664336141 asked it.
+- **plan-review-report**: the case turns the default-on outside voice off with `codex_reviews: disabled`, the skill's documented switch. In gate 40660626349 both reds ran out of the 20-turn cap before writing the report, and the outside voice had used 4 of their 21 turns. The cap is unchanged.
+- **shared-libs-review-path-eligibility**: a Bash read that printed a whole evidence file counts even when a later command in the same call failed, as one did in run 40617200857.
+- **office-hours-brain-writeback**: the fake `gbrain` saves a page piped on stdin, the form the SAVE_RESULTS template shows, as well as `--content`.
+
+### Gate integrity
+- `designFocusBoundary` (test/skill-e2e-plan-design-with-ui.test.ts) accepts the all-7 offer in the rated title line and rejects issue-numbered option sets. Seven new negative controls cover a missing rating, a /7 rating, no focus, another count, an offer below the title, issue-numbered options and a single option.
+- `hasTrustedSharedLibsCheck` (test/helpers/shared-libs-review-start-evidence.ts) accepts an errored Bash read only in a multi-command call whose output holds the exact evidence source. Start, check and finish calls must still succeed. The existing "errored caller read" control still fails, and five new controls do too.
+- The plan-review-report case input now disables the outside voice. Outside-voice coverage is not part of this case's assertions.
+
+## [1.91.300.0] - 2026-10-28
+
+**Three free tests that went red at random now fail only when the code under test is wrong.** Today's flaky-test pass (GSTA-139) traced two Linux reds to their fixtures and fixed a third that was certain to fail under load. No product code changed.
+
+### Fixed
+- **`test/ubicloud-runner.test.ts`**: the watchdog cases expected exit 124 but got 2 or 0, about one run in 62. The cause was not timing. The fake `ssh` had a `*-O*` case arm, meant for `ssh -O exit` but never matched by it, and it caught any remote command whose checkout path held `-O`. That happened whenever the fixture's temporary directory name started with `O`. The arm is gone, and a new test runs a checkout named `ubi-run-O1x2y3`.
+- **`test/ship-queue-train.test.ts`, `test/gstack-ship-queue.test.ts`**: `coordinatorClone` now clones the fixture origin with `--no-local`, through git's transport like a real clone of GitHub, instead of copying `origin.git/objects` file by file. Every push into the fixture origin leaves a detached `git maintenance run --auto` there. The local transport drops the shard's `GIT_CONFIG_COUNT` maintenance-off setting, so that process still creates and deletes `objects/maintenance.lock` after the push returns. Two runs failed with `failed to copy file … No such file or directory` on a loose object. The process that removed that object was not identified; the transport clone never lists the directory at all.
+- **`test/qa-fix-loop-fixture.test.ts` late-timeout**: the scenario ran its real setup inside a 1000 ms mocked work budget under a 1160 ms deadline, so on a loaded machine the attempt never started (0 of 10 runs under 24 busy loops). It now uses #3413's qa-only fix: the clock stands still from the test body's start until the capture begins, and the deadline is the registered 6080 ms outer budget (20 of 20 under the same load).
+
+### Gate integrity
+- `test/qa-fix-loop-fixture.test.ts` late-timeout asserts that the capture gets exactly 1000 ms, where it used to accept anything between 0 and 1000, and its test deadline is the registered outer budget rather than budget − 5000 + 80 ms. If the workflow's outer budget drops back to the bare work budget, the scenario still fails. A new `slow-setup` scenario keeps the check the old range assertion gave. A controlled clock spends 400 ms in setup, and the capture must get exactly 600 ms. If the workflow passed the whole work budget to the capture instead of what setup left, it would fail.
+
+## [1.91.299.0] - 2026-10-28
+
+**The Captain brief now says what `rec` does when a gate carries earlier decisions.** At a gate after the owner already answered some items, such as a round-cap gate, `gstack-owner-brief render --captain` listed each item's recommendation ("keep the plan as written", `rec resolves to d2a`) while `gstack-gate render` and `gstack-autoplan answer --reply rec` keep the carried answer (`d2b`). A Captain relaying the brief told the owner the opposite of what their one-word reply would record (#3546). The brief now takes its choices from the same resolver `gstack-gate render` uses.
+
+### Fixed
+- **Carried choices in the Captain brief**: each choice under "What we need from you", the header, the change-something example and the relaying agent's `rec resolves to` line use the `rec` resolution from `parseReply`, given the answers already recorded at this gate the way `gstack-autoplan answer` reads them. A carried item shows the owner's earlier answer marked `(your answer at gate_rev N, carried forward)`, an item answered earlier at this gate is marked `(your answer at this gate)`, and the header says how many answers `rec` keeps.
+
+### Tests
+- `test/captain-brief.test.ts` drives a fixture autoplan run to a round-cap gate with three carried decisions, renders `gstack-gate render` and `gstack-owner-brief render --captain` for it, and asserts the same `rec` resolution and choice labels. A second case records a partial answer at that gate and checks the brief's `rec` against what `gstack-autoplan answer --reply rec` then records. The negative control strips the carried decisions and expects both renders to fall back to the recommendations.
+
+## [1.91.298.0] - 2026-10-28
+
+**Dia is gone from gstack.** `/setup-browser-cookies` and `cookie-import-browser` no longer list Dia as a cookie source, and the Dia qualification harness is deleted. That harness was a set of macOS campaigns that never qualified a native import, and its `dia-launch-comparison` free test was failing the merge train on Ubicloud runners. Cookie import from Comet, Chrome, Chromium, Arc, Brave, Edge, Opera and Opera GX is unchanged.
+
+### Removed
+- **Dia as a cookie source**: the registry entry, the `dia` alias, and every Dia mention in the `cookie-import-browser` description, the browse and setup-browser-cookies skills, `gstack/llms.txt`, README, BROWSER.md, ARCHITECTURE.md, CONTRIBUTING.md, docs/skills.md and docs/TESTING_INTERNALS.md.
+- The `dia-native`, `dia-launch-comparison` and `dia-gui-readiness` modes are gone from `native-qualification.yml`, along with their job, the four `.github/scripts` files behind them, and their three `browse/test` files. Those tests also leave the free-test duration seed and the test typecheck baseline.
+- **`clang` on the Ubicloud free-suite VM**: only the Dia GUI readiness test compiled C on Linux.
+
+### Tests
+- The cookie tests that used Dia as their macOS fixture browser now use Arc, which has the same `User Data` layout and Keychain shape: numbered-profile discovery, Keychain denial, the credential deadline, the Node bundle import and the picker UI. The historical cookie-workflow approval fixture adds one reverse edit so it still rebuilds the approved prompt byte for byte. No threshold or allowlist changed.
+
+## [1.91.297.0] - 2026-10-28
+
+**The terminal agent on Windows no longer waits on PowerShell to learn its own start time, so it boots in about a second and a slow PowerShell can no longer leave it without an identity.** Every agent boot ran `powershell.exe Get-CimInstance` with a 2 s timeout, twice when started standalone. On a loaded `windows-latest` runner one launch took 0.94 s at the median and up to 10.8 s, so agent boot took 2.4 to 2.8 s at the median and 5.1 s on a runner's first boot, past the owner-watchdog test's 5 s window. Measured again after the change under the same load: 0.86 to 0.91 s at the median, 1.18 s at most, 120 of 120 boots inside the window.
+
+### Fixed
+- **`browse/src/terminal-agent-control.ts`**: under Bun the Windows start time comes from `GetProcessTimes` in-process and is written as the same `/Date(<ms>)/` value PowerShell's `CreationDate` gives (147 of 147 processes matched), so records from earlier releases and from the Node daemon, which keeps the PowerShell reader, still compare. The kill-time check still reads the command line through PowerShell, and a process is stopped only when it carries the record's `--agent-gen`. On Windows a start time that disagrees between the two readers no longer reads as gone when the live process carries that generation or its command line cannot be read, so no second agent starts beside it.
+
+### Tests
+- `browse/test/process-liveness-windows.test.ts`: the in-process reader, the Node fallback, the kill-time command-line check, a reader disagreement and the unreadable path (never signalled, never gone, blocks a second agent), plus two Windows-only cases: the in-process value equals PowerShell's `CreationDate`, and a live agent whose identity cannot be read blocks a second one.
+- `browse/test/path-security-realpath.test.ts` builds its 8.3 alias with `GetShortPathNameW` instead of a PowerShell launch that stalled for 30 s in Windows Free Tests 40624015029 and was reported as "8.3 short names are disabled". A failed lookup now fails the test instead of skipping it.
+- `browse/test/cookie-import-native-job.test.ts` prints the Restart Manager receipt when the owner assertion fails, so the next red names its cause.
+
+### Gate integrity
+- Test 5 in `process-liveness-windows.test.ts` expected the PowerShell mock's `fixture-owner-start` as the owner start time on every platform. On Windows that expectation followed the old implementation, so it moved with the product. It now requires the in-process value, equality with a real read, and no PowerShell query for the owner. The Linux and macOS assertion is unchanged.
+
+## [1.91.296.0] - 2026-10-28
+
+**The docsync gate stops failing ship-docsync-current and ship-docsync-store when the agent asks the docs helper for its usage in the middle of a line of reads.** Five red paid trials since 2026-10-27 each failed on a single refused line. In four, the agent ended a line of reads with `gstack-docs-candidate --help` (screen 40558235014, gate 40600731931, and screen 40627127462 twice). In the fifth, gate 40643690306, the line included `git tag`. v1.91.185.0 tried to stop the first slip by moving the "own Bash call" rule into the sentence that names `--help`, and the slip came back four times. The helper's `--help` prints its usage and returns before it touches Git or any file, so refusing it protected nothing. The 2026-10-27 backstop red (40515158924, `toContain`) ran on a tree from before #3516, which had already fixed it.
+
+### Fixed
+- **`test/helpers/docsync-observer.ts`**: a line of reads may now include the installed candidate's `--help`, either alone or after `snapshot` or `compare`, optionally with `2>&1` or `2>/dev/null`. It counts as a neutral read, the same way a joined Git read does, but never when it is fed by a pipe and never in a line that also runs `cd`. `git tag`, `git tag -l` and `git tag --list` are now accepted as Git reads, alongside the branch listings #3516 added. A tag operand or any other option is still refused.
+- **`test/helpers/docsync-interface.ts`**: the fixture interface declares both changes. It names the candidate's `--help` as the one exception to the own-call rule, and it adds tag listings to the Git read list.
+
+### Tests
+- `test/docsync-command-grammar.test.ts` replays the five captured lines, which were refused before this change, and checks that each is now accepted, while the same line with `; git add app.ts` appended is still refused. Negative controls that stay refused: pipe-fed, `| sh`, `>` redirect and `cd` forms; `snapshot` and `compare` joined to reads; `-h`, `--version` and `--help snapshot`; the `~` and foreign helper paths; the lifecycle helpers' `--help` joined to reads; and 13 tag writes or filtered listings.
+
+### Gate integrity
+- This is a gate edit, because the docs detector now accepts more lines. The test that pinned the joined `--help` as refused now expects it to be accepted. Focused paid trials at e967634: ship-docsync-current PASS ($0.84; its agent did join `--help` onto a line of reads) and ship-docsync-store PASS ($0.84).
+
 ## [1.91.295.0] - 2026-10-28
 
 **Deleting or renaming a test no longer fails pregate with PREGATE_NO_LANE.** A PR that removed a test file, or renamed one, failed `lanes` because the removed path had no test lane of its own, so cleanup PRs needed a hand-written `dependencies` entry to pass (#3529). Pregate now accounts for a removed test the way it accounts for an edit. A renamed test runs under its new name, a deleted test runs the remaining tests of the files it exercised, and either one runs the tests of any file that still names it, such as a curation list. Every waived test is printed on its own line, so the reason is visible in the gate output. Removing any other file still needs a lane, as before.
