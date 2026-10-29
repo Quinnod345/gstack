@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+**A /ship token cap now projects each step and reviewer from what the run has actually spent, so real caps stop refusing work that costs a fraction of the old guess.** On GSTA-152 a 29.28M cap refused its third reviewer because every dispatch was projected at 7.43M while real ones cost 0.23 to 1.02M; on GSTA-2 an 8M cap stopped before Step 6 after Steps 1 to 5 cost about 0.27M each, because every step was projected at 2.25M.
+
+### Fixed
+- **`gstack-ship-budget check`** projects steps and dispatches with the run's own factor once it has measured one: the largest actual/prior ratio of its last three measurements, times 1.5. Before the first measurement the calibrated prior applies, as before. The default tail reserve scales with the step factor; the stop overhead and an explicit `--reserve` do not.
+- **Reviewers admitted one at a time no longer stay reserved.** `check --returned <id>` settles the reviewers that came back, `gstack-review-log --finish` settles every dispatch reservation of its step, and a check that moves to the next step settles the dispatches of the step before. `settle` takes `--reading`.
+- Charges the meter cannot see (`settle --unknown`, a Claude-metered outside voice) are booked at their reservation and never measured, so they cannot shrink the dispatch factor.
+- `gstack-ship-budget handoff` holds back the same calibrated reserve as `check`, so a `verdict=delegate` is always one the handoff admits.
+
+### Changed
+- The `BUDGET:` line adds `calibration=step:<f|prior>,dispatch:<f|prior>`. Each measured reservation prints `DRIFT: … projected=<n> actual=<n> ratio=<r>`, and `close` prints `BUDGET_DRIFT:` totals. docs/ship-budget.md has a Calibration section.
+
+### Tests
+- `test/ship-budget-projection.test.ts` replays GSTA-2 (an 8M cap now reaches Step 6.5 and still stops with room to stop) and GSTA-152 PR B (the 29.28M refusal is admitted and the run stops before the cap), and covers the settle points, unseen charges and the delegate/handoff boundary. The first 8 tests failed at ad8e12d; the 3 review-fix tests failed at f30c33f.
+
 ## [1.91.319.0] - 2026-10-29
 
 **`gstack-pregate sealed` no longer prints a line that reads like a push confirmation.** On gstack-evals#29 the lane read `pushed aeb2413` in the `SEALED:` line as the push landing, while the remote stayed at 9036ab1 (#3565). `sealed` never pushes: it checks the commits a push would publish. `pushed <sha>` was its label for the commit whose `sealed` policy it read beside the base branch's.
