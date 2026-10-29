@@ -499,16 +499,19 @@ jobs:
       - name: DIAG chromium sandbox on this image
         run: |
           set +e
-          grep -A1 'Runner Image' /dev/null
           echo "restrict_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns) profiles=$(sudo aa-status --profiled 2>/dev/null)"
-          chrome=$(bun -e 'import { chromium } from "playwright"; console.log(chromium.executablePath())')
+          chrome=$(bun -e 'import { chromium } from "playwright"; import { realpathSync } from "node:fs"; console.log(realpathSync(chromium.executablePath()))')
           d=$(mktemp -d)
-          timeout 20 "$chrome" --headless=new --user-data-dir="$d/a" --dump-dom about:blank 2>&1 | head -12; echo "plain-before exit=${PIPESTATUS[0]}"
-          timeout 60 bun test browse/test/cookie-import-native.test.ts -t 'pipe smoke' 2>&1 | tail -4; echo "smoke-before exit=${PIPESTATUS[0]}"
+          timeout 20 "$chrome" --headless=new --user-data-dir="$d/a" --dump-dom about:blank 2>&1 | grep -v dbus | head -25; echo "plain-before exit=${PIPESTATUS[0]}"
+          timeout 60 bun test browse/test/cookie-import-native.test.ts -t 'pipe smoke' 2>&1 | tail -3; echo "smoke-before exit=${PIPESTATUS[0]}"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile gstack-playwright-chromium %s flags=(unconfined) {\n  userns,\n}\n' "$chrome" | sudo tee /etc/apparmor.d/gstack-playwright-chromium
+          sudo apparmor_parser -r /etc/apparmor.d/gstack-playwright-chromium; echo "parser exit=$?"
+          timeout 20 "$chrome" --headless=new --user-data-dir="$d/p" --dump-dom about:blank 2>&1 | grep -v dbus | head -5; echo "plain-profile exit=${PIPESTATUS[0]}"
+          timeout 60 bun test browse/test/cookie-import-native.test.ts 2>&1 | tail -3; echo "file-profile exit=${PIPESTATUS[0]}"
+          sudo apparmor_parser -R /etc/apparmor.d/gstack-playwright-chromium; sudo rm -f /etc/apparmor.d/gstack-playwright-chromium
+          timeout 60 bun test browse/test/cookie-import-native.test.ts -t 'pipe smoke' 2>&1 | tail -3; echo "smoke-unloaded exit=${PIPESTATUS[0]}"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          unshare -Ur true && echo "unshare userns OK" || echo "unshare userns FAILED"
-          timeout 20 "$chrome" --headless=new --user-data-dir="$d/b" --dump-dom about:blank 2>&1 | head -5; echo "plain-after exit=${PIPESTATUS[0]}"
-          timeout 60 bun test browse/test/cookie-import-native.test.ts 2>&1 | tail -4; echo "file-after exit=${PIPESTATUS[0]}"
+          timeout 60 bun test browse/test/cookie-import-native.test.ts 2>&1 | tail -3; echo "file-sysctl exit=${PIPESTATUS[0]}"
           exit 1
       - name: Run free suite
         run: xvfb-run -a bun run test:free --ci-run "$RUNNER_TEMP/free-plan.json" --shard ${{ matrix.shard }} --result "$RUNNER_TEMP/free-results/shard-${{ matrix.shard }}.json"
