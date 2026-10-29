@@ -1566,11 +1566,19 @@ process has exited never blocks, and neither does a stale one: each lease
 records its process's start identity, so a pid reused after a reboot or a
 machine wake (GBRA-105's lease named pid 379, which had become dbus-daemon)
 is reclaimed instead of blocking. The upgrader's own session (the pid chain it
-runs under) never counts.
+runs under) never counts for `bin/gstack-upgrade` run by hand. A Capy install
+in install mode (`bin/gstack-capy-session`) counts it while that lease is under
+120 minutes old: an install run from inside a workflow that holds the lease
+(/ship's docs step, #3571) prints `SELF_UPGRADE: skipped (a gstack run in this
+session holds a workflow lease on this installation: pid <p> (<age>m
+<command>), so the upgrade waits until the lease is 120 minutes old; fix:
+<checkout>/bin/gstack-upgrade once the run ends (UPGRADE_BUSY))` and leaves the
+checkout where the run started. Each `gstack-skill-start` renews the lease.
 
 **Fix.** Wait for those sessions to finish (`bin/gstack-lease list` shows
 every lease with its age and `alive|dead|stale`; a holder is named as
-`pid <p> (<age>m <command>)`), then re-run `bin/gstack-upgrade`.
+`pid <p> (<age>m <command>)`), then re-run `bin/gstack-upgrade`. For the
+session's own run, run the printed `bin/gstack-upgrade` after the run ends.
 When you know they are idle, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
 proceeds. At a Capy session start the same refusal appears as
 `SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`,
@@ -1729,8 +1737,11 @@ restate them. Rotate the secret if it was real.
 
 **Meaning.** The record is kept per branch (one Capy thread ships one branch), and
 HEAD is detached or the working directory is not a git repository. Exit 3.
+From `import --autoplan <dir> --stack <b1,b2,...>` it means a listed branch exists
+neither locally nor on origin; the line names it, and no branch's record was written.
 
-**Fix.** Check out the branch the work ships from, or pass `--branch <name>`.
+**Fix.** Check out the branch the work ships from, or pass `--branch <name>`. For
+`--stack`, correct or fetch the named branch and import again.
 
 <a id="approval-record-unavailable"></a>
 ### `gstack-approvals: ... (APPROVAL_RECORD_UNAVAILABLE)`
@@ -1769,7 +1780,9 @@ import again. Imports are idempotent, so a retry never records an answer twice.
 ### `gstack-owner-brief render --captain: ... (CAPTAIN_BRIEF_INCOMPLETE)`
 
 **Meaning.** The plan is missing at least one section the brief needs: `## Before → after`,
-`## Why it matters`, `## What caused this work`, `## Big decisions`. The brief still prints,
+`## Why it matters`, `## What caused this work`, `## Big decisions`, and `## ELI5` (alias
+`## In plain words`) on a run whose `gate.json` carries an `eli5` field (gstack 1.91.305 and
+later; older runs render as before). The brief still prints,
 but it opens with "Not ready for approval" and has no reply invitation. Exit 1.
 
 **Fix.** Add the named sections to the plan (`gstack-autoplan revise --plan <file>` if
@@ -2474,6 +2487,14 @@ and an E.164 `+14155551234` still report, so the finding means the id stands
 without a run word (`the id is 40269992077`, `40269992077 failed`) or follows
 a word that is not one (`see 40323989742`).
 
+Separately, the scanner skips a bare number that is exactly a power of two
+from 2^30 through 2^49, one less than such a power, or one of eleven 32-bit
+hash and PRNG constants (Knuth's multiplicative hash, the golden-ratio
+constant, the glibc and Numerical Recipes LCGs, FNV-1a, MurmurHash2 and 3, the
+MT19937 seeder and the largest 32-bit prime; `isNumericConstant` in
+`lib/redact-patterns.ts`). Only the exact digits with no separator are exempt:
+the same digits with a `+`, spaces, dashes, dots or parentheses still report.
+
 **Fix.** Write the id next to a run word (`run 40269992077`) or as an
 `/actions/runs/` link. For anything else, rerun with `--confirm <token>`
 using the `TOKEN:` line the refusal printed; MEDIUM findings do not block
@@ -2513,6 +2534,15 @@ for a new branch pushed to a configured remote, of that remote's tracking refs.
 An address only another remote knows still reports. If the hook also printed
 `existing-email suppression was limited for this push`, it could not read the
 history in 5 seconds, so known authors may be listed too.
+
+A filename with an `@` in the package@version style is not an address and
+never reports: the part after the `@` is a version or tag (one dotless label
+or a dotted version, never a domain name) followed by file extensions no
+top-level domain uses, or a dotted all-digit version followed by
+an extension that doubles as a top-level domain (`looksLikeAtFilename` in
+`lib/redact-patterns.ts`). A file named after a real address, an address at an
+all-digit domain and an address whose top-level domain doubles as a file
+extension still report.
 
 **Fix.** Remove the address, or allow it for this repo:
 `git config --add gstack.redact.allowEmail <address>`. If it is your own
@@ -3238,7 +3268,10 @@ cannot be downgraded; every other check id in `warn` is honoured only from the
 base branch's copy or the user-owned file. For the user-owned file, edit it
 directly at the path the message names. A user file inside the repository, or
 reached through a symlink into it, is ignored rather than read (`--explain`
-names it).
+names it). An unknown `sealed` key that a newer gstack defines (such as
+`allow_paths` or `case_insensitive`) means this machine's gstack is older than
+the policy: upgrade gstack here, and raise `min_gstack_version` in the
+repository's `.gstack/ship-policy.json` before landing such a key.
 
 <a id="pregate-secrets"></a>
 ### `PREGATE_SECRETS`
@@ -3744,7 +3777,11 @@ finding: rule, `file[:line]`, commit. They never print the matched text.
 
 **Fix.** Remove the output from every published commit before the branch
 reaches the public repository (a later commit that deletes it still publishes
-it). A reviewed false positive gets one line in the base branch's
+it). A publishable file kept next to sealed data (a `MANIFEST.json` of hashes
+and counts) can be exempted from the path rules with a `sealed.allow_paths`
+glob in the base branch's `.gstack/pregate.json`; the text rules still read it
+([docs/pregate.md#sealed](pregate.md#sealed)). A reviewed false positive gets
+one line in the base branch's
 `.gstack/sealed-allow.tsv`: `rule<TAB>path<TAB>sha<TAB>reason`. A private
 destination sets `"visibility": "private"` under `sealed` in the base branch's
 `.gstack/pregate.json`. Capy's pull-request tool may not run local hooks, so
@@ -4819,8 +4856,10 @@ to HEAD: the PR body has no valid receipt, the working tree has uncommitted or
 untracked changes (a carry certifies a commit, never a tree that differs from
 it), the receipt's head left HEAD's history and the receipt records no tree to
 compare (a receipt written before `head_tree`, whose head is not in this
-clone), or git could not compare the two product diffs or read the working
-tree's status. It also refuses when an owner exception the receipt records
+clone), the PR was retargeted to the base after its stack parent landed but
+the receipt records no `product_patch_id` and `origin/<parent>` no longer
+resolves, so the reviewed range cannot be recomputed, or git could not
+compare the two product diffs or read the working tree's status. It also refuses when an owner exception the receipt records
 no longer stands, and, for a receipt from a gstack that records review
 depth, when HEAD needs a deeper review than the receipt records, `--head` is
 not the checked-out HEAD, or the receipt records `gstack_version` without
@@ -4831,9 +4870,10 @@ ready` refuses `QUEUE_RECEIPT_STALE`.
 **Fix.** Commit or stash every working-tree change, then rerun
 `gstack-ship-receipt carry --pr <n>` at the new head. When the history is
 already rewritten and the receipt predates `head_tree`, run /ship on the new
-head; next time merge the base in instead of rebasing. For a depth or
-exception refusal, run /ship on the new head (or check out `--head` and carry
-there).
+head; next time merge the base in instead of rebasing. For a retargeted stacked
+PR whose older receipt lost its parent branch, or a depth or exception
+refusal, run /ship on the new head. When `--head` is not the checked-out HEAD,
+check it out and carry there.
 
 <a id="review-loop-exception-invalid"></a>
 ### `REVIEW_LOOP_EXCEPTION_INVALID`
@@ -4872,13 +4912,18 @@ registered output the pregate's regen check proved (listed under `proven`,
 checked against the same base registry), nor part of the base merge has
 a different patch than the reviewed head had. After a rebase it means HEAD has
 the reviewed tree but the base moved under it, so the diff a reviewer would see
-is not the reviewed one. The reviewed verdict does not cover HEAD, so the
-receipt is not carried. The refusal names the changed product paths.
+is not the reviewed one. For a stacked PR retargeted to the base after its
+parent landed, it means HEAD's product diff against the base is not the range
+reviewed against the parent branch: the parent has not fully landed, or the
+branch changed since. The reviewed verdict does not cover HEAD, so the
+receipt is not carried. The refusal names the changed product paths, or for a
+retargeted stacked PR the parent branch and the base.
 
 **Fix.** Run /ship on the new head. The receipt carries only across a
 conflict-only base merge, a test-only change, release metadata, a registered
-output the pregate's regen check proved, or a rebase onto a covered tree with
-the recorded product diff, which the
+output the pregate's regen check proved, a rebase onto a covered tree with
+the recorded product diff, or a stacked PR's retarget once its parent fully
+landed on the base, which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
