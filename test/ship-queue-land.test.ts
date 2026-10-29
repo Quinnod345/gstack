@@ -15,6 +15,7 @@ import { BASE_POLICY, cleanup, makeFixtureRepo, readFile, runBin, type FixtureRe
 import { shippedBody } from './helpers/ship-queue-train-fixture';
 import { resolveReleaseConflicts } from '../lib/ship-queue-land';
 import { mergePolicy } from '../lib/ship-policy';
+import { persist, repoIdentity } from '../lib/ship-queue-train-record';
 
 const POLICY = { ...BASE_POLICY, release_tool: null, release_outputs: [], changelog_fragments: { dir: 'changelog.d' }, min_gstack_version: '1.92.0.0' };
 const repos: FixtureRepo[] = [];
@@ -58,7 +59,17 @@ function setup(policy: Record<string, unknown> = POLICY): Fx {
 }
 
 /** A PR branch from origin/main, pushed, with a fragment (or none), and a /ship receipt for its head in the shim. */
-function openPr(fx: Fx, pr: string, opts: { fragment?: string | null; edit?: (work: string) => void; shipped?: boolean } = {}): string {
+/** The READY receipt `gstack-ship-queue ready` records (a note on origin refs/notes/gstack-trains), written into the fixture's own state root. */
+function markReady(fx: Fx, pr: string, head: string): void {
+  const prior = process.env.GSTACK_STATE_ROOT;
+  process.env.GSTACK_STATE_ROOT = path.join(fx.repo.root, 'ready-state');
+  try {
+    const now = new Date().toISOString();
+    persist(fx.repo.work, [{ schema: 1, kind: 'ready', repo_key: repoIdentity(fx.repo.work).key, pr, head, base_sha: fx.repo.git('rev-parse', 'origin/main'), ready_at: now, screen: { choice: 'no-screen', policy: null, nonce: null, run: null, merge_sha: null }, updated_at: now }]);
+  } finally { if (prior === undefined) delete process.env.GSTACK_STATE_ROOT; else process.env.GSTACK_STATE_ROOT = prior; }
+}
+
+function openPr(fx: Fx, pr: string, opts: { fragment?: string | null; edit?: (work: string) => void; shipped?: boolean; ready?: boolean } = {}): string {
   const { repo } = fx;
   repo.git('checkout', '-q', 'origin/main', '-B', 'pr-' + pr);
   fs.writeFileSync(path.join(repo.work, 'pr-' + pr + '.txt'), pr + '\n');
@@ -72,6 +83,7 @@ function openPr(fx: Fx, pr: string, opts: { fragment?: string | null; edit?: (wo
   repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/pr-' + pr);
   const head = repo.git('rev-parse', 'HEAD');
   fx.write(d => { d.prs[pr] = { state: 'OPEN', headRefName: 'pr-' + pr, isCrossRepository: false, title: 'PR ' + pr + ' title', body: opts.shipped === false ? '' : shippedBody(pr, head) }; });
+  if (opts.ready !== false) markReady(fx, pr, head);
   repo.git('checkout', '-q', '--detach', 'origin/main');
   return head;
 }
@@ -131,6 +143,7 @@ describe('land: fold, push, merge', () => {
     fx.repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/pr-3');
     const head = fx.repo.git('rev-parse', 'HEAD');
     fx.write(d => { d.prs['3'] = { state: 'OPEN', headRefName: 'pr-3', isCrossRepository: false, title: 'legacy', body: shippedBody('3', head) }; });
+    markReady(fx, '3', head);
     const r = land(fx, ['--pr', '3']);
     expect(r.err).toBe('');
     expect(r.out).toMatch(/^legacy: the pin stamped 1\.2\.9\.0 itself/m);
@@ -236,6 +249,7 @@ describe('land: lock, races and refusals', () => {
     expect(show(fx, n[2] + ':changelog.d/repair-9.md')).toBe('- Changes merged outside land beside #9: outside merge');
     expect(land(fx, ['--pr', n[1]!]).err).toContain('(QUEUE_RECEIPT_MISSING)');
     fx.write(d => { d.prs[n[1]!].body = shippedBody(n[1]!, n[2]!); });
+    markReady(fx, n[1]!, n[2]!);
     const pushed = land(fx, ['--pr', n[1]!]);
     expect(pushed.out).toContain("LOCK: taking over #9's drift lock for its repair");
     const merged = land(fx, ['--pr', n[1]!]);
@@ -516,6 +530,7 @@ describe('land: one pass, base, lock and history', () => {
     fx.repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/pr-11');
     const head = fx.repo.git('rev-parse', 'HEAD');
     fx.write(d => { d.prs['11'] = { state: 'OPEN', headRefName: 'pr-11', isCrossRepository: false, title: 'child', body: shippedBody('11', head) }; });
+    markReady(fx, '11', head);
     fx.repo.git('checkout', '-q', '--detach', 'origin/main');
     const r = land(fx, ['--pr', '11']);
     expect(r.status).toBe(EXIT.refused);
@@ -592,6 +607,7 @@ describe('land: merged-after-error, live locks, repair recovery, legacy release 
     const n = /REPAIR_PR: #(\d+) gstack-land-repair\/23/.exec(rep.out)!;
     const head = remote(fx, 'gstack-land-repair/23');
     fx.write(d => { d.prs[n[1]!].body = shippedBody(n[1]!, head); });
+    markReady(fx, n[1]!, head);
     fs.rmSync(path.join(fx.repo.work, '.gstack', 'tmp', 'ship-queue', 'land', '23.json'));
     expect(land(fx, ['--pr', n[1]!]).out).toContain("LOCK: taking over #23's drift lock for its repair");
     const merged = land(fx, ['--pr', n[1]!]);
@@ -608,6 +624,17 @@ describe('land: merged-after-error, live locks, repair recovery, legacy release 
     const r = land(fx, ['--pr', '25', '--dry-run']);
     expect(r.err).toMatch(/VERSION is a symlink at the pin.*\(QUEUE_LAND_CONFLICT\)/);
     expect(fs.readFileSync(outside, 'utf8')).toBe('keep\n');
+  }, 90_000);
+
+  // Value: protects=restamp never folds fragments through a PR-controlled symlinked CHANGELOG; fails_when=the fold rewrites a file outside the checkout, even in --dry-run; why_new=the legacy guard runs only when the pin bumped VERSION; seam=none; no_claim=Windows symlink semantics
+  test('a pin whose CHANGELOG is a symlink refuses before restamp and leaves the target untouched', () => {
+    const fx = setup();
+    const outside = path.join(fx.repo.root, 'outside-changelog.md');
+    fs.writeFileSync(outside, '# Changelog\n\n## [1.2.3.0] - 2026-10-01\n\n- base release\n');
+    openPr(fx, '27', { edit: w => { fs.rmSync(path.join(w, 'CHANGELOG.md')); fs.symlinkSync(outside, path.join(w, 'CHANGELOG.md')); } });
+    const r = land(fx, ['--pr', '27', '--dry-run']);
+    expect(r.err).toMatch(/CHANGELOG\.md is a symlink in the merged tree.*\(QUEUE_LAND_CONFLICT\)/);
+    expect(fs.readFileSync(outside, 'utf8')).toBe('# Changelog\n\n## [1.2.3.0] - 2026-10-01\n\n- base release\n');
   }, 90_000);
 
   // Value: protects=a legacy pin in a repo whose version source is package.json keeps its dependency and script edits; fails_when=the whole manifest is reset to the merge base; why_new=every case used a VERSION file; seam=none; no_claim=lockfile shapes beyond package.json
@@ -629,5 +656,23 @@ describe('land: merged-after-error, live locks, repair recovery, legacy release 
     expect(pkg.dependencies['right-pad']).toBe('2.0.0');
     expect(pkg.scripts.build).toBe('node build.js');
     expect(pkg.version).toBe('1.2.4');
+  }, 90_000);
+});
+
+// GStack Minder ruling (2026-10-29, GSTA-154): standalone land checks the evidence ready enforces.
+describe('land: the READY receipt', () => {
+  // Value: protects=land refuses a pin ready never accepted (pregate, full_e2e), before any lock or push; fails_when=land merges a head that skipped ready; why_new=every other case marks its PR ready; seam=none; no_claim=what ready itself checks (its own tests)
+  test('a pin with a /ship receipt but no READY receipt refuses, naming the ready command; nothing is locked or pushed', () => {
+    const fx = setup();
+    const pin = openPr(fx, '28', { ready: false });
+    for (const args of [['--pr', '28'], ['--pr', '28', '--dry-run']]) {
+      const r = land(fx, args);
+      expect(r.status).toBe(EXIT.refused);
+      expect(r.err).toMatch(/no READY receipt for #28 at the pin [0-9a-f]{12}.*fix: run gstack-ship-queue ready --pr 28 \(QUEUE_NOT_READY\)/);
+    }
+    expect(remote(fx, 'pr-28')).toBe(pin);
+    expect(fx.repo.git('ls-remote', 'origin', 'refs/notes/gstack-land')).toBe('');
+    markReady(fx, '28', pin);
+    expect(land(fx, ['--pr', '28']).out).toContain('PUSHED: ');
   }, 90_000);
 });

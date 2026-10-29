@@ -170,7 +170,11 @@ ci: green at <head12> (passed=31 failed=0 pending=0 skipped=2)
 PREGATE: pass tree=<tree12> head=<head12> checks=6
 gate: command="<gate_command>" full_e2e=no gate-ahead=none
 SHIP_RECEIPT: pr=42 head=<head12> …
+READY_RECEIPT: <state root>/ship-queue/ready/<repo key>/42-<head>.json (notes pushed to origin refs/notes/gstack-trains)
 ```
+
+Under `changelog_fragments`, a `READY_RECEIPT:` line follows, written only when
+every check above passed; `land` refuses a pin without one.
 
 CI's Version Gate (`scripts/compare-pr-version.ts`) accepts that head as
 unstamped when `VERSION` and `package.json`'s version match its merge base, the
@@ -1217,7 +1221,10 @@ stamp commit. Steps, each journaled in
 `.gstack/tmp/ship-queue/land/<n>.json` and resumable by rerunning the same
 command:
 
-1. **Refuse** a fork head, a closed PR, a PR whose base is another branch, a /ship receipt that is missing or
+1. **Refuse** a fork head, a closed PR, a PR whose base is another branch, a
+   pin without a READY receipt (`gstack-ship-queue ready --pr <n>` records one
+   on `refs/notes/gstack-trains` once its pregate, full_e2e and receipt checks
+   pass; land checks nothing weaker), a /ship receipt that is missing or
    bound to another head (`QUEUE_RECEIPT_MISSING`, `QUEUE_RECEIPT_STALE`), and
    required checks that are not green at the pin.
 2. **Lock.** Take the repository land lock, `refs/notes/gstack-land` (its own

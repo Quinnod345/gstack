@@ -21,6 +21,7 @@ import { matchesAny, type ShipPolicy } from './ship-policy';
 import { ciAtHead, loadBasePolicy, type QueueContext, type StepOutput } from './ship-queue';
 import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from './ship-queue-gate';
 import { bindShippedReceipt } from './ship-receipt-depth';
+import { loadReady, rebuildFromNotes, repoIdentity } from './ship-queue-train-record';
 
 export const LAND_LOCK_REF = 'refs/notes/gstack-land';
 export const MAX_RESTAMPS = 2;
@@ -191,6 +192,10 @@ function buildStamp(ctx: QueueContext, policy: ShipPolicy, o: { pin: string; bas
       }
     }
     if (!git(wt, ['commit', '-q', '--no-verify', '--allow-empty', '-m', `land #${o.pr}: merge origin/${ctx.base}`]).ok) return { code: 'QUEUE_LAND_CONFLICT', message: 'cannot commit the merge in the scratch worktree' };
+    const exact = [versionRel, ...MANIFESTS, ...(policy.changelog ? [policy.changelog] : [])];
+    const linked = git(wt, ['ls-files', '-s', '-z']).out.split('\0').filter(rec => rec.startsWith('120000 ')).map(rec => rec.slice(rec.indexOf('\t') + 1))
+      .find(rel => exact.includes(rel) || matchesAny([...policy.release_outputs, ...policy.stamp_paths], rel)) ?? exact.map(rel => linkedSegment(wt, rel)).find(Boolean);
+    if (linked) return { code: 'QUEUE_LAND_CONFLICT', message: `${linked} is a symlink in the merged tree; the merge step writes release files only inside the repository` };
     const r = restamp({ repoRoot: wt, base: ctx.base, next: true, policyFrom: 'base', allowRepoCommands: o.allowRepoCommands, dryRun: false, now: o.now, env: process.env });
     if (r.status !== 'stamped' && r.status !== 'noop') return { code: r.code ?? 'QUEUE_LAND_CONFLICT', message: `restamp ${r.status}: ${r.message ?? ''}`, fix: r.fix };
     lines.push(...r.stages.filter(s => s.status !== 'pending').map(s => `stage ${s.name}: ${s.status}${s.detail ? ` (${s.detail})` : ''}`));
@@ -295,14 +300,21 @@ function repair(ctx: QueueContext, policy: ShipPolicy, j: LandJournal | null, fi
     if (!git(wt, ['commit', '-q', '--no-verify', '-m', `land: release entry for the merge outside land beside #${j.pr}`]).ok) return fail(lines, { code: 'QUEUE_NOT_READY', message: 'cannot commit the repair' }, run);
     const head = git(wt, ['rev-parse', 'HEAD']).out;
     const push = git(root, ['push', '-q', `--force-with-lease=refs/heads/${branch}:`, 'origin', `${head}:refs/heads/${branch}`]);
-    if (!push.ok) lines.push(`branch: ${branch} already on origin (an earlier --repair pushed it); opening or finding its PR`);
+    let pushed = head;
+    if (!push.ok) {
+      git(root, ['fetch', '-q', 'origin', `refs/heads/${branch}`]);
+      const remote = git(root, ['log', '-1', '--format=%H%n%s', 'FETCH_HEAD']).out.split('\n');
+      if (!isSha(remote[0]) || remote[1] !== `land: release entry for the merge outside land beside #${j.pr}`) return fail(lines, { code: 'QUEUE_TRAIN_MOVED', message: `cannot push ${branch}, and origin holds no repair commit there: ${push.err.split('\n')[0]}` }, run);
+      pushed = remote[0]!;
+      lines.push(`branch: ${branch} already on origin at ${pushed.slice(0, 12)} (an earlier --repair pushed it); opening or finding its PR`);
+    }
     const pr = ctx.gh(['pr', 'create', '--base', ctx.base, '--head', branch, '--title', `Release entry for the merge outside land beside #${j.pr}`, '--body', `QUEUE_LAND_DRIFT repair (docs/troubleshooting.md#queue-land-drift). Outside commits: ${outside.join(', ') || 'unknown'}.`]);
     const n = /\/pull\/(\d+)/.exec(`${pr.out}\n${pr.err ?? ''}`)?.[1];
     if (!n) return fail(lines, { code: 'QUEUE_NOT_READY', message: `gh pr create failed: ${(pr.err ?? pr.out).trim().slice(0, 160)}` }, run);
     j.repair_pr = n; writeJsonAtomic(file, j);
     const held = readLock(root);
     if (held.lock?.pr === j.pr && held.lock.phase === 'drift') writeLock(root, held.sha, { ...held.lock, repair_pr: n });
-    return { ok: true, run, lines: [...lines, `REPAIR_PR: #${n} ${branch} ${head}`, `NEXT: run /ship on #${n}, then gstack-ship-queue land --pr ${n} (it takes over #${j.pr}'s drift lock and releases it)`] };
+    return { ok: true, run, lines: [...lines, `REPAIR_PR: #${n} ${branch} ${pushed}`, `NEXT: run /ship on #${n}, then gstack-ship-queue land --pr ${n} (it takes over #${j.pr}'s drift lock and releases it)`] };
   } finally {
     git(root, ['worktree', 'remove', '--force', wt]);
     fs.rmSync(wt, { recursive: true, force: true });
@@ -336,6 +348,10 @@ export function land(ctx: QueueContext, o: LandOptions): StepOutput {
   const receipt = bindShippedReceipt(root, `origin/${ctx.base}`, info.body ?? '', o.pr, [pin]);
   lines.push(receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []));
   if (!receipt.ok) return fail(lines, { code: receipt.code, message: receipt.message, fix: 'run /ship at the pinned head first' }, run);
+  if (!policy.changelog_fragments) return fail(lines, { code: 'QUEUE_NOT_READY', message: 'the base policy has changelog_fragments off; land merges only under the key, where ready records the READY receipt it checks' }, run);
+  const keys = repoIdentity(root).keys;
+  if (!loadReady(keys, o.pr, pin)) rebuildFromNotes(root, ctx.remote ?? 'origin');
+  if (!loadReady(keys, o.pr, pin)) return fail(lines, { code: 'QUEUE_NOT_READY', message: `no READY receipt for #${o.pr} at the pin ${pin.slice(0, 12)}; ready checks the pregate and full_e2e evidence land merges on`, fix: `run gstack-ship-queue ready --pr ${o.pr}` }, run);
   if (!j) {
     const ci = ciAtHead(ctx, pin);
     lines.push(`CI: ${ci.line}`);
