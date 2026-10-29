@@ -515,6 +515,25 @@ describe('gstack-pregate (bin)', () => {
     expect(fix).toContain('otherwise add a test that names the file');
   });
 
+  // Value: protects=the own-policy fix line appears only when the base or user copy decides and the branch still carries its own
+  // pregate.json: a --policy-from head run and a branch that deletes the file get the plain fix; fails_when=the configKind 'head' guard or
+  // the status 'D' filter in noLaneFix is dropped; why_new=the head run above passes and never reaches noLaneFix, and no test deletes the
+  // pin file on a NO_LANE run; seam=fixture repo; no_claim=the wording of the plain fix
+  test('lanes: a head-policy run and a branch that deletes pregate.json get the plain no-lane fix', () => {
+    const repo = fixture();
+    commit(repo, { 'lib/orphan.js': "exports.lonely = () => 2;\n", '.gstack/pregate.json': JSON.stringify({ ...BASE_PREGATE, dependencies: { ...BASE_PREGATE.dependencies, 'lib/orphan.js': ['test/util.test.js'] } }) + '\n' });
+    commit(repo, { 'lib/orphan2.js': "exports.alone = () => 3;\n" });
+    const head = pregate(repo, ['--stage', 'tests', '--policy-from', 'head']);
+    expect(head.status).toBe(EXIT.fail);
+    expect(head.err).toContain('(PREGATE_NO_LANE)');
+    expect(check(repo, 'lanes').fix).toMatch(/^add a test that names the file/);
+    commit(repo, { '.gstack/pregate.json': null });
+    const deleted = pregate(repo, ['--stage', 'tests']);
+    expect(deleted.status).toBe(EXIT.fail);
+    expect(deleted.err).toContain('(PREGATE_NO_LANE)');
+    expect(check(repo, 'lanes').fix).toMatch(/^add a test that names the file/);
+  });
+
   test('lanes: deleted and renamed files select the tests that named them; subprocess targets and computed reads map through declarations and joined literals', () => {
     const repo = fixture();
     repo.git('mv', 'lib/util.js', 'lib/maths.js');

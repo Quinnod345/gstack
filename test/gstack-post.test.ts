@@ -554,6 +554,14 @@ describe("gstack-post pr-body merges the PR body by section", () => {
     expect(sent(replaced).input).toBe(fresh);
   });
 
+  // Value: protects=a current body holding two ship-receipt blocks (an old receipt pasted below) refuses like a doubled title, so the stale
+  // receipt is never kept beside the new one; fails_when=receipt keys are exempted from the duplicate check or matched one to one again;
+  // why_new=only doubled ## titles were tested; seam=none; no_claim=how /ship reports the refusal
+  test("a current body with two receipt blocks refuses a file that carries a receipt", () => {
+    const current = RECEIPT("aaaa") + "\n## A\n\na\n\n" + RECEIPT("bbbb") + "\n## B\n\nb\n";
+    expect(() => mergeBodySections(current, RECEIPT("cccc") + "\n## A\n\nnew\n")).toThrow('holds "ship receipt" more than once');
+  });
+
   // Value: protects=the body /ship composes (lib/ship-receipt.ts placeReceiptFirst: the receipt block, one blank line, then the sections) reposts
   // idempotently: merged into a PR body of the same shape it yields the file's bytes, the receipt stays byte-first, and the stderr line reports no
   // addition; fails_when=the blank line after the receipt is read as new leading text and prepended before the receipt (one more leading newline per
