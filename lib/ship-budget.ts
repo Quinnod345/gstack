@@ -303,18 +303,20 @@ export function pointMarker(marker: string | undefined, l: Ledger): void {
 function activeLedger(marker: string): Ledger | undefined {
   let pointer: { ledger?: string };
   try { pointer = JSON.parse(fs.readFileSync(marker, 'utf8')); } catch (e: any) { if (e.code === 'ENOENT') return undefined; throw e; }
-  const l = pointer.ledger ? readLedger(pointer.ledger) : undefined;
+  const l = pointer.ledger && fs.existsSync(pointer.ledger) ? readLedger(pointer.ledger) : undefined;
   return l && l.cap !== null && !l.closed_at ? l : undefined;
 }
 
 /**
  * gstack-review-log --start under a cap: the dispatch needs an unspent, one-shot
  * dispatch reservation of the active run, consumed atomically with the start
- * capture. No marker (no cap) runs capture() exactly as before.
+ * capture. No marker (no cap), a marker whose ledger is gone, or a stopped run
+ * started without --reservation (a later uncapped review on the branch) runs
+ * capture() exactly as before.
  */
 export function admitReviewStart(marker: string, reservation: string | undefined, capture: () => string, env: NodeJS.ProcessEnv = process.env): string {
   const active = activeLedger(marker);
-  if (!active) return capture();
+  if (!active || (active.stopped && !reservation)) return capture();
   return mutateLedger(active.file, env, l => {
     const fix = `run gstack-ship-budget check --run ${l.run} --step <s> --next dispatch:<roles> and pass --reservation <id>`;
     if (l.stopped) throw new BudgetError('BUDGET_CAP_REACHED', resultLine('gstack-review-log', 'BUDGET_CAP_REACHED', `run ${l.run} stopped at Step ${l.stopped.step}: ${l.stopped.reason}`), 1);

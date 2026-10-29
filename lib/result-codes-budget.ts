@@ -21,7 +21,7 @@ export const BUDGET_RESULT_CODES = {
   },
   BUDGET_READING_REJECTED: {
     anchor: 'budget-reading-rejected',
-    summary: 'the reading does not fit the run\'s meter contract: it is lower than the last reading of the same epoch, or it was passed to a meter that reads its own source',
+    summary: 'the reading does not fit the run\'s meter contract: it is lower than the last reading of the same epoch, it was passed to a meter that reads its own source, or --prior-reading is above --reading',
     fix: 'pass the counter the run started with (the BUDGET line names meter, unit and epoch); a different meter starts a new epoch through gstack-ship-budget resume --meter <m>',
   },
   BUDGET_METER_UNAVAILABLE: {

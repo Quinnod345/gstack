@@ -203,7 +203,7 @@ export function cmdReconcile(argv: string[], ctx: Ctx): Outcome {
     const r = l.reservations.find(x => x.id === h.reservation);
     if (r && (r.state === 'open' || r.state === 'consumed')) { r.state = 'settled'; r.settled_at = new Date().toISOString(); }
     if (l.meter.contract.meter === 'estimate') l.estimate_used += childUsed;
-    h.status = ret?.status ?? 'interrupted';
+    h.status = ret && ret.to !== h.to && ret.status === 'complete' ? 'incomplete' : ret?.status ?? 'interrupted';
     h.child_used = childUsed;
     h.reconciled_at = new Date().toISOString();
     pointMarker(l.marker, l);
