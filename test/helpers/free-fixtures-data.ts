@@ -180,6 +180,7 @@ export const FREE_FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'test/fixtures/plan-ceo-floor-unasked-decisions-872e154.json': ['test/plan-ceo-floor-interactive-boundary.test.ts'],
   'test/fixtures/plan-floor-edit-wrap-37176835584.json': ['test/plan-floor-edit-wrap.test.ts'],
   'test/fixtures/plan-format-kind-notes.json': ['test/plan-format-kind-note.test.ts'],
+  'test/fixtures/qa-caller-child-handoff-2026-10-29.json': ['test/qa-caller-review-plan.test.ts'],
   'test/fixtures/qa-caller-handoff-order-public.json': ['test/qa-exploratory-callers.test.ts'],
   'test/fixtures/qa-caller-merge-base-diff-40737741454.json': ['test/qa-caller-review-plan.test.ts'],
   'test/fixtures/qa-caller-read-probe-mtb1007a.json': ['test/qa-exploratory-callers.test.ts'],
