@@ -231,6 +231,11 @@ a push included. The sequence that works unattended on Capy:
 10. After the slot call, the stamp commit keeps the pin's receipt; re-READY with the same
     receipt, no second /ship.
 
+When /ship runs in a subagent, the parent takes over the pull request's check and review
+notices first, then stops the /ship subagent once its READY arrives. Red checks and human
+review reach the parent from then on. On Capy the mechanics are in
+[the gstack skill](../capy/skill/gstack/SKILL.md#plan-approve-ship).
+
 When the base moves under a reviewed branch, merge it in; never rebase. A merge that
 leaves the product diff unchanged carries the receipt with `gstack-ship-receipt carry`
 (pregate at HEAD, no review rerun), and a merge whose resolution changed product code
