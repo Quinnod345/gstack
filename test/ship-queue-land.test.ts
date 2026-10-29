@@ -246,6 +246,32 @@ describe('land: lock, races and refusals', () => {
   }, 90_000);
 });
 
+describe('land: the base\'s manifest part count', () => {
+  test('a repo whose base holds a four-part package.json listed in stamp_files lands four parts (gbrain#7878 wrote three)', () => {
+    const fx = setup({ ...POLICY, stamp_files: ['VERSION', 'package.json', 'CHANGELOG.md', 'changelog.d/*.md'], stamp_patterns: ['"version": "{version}"'] });
+    const { repo } = fx;
+    repo.git('checkout', '-q', 'main');
+    const pkg = JSON.parse(readFile(repo, 'package.json'));
+    fs.writeFileSync(path.join(repo.work, 'package.json'), JSON.stringify({ ...pkg, version: '1.2.3.0' }, null, 2) + '\n');
+    fs.rmSync(path.join(repo.work, 'package-lock.json'));
+    repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'four-part manifest'); repo.git('push', '-q', 'origin', 'main');
+    openPr(fx, '21');
+    expect(land(fx, ['--pr', '21']).status).toBe(EXIT.ok);
+    const merged = land(fx, ['--pr', '21']);
+    expect(merged.status, merged.err).toBe(EXIT.ok);
+    expect(JSON.parse(show(fx, 'origin/main:package.json')).version).toBe('1.2.4.0');
+    expect(show(fx, 'origin/main:VERSION')).toBe('1.2.4.0');
+  }, 90_000);
+
+  test('control: gstack\'s shape (a three-part manifest outside stamp_files) stays three parts', () => {
+    const fx = setup();
+    openPr(fx, '22');
+    land(fx, ['--pr', '22']);
+    expect(land(fx, ['--pr', '22']).status).toBe(EXIT.ok);
+    expect(JSON.parse(show(fx, 'origin/main:package.json')).version).toBe('1.2.4');
+  }, 90_000);
+});
+
 describe('resolveReleaseConflicts', () => {
   test('a manifest whose version conflicts keeps the clean dependency edit and takes the base version; a real dependency conflict stays a conflict', () => {
     const fx = setup();

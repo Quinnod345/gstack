@@ -17,7 +17,7 @@
 
 ### Tests
 - `test/changelog-fragments.test.ts`: blob-only reads and refusals, bump precedence, fold order with a legacy section, the restamp fold and its tree receipt, an edited fold refused.
-- `test/ship-queue-land.test.ts` (bare origin and a gh shim): happy path; two PRs from one base without a collision; a legacy stamp plus a dependency edit; a title-derived entry; a product conflict; the lock and `--break-lock`; the base moving during CI; a foreign push never overwritten; a missing receipt; drift, `--repair` and the lock release; the census; a receipt that fails #3567's depth check refuses.
+- `test/ship-queue-land.test.ts` (bare origin and a gh shim): happy path; two PRs from one base without a collision; a legacy stamp plus a dependency edit; a title-derived entry; a product conflict; the lock and `--break-lock`; the base moving during CI; a foreign push never overwritten; a missing receipt; drift, `--repair` and the lock release; the census; a receipt that fails #3567's depth check refuses; a base with a four-part package.json in `stamp_files` lands four parts (#3557), gstack's own shape stays three.
 - `test/version-gate-fragments.test.ts`: fragment heads, premature version changes, a bot author, an advanced base, an invalid fragment, the stamp commit's effective bump, and the workflow's missing path filter.
 - `test/restamp-command-boundary.test.ts`: the hook reads its counter from `GSTACK_RESTAMP_BASE_SHA`, not the branch.
 
