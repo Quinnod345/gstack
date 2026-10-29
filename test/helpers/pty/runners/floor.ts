@@ -18,7 +18,7 @@ import { capturePlanCountQuestion, createPlanCountPermissionGuard, matchesNative
 import { resolveClaudeBinary } from '../binary';
 import { SANCTIONED_WRITE_SUBSTRINGS, isProseAUQVisible, planCountSubmissionInput } from '../classify';
 import type { ClaudePtySession } from '../launch';
-import { isNumberedOptionListVisible, isPermissionDialogVisible, isPlanReadyVisible, isRejectedSlashCommand, stripPtyResidue } from '../screen';
+import { idleTurnEnd, isNumberedOptionListVisible, isPermissionDialogVisible, isPlanReadyVisible, isRejectedSlashCommand, stripPtyResidue } from '../screen';
 import { realPtyDriver, runPtySession, type PtyDriver, type PtyStep } from '../session';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -41,7 +41,8 @@ export interface PlanSkillFloorObservation {
     | 'exited'
     | 'timeout'
     | 'assessment_error'
-    | 'permission_unanswered';
+    | 'permission_unanswered'
+    | 'api_error';
   summary: string;
   /** Public current viewport for an accepted finding; terminal tail otherwise. */
   evidence: string;
@@ -350,6 +351,10 @@ async function floorTick(run: FloorRun, session: ClaudePtySession): Promise<PtyS
     evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
   if (isRejectedSlashCommand(visible, opts.slashCommand)) return finish({ auqObserved: false, outcome: 'exited',
     summary: `claude rejected ${opts.slashCommand} as unknown command`,
+    evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
+  const idle = idleTurnEnd(visible);
+  if (idle?.apiError) return finish({ auqObserved: false, outcome: 'api_error',
+    summary: `the CLI turn ended at an idle prompt (${idle.done}) after its public error panel: ${idle.apiError}`,
     evidence: visible.slice(-3000), elapsedMs: driver.now() - run.startedAt });
 
   if (run.targetDelivery.status !== 'ready') {

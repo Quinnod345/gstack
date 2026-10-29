@@ -209,6 +209,19 @@ describe('runPlanSkillFloorCheck through the fake driver', () => {
     expect(obs.summary).toBe('no qualifying finding question within 30000ms');
   });
 
+  test('the 40851840940 provider error at an idle plan-mode prompt ends the floor check with its panel', async () => {
+    const plan: string = JSON.parse(fs.readFileSync(new URL('../fixtures/pty-idle-turn-end.json', import.meta.url), 'utf8')).planModeApiErrorIdle.visible;
+    const { obs } = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen: plan, effect: delivered }]);
+    expect(obs.outcome).toBe('api_error');
+    expect(obs.auqObserved).toBe(false);
+    expect(obs.elapsedMs).toBeLessThan(30_000);
+    expect(obs.summary).toBe('the CLI turn ended at an idle prompt (✻Brewed for 1m 13s · done 9:51 AM) after its public error panel: ' +
+      '●API Error: Connection lost mid-response. The response above may be incomplete.');
+    const running = plan.replace('⏸planmodeon (shift+tabtocycle)·←foragents', '⏸planmodeon (shift+tabtocycle)·esctointerrupt·←foragents');
+    const live = await floor([{ onInput: '/plan-devex-review PLAN.md\r', screen: running, effect: delivered }]);
+    expect(live.obs).toMatchObject({ outcome: 'timeout', summary: 'no qualifying finding question within 30000ms' });
+  });
+
   test('permission prompt: an unowned permission is neither granted nor counted', async () => {
     const { obs, fake } = await floor([
       { onInput: '/plan-devex-review PLAN.md\r', screen: PERMISSION, effect: delivered },
