@@ -82,11 +82,11 @@ exit 0
       stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32',
     });
     const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
-    const expired = await Promise.race([child.exited.then(() => false), Bun.sleep(Math.max(0, deadline - performance.now())).then(() => true)]);
+    const finished = Promise.all([child.exited, output]);
+    const expired = await Promise.race([finished.then(() => false), Bun.sleep(Math.max(0, deadline - performance.now())).then(() => true)]);
     if (expired) {
       killGroup(child.pid, 'SIGKILL');
       await child.exited;
-      await output;
       throw new Error(`${stage} still running at the ${deadlineMs}ms case deadline after ${Math.round(performance.now() - stageStart)}ms; process tree killed; earlier stages: ${stages.join(', ')}`);
     }
     stages.push(`${stage} ${Math.round(performance.now() - stageStart)}ms`);
@@ -142,22 +142,42 @@ for (const failure of ['none', 'body', 'title'] as const) {
   });
 }
 
+/** True when the pid is gone within a second of the kill. */
+async function exitsSoon(pid: number) {
+  for (let i = 0; i < 50; i++) {
+    try { process.kill(pid, 0); await Bun.sleep(20); } catch { return true; }
+  }
+  return false;
+}
+
 test('a block still running at the case deadline is killed with its whole tree before cleanup', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ship-post-deadline-'));
-  const pidFile = join(root, 'holder.pid');
-  const repo = publicationRepo(root, 1_500);
-  await expect(repo.run('publish', `sh -c 'echo $$ > "${pidFile}"; exec sleep 30'\necho unreachable`))
-    .rejects.toThrow(/^publish still running at the 1500ms case deadline after \d+ms; process tree killed; earlier stages: setup \d+ms$/);
-  if (process.platform !== 'win32') {
-    const holder = Number(readFileSync(pidFile, 'utf8'));
-    let alive = true;
-    for (let i = 0; alive && i < 50; i++) {
-      try { process.kill(holder, 0); await Bun.sleep(20); } catch { alive = false; }
-    }
-    expect(alive).toBe(false);
+  try {
+    const pidFile = join(root, 'holder.pid');
+    const repo = publicationRepo(root, 1_500);
+    await expect(repo.run('publish', `sh -c 'echo $$ > "${pidFile}"; exec sleep 30'\necho unreachable`))
+      .rejects.toThrow(/^publish still running at the 1500ms case deadline after \d+ms; process tree killed; earlier stages: setup \d+ms$/);
+    if (process.platform !== 'win32') expect(await exitsSoon(Number(readFileSync(pidFile, 'utf8')))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+    expect(existsSync(root)).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
-  rmSync(root, { recursive: true, force: true });
-  expect(existsSync(root)).toBe(false);
+});
+
+// A block that exits while a background child still holds its output is still running: the deadline covers
+// the pipes too, not only bash's exit. POSIX only: on Windows the exited bash leaves no tree for taskkill /T.
+test.skipIf(process.platform === 'win32')('a block whose background child holds its output past the deadline is killed too', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ship-post-pipe-'));
+  try {
+    const pidFile = join(root, 'holder.pid');
+    const repo = publicationRepo(root, 1_500);
+    await expect(repo.run('publish', `sleep 30 &\necho $! > "${pidFile}"`))
+      .rejects.toThrow(/^publish still running at the 1500ms case deadline after \d+ms; process tree killed; earlier stages: setup \d+ms$/);
+    expect(await exitsSoon(Number(readFileSync(pidFile, 'utf8')))).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test.skipIf(process.platform === 'win32')('MEDIUM findings publish nothing until the block reruns with the printed token', async () => {
