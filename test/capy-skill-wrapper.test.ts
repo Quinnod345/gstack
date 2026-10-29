@@ -393,6 +393,25 @@ describe('capy skill: the session hands the installer GSTACK_CAPY_BEHIND', () =>
     }
   });
 
+  // #3571: /ship's docs step ran install.sh --for document-release from inside the run that
+  // holds the lease, the upgrader excluded its own ancestry, and the checkout moved mid-/ship.
+  test('install mode inside a run that holds the workflow lease: the self-upgrade is deferred, HEAD stays and the trailer stays ok; after the run the same install upgrades', () => {
+    const f = fixture({ cloneAt: 'B' });
+    write(path.join(f.root, 'bin/gstack-capy-install'), ENV_INSTALLER, 0o755);
+    f.git(['update-index', '--assume-unchanged', 'bin/gstack-capy-install']);
+    const leaseDir = path.join(f.host.base, 'leases');
+    const lease = path.join(f.root, 'bin/gstack-lease');
+    const inRun = spawnSync('bash', ['-c', 'bash "$1" touch --pid $$ --root "$2" || exit 9; bash "$3" --for document-release; echo "exit=$?"', 'run', lease, f.root, BOOT], { cwd: f.host.home, encoding: 'utf8', env: { ...f.host.env, GSTACK_CAPY_ROOT: f.root, GSTACK_CAPY_REPO: `file://${f.bare}`, WRAP_LOG: path.join(f.host.base, 'wrap.log'), GSTACK_LEASE_DIR: leaseDir }, timeout: 120_000 });
+    expect(inRun.stdout, inRun.stderr).toMatch(/^SELF_UPGRADE: skipped \(this session's own gstack run holds a workflow lease on this installation: pid \d+ \(\d+m bash\), so the upgrade is deferred until the run ends; fix: .+bin\/gstack-upgrade \(UPGRADE_BUSY\)\)$/m);
+    expect(inRun.stdout).not.toContain('SELF_UPGRADE: done');
+    expect(inRun.stdout).toMatch(/^exit=0$/m);
+    expect(inRun.stdout).toMatch(/blocked=this session's own gstack run holds a workflow lease .+ \(UPGRADE_BUSY\)$/m);
+    expect(f.git(['rev-parse', 'HEAD'])).toBe(f.b);
+    const after = f.run(['--for', 'document-release'], { GSTACK_LEASE_DIR: leaseDir });
+    expect(after.stdout).toMatch(/^SELF_UPGRADE: done 1\.0\.1 -> 1\.0\.2$/m);
+    expect(f.git(['rev-parse', 'HEAD'])).toBe(f.c);
+  });
+
   test('an older bootstrapper handing --for none to the session in install mode: the session certifies nothing and moves nothing (no self-upgrade, HEAD unchanged), and reports behind like --check', () => {
     const f = fixture({ cloneAt: 'B' });
     write(path.join(f.root, 'bin/gstack-capy-install'), ENV_INSTALLER, 0o755);
