@@ -39,7 +39,7 @@ describe('launchClaudePty model pin', () => {
     expect(opts.model).toBe('claude-sonnet-4-6');
   });
 
-  test.skipIf(process.platform === 'win32')('spawn args pin --model from the fallback chain, before extraArgs, with hermetic MCP gating and a pinned session id', () => {
+  test.skipIf(process.platform === 'win32')('spawn args pin --model from the fallback chain, before extraArgs, with hermetic MCP gating', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pty-model-pin-'));
     try {
       const fake = join(dir, 'fake-claude');
@@ -56,11 +56,7 @@ const argv = async (opts, evalsModel) => {
 };
 process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
   fallback: await argv({}, undefined), env: await argv({}, 'env-model'), explicit: await argv({ model: 'opts-model' }, 'env-model'),
-  extra: await argv({ extraArgs: ['--model', 'override'] }, undefined),
-  pinned: await argv({ extraArgs: ['--session-id', '11111111-2222-4333-8444-555555555555'] }, undefined),
-  resumed: await argv({ extraArgs: ['--resume', 'prior'] }, undefined),
-  pinnedEq: await argv({ extraArgs: ['--session-id=11111111-2222-4333-8444-555555555555'] }, undefined),
-  resumedEq: await argv({ extraArgs: ['--resume=prior'] }, undefined) }));
+  extra: await argv({ extraArgs: ['--model', 'override'] }, undefined) }));
 `);
       const run = (hermetic: string) => {
         const result = spawnSync(process.execPath, [worker], { cwd: join(import.meta.dir, '../..'), encoding: 'utf8', timeout: 30_000,
@@ -77,15 +73,46 @@ process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
       expect(hermetic.extra.slice(-2)).toEqual(['--model', 'override']);
       expect(hermetic.fallback).toContain('--strict-mcp-config');
       expect(run('0').fallback).not.toContain('--strict-mcp-config');
-      const sessionIds = (args: string[]) => args.flatMap((arg, i) => arg === '--session-id' ? [args[i + 1]] : []);
-      expect(sessionIds(hermetic.fallback)).toHaveLength(1);
-      expect(sessionIds(hermetic.fallback)[0]).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
-      expect(sessionIds(hermetic.extra)).toHaveLength(1);
-      expect(sessionIds(hermetic.pinned)).toEqual(['11111111-2222-4333-8444-555555555555']);
-      expect(sessionIds(hermetic.resumed)).toEqual([]);
-      expect(hermetic.pinnedEq.filter((arg: string) => arg.startsWith('--session-id'))).toEqual(['--session-id=11111111-2222-4333-8444-555555555555']);
-      expect(sessionIds(hermetic.resumedEq)).toEqual([]);
-      expect(sessionIds(run('0').fallback)).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+});
+
+describe('launchClaudePty transcript pricing (GSTA-150 PR 3)', () => {
+  test.skipIf(process.platform === 'win32')('prices the transcript this launch created for its cwd, without adding a launch argument; opting out prices nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pty-transcript-cost-'));
+    try {
+      const fake = join(dir, 'fake-claude');
+      writeFileSync(fake, `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+const project = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', 'fake-project');
+fs.mkdirSync(project, { recursive: true });
+fs.writeFileSync(path.join(project, crypto.randomUUID() + '.jsonl'), JSON.stringify({ type: 'assistant', cwd: process.cwd(),
+  message: { id: 'msg_' + crypto.randomUUID(), model: 'claude-opus-5-5', usage: { input_tokens: 0, output_tokens: 1000 } } }) + '\\n');
+process.stdout.write('ARGV=' + JSON.stringify(process.argv.slice(2)) + '\\n');
+setInterval(() => {}, 1000);
+`, { mode: 0o755 });
+      const runner = pathToFileURL(join(import.meta.dir, 'claude-pty-runner.ts')).href;
+      const worker = join(dir, 'worker.ts');
+      writeFileSync(worker, `import { launchClaudePty } from ${JSON.stringify(runner)};
+import * as fs from 'node:fs';
+const run = async (opts) => {
+  const cwd = fs.mkdtempSync(${JSON.stringify(join(dir, 'cwd-'))});
+  const session = await launchClaudePty({ cwd, timeoutMs: 5000, ...opts });
+  try {
+    await session.waitFor(/ARGV=\\[.*\\]/, { timeoutMs: 4000, pollMs: 20 });
+    return { argv: JSON.parse(/ARGV=(\\[.*\\])/.exec(session.visibleText())[1]), cost: session.transcriptCostUsd?.() ?? null };
+  } finally { await session.close(); }
+};
+const [priced, optedOut] = await Promise.all([run({}), run({ priceTranscript: false })]);
+process.stdout.write(JSON.stringify({ priced, optedOut }));
+`);
+      const result = spawnSync(process.execPath, [worker], { cwd: join(import.meta.dir, '../..'), encoding: 'utf8', timeout: 30_000,
+        env: { ...process.env, BROWSE_TERMINAL_BINARY: fake, EVALS_HERMETIC: '1' } });
+      expect(result.status, result.stderr).toBe(0);
+      const { priced, optedOut } = JSON.parse(result.stdout.trim().split('\n').at(-1)!);
+      expect(priced.cost).toBeCloseTo(0.02, 6);
+      expect(optedOut.cost).toBeNull();
+      expect(priced.argv).not.toContain('--session-id');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 });

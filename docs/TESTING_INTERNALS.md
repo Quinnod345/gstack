@@ -696,17 +696,18 @@ largest output, subagent turns included, `<synthetic>` messages skipped,
 5-minute cache writes at 1.25x and 1-hour writes at 2x the input rate. The
 field is absent when no message carries usage or any message's model has no
 price row, so an unpriced session stays cost-unknown, never $0. A PTY session
-records `streamed_cost_usd` from its transcript the same way: the hermetic
-launcher (`prepareLaunch` in `test/helpers/pty/launch.ts`) pins
-`--session-id <uuid>` when the caller passes none and is not resuming
-(`--resume`, `-r`, `--continue`, `-c`), and both PTY ledger writers price
-`<CLAUDE_CONFIG_DIR>/projects/*/<id>.jsonl` plus `<id>/subagents/*.jsonl`
-(`test/helpers/pty/transcript-cost.ts`). Pricing keys on the session id, not
-the whole directory, because concurrent PTY tests in one process share one
-hermetic config dir. A non-hermetic or resumed launch without a caller
-`--session-id`, a missing transcript, no usage, an unpriced model or a read
-error leaves the field absent (cost-unknown), and a pricing failure never
-fails the test. The row keeps `billed: false`. The ledger rides in each slice
+records `streamed_cost_usd` from its transcript the same way. Both PTY ledger
+writers price `<CLAUDE_CONFIG_DIR>/projects/*/<id>.jsonl` plus
+`<id>/subagents/*.jsonl` (`test/helpers/pty/transcript-cost.ts`), where the
+id is the caller's `--session-id`, else the one transcript that appeared
+during this launch for its cwd. The launcher adds no argument. Pricing never
+takes the whole directory, because concurrent PTY tests in one process share
+one hermetic config dir; two new transcripts for one cwd are ambiguous and stay
+unknown. A non-hermetic or resumed launch, a caller that opts out
+(`priceTranscript: false`, the native AskUserQuestion capture, which never
+reads model transcripts), a missing transcript, no usage, an unpriced model or
+a read error leaves the field absent (cost-unknown), and a pricing failure
+never fails the test. The row keeps `billed: false`. The ledger rides in each slice
 artifact beside the shard results.
 
 **Quarantine** (`CASE_QUARANTINE`, same file). An entry needs: a per-trial rate

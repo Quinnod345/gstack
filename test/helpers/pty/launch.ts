@@ -2,7 +2,6 @@
  * Spawn `claude` in a real PTY (launchClaudePty) and the session handle. Moved from claude-pty-runner.ts.
  * Import through test/helpers/claude-pty-runner.ts from tests; pty/ modules import siblings directly.
  */
-import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { resolveEvalModel } from '../../../lib/eval-model';
 import { hermeticChildEnv, hermeticSkillsConfigDir, isHermeticEnabled } from '../hermetic-env';
@@ -16,9 +15,12 @@ import { trustDialogInput } from '../pty-trust-dialog';
 import { resolveClaudeBinary } from './binary';
 import { createPtyScreen, screenPanelEnd, stripAnsi } from './screen';
 import { appendSessionLedger, sessionKey } from '../session-ledger';
-import { pricedTranscript } from './transcript-cost';
+import { newTranscriptSessionId, pricedTranscript, ptyTranscriptCostUsd, transcriptFiles } from './transcript-cost';
 
 export interface ClaudePtyOptions {
+  /** Price this session's ledger row from the transcript Claude writes under the hermetic config dir (default true).
+   * false for a caller that must never read model transcripts, such as the native AskUserQuestion capture. */
+  priceTranscript?: boolean;
   /** Register the repo's shipped skills in the child's user scope via
    * hermeticSkillsConfigDir(). Required by any test that types a /skill
    * slash command; without it hermetic claude rejects the command as
@@ -131,8 +133,9 @@ export interface ClaudePtySession {
    * the dir name ends in `/.claude` by contract).
    */
   hermeticConfigDir: string | null;
-  /** The Claude session id the launcher pinned (or the caller's --session-id): its transcript prices the session ledger row. */
-  sessionId?: string;
+  /** This session's cost from its transcript (the caller's --session-id, else the one transcript this launch created
+   * for its cwd); undefined when unpriced, ambiguous or opted out. Never throws. */
+  transcriptCostUsd?(): number | undefined;
   /** Owned HOME/.gstack created by the seeded launcher; absent for caller overrides. */
   hermeticSkillStateRoot?: string;
   /** Owned pre-tool identity record, removed by close(). */
@@ -268,7 +271,8 @@ interface LaunchSetup {
   hermeticSkillStateRoot: string | undefined;
   autoplanArtifactStateRoot: string | undefined;
   autoplanEngTestPlanStateRoot: string | undefined;
-  sessionId: string | undefined;
+  /** What prices the transcript: the caller's session id, else the transcripts present before spawn. */
+  transcript: { sessionId: string | undefined; before: Set<string>; cwd: string } | undefined;
 }
 
 function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
@@ -289,11 +293,6 @@ function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
   // Before opts.extraArgs so a test could theoretically supply --mcp-config.
   const hermetic = isHermeticEnabled();
   if (hermetic) args.push('--strict-mcp-config');
-  const extra = opts.extraArgs ?? [];
-  const resumes = extra.some(arg => /^(--resume|--continue|-r|-c)(=|$)/.test(arg));
-  const pinned = extra.findIndex(arg => /^--session-id(=|$)/.test(arg));
-  let sessionId = pinned < 0 ? undefined : extra[pinned].startsWith('--session-id=') ? extra[pinned].slice('--session-id='.length) : extra[pinned + 1];
-  if (hermetic && pinned < 0 && !resumes) args.push('--session-id', sessionId = randomUUID());
   if (opts.extraArgs) args.push(...opts.extraArgs);
 
   // Hermetic by default (test/helpers/hermetic-env.ts): operator session
@@ -330,7 +329,13 @@ function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
 
   const autoplanEngTestPlanStateRoot = opts.approveAutoplanArtifactEdits && opts.autoplanArtifactState !== undefined
     ? hermeticSkillStateRoot : undefined;
-  return { args, childEnv, hermetic, hermeticSkillStateRoot, autoplanArtifactStateRoot, autoplanEngTestPlanStateRoot, sessionId };
+  const extra = opts.extraArgs ?? [];
+  const pinned = extra.findIndex(arg => /^--session-id(=|$)/.test(arg));
+  const sessionId = pinned < 0 ? undefined : extra[pinned].startsWith('--session-id=') ? extra[pinned].slice('--session-id='.length) : extra[pinned + 1];
+  const resumes = extra.some(arg => /^(--resume|--continue|-r|-c)(=|$)/.test(arg));
+  const transcript = hermetic && childEnv.CLAUDE_CONFIG_DIR && opts.priceTranscript !== false && !resumes
+    ? { sessionId, before: transcriptFiles(childEnv.CLAUDE_CONFIG_DIR), cwd: opts.cwd ?? process.cwd() } : undefined;
+  return { args, childEnv, hermetic, hermeticSkillStateRoot, autoplanArtifactStateRoot, autoplanEngTestPlanStateRoot, transcript };
 }
 
 interface LaunchRecorders {
@@ -579,7 +584,11 @@ function sessionHandle(pty: PtyProcess, launch: LaunchSetup, wallTimer: ReturnTy
     exited: () => pty.exited,
     exitCode: () => pty.exitCode,
     hermeticConfigDir: launch.hermetic ? launch.childEnv.CLAUDE_CONFIG_DIR ?? null : null,
-    sessionId: launch.sessionId,
+    transcriptCostUsd: () => {
+      const { transcript, childEnv } = launch;
+      return transcript && ptyTranscriptCostUsd(childEnv.CLAUDE_CONFIG_DIR,
+        transcript.sessionId ?? newTranscriptSessionId(childEnv.CLAUDE_CONFIG_DIR, transcript.before, transcript.cwd));
+    },
     hermeticSkillStateRoot: launch.hermeticSkillStateRoot,
     pendingPlanReadyFile: pendingExit?.file,
     pendingQuestionFile: pendingQuestion?.file,

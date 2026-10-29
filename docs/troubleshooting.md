@@ -2264,8 +2264,9 @@ case with `bun run eval:pass-rates --headroom --case <id>`.
 
 **Meaning.** Some trials' cost was not captured, so only the known sum is
 shown. A trial is cost-unknown when it ran a PTY session whose transcript
-could not be priced (a non-hermetic or resumed launch without a caller
-`--session-id`, no transcript or usage, or a model with no price row), a
+could not be priced (a non-hermetic or resumed launch, the native
+AskUserQuestion capture, two new transcripts for one cwd, no transcript or
+usage, or a model with no price row), a
 Codex session that completed no turn or whose model has no price row, a
 `claude -p` session that ended without a result, or an aborted Agent SDK
 session whose streamed usage could not be priced (no usage, or a model with no

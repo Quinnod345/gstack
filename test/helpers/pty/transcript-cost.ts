@@ -3,9 +3,42 @@ import * as path from 'node:path';
 import { streamedUsageCostUsd } from '../../../lib/pricing';
 
 /** The session ledger's cost field for a PTY session: present only when its transcript prices. */
-export function pricedTranscript(session: { hermeticConfigDir?: string | null; sessionId?: string } | undefined): { streamed_cost_usd?: number } {
-  const cost = ptyTranscriptCostUsd(session?.hermeticConfigDir, session?.sessionId);
+export function pricedTranscript(session: { transcriptCostUsd?(): number | undefined } | undefined): { streamed_cost_usd?: number } {
+  const cost = session?.transcriptCostUsd?.();
   return cost === undefined ? {} : { streamed_cost_usd: cost };
+}
+
+/** Top-level session transcripts (`projects/<dir>/<id>.jsonl`) under a config dir; empty when unreadable. */
+export function transcriptFiles(configDir: string | undefined): Set<string> {
+  if (!configDir) return new Set();
+  try {
+    const projects = path.join(configDir, 'projects');
+    return new Set(fs.readdirSync(projects, { withFileTypes: true }).filter(dir => dir.isDirectory())
+      .flatMap(dir => fs.readdirSync(path.join(projects, dir.name)).filter(f => f.endsWith('.jsonl')).map(f => path.join(projects, dir.name, f))));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * The session id of the one transcript that appeared since `before` and was written for `cwd`. Concurrent PTY tests in
+ * one process share a hermetic config dir, so a launch claims only a new transcript for its own cwd; none or several
+ * (two sessions in one cwd) is undefined, which leaves the cost unknown.
+ */
+export function newTranscriptSessionId(configDir: string | undefined, before: ReadonlySet<string>, cwd: string): string | undefined {
+  try {
+    const cwds = new Set([cwd, fs.realpathSync(cwd)]);
+    const mine = [...transcriptFiles(configDir)].filter(file => !before.has(file) && fs.readFileSync(file, 'utf8').split('\n').some(line => {
+      try {
+        return cwds.has(JSON.parse(line)?.cwd);
+      } catch {
+        return false;
+      }
+    }));
+    return mine.length === 1 ? path.basename(mine[0], '.jsonl') : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
