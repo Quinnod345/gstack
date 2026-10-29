@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+**A /ship subagent now stops once its READY is sent, so CI and review callbacks on a frozen head stop waking it.** Finished /ship subagents kept getting woken by checks and reviews on a PR they had already READY'd. Each wake cost tokens, and some acted on a head that was supposed to be frozen. The parent now subscribes to the PR first, so red checks and human review still reach an owner, and then stops the subagent.
+
+### Changed
+- **`capy/skill/gstack/SKILL.md`** (Plan, approve, ship): a parent running /ship in a subagent subscribes to its PR, then stops the subagent when READY arrives. A /ship run woken after READY whose pin still equals the PR head reports one line and ends the turn.
+- **`docs/captain.md`** (the lane's /ship sequence): the host-neutral rule, with a pointer to the Capy mechanics. **`captain/templates/brief.md`**: one pointer line.
+- **`test/fixtures/context-budget.json`**: the Capy skill's eager ceiling moves from 4120 to 4615, recaptured by the ratchet protocol for this growth only.
+
 ## [1.91.310.0] - 2026-10-29
 
 **The cookie workflow judge now asks for structured output, so a quote the model forgets to escape can no longer fail the gate.** Train 42 went red because both of its `setup-browser-cookies/SKILL.md workflow` samples came back as free text with a bare quote inside `reasoning` ("one --domain per run"), and neither parsed. The GSTA-91 comparison had measured that failure: 2 of 144 free-text samples failed to parse, against 0 of 72 with the schema.
