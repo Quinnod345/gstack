@@ -1198,10 +1198,12 @@ writes no version in Step 12 and writes Step 13's entry as
 **The fold.** `gstack-restamp` (and so `land`) concatenates the fragment
 bodies in path order above any legacy `[Unreleased]` section, re-heads both as
 one `## [<version>] - <date>` section at the top, and deletes the fragment
-files, in one stamp. The tree receipt's `changelog-fragments` rule calls a
-deleted fragment a stamp only when its body appears verbatim, in order, among
-the lines added under the new heading; an edited fold, or a fragment deleted
-without its text, is a change.
+files, in one stamp. The tree receipt, and so `gstack-pregate clear`'s
+stamp-only substitution, calls a deleted fragment a stamp (rule
+`changelog_fragments`) only when the new CHANGELOG section is exactly the
+deleted fragments' bodies in path order above any legacy `[Unreleased]` text
+(rule `changelog-fragments`); an edited fold, or a fragment deleted without
+its text, is a change.
 
 **Version Gate.** The workflow runs on every PR (no path filter), so a PR
 that touches no release file still has to prove its entry. Under the key, an
