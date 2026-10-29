@@ -446,7 +446,7 @@ export function selectPrProfile(options: {
   }
   const gateIds = Object.keys(maps.e2eTouchfiles).filter(id => maps.tiers[id] === 'gate');
   const hubFiles = options.screenPolicy === 'narrow' && gateIds.length > 0
-    ? [...consumers.keys()].filter(file => gateIds.every(id => consumers.get(file)!.e2e.has(id))) : [];
+    ? [...consumers.keys()].filter(file => derived?.tracked.has(file) && gateIds.every(id => consumers.get(file)!.e2e.has(id))) : [];
   const derivedFiles = [...consumers.keys()].filter(file => !hubFiles.includes(file));
   const unknownFiles = unmapped.filter(file => !derivedGlobal.includes(file) && !consumers.has(file) && !noConsumerFiles.includes(file));
   const sharedInputs = files.filter(file => depends(file, PR_FULL_GATE_FILES));
@@ -563,7 +563,7 @@ function shadowSelection(options: Parameters<typeof selectPrProfile>[0] & { maps
 export interface CoverageSummaryInput {
   profile?: string;
   selection?: { e2e: string[] | null; judges: string[] | null };
-  prCoverage?: Pick<PrProfileSelection, 'mode' | 'deferred' | 'unknownFiles'> & Partial<Pick<PrProfileSelection, 'unknownFileLabels' | 'derivedFiles' | 'noConsumerFiles' | 'shadow'>>;
+  prCoverage?: Pick<PrProfileSelection, 'mode' | 'deferred' | 'unknownFiles'> & Partial<Pick<PrProfileSelection, 'unknownFileLabels' | 'derivedFiles' | 'hubFiles' | 'noConsumerFiles' | 'shadow'>>;
 }
 
 /**
@@ -584,6 +584,7 @@ export function formatPrCoverageSummary(manifest: CoverageSummaryInput, totals?:
     lines.push(`- Derived dependents (scripts/pr-dependencies.ts) of ${coverage.derivedFiles.length} unmapped file(s):`);
     for (const item of coverage.derivedFiles.slice(0, 40)) lines.push(`  - \`${item.file}\`: ${item.e2e} case(s), ${item.judges} judge(s)`);
   }
+  if (coverage?.hubFiles?.length) lines.push(`- Left to the train gate's full census (narrow screen): ${coverage.hubFiles.slice(0, 40).map(file => `\`${file}\``).join(', ')}`);
   const shadow = coverage?.shadow;
   if (shadow) lines.push(shadow.error ? `- Shadow exercised-path map: unavailable (${shadow.error}); selection unaffected`
     : `- Shadow exercised-path map (not active): would select ${shadow.e2e.length} gate case(s), dropping ${shadow.wouldDrop.length} and adding ${shadow.wouldAdd.length}; predicted saving $${shadow.predictedSavingUsd.toFixed(2)}${shadow.unpricedCases ? ` (${shadow.unpricedCases} unpriced)` : ''}, a lower bound: known cost excludes the ${Math.round(100 * (shadow.unknownCostShare ?? 0))}% of observed case runs with unknown cost (PTY) (${EXERCISED_MAP_ANCHOR})`);

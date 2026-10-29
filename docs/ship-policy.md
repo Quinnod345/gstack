@@ -416,8 +416,9 @@ dispatches `gate_workflow` with `screen_pr`, `screen_merge_sha` (the
 `refs/pull/<n>/merge` SHA) and `screen_policy` (`narrow`, or `broad` with
 `--broad`, the full PR selection). A narrow screen, and `eval:bg:pr`, skip a
 changed file whose derived references reach every gate case and nothing
-narrower selects: the plan's reason names it, and the train gate's full
-census runs those cases. Full-gate files, shared runtime and paid-runner
+narrower selects, along with its derived judges: the plan's reason names it,
+and the train gate's full census runs those cases. A `pull_request` run, the
+merge gate when the base has no `train` block, keeps the broad selection. Full-gate files, shared runtime and paid-runner
 inputs, and files the derivation cannot place still run the full gate on a
 narrow screen. The nonce key carries the purpose and
 the policy, so a repeat follows the same run and a broad screen never adopts

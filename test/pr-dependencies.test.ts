@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { deriveDependencies, derivedDependencies, referenceText } from '../scripts/pr-dependencies';
 import {
-  DERIVABLE_PREFIXES, PERIODIC_ONLY_PR_FILES, PR_FULL_GATE_FILES, PR_PROFILE_MAPS, selectPrProfile, unknownFileLabel,
+  DERIVABLE_PREFIXES, PERIODIC_ONLY_PR_FILES, PR_FULL_GATE_FILES, PR_PROFILE_MAPS, formatPrCoverageSummary, selectPrProfile, unknownFileLabel,
 } from '../scripts/test-pr-profile';
 import { buildRunManifest, computePaidCaseSelection } from '../scripts/test-paid-shards';
 import { E2E_TIERS } from './helpers/touchfiles-data';
@@ -336,11 +336,14 @@ describe('narrow screens leave hub files to the train gate', () => {
     expect(gate.every(id => real.e2e.get(hub)?.has(id))).toBe(true);
   });
 
-  test('a hub-only diff selects no case on a narrow screen and names the hub file', () => {
+  test('a hub-only diff selects no case or judge on a narrow screen and names the hub file', () => {
     const result = plan([hub]);
     expect(result.coverage?.hubFiles).toEqual([hub]);
     expect(result.coverage?.mode).toBe('pr');
-    expect(result.selection.e2e).toEqual([]);
+    expect(result.selection).toEqual({ e2e: [], judges: [] });
+    expect(plan([hub], 'broad').selection.judges!.length).toBeGreaterThan(0);
+    expect(formatPrCoverageSummary({ profile: 'pr', selection: result.selection, prCoverage: result.coverage }).join('\n'))
+      .toContain(`Left to the train gate's full census (narrow screen): \`${hub}\``);
     expect(result.reason).toContain(`train gate's full census runs them: ${hub}`);
   });
 
@@ -363,6 +366,20 @@ describe('narrow screens leave hub files to the train gate', () => {
     const direct = plan(['browse/src/retired-module.ts']).selection.e2e;
     expect(direct).toContain('browse-basic');
     expect(plan([hub, 'browse/src/retired-module.ts']).selection.e2e).toEqual(direct);
+  });
+
+  test('a deleted file that still reaches every gate case is not a hub: a narrow screen keeps its dependents', () => {
+    const without = { ...real, tracked: new Set([...real.tracked].filter(file => file !== hub)) };
+    const result = selectPrProfile({ selectedE2E: [], selectedJudges: [], changedFiles: [hub], derived: without, screenPolicy: 'narrow' });
+    expect(result.hubFiles).toEqual([]);
+    expect(result.mode).toBe('dependents');
+    expect(result.e2e).toEqual(gate.sort());
+  });
+
+  test('only dispatched screens default to narrow in the PR workflow; a pull_request run plans broad', () => {
+    const workflow = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'evals.yml'), 'utf8');
+    expect(workflow).toContain("EVALS_SCREEN_POLICY: ${{ inputs.screen_policy || (github.event_name == 'workflow_dispatch' && 'narrow') || 'broad' }}");
+    expect(workflow).not.toContain("EVALS_SCREEN_POLICY: ${{ inputs.screen_policy || 'narrow' }}");
   });
 
   test('size-ledger baselines select only the cases that read them, none in the gate', () => {
