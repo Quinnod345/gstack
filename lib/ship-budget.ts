@@ -51,7 +51,9 @@ export const METER_CONTRACTS: Record<MeterKind, MeterContract> = {
 export interface Reservation {
   id: string; kind: 'step' | 'dispatch' | 'child'; step: string; next: string; roles?: string[]; tokens: number; at: string;
   state: 'open' | 'consumed' | 'settled' | 'released'; token?: string; started_at?: string; settled_at?: string;
+  prior?: number; reading_at?: number | null; epoch?: number; actual?: number;
 }
+export interface Sample { id: string; kind: 'step' | 'dispatch'; epoch: number; prior: number; projected: number; actual: number }
 export interface Handoff {
   n: number; sha: string; file: string; from: string; to: string; sub_cap: number; reservation: string; reading_at: number | null;
   epoch: number; return_file: string; reconciled_at?: string; status?: string; child_used?: number;
@@ -65,7 +67,7 @@ export interface Ledger {
   carried_used: number; estimate_used: number; unknown: number; next_id: number;
   reservations: Reservation[]; handoffs: Handoff[];
   cap_raises: Array<{ from: number | null; to: number | null; by: string; words: string; at: string }>;
-  marker?: string; review_log?: string; calibration?: string;
+  marker?: string; review_log?: string; calibration?: string; samples?: Sample[]; tail_explicit?: boolean;
   stopped?: { at: string; reason: string; step: string; next: string }; closed_at?: string;
 }
 
@@ -134,7 +136,61 @@ export function projection(cal: Calibration, unit: string, next: Next): number {
   return next.kind === 'dispatch' ? next.roles.length * unitConstants(cal, unit).per_dispatch : stepProjection(cal, unit, next.step);
 }
 
-/** Steps from..to inclusive plus their usual reviewer batches: a child's segment estimate and the RECOVER tail. */
+/** How many recent measurements of a kind the run's factor looks at (GST-101). */
+export const SAMPLE_WINDOW = 3;
+const roundUp = (n: number, to: number) => Math.ceil(n / to) * to;
+
+/**
+ * The run's own factor for steps or dispatches: the largest actual/prior ratio
+ * among its last SAMPLE_WINDOW measurements times the calibration headroom, or
+ * null before the first measurement (the prior applies until then).
+ */
+export function measuredFactor(l: Ledger, cal: Calibration, kind: Sample['kind']): number | null {
+  const rows = (l.samples ?? []).filter(s => s.kind === kind && s.epoch === l.meter.epoch && s.actual > 0 && s.prior > 0).slice(-SAMPLE_WINDOW);
+  return rows.length ? Math.max(...rows.map(s => s.actual / s.prior)) * cal.headroom : null;
+}
+
+/**
+ * Projections calibrated by the run's measured factors. The tail reserve scales
+ * with the step factor unless --reserve set it; the stop overhead keeps its
+ * calibrated fit so a run always has room to stop.
+ */
+export function projector(l: Ledger, cal: Calibration = loadCalibration(l.calibration)) {
+  const unit = l.meter.contract.unit;
+  const step = measuredFactor(l, cal, 'step'), dispatch = measuredFactor(l, cal, 'dispatch');
+  const scale = (n: number, f: number | null) => (f === null ? n : roundUp(n * f, cal.round_to));
+  const project = (next: Next) => {
+    const prior = projection(cal, unit, next);
+    return { prior, tokens: scale(prior, next.kind === 'dispatch' ? dispatch : step) };
+  };
+  const segment = (from: string, to: string) => SHIP_STEPS.slice(SHIP_STEPS.indexOf(from as any), SHIP_STEPS.indexOf(to as any) + 1)
+    .reduce((sum, s) => sum + project({ kind: 'step', step: s }).tokens + (cal.segment_dispatches[s] ?? 0) * project({ kind: 'dispatch', roles: ['specialist'] }).tokens, 0);
+  const label = (f: number | null) => (f === null ? 'prior' : f.toFixed(3));
+  return { project, segment, reserve: (l.tail_explicit ? l.tail : scale(l.tail, step)) + l.stop_overhead, label: `step:${label(step)},dispatch:${label(dispatch)}` };
+}
+
+/**
+ * Measure settled reservations against the current (fresh) reading: a step
+ * from its reading to now; settled dispatches as one group from the earliest
+ * of their readings, split by role. Returns one DRIFT line per measurement.
+ */
+export function measureSettled(l: Ledger): string[] {
+  const last = l.meter.last;
+  if (last === null) return [];
+  const pending = l.reservations.filter(r => r.state === 'settled' && r.kind !== 'child' && r.actual === undefined
+    && typeof r.reading_at === 'number' && r.epoch === l.meter.epoch && last >= r.reading_at);
+  const dispatches = pending.filter(r => r.kind === 'dispatch');
+  const from = Math.min(...dispatches.map(r => r.reading_at!));
+  const roles = dispatches.reduce((n, r) => n + (r.roles?.length ?? 1), 0);
+  return pending.map(r => {
+    const actual = r.kind === 'dispatch' ? Math.round(((last - from) * (r.roles?.length ?? 1)) / roles) : last - r.reading_at!;
+    r.actual = actual;
+    (l.samples ??= []).push({ id: r.id, kind: r.kind as Sample['kind'], epoch: l.meter.epoch, prior: r.prior ?? r.tokens, projected: r.tokens, actual });
+    return `DRIFT: id=${r.id} kind=${r.kind} next=${r.next} projected=${r.tokens} actual=${actual} ratio=${(actual / Math.max(1, r.tokens)).toFixed(2)}`;
+  });
+}
+
+/** Steps from..to inclusive plus their usual reviewer batches at the prior: a child's segment estimate. */
 export function segmentEstimate(cal: Calibration, unit: string, from: string, to: string): number {
   const i = SHIP_STEPS.indexOf(from as any), j = SHIP_STEPS.indexOf(to as any);
   const k = unitConstants(cal, unit);
@@ -206,11 +262,12 @@ export function admits(t: { used: number; reserved: number; unknown: number }, p
 
 export function budgetLine(l: Ledger, f: { call: number | null; next: string; projected: number; verdict: string }): string {
   const t = tally(l);
-  return `BUDGET: used=${t.used} reserved=${t.reserved} unknown=${t.unknown} admission_cap=${l.cap ?? 'none'} tail=${l.tail + l.stop_overhead} unit=${l.meter.contract.unit} meter=${l.meter.contract.meter} epoch=${l.meter.epoch} call=${f.call ?? 'unknown'} next=${f.next} projected=${f.projected} verdict=${f.verdict}`;
+  const p = projector(l);
+  return `BUDGET: used=${t.used} reserved=${t.reserved} unknown=${t.unknown} admission_cap=${l.cap ?? 'none'} tail=${p.reserve} unit=${l.meter.contract.unit} meter=${l.meter.contract.meter} epoch=${l.meter.epoch} call=${f.call ?? 'unknown'} next=${f.next} projected=${f.projected} calibration=${p.label} verdict=${f.verdict}`;
 }
 
 export function reserveIn(l: Ledger, r: Omit<Reservation, 'id' | 'at' | 'state'>): Reservation {
-  const row: Reservation = { ...r, id: `${l.run}-r${l.next_id++}`, at: new Date().toISOString(), state: 'open' };
+  const row: Reservation = { ...r, id: `${l.run}-r${l.next_id++}`, at: new Date().toISOString(), state: 'open', reading_at: l.meter.last, epoch: l.meter.epoch };
   l.reservations.push(row);
   return row;
 }
@@ -333,15 +390,20 @@ export function admitReviewStart(marker: string, reservation: string | undefined
   });
 }
 
-/** gstack-review-log --finish TOKEN: settle the reservation that start consumed (its completion receipt). */
+/**
+ * gstack-review-log --finish TOKEN: the pass is over, so settle the reservation
+ * that start consumed and every other dispatch reservation started in the same
+ * step (a pass logs one row even when its reviewers were admitted one by one).
+ */
 export function settleReviewFinish(marker: string, token: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const active = activeLedger(marker);
   if (!active || !active.reservations.some(r => r.token === token && r.state === 'consumed')) return undefined;
   return mutateLedger(active.file, env, l => {
     const r = l.reservations.find(x => x.token === token && x.state === 'consumed');
     if (!r) return undefined;
-    settleIn(l, r);
-    return r.id;
+    const pass = l.reservations.filter(x => x.kind === 'dispatch' && x.state === 'consumed' && x.step === r.step);
+    for (const x of pass) settleIn(l, x);
+    return pass.map(x => x.id).join(',');
   });
 }
 

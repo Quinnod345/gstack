@@ -11,7 +11,6 @@ import { BUDGET_BIN, budgetHarness, type Harness } from './helpers/ship-budget-h
 
 const cal = loadCalibration();
 const K = unitConstants(cal, 'capy-tokens');
-const STEP2 = stepProjection(cal, 'capy-tokens', '2');
 const harnesses: Harness[] = [];
 const fresh = () => { const h = budgetHarness(); harnesses.push(h); return h; };
 afterEach(() => { while (harnesses.length) harnesses.pop()!.cleanup(); });
@@ -42,12 +41,11 @@ describe('parsing and the admission rule', () => {
 
   test('CLI boundary: a check exactly at the cap continues, one token over stops (exit 3)', () => {
     const h = fresh();
-    const cap = 40_000_000;
     for (const [extra, code, verdict] of [[0, 0, 'continue'], [1, 3, 'stop']] as const) {
-      const s = started(h, ['--token-cap', String(cap), '--reading', '0', '--reserve', '0']);
+      const cap = K.per_dispatch + K.stop_overhead - extra;
+      const s = started(h, ['--token-cap', String(cap), '--reading', '3000000', '--reserve', '0']);
       expect(s.r.code).toBe(0);
-      const reading = cap - STEP2 - K.stop_overhead + extra;
-      const c = h.sb(['check', '--run', s.run, '--step', '1', '--next', '2', '--reading', String(reading)]);
+      const c = h.sb(['check', '--run', s.run, '--step', '1', '--next', 'dispatch:specialist', '--reading', '3000000']);
       expect(c.code).toBe(code);
       expect(h.field(c.out, 'BUDGET', 'verdict')).toBe(verdict);
       expect(h.field(c.out, 'BUDGET', 'admission_cap')).toBe(String(cap));
@@ -98,7 +96,9 @@ describe('reservations', () => {
     const spent = 2 * K.per_dispatch;
     const next = h.sb(['check', '--run', s.run, '--step', '9', '--next', 'dispatch:red-team', '--reading', String(spent)]);
     expect(Number(h.field(next.out, 'BUDGET', 'used'))).toBe(spent);
-    expect(next.code).toBe(spent + K.per_dispatch + K.stop_overhead <= cap ? 0 : 3);
+    const projected = Number(h.field(next.out, 'BUDGET', 'projected'));
+    expect(projected).toBe(Math.ceil((K.per_dispatch * 2 * cal.headroom) / cal.round_to) * cal.round_to);
+    expect(next.code).toBe(spent + projected + K.stop_overhead <= cap ? 0 : 3);
     const later = h.sb(['check', '--run', s.run, '--step', '9', '--next', 'dispatch:red-team', '--reading', String(cap - K.stop_overhead - K.per_dispatch + 1)]);
     expect(later.code).toBe(3);
   });

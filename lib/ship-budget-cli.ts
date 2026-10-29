@@ -13,9 +13,9 @@ import * as path from 'node:path';
 import { resultLine } from './result-codes';
 import {
   BudgetError, DEFAULT_TAIL, DELEGATE_SEGMENT_CALL, DELEGATE_START_CALL, METER_CONTRACTS, SEGMENTS, SHIP_STEPS,
-  admits, applyReading, budgetError, budgetLine, ledgerFileFor, loadCalibration, mintRunId, mutateLedger, newEpoch,
-  parseNext, parseRecordBlock, parseStep, parseTokens, pointMarker, readLedger, reserveIn, restoreRun, reviewPaths,
-  runDirFor, segmentEstimate, settleIn, stepProjection, projection, tally, unitConstants, unreservedDispatches, usageError, writeLedger,
+  admits, applyReading, budgetError, budgetLine, ledgerFileFor, loadCalibration, measureSettled, mintRunId, mutateLedger, newEpoch,
+  parseNext, parseRecordBlock, parseStep, parseTokens, pointMarker, projector, readLedger, reserveIn, restoreRun, reviewPaths,
+  runDirFor, settleIn, stepProjection, tally, unitConstants, unreservedDispatches, usageError, writeLedger,
   type Ledger, type MeterKind, type Next,
 } from './ship-budget';
 import { claudeConfigDir, loadMeterState, newMeterState, nonceSessions, readClaudeUsage, saveMeterState, sessionJournals } from './claude-usage';
@@ -41,6 +41,8 @@ export function parseArgs(argv: string[], values: string[], flags: string[] = []
 export const str = (o: Opts, k: string) => (typeof o[k] === 'string' ? (o[k] as string) : undefined);
 export const tokensOpt = (o: Opts, k: string) => (str(o, k) === undefined ? undefined : parseTokens(str(o, k), `--${k}`));
 const meterFile = (l: Ledger) => path.join(l.dir, 'claude-meter.json');
+/** Whether this command took a fresh reading (Claude Code reads its journals on every command). */
+const freshReading = (l: Ledger, o: Opts) => l.meter.contract.meter === 'claude' || str(o, 'reading') !== undefined;
 
 /** Take this command's reading under the run's meter contract; returns the per-call charge when known. */
 export function readMeter(l: Ledger, o: Opts, requireReading: boolean): number | null {
@@ -69,13 +71,13 @@ export function readMeter(l: Ledger, o: Opts, requireReading: boolean): number |
 export function stopLines(l: Ledger, f: { call: number | null; next: string; step: string; projected: number; reason: 'budget_exhausted' | 'context_threshold' }): string[] {
   l.stopped = { at: new Date().toISOString(), reason: f.reason, step: f.step, next: f.next };
   const t = tally(l);
-  const cal = loadCalibration(l.calibration);
+  const p = projector(l);
   const from = f.next.startsWith('dispatch:') ? f.step : f.next;
-  const tailCost = segmentEstimate(cal, l.meter.contract.unit, from, '22') + l.tail + l.stop_overhead;
+  const tailCost = p.segment(from, '22') + p.reserve;
   const lines = [budgetLine(l, { ...f, verdict: 'stop' })];
   if (f.reason === 'budget_exhausted') {
     lines.push(`STOP: reason=budget_exhausted spent=${t.used} reserved=${t.reserved} unknown=${t.unknown} admission_cap=${l.cap} next=${f.next} projected=${f.projected}`,
-      resultLine('gstack-ship-budget', 'BUDGET_CAP_REACHED', `next ${f.next} needs ${f.projected} + reserve ${l.tail + l.stop_overhead}`),
+      resultLine('gstack-ship-budget', 'BUDGET_CAP_REACHED', `next ${f.next} needs ${f.projected} + reserve ${p.reserve}`),
       `RECOVER: /ship --resume ${l.record ?? '<record>'} --token-cap ${t.used + t.reserved + t.unknown + tailCost}`);
   } else {
     lines.push(`STOP: reason=context_threshold call=${f.call ?? 'unknown'} threshold=${DELEGATE_SEGMENT_CALL} next=${f.next} (${l.role === 'child' ? 'a child never delegates' : '--delegate never'})`,
@@ -93,10 +95,10 @@ export function writeReturnFile(file: string, lines: string[]): void {
 
 /** Admission and the delegate rule for one boundary; reserves the admitted work under a cap. */
 export function decide(l: Ledger, step: string, next: Next, call: number | null, startThreshold = false): Outcome {
-  const cal = loadCalibration(l.calibration);
+  const p = projector(l);
   const nextId = next.kind === 'step' ? next.step : `dispatch:${next.roles.join(',')}`;
-  const projected = projection(cal, l.meter.contract.unit, next);
-  if (!admits(tally(l), projected, l.tail + l.stop_overhead, l.cap)) {
+  const { prior, tokens: projected } = p.project(next);
+  if (!admits(tally(l), projected, p.reserve, l.cap)) {
     return { stdout: stopLines(l, { call, next: nextId, step, projected, reason: 'budget_exhausted' }), exit: 3 };
   }
   const boundary = next.kind === 'step' && (startThreshold ? next.step === '1' : next.step === '7' || next.step === '12');
@@ -110,7 +112,7 @@ export function decide(l: Ledger, step: string, next: Next, call: number | null,
   }
   const lines = [budgetLine(l, { call, next: nextId, projected, verdict: 'continue' })];
   if (l.cap !== null) {
-    const r = reserveIn(l, { kind: next.kind, step, next: nextId, tokens: projected, ...(next.kind === 'dispatch' ? { roles: next.roles } : {}) });
+    const r = reserveIn(l, { kind: next.kind, step, next: nextId, tokens: projected, prior, ...(next.kind === 'dispatch' ? { roles: next.roles } : {}) });
     lines.push(`RESERVATION: id=${r.id} next=${nextId} tokens=${projected}`);
   }
   return { stdout: lines, exit: 0 };
@@ -166,7 +168,8 @@ export function cmdStart(argv: string[], ctx: Ctx): Outcome {
   const sessions = meter === 'claude' ? bindClaude(o, ctx.env) : undefined;
   const l: Ledger = {
     schema_version: 1, kind: 'gstack-ship-budget', run, dir, file: str(o, 'ledger') ?? path.join(dir, 'budget.json'), record: path.resolve(record),
-    created_at: new Date().toISOString(), cap, tail: tokensOpt(o, 'reserve') ?? DEFAULT_TAIL, stop_overhead: unitConstants(cal, contract.unit).stop_overhead,
+    created_at: new Date().toISOString(), cap, tail: tokensOpt(o, 'reserve') ?? DEFAULT_TAIL, ...(tokensOpt(o, 'reserve') !== undefined ? { tail_explicit: true } : {}),
+    stop_overhead: unitConstants(cal, contract.unit).stop_overhead,
     delegate, role: 'parent', meter: { contract, epoch: 1, baseline: 0, last: null, ...(sessions ? { sessions, config_dir: claudeConfigDir(ctx.env) } : {}) },
     epochs: [], carried_used: 0, estimate_used: 0, unknown: 0, next_id: 1, reservations: [], handoffs: [], cap_raises: [],
     marker: paths.marker, review_log: paths.reviewLog, ...(str(o, 'calibration') ? { calibration: path.resolve(str(o, 'calibration')!) } : {}),
@@ -181,40 +184,59 @@ export function cmdStart(argv: string[], ctx: Ctx): Outcome {
   return { stdout: [`BUDGET_RUN: id=${run} ledger=${l.file}`, ...out.stdout], exit: out.exit };
 }
 
+/**
+ * check: read the meter, settle what is done (open step reservations, the
+ * dispatches named by --returned, and on a step change every dispatch a
+ * reviewer consumed), measure them, then admit the next step or dispatch.
+ */
 export function cmdCheck(argv: string[], ctx: Ctx): Outcome {
-  const o = parseArgs(argv, ['run', 'record', 'step', 'next', 'reading', 'prior-reading']);
+  const o = parseArgs(argv, ['run', 'record', 'step', 'next', 'reading', 'prior-reading', 'returned']);
   const step = parseStep(str(o, 'step'));
   const next = parseNext(str(o, 'next'));
+  const returned = (str(o, 'returned') ?? '').split(',').filter(Boolean);
   return mutateLedger(ledgerFileFor({ run: str(o, 'run'), record: str(o, 'record') }, ctx.env), ctx.env, l => {
     if (l.closed_at) throw usageError(`run ${l.run} is closed`);
     if (l.stopped) return { stdout: [budgetLine(l, { call: null, next: l.stopped.next, projected: 0, verdict: 'stop' }), `STOP: reason=${l.stopped.reason} at Step ${l.stopped.step}; resume first: gstack-ship-budget resume --record ${l.record}`, `GSTACK_RESULT: skill=ship status=incomplete run=${l.dir}`], exit: 3 };
-    for (const r of l.reservations) if (r.kind === 'step' && r.state === 'open') settleIn(l, r);
+    const back = returned.map(id => l.reservations.find(r => r.id === id && r.kind === 'dispatch'));
+    const bad = returned.filter((_, i) => !back[i]);
+    if (bad.length) throw usageError(`--returned ${bad.join(',')} is not a dispatch reservation of run ${l.run}; fix: pass the RESERVATION ids check printed for the reviewers that came back`);
     const call = readMeter(l, o, true);
-    return decide(l, step, next, call);
+    for (const r of l.reservations) {
+      const done = r.kind === 'step' ? r.state === 'open' : r.kind === 'dispatch' && (back.includes(r) || (next.kind === 'step' && r.state === 'consumed'));
+      if (done) settleIn(l, r);
+    }
+    const drift = freshReading(l, o) ? measureSettled(l) : [];
+    const out = decide(l, step, next, call);
+    return { stdout: [...drift, ...out.stdout], exit: out.exit };
   });
 }
 
 export function cmdSettle(argv: string[], ctx: Ctx, release = false): Outcome {
-  const o = parseArgs(argv, ['run', 'record', 'reservation'], release ? [] : ['unknown']);
+  const o = parseArgs(argv, ['run', 'record', 'reservation', ...(release ? [] : ['reading'])], release ? [] : ['unknown']);
   const id = str(o, 'reservation');
   if (!id) throw usageError(`${release ? 'release' : 'settle'} needs --reservation <id>`);
   return mutateLedger(ledgerFileFor({ run: str(o, 'run'), record: str(o, 'record') }, ctx.env), ctx.env, l => {
     const r = l.reservations.find(x => x.id === id);
     if (!r) throw usageError(`reservation ${id} is not in run ${l.run}`);
-    if (release) { if (r.state === 'open') r.state = 'released'; }
-    else settleIn(l, r, { unknown: o.unknown === true, cal: loadCalibration(l.calibration) });
-    return { stdout: [`${release ? 'RELEASED' : 'SETTLED'}: id=${id} state=${r.state}`], exit: 0 };
+    if (release) { if (r.state === 'open') r.state = 'released'; return { stdout: [`RELEASED: id=${id} state=${r.state}`], exit: 0 }; }
+    readMeter(l, o, false);
+    settleIn(l, r, { unknown: o.unknown === true, cal: loadCalibration(l.calibration) });
+    return { stdout: [`SETTLED: id=${id} state=${r.state}`, ...(freshReading(l, o) ? measureSettled(l) : [])], exit: 0 };
   });
 }
 
 export function cmdClose(argv: string[], ctx: Ctx): Outcome {
   const o = parseArgs(argv, ['run', 'record', 'reading', 'approved-by', 'words']);
   return mutateLedger(ledgerFileFor({ run: str(o, 'run'), record: str(o, 'record') }, ctx.env), ctx.env, l => {
-    for (const r of l.reservations) if (r.kind === 'step' && r.state === 'open') settleIn(l, r);
     readMeter(l, o, false);
+    for (const r of l.reservations) if (r.kind === 'step' && r.state === 'open') settleIn(l, r);
+    if (freshReading(l, o)) measureSettled(l);
     const t = tally(l);
     const open = l.reservations.filter(r => r.kind === 'dispatch' && r.state === 'consumed').length;
     const lines = [`BUDGET_FINAL: used=${t.used} reserved=${t.reserved} unknown=${t.unknown} admission_cap=${l.cap ?? 'none'} unit=${l.meter.contract.unit} meter=${l.meter.contract.meter} epoch=${l.meter.epoch} open_dispatches=${open}`];
+    const sum = (kind: string, k: 'projected' | 'actual') => (l.samples ?? []).filter(s => s.kind === kind).reduce((n, s) => n + s[k], 0);
+    const count = (kind: string) => (l.samples ?? []).filter(s => s.kind === kind).length;
+    lines.push(`BUDGET_DRIFT: steps=${count('step')} step_projected=${sum('step', 'projected')} step_actual=${sum('step', 'actual')} dispatches=${count('dispatch')} dispatch_projected=${sum('dispatch', 'projected')} dispatch_actual=${sum('dispatch', 'actual')}`);
     const accepted = new Set((l as any).accepted_skips as string[] | undefined ?? []);
     const skipped = l.cap === null ? [] : unreservedDispatches(l).filter(s => !accepted.has(s.started));
     if (skipped.length && str(o, 'approved-by') && str(o, 'words')) {

@@ -17,7 +17,9 @@ Exactly at the cap is admitted; one token over is not. A parallel review batch i
 one sum before any of it starts. Admitted work can still cost more than its projection, and
 gstack cannot stop a host mid-turn from bash, so a run can finish above the cap by the
 misprojection of work already admitted. The tail reserve (default 2M, `--reserve <n>`) keeps
-room for the receipt steps, and the stop overhead (calibrated) keeps room to stop cleanly.
+room for the receipt steps, and the stop overhead (calibrated) keeps room to stop cleanly. Once
+the run has measured a step, the tail reserve scales with its measured step cost (a `--reserve`
+you set stays as given); the stop overhead never scales.
 
 ## Quickstart
 
@@ -48,7 +50,7 @@ With a cap set and no readable meter, start refuses
 
 ## The BUDGET line
 
-    BUDGET: used=<n> reserved=<n> unknown=<n> admission_cap=<n|none> tail=<n> unit=<u> meter=<m> epoch=<n> call=<n|unknown> next=<id> projected=<n> verdict=continue|delegate|stop
+    BUDGET: used=<n> reserved=<n> unknown=<n> admission_cap=<n|none> tail=<n> unit=<u> meter=<m> epoch=<n> call=<n|unknown> next=<id> projected=<n> calibration=step:<f|prior>,dispatch:<f|prior> verdict=continue|delegate|stop
 
 | Field | Meaning |
 |---|---|
@@ -56,10 +58,11 @@ With a cap set and no readable meter, start refuses
 | `reserved` | Open reservations: admitted steps, started dispatches, and each open child's sub-cap counted as max(sub_cap, child_used), never both |
 | `unknown` | Charges the meter cannot see (an external-CLI outside voice on Claude Code), counted at their reservation |
 | `admission_cap` | The cap, or `none` |
-| `tail` | Tail reserve plus stop overhead, held back from every admission |
+| `tail` | Tail reserve (scaled by the step factor once measured) plus stop overhead, held back from every admission |
 | `unit`, `meter`, `epoch` | The meter contract: `capy-tokens` (root counter), `claude-usage-tokens` (journal usage), `estimate-tokens`; a meter change opens a new epoch |
 | `call` | The per-call charge: two Capy readings in consecutive calls, or the last Claude Code call's usage |
-| `next`, `projected` | What the check was for and its calibrated projection |
+| `next`, `projected` | What the check was for and its projection: the prior times the run's factor for that kind |
+| `calibration` | The run's step and dispatch factors (see Calibration), or `prior` before the first measurement |
 | `verdict` | `continue` (exit 0, prints `RESERVATION:` under a cap), `delegate` (exit 0), `stop` (exit 3) |
 
 Any exit other than 0 means the next step does not start. Exit 2 is a usage or validation
@@ -77,7 +80,12 @@ gstack-review-log --start review --reservation <id>
 ```
 
 Roles are review-depth's: `specialist`, `red-team`, `adversarial-native`, `outside-voice`,
-`fix-check`. `--finish <token>` settles the reservation at the dispatch's completion receipt.
+`fix-check`. `--finish <token>` is the pass's completion receipt: it settles that reservation and
+every other dispatch reservation started in the same step, so reviewers admitted one at a time
+do not stay reserved. Name a reviewer that came back in your next check
+(`check ... --returned <id>[,<id>...]`), or, when other work comes first, `settle --reservation <id>
+--reading <n>` as it returns so its cost is measured alone. A check that moves to the next step
+settles every dispatch a reviewer started in the step before.
 `close` audits after the fact: each review-log row of the run with no reservation gets one
 BUDGET_CHECK_SKIPPED line and the run ends status=incomplete for the owner to accept
 (`close --approved-by <who> --words "<their words>"`); a reservation is never created after the fact.
@@ -136,6 +144,19 @@ largest observation times 1.5, rounded up to 10,000 tokens. The leave-one-out te
 across three runs; per-dispatch has two observations and stop overhead one. Only the Capy
 meter has observations; the Claude Code and estimate units are seeded from it until a
 Claude-metered /ship completes.
+
+These constants are the prior. Each settled step or dispatch is measured on the next fresh
+reading (a step from its check's reading to the next one; dispatches settled together as one
+group, split by role), and prints
+
+    DRIFT: id=<reservation> kind=step|dispatch next=<id> projected=<n> actual=<n> ratio=<actual/projected>
+
+From then on the run projects steps and dispatches with its own factor: the largest
+actual/prior ratio among its last three measurements of that kind, times 1.5. The step factor
+also scales the default tail reserve. Dispatches keep the prior until the first
+dispatch is measured, so under a tight cap admit one reviewer first and let it calibrate the rest.
+`close` prints `BUDGET_DRIFT:` with the run's projected and actual totals per kind. The estimate
+meter has no readings, so it always projects at the prior.
 
 ## Token cap and USD spend cap
 

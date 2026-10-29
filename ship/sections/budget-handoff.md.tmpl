@@ -23,7 +23,8 @@ Before each dispatch batch, reserve the batch as one sum, then pass the printed 
 ~/.claude/skills/gstack/bin/gstack-review-log --start review --reservation "$RESERVATION_ID"
 ```
 
-`--finish` settles it. A dispatch with no `review-log --start` settles with
+`--finish` settles it and the pass's other dispatch reservations. Admitting reviewers one at
+a time, name each one that came back in the next check's `--returned <id>`. A dispatch with no `review-log --start` settles with
 `gstack-ship-budget settle --run <id> --reservation <id>` when it returns
 (`--unknown` when the meter cannot see it), or `release` if it never ran.
 
