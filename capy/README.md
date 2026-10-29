@@ -119,7 +119,7 @@ shows it red before green. Nothing is retried into green and no threshold moves.
 **Peer Captains route findings, not chatter.** Captains message each other
 with evidence. gstack-evals' replay showed `/review` downgrading real bugs; it
 was a fix lane in gstack within the hour. Another eval Captain's $5.78 panel found that
-OpenClaw refused to load a 78 KB gstack skill; gstack fixed it the same
+OpenClaw refused to load a 78 KB gstack skill; gstack had a fix up the same
 afternoon ([#3610](https://github.com/garrytan/gstack/pull/3610)). When Garry
 said "hurry up" to one Captain, another reordered its merge queue for it and
 sent back each merge sha.
