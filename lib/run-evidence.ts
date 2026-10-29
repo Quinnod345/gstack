@@ -20,7 +20,9 @@
  *   runner OS matches when the profile names one.
  *
  * Profiles are the base branch's `.gstack/pregate.json` `run_profiles`, so a
- * pull request can tighten them but never relax them. Every refusal names a
+ * pull request can tighten them but never relax them. The workflow a run
+ * executed and the tree.json it uploaded are the run head's own, so a diff to
+ * that workflow is reviewed like any other gate change. Every refusal names a
  * reason code; an API or git error refuses (fail closed). Verification runs
  * once, online, at `gstack-pregate clear`; the receipt it writes carries the
  * evidence, and `gstack-pregate verify` checks that receipt offline.
@@ -51,7 +53,7 @@ export interface RunDeps {
 
 export type RunRefusal = 'run_ref_invalid' | 'other_repository' | 'fork_run' | 'workflow_mismatch' | 'event_mismatch' | 'run_in_progress'
   | 'run_not_success' | 'job_missing' | 'job_ambiguous' | 'job_not_success' | 'artifact_missing' | 'artifact_mismatch'
-  | 'artifact_reused' | 'tree_mismatch' | 'newer_run_vetoes' | 'run_stale' | 'os_mismatch' | 'api_error';
+  | 'artifact_reused' | 'tree_mismatch' | 'newer_run_vetoes' | 'run_changed' | 'run_stale' | 'os_mismatch' | 'api_error';
 export interface RunEvidence { run_id: number; run_attempt: number; head_sha: string; tree: string; profile: string; event: string; finished_at: string; files: string[]; tests: number | null }
 export type RunVerdict = { ok: true; evidence: RunEvidence } | { ok: false; reason: RunRefusal; detail: string };
 
@@ -60,6 +62,7 @@ const PROFILE_KEYS = ['workflow', 'events', 'jobs', 'artifact', 'max_age_hours',
 const WORKFLOW_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
 const NAME = /^[A-Za-z0-9_.\/-]{1,128}$/;
 export const DEFAULT_MAX_AGE_HOURS = 24;
+const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 
 /** A numeric run id, or a run URL on this repository (`…/actions/runs/<id>[/attempts/<n>][/job/<j>]`). */
 export function parseRunRef(ref: string, repo: string): number | null {
@@ -98,7 +101,10 @@ export function runProfileErrors(profiles: unknown, gateRuns: unknown): Array<{ 
     else {
       for (const k of Object.keys(g)) if (k !== 'profiles' && k !== 'inventory') errors.push({ path: `remote_gate_runs.${k}`, message: 'unknown key; valid keys: profiles, inventory' });
       if (!Array.isArray(g.profiles) || g.profiles.length === 0 || g.profiles.some(p => typeof p !== 'string')) errors.push({ path: 'remote_gate_runs.profiles', message: 'must be a non-empty array of run_profiles names' });
-      else for (const p of g.profiles as string[]) if (!names.has(p)) errors.push({ path: 'remote_gate_runs.profiles', message: `${JSON.stringify(p)} is not a run_profiles name` });
+      else {
+        for (const p of g.profiles as string[]) if (!names.has(p)) errors.push({ path: 'remote_gate_runs.profiles', message: `${JSON.stringify(p)} is not a run_profiles name` });
+        if (new Set(g.profiles).size !== g.profiles.length) errors.push({ path: 'remote_gate_runs.profiles', message: 'names each profile once' });
+      }
       if (typeof g.inventory !== 'string' || !g.inventory.trim() || g.inventory.length > 512 || /[\0\r\n]/.test(g.inventory)) errors.push({ path: 'remote_gate_runs.inventory', message: 'must be one command line under 512 characters that prints the remote gate\'s test files, one per line' });
     }
   }
@@ -108,6 +114,7 @@ export function runProfileErrors(profiles: unknown, gateRuns: unknown): Array<{ 
 const fail = (reason: RunRefusal, detail: string): RunVerdict => ({ ok: false, reason, detail });
 /** When a run's newest attempt started. A run vetoes the candidate when it started after the candidate was created: a red re-run of an older run counts, and re-running the candidate does not hide a failure in between. */
 const started = (r: ApiRun): string => r.run_started_at ?? r.created_at ?? '';
+const normalPath = (f: string): string => f.replace(/^(\.\/)+/, '');
 
 /**
  * The verdict for run `runRef` under `profile`. `vetoHeads` are further heads
@@ -140,7 +147,7 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
     }
     const heads = [...new Set([run.head_sha, ...(o.vetoHeads ?? []).filter(h => SHA.test(h))])];
     for (const head of heads) {
-      const newer = deps.runsForHead(p.workflow, head).filter(r => r.id !== id && started(r) > (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
+      const newer = deps.runsForHead(p.workflow, head).filter(r => !(r.id === id && r.run_attempt === run.run_attempt) && started(r) > (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
       if (newer.length) return fail('newer_run_vetoes', `newer run ${newer[0]!.id} of ${p.workflow} on ${head.slice(0, 12)} is ${newer[0]!.status === 'completed' ? newer[0]!.conclusion : newer[0]!.status}`);
     }
     let rec: TreeRecord;
@@ -155,8 +162,12 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
     if (!headTree) return fail('api_error', `git cannot read the tree of ${run.head_sha}`);
     if (rec.tree !== headTree) return fail('tree_mismatch', `${at} recorded tree ${String(rec.tree)}, but its head ${run.head_sha.slice(0, 12)} has tree ${headTree}`);
     if (p.os && rec.os !== p.os) return fail('os_mismatch', `${at} ran on ${String(rec.os ?? 'an unrecorded OS')}; ${o.profileName} requires ${p.os}`);
-    const files = Array.isArray(rec.files) ? (rec.files as unknown[]).filter((f): f is string => typeof f === 'string') : [];
-    const tests = Number.isInteger(rec.tests) ? (rec.tests as number) : null;
+    if (rec.files !== undefined && (!Array.isArray(rec.files) || rec.files.some(f => typeof f !== 'string'))) return fail('artifact_mismatch', `${at}'s ${p.artifact} files is not a list of paths`);
+    if (rec.tests !== undefined && (!Number.isInteger(rec.tests) || (rec.tests as number) < 0)) return fail('artifact_mismatch', `${at}'s ${p.artifact} tests is not a non-negative integer`);
+    const files = ((rec.files ?? []) as string[]).map(normalPath);
+    const tests = rec.tests === undefined ? null : (rec.tests as number);
+    const again = deps.run(id);
+    if (again.run_attempt !== run.run_attempt || again.status !== 'completed' || again.conclusion !== 'success') return fail('run_changed', `run ${id} moved to attempt ${again.run_attempt} (${again.status === 'completed' ? again.conclusion : again.status}) while it was being verified`);
     return { ok: true, evidence: { run_id: id, run_attempt: run.run_attempt, head_sha: run.head_sha, tree: headTree, profile: o.profileName, event: run.event, finished_at: run.updated_at!, files, tests } };
   } catch (e: any) {
     return fail('api_error', `reading run ${id} failed: ${String(e?.message ?? e).slice(0, 300)}`);
@@ -165,8 +176,8 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
 
 /** The files in `inventory` that no verified run's tree.json lists. */
 export function uncoveredFiles(inventory: string[], evidence: RunEvidence[]): string[] {
-  const ran = new Set(evidence.flatMap(e => e.files));
-  return inventory.filter(f => !ran.has(f));
+  const ran = new Set(evidence.flatMap(e => e.files.map(normalPath)));
+  return inventory.filter(f => !ran.has(normalPath(f)));
 }
 
 /** The receipt suffix a run clear records: runs, profiles and the verification time, read back by `parseRunReceipt`. */
@@ -190,15 +201,22 @@ function gh(args: string[], timeoutMs = 60_000): string {
 /** The gh- and git-backed dependencies for `repo`, reading trees in `repoRoot` (fetching a missing head from origin once). */
 export function ghRunDeps(repo: string, repoRoot: string): RunDeps {
   const json = <T>(p: string): T => JSON.parse(gh(['api', p]));
+  // Every page, one JSON value per line: a veto or a required job past the first 100 entries must still be seen.
+  const all = <T>(p: string, key: string): T[] => gh(['api', '--paginate', p, '--jq', `.${key}[]`]).split('\n').filter(Boolean).map(l => JSON.parse(l) as T);
   return {
     run: id => json<ApiRun>(`repos/${repo}/actions/runs/${id}`),
-    runsForHead: (workflow, sha) => json<{ workflow_runs: ApiRun[] }>(`repos/${repo}/actions/workflows/${workflow}/runs?head_sha=${sha}&per_page=100`).workflow_runs,
-    jobs: (id, attempt) => json<{ jobs: ApiJob[] }>(`repos/${repo}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=100`).jobs,
+    runsForHead: (workflow, sha) => all<ApiRun>(`repos/${repo}/actions/workflows/${workflow}/runs?head_sha=${sha}&per_page=100`, 'workflow_runs'),
+    jobs: (id, attempt) => all<ApiJob>(`repos/${repo}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=100`, 'jobs'),
     artifact: (id, name) => {
+      const listed = all<{ name: string; size_in_bytes: number; expired: boolean }>(`repos/${repo}/actions/runs/${id}/artifacts?name=${encodeURIComponent(name)}&per_page=100`, 'artifacts').filter(a => a.name === name && !a.expired);
+      if (listed.length !== 1) throw new Error(`run ${id} has ${listed.length} unexpired artifacts named ${name}`);
+      if (!(listed[0]!.size_in_bytes <= MAX_ARTIFACT_BYTES)) throw new Error(`artifact ${name} is ${listed[0]!.size_in_bytes} bytes, over ${MAX_ARTIFACT_BYTES}`);
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-run-evidence-'));
       try {
         gh(['run', 'download', String(id), '--repo', repo, '--name', name, '--dir', dir], 120_000);
-        return JSON.parse(fs.readFileSync(path.join(dir, 'tree.json'), 'utf8')) as TreeRecord;
+        const file = path.join(dir, 'tree.json');
+        if (fs.statSync(file).size > MAX_ARTIFACT_BYTES) throw new Error(`tree.json is over ${MAX_ARTIFACT_BYTES} bytes`);
+        return JSON.parse(fs.readFileSync(file, 'utf8')) as TreeRecord;
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     },
     commitTree: sha => {

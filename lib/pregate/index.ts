@@ -27,7 +27,7 @@ import { NON_DOWNGRADABLE, PREGATE_CONFIG_PATH, userPolicyAbsent } from './confi
 import { sha256, withFingerprint } from './context';
 import { baseBranchOf, baseMismatchFix, describeSubstitution, substituteStampOnlyTree } from './remote-receipt';
 import { resolveBaseBranch } from '../ship-policy';
-import { parseRunReceipt, runReceiptFields, uncoveredFiles, verifyRun, type RemoteGateRuns, type RunDeps, type RunEvidence, type RunProfile } from '../run-evidence';
+import { parseRunReceipt, parseRunRef, runReceiptFields, uncoveredFiles, verifyRun, type RemoteGateRuns, type RunDeps, type RunEvidence, type RunProfile } from '../run-evidence';
 import type { CheckDef, CheckResult, PregateContext, Stage } from './types';
 
 export const CHECKS: readonly CheckDef[] = [regenCheck, secretsCheck, straysCheck, literalsCheck, timingCheck, guardsCheck, lanesCheck];
@@ -204,7 +204,7 @@ function userPolicyChange(file: PregateFile): string | null {
 
 export interface ClearInput { runUrl?: string; bundleLane?: string; receiptPath?: string; runs?: string[]; evidence?: RunCheck }
 /** What a run clear needs: the base branch's run profiles, the verifier's dependencies, the clock, and the remote gate's inventory. */
-export interface RunCheck { repo: string; deps: RunDeps; profiles: Record<string, RunProfile>; gateRuns: RemoteGateRuns | null; now: Date; inventory: (command: string) => string[] | { error: string } }
+export interface RunCheck { repo: string; deps: RunDeps; profiles: Record<string, RunProfile>; gateRuns: RemoteGateRuns | null; now: Date; inventory: (command: string, tree: string) => string[] | { error: string } }
 export type ClearDecision = { receipt: string; attested: boolean; substitution?: PregateReceiptSubstitution } | { refused: 'usage' | 'PREGATE_RECEIPT_INVALID'; message: string; fix?: string };
 
 /**
@@ -277,34 +277,53 @@ function clearByRuns(file: PregateFile, lane: string, refs: string[], check: Run
   const names = isGate ? check.gateRuns?.profiles ?? [] : check.profiles[lane] ? [lane] : [];
   if (!names.length) return { refused: 'usage', message: isGate ? `--run clears ${lane} only when the base branch's ${PREGATE_CONFIG_PATH} declares remote_gate_runs` : `--run clears ${lane} only when the base branch's ${PREGATE_CONFIG_PATH} declares a run_profiles entry named ${lane}` };
   if (refs.length !== names.length) return { refused: 'usage', message: `${lane} clears with exactly ${names.length} run(s), one per profile (${names.join(', ')}); got ${refs.length}` };
-  const evidence: RunEvidence[] = [];
-  const left = [...refs];
-  for (const name of names) {
-    const profile = check.profiles[name];
-    if (!profile) return { refused: 'usage', message: `run profile ${name} is not declared` };
-    const tried: string[] = [];
-    const hit = left.findIndex(ref => {
-      const v = verifyRun(check.deps, { repo: check.repo, runRef: ref, profileName: name, profile, vetoHeads: file.head ? [file.head] : [], now: check.now });
-      if (v.ok) { evidence.push(v.evidence); return true; }
-      tried.push(`${ref}: reason=${v.reason} ${v.detail}`);
-      return false;
-    });
-    if (hit < 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_verified_run — no run verifies as ${name}: ${tried.join('; ')}; ${lane} stays uncleared` };
-    left.splice(hit, 1);
+  const ids = refs.map(ref => parseRunRef(ref, check.repo) ?? ref);
+  if (new Set(ids).size !== ids.length) return { refused: 'usage', message: `${lane} needs a different run for each profile; got ${refs.join(', ')}` };
+  // The profiles are the base branch's; a pregate.json recorded against another base names another authority.
+  const base = resolveBaseBranch(repoRoot);
+  const recorded = baseBranchOf(file.base);
+  if (recorded && recorded !== base) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=base_mismatch — pregate.json was recorded against origin/${recorded}, but run profiles come from this repository's base origin/${base}; ${lane} stays uncleared`, fix: baseMismatchFix(repoRoot, base, recorded) };
+  const verdicts = new Map<string, ReturnType<typeof verifyRun>>();
+  const verdict = (name: string, ref: string) => {
+    const key = `${name}\0${ref}`;
+    if (!verdicts.has(key)) verdicts.set(key, verifyRun(check.deps, { repo: check.repo, runRef: ref, profileName: name, profile: check.profiles[name]!, vetoHeads: file.head ? [file.head] : [], now: check.now }));
+    return verdicts.get(key)!;
+  };
+  const missingProfile = names.find(name => !check.profiles[name]);
+  if (missingProfile) return { refused: 'usage', message: `run profile ${missingProfile} is not declared` };
+  // Every profile gets its own verified run; search the whole assignment so a run valid for two profiles cannot starve one.
+  const assign = (i: number, used: Set<string>): RunEvidence[] | null => {
+    if (i === names.length) return [];
+    for (const ref of refs) {
+      if (used.has(ref)) continue;
+      const v = verdict(names[i]!, ref);
+      if (!v.ok) continue;
+      const rest = assign(i + 1, new Set([...used, ref]));
+      if (rest) return [v.evidence, ...rest];
+    }
+    return null;
+  };
+  const evidence = assign(0, new Set());
+  if (!evidence) {
+    const failed = names.map(name => `${name}: ${refs.map(ref => { const v = verdict(name, ref); return v.ok ? `${ref} ok` : `${ref} reason=${v.reason} ${v.detail}`; }).join('; ')}`);
+    return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_verified_run — no run per profile verifies (${failed.join(' | ')}); ${lane} stays uncleared` };
   }
   const trees = [...new Set(evidence.map(e => e.tree))];
   if (trees.length > 1) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=tree_mismatch — the runs tested different trees (${trees.map(t => t.slice(0, 12)).join(', ')}); ${lane} stays uncleared` };
   const sub = treeSubstitution(file, trees[0]!, lane, repoRoot);
   if ('refused' in sub) return { ...sub, message: `REUSE: refused reason=tree_not_stamp_only — ${sub.message}` };
-  const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
+  const idle = evidence.filter(e => (e.tests ?? e.files.length) === 0);
+  if (idle.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_tests — ${idle.map(e => `run ${e.run_id} (${e.profile})`).join(', ')} records no tests; ${lane} stays uncleared` };
+  const required = new Set(file.requires_remote?.find(r => r.lane === lane)?.tests ?? []);
   if (isGate) {
-    const listed = check.inventory(check.gateRuns!.inventory);
+    const listed = check.inventory(check.gateRuns!.inventory, file.tree);
     if ('error' in listed) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_failed — the remote gate's inventory command failed: ${listed.error}; ${lane} stays uncleared` };
     if (!listed.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_empty — the remote gate's inventory command listed no test files; ${lane} stays uncleared` };
-    const missing = uncoveredFiles(listed, evidence);
-    if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_uncovered — ${missing.length} of the gate's ${listed.length} test file(s) appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
+    for (const f of listed) required.add(f);
   }
-  if (tests === 0) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=no_tests — the verified runs record no tests; ${lane} stays uncleared` };
+  const missing = uncoveredFiles([...required], evidence);
+  if (missing.length) return { refused: 'PREGATE_RECEIPT_INVALID', message: `REUSE: refused reason=inventory_uncovered — ${missing.length} of the ${required.size} test file(s) ${lane} must cover appear in no run's tree.json (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}); ${lane} stays uncleared` };
+  const tests = evidence.reduce((n, e) => n + (e.tests ?? e.files.length), 0);
   const accepted = sub.substitution ? ` accepted-for=${file.tree.slice(0, 12)} stamp-only=${sub.substitution.files.length}` : '';
   return { receipt: `${isGate ? 'remote-gate' : 'run'} tree=${trees[0]!.slice(0, 12)} tests=${tests}${accepted} ${runReceiptFields(evidence, check.now)}`, attested: false, substitution: sub.substitution };
 }

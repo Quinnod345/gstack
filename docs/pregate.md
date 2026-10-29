@@ -607,54 +607,70 @@ run executed), `tests` (the count) and, with `os`, the runner OS.
 **What `clear --run` checks** (`lib/run-evidence.ts`), for every run, online,
 once:
 
-- The run belongs to this repository and ran for a same-repository head.
-  Its workflow file and event are the profile's, and it completed with success.
-  The API answers with the newest attempt, so an earlier green attempt under a
-  newer red one is refused.
+- The run belongs to this repository and ran for a same-repository head. Its
+  workflow file is the profile's, its event is `push` or `workflow_dispatch`
+  (a `pull_request` run tests the merge commit, not the head tree, so no
+  profile may accept it), and it completed with success. The API answers with
+  the newest attempt, so an earlier green attempt under a newer red one is
+  refused, and the run is read again after the evidence is collected: a new
+  attempt meanwhile is `run_changed`.
 - Every job the profile names appears exactly once in that attempt and
-  succeeded.
-- `tree.json` names this run, attempt, event and head. It is not a reuse
+  succeeded. Jobs and runs are read across every page.
+- `tree.json` (an artifact of at most 8 MiB) names this run, attempt, event and
+  head (`sha` and `head_sha`, each checked when present). It is not a reuse
   record (a reuse is never evidence). Its tree equals the tree git computes for
-  the run's head commit.
+  the run's head commit. `files` is a list of paths and `tests` a
+  non-negative integer when present; without `tests` the file count stands in.
 - No run of the same workflow on that head, or on pregate.json's own head,
   whose newest attempt started after this run was created failed, was
   cancelled or is still running (`run_started_at`, so a red re-run of an older
   run counts, and re-running this run does not hide a failure in between).
-- Its event is `push` or `workflow_dispatch`. A `pull_request` run tests the
-  merge commit, not the head tree, so no profile may accept it.
 - The run finished within `max_age_hours`, and on the profile's OS when it
   names one.
-- For `pregate.json/remote_gate`: there is exactly one verified run per
-  `remote_gate_runs` profile, all on one tree. Every file the `inventory`
-  command prints for this tree appears in some run's `files`. The command is a
-  pin-file command, so it runs only with `--allow-repo-commands`, and an empty
-  or failing inventory refuses.
-- The run tree is pregate.json's tree, or a stamp-only predecessor of it under
-  exactly the rule [above](#remote-gate-stamp-only) (a policy whose
+
+Then, for the lane:
+
+- pregate.json was recorded against this repository's base, whose profiles
+  apply (`base_mismatch` otherwise).
+- Each profile gets its own run (a run id given twice is a usage error), and
+  every run verifies under its profile. The assignment is searched, so a run
+  valid for two profiles cannot starve the other. A lane with a profile needs
+  one run; `pregate.json/remote_gate` needs one per `remote_gate_runs`
+  profile.
+- All runs tested one tree: pregate.json's tree, or a stamp-only predecessor of
+  it under exactly the rule [above](#remote-gate-stamp-only) (a policy whose
   `stamp_sensitive_gates` names `tests` refuses that substitution).
+- Every run executed something (`no_tests` names one that did not), and the
+  runs' `files` together cover the obligation's selected test files, plus, for
+  the remote gate, every file the `inventory` command prints. The inventory is
+  a pin-file command, so it runs only with `--allow-repo-commands`, and only
+  while the working tree is pregate.json's tree (checked before and after it
+  runs); an empty or failing inventory refuses.
 
 Any API or git error refuses. Each refusal prints `REUSE: refused
 reason=<code> — …` as `PREGATE_RECEIPT_INVALID`, and a run that fails
 verification is named with its own reason (`fork_run`, `event_mismatch`,
 `run_not_success`, `job_missing`, `artifact_mismatch`, `artifact_reused`,
-`tree_mismatch`, `newer_run_vetoes`, `run_stale`, `os_mismatch`, `api_error`,
-…); the clear-level codes are `no_verified_run`, `tree_mismatch` (runs on
-different trees), `tree_not_stamp_only`, `inventory_failed`, `inventory_empty`,
-`inventory_uncovered` and `no_tests`. A wrong run count or a lane with no
-profile is a usage error (exit 2), not a REUSE refusal. When the base config or
-the GitHub origin cannot be read, `--run` fails, and so do `--run-url` and
-`--bundle-lane` for a lane the base profiles; any other lane is recorded as
-before, with a warning naming the cause. Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and
-the receipt reads
-`remote-gate tree=<t12> tests=<n> runs=<id>/<attempt>,… profiles=<p>,…
+`tree_mismatch`, `newer_run_vetoes`, `run_changed`, `run_stale`,
+`os_mismatch`, `api_error`, …); the clear-level codes are `base_mismatch`,
+`no_verified_run`, `tree_mismatch` (runs on different trees),
+`tree_not_stamp_only`, `no_tests`, `inventory_failed`, `inventory_empty` and
+`inventory_uncovered`. A wrong run count, a repeated run or a lane with no
+profile is a usage error (exit 2), not a REUSE refusal.
+
+Accepted, `clear` prints `REUSE: accepted <lane> <receipt>`, and the receipt
+reads `remote-gate tree=<t12> tests=<n> runs=<id>/<attempt>,… profiles=<p>,…
 heads=<h12> verified=<time>` (with `accepted-for=` and the substitution for a
 stamp-only predecessor). A lane with its own profile gets `run tree=… runs=…`
-the same way, and for such a lane `--run-url` is verified as `--run` is and
-`--bundle-lane` is refused. `gstack-ship-queue ready --dispatch-ci` still
-records its dispatched runs by URL; routing it through the verifier is the
-next change (P3b), so a repository that declares lane profiles clears those
-lanes with `gstack-pregate clear --run`. A
-lane with no profile keeps today's `--run-url` recording.
+the same way; for such a lane `--run-url` is verified as `--run` is, and
+`--bundle-lane` is refused. A lane with no profile keeps today's `--run-url`
+recording. When the base config or the GitHub origin cannot be read, `--run`
+fails, and so do `--run-url` and `--bundle-lane` unless the base was read and
+shows the lane has no profile; then the lane is recorded as before, with a
+warning naming the cause. `gstack-ship-queue ready --dispatch-ci` still
+records its dispatched runs by URL; routing it through the verifier is the next
+change (P3b), so a repository that declares lane profiles clears those lanes
+with `gstack-pregate clear --run`.
 
 **`verify` stays offline.** The check ran at `clear`. `gstack-pregate verify`,
 and `gstack-ship-queue ready` through it, refuse a run receipt whose `tree=`

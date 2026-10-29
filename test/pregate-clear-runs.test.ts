@@ -54,12 +54,12 @@ async function pregateAt(repo: FixtureRepo): Promise<PregateFile> {
 }
 
 /** A run of `profile` on `head` with a tree.json listing `files`, as GitHub would report it. */
-interface FakeRun { id: number; profile: string; head: string; files: string[]; conclusion?: string }
+interface FakeRun { id: number; profile: string; head: string; files: string[]; conclusion?: string; updated?: string }
 function check(repo: FixtureRepo, runs: FakeRun[], over: Partial<RunCheck> = {}): RunCheck {
   const byId = new Map(runs.map(r => [r.id, r]));
   const api = (r: FakeRun): ApiRun => ({
     id: r.id, run_attempt: 1, status: 'completed', conclusion: r.conclusion ?? 'success', event: 'workflow_dispatch', head_sha: r.head,
-    path: `.github/workflows/${PROFILES[r.profile]!.workflow}`, created_at: '2026-10-29T10:00:00Z', updated_at: '2026-10-29T10:30:00Z',
+    path: `.github/workflows/${PROFILES[r.profile]!.workflow}`, created_at: '2026-10-29T10:00:00Z', updated_at: r.updated ?? '2026-10-29T10:30:00Z',
     repository: { full_name: 'fx/fx' }, head_repository: { full_name: 'fx/fx' },
   });
   const deps: RunDeps = {
@@ -77,9 +77,9 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const repo = fixture();
     const head = repo.git('rev-parse', 'HEAD');
     const file = await pregateAt(repo);
-    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 201, profile: 'e2e', head, files: ['test/b.test.ts'] }, { id: 200, profile: 'test', head, files: ['test/a.test.ts'] }]) }, repo.work);
+    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 201, profile: 'e2e', head, files: ['test/b.test.ts'] }, { id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/util.test.js'] }]) }, repo.work);
     if ('refused' in d) throw new Error(d.message);
-    expect(d.receipt).toBe(`remote-gate tree=${file.tree.slice(0, 12)} tests=10 runs=200/1,201/1 profiles=test,e2e heads=${head.slice(0, 12)} verified=2026-10-29T12:00:00.000Z`);
+    expect(d.receipt).toBe(`remote-gate tree=${file.tree.slice(0, 12)} tests=15 runs=200/1,201/1 profiles=test,e2e heads=${head.slice(0, 12)} verified=2026-10-29T12:00:00.000Z`);
     expect(d.substitution).toBeUndefined();
     const cleared = clearObligation(file, LANE, d.receipt, 'test');
     expect(verifyPregate(repo.work, cleared, { tree: file.tree } as any)).toMatchObject({ ok: true });
@@ -96,7 +96,7 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const gated = repo.git('rev-parse', 'HEAD');
     stamp(repo);
     const file = await pregateAt(repo);
-    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head: gated, files: ['test/a.test.ts', 'test/b.test.ts'] }, { id: 201, profile: 'e2e', head: gated, files: [] }]) }, repo.work);
+    const d = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head: gated, files: ['test/a.test.ts', 'test/util.test.js'] }, { id: 201, profile: 'e2e', head: gated, files: ['test/b.test.ts'] }]) }, repo.work);
     if ('refused' in d) throw new Error(d.message);
     expect(d.receipt).toContain(`accepted-for=${file.tree.slice(0, 12)} stamp-only=3 runs=200/1,201/1`);
     expect(d.substitution?.accepted_for).toBe(file.tree);
@@ -108,11 +108,15 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const older = repo.git('rev-parse', 'HEAD~1');
     const head = repo.git('rev-parse', 'HEAD');
     const file = await pregateAt(repo);
-    const both = (h: string, files: string[][] = [['test/a.test.ts'], ['test/b.test.ts']], conclusion?: string): FakeRun[] => [{ id: 200, profile: 'test', head: h, files: files[0]!, conclusion }, { id: 201, profile: 'e2e', head: h, files: files[1]! }];
+    const both = (h: string, files: string[][] = [['test/a.test.ts', 'test/util.test.js'], ['test/b.test.ts']], conclusion?: string): FakeRun[] => [{ id: 200, profile: 'test', head: h, files: files[0]!, conclusion }, { id: 201, profile: 'e2e', head: h, files: files[1]! }];
     const msg = (d: ReturnType<typeof clearDecision>) => ('refused' in d ? `${d.refused}: ${d.message}` : `cleared ${d.receipt}`);
     expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(older)) }, repo.work))).toMatch(/^PREGATE_RECEIPT_INVALID: .*lib\/util\.js/);
-    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, [['test/a.test.ts'], []])) }, repo.work))).toContain('1 of the gate\'s 2 test file(s) appear in no run\'s tree.json (test/b.test.ts)');
-    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, undefined, 'failure')) }, repo.work))).toContain('no run verifies as test');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, [['test/a.test.ts', 'test/util.test.js'], ['test/c.test.ts']])) }, repo.work))).toContain('1 of the 3 test file(s) pregate.json/remote_gate must cover appear in no run\'s tree.json (test/b.test.ts)');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, [['test/a.test.ts', 'test/b.test.ts'], ['test/b.test.ts']])) }, repo.work))).toContain('(test/util.test.js)');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, [['test/a.test.ts', 'test/util.test.js'], []])) }, repo.work))).toContain('reason=no_tests — run 201 (e2e) records no tests');
+    expect(msg(clearDecision(file, LANE, { runs: ['200', 'https://github.com/fx/fx/actions/runs/200'], evidence: check(repo, both(head)) }, repo.work))).toBe('usage: pregate.json/remote_gate needs a different run for each profile; got 200, https://github.com/fx/fx/actions/runs/200');
+    expect(msg(clearDecision({ ...file, base: 'origin/release@0123456789ab' }, LANE, { runs: ['200', '201'], evidence: check(repo, both(head)) }, repo.work))).toMatch(/^PREGATE_RECEIPT_INVALID: REUSE: refused reason=base_mismatch/);
+    expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head, undefined, 'failure')) }, repo.work))).toContain('reason=no_verified_run');
     expect(msg(clearDecision(file, LANE, { runs: ['200'], evidence: check(repo, both(head)) }, repo.work))).toBe('usage: pregate.json/remote_gate clears with exactly 2 run(s), one per profile (test, e2e); got 1');
     expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { gateRuns: null }) }, repo.work))).toContain('only when the base branch\'s .gstack/pregate.json declares remote_gate_runs');
     expect(msg(clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, both(head), { inventory: () => ({ error: 'boom' }) }) }, repo.work))).toContain('inventory command failed: boom');
@@ -123,10 +127,21 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     const older = repo.git('rev-parse', 'HEAD~1');
     const head = repo.git('rev-parse', 'HEAD');
     const file = await pregateAt(repo);
-    const split = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }, { id: 201, profile: 'e2e', head: older, files: [] }]) }, repo.work);
+    const split = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts', 'test/util.test.js'] }, { id: 201, profile: 'e2e', head: older, files: ['test/b.test.ts'] }]) }, repo.work);
     expect('refused' in split && split.message).toContain('the runs tested different trees');
-    const empty = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: [] }, { id: 201, profile: 'e2e', head, files: [] }], { inventory: () => [] }) }, repo.work);
+    const empty = clearDecision(file, LANE, { runs: ['200', '201'], evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/util.test.js'] }, { id: 201, profile: 'e2e', head, files: ['test/b.test.ts'] }], { inventory: () => [] }) }, repo.work);
     expect('refused' in empty && empty.message).toContain('inventory command listed no test files');
+  }, 120_000);
+
+  test('a run valid for two profiles does not starve the other: the profile-to-run assignment is searched, not taken greedily', async () => {
+    const repo = fixture();
+    const head = repo.git('rev-parse', 'HEAD');
+    const file = await pregateAt(repo);
+    const profiles = { ...PROFILES, wide: PROFILES.test!, narrow: { ...PROFILES.test!, max_age_hours: 1 } };
+    const runs: FakeRun[] = [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/util.test.js'] }, { id: 201, profile: 'test', head, files: ['test/b.test.ts'], updated: '2026-10-29T11:30:00Z' }];
+    const d = clearDecision(file, LANE, { runs: ['201', '200'], evidence: check(repo, runs, { profiles, gateRuns: { profiles: ['wide', 'narrow'], inventory: 'true' } }) }, repo.work);
+    if ('refused' in d) throw new Error(d.message);
+    expect(d.receipt).toContain('runs=200/1,201/1 profiles=wide,narrow ');
   }, 120_000);
 
   test('a lane with its own profile clears from --run-url through the verifier; a lane without one keeps the plain run-URL record, and so does a repository whose run profiles cannot be read (a non-GitHub origin), with a warning', async () => {
@@ -148,11 +163,13 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     expect(clearDecision(file, PLATFORM, { bundleLane: 'macos', evidence: check(repo, []) }, repo.work)).toEqual({ receipt: 'bundle-lane:macos', attested: false });
     const unprofiled = clearDecision(file, PLATFORM, { runs: ['200'], evidence: check(repo, []) }, repo.work);
     expect('refused' in unprofiled && `${unprofiled.refused}: ${unprofiled.message}`).toContain(`usage: --run clears ${PLATFORM} only when the base branch's .gstack/pregate.json declares a run_profiles entry named`);
-    const gateFromUrl = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }]) }, repo.work);
+    const gateFromUrl = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts', 'test/util.test.js'] }]) }, repo.work);
     expect('refused' in gateFromUrl && `${gateFromUrl.refused}: ${gateFromUrl.message}`).toBe('usage: pregate.json/remote_gate clears with exactly 2 run(s), one per profile (test, e2e); got 1');
-    const oneProfile = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts'] }], { gateRuns: { profiles: ['test'], inventory: 'true' } }) }, repo.work);
+    const oneProfile = clearDecision(file, LANE, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/a.test.ts', 'test/b.test.ts', 'test/util.test.js'] }], { gateRuns: { profiles: ['test'], inventory: 'true' } }) }, repo.work);
     if ('refused' in oneProfile) throw new Error(oneProfile.message);
-    expect(oneProfile.receipt).toStartWith(`remote-gate tree=${file.tree.slice(0, 12)} tests=10 runs=200/1 profiles=test `);
+    expect(oneProfile.receipt).toStartWith(`remote-gate tree=${file.tree.slice(0, 12)} tests=15 runs=200/1 profiles=test `);
+    const uncovered = clearDecision(file, PLATFORM, { runUrl: url, evidence: check(repo, [{ id: 200, profile: 'test', head, files: ['test/smoke.test.ts'] }], { profiles: { ...PROFILES, [PLATFORM]: PROFILES.test! } }) }, repo.work);
+    expect('refused' in uncovered && uncovered.message).toContain(`1 of the 1 test file(s) ${PLATFORM} must cover appear in no run's tree.json (test/a.test.ts)`);
     fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
     fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
     const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', PLATFORM, '--run-url', url]);
@@ -168,7 +185,7 @@ describe.skipIf(process.platform === 'win32')('clear --run: Actions runs as remo
     fs.mkdirSync(path.join(repo.work, '.gstack/tmp'), { recursive: true });
     fs.writeFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), JSON.stringify(file));
     const r = runBin(repo, 'gstack-pregate', ['clear', '--remote', LANE, '--run-url', 'https://github.com/fx/fx/actions/runs/200']);
-    expect([r.status, r.err]).toEqual([EXIT.fail, expect.stringContaining(`the base branch declares a run profile for ${LANE}, so it clears only with --run`)]);
+    expect([r.status, r.err]).toEqual([EXIT.fail, expect.stringContaining(`${LANE} may have a run profile on the base branch, so it clears only with a verified --run`)]);
     expect(JSON.parse(fs.readFileSync(path.join(repo.work, '.gstack/tmp/pregate.json'), 'utf8')).requires_remote[0].receipt).toBeNull();
   }, 120_000);
 

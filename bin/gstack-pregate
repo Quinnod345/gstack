@@ -32,6 +32,7 @@ import { describeDraft, draftConfig } from '../lib/pregate/init-draft';
 import { buildContext, defaultUserConfigPath, describeRefusal, loadedDotenvFiles } from '../lib/pregate/context';
 import { CHECKS, CHECK_IDS, PREGATE_OUT_REL, PREGATE_TIER2, clearDecision, clearObligation, readPregateFile, renderTable, runPregate, verifyPregate, writePregateFile, type RunCheck } from '../lib/pregate/index';
 import { ghRunDeps } from '../lib/run-evidence';
+import { wtreeFingerprint } from '../lib/script-invocation';
 import { describeLane, discoverLanes } from '../lib/pregate/workflows';
 import { REMOTE_GATE_LANE } from '../lib/pregate/checks/lanes';
 import { describeSubstitution } from '../lib/pregate/remote-receipt';
@@ -223,7 +224,7 @@ function cmdClear(root: string, rest: string[]): number {
   const runUrl = flag(rest, '--run-url');
   const bundleLane = flag(rest, '--bundle-lane');
   const checked = runs.length || runUrl || bundleLane ? runCheck(root, lane, rest.includes('--allow-repo-commands')) : undefined;
-  if (checked && 'error' in checked && (runs.length || checked.profiled)) { process.stderr.write(`gstack-pregate clear: ${checked.error}${checked.profiled ? `; the base branch declares a run profile for ${lane}, so it clears only with --run` : ''}\n`); return EXIT.fail; }
+  if (checked && 'error' in checked && (runs.length || checked.profiled)) { process.stderr.write(`gstack-pregate clear: ${checked.error}${checked.profiled ? `; ${lane} may have a run profile on the base branch, so it clears only with a verified --run` : ''}\n`); return EXIT.fail; }
   const evidence = checked && !('error' in checked) ? checked : undefined;
   const decision = clearDecision(read.file, lane, { runUrl, runs, bundleLane, receiptPath: flag(rest, '--receipt'), evidence }, root);
   if ('refused' in decision) {
@@ -244,16 +245,20 @@ function cmdClear(root: string, rest: string[]): number {
 function runCheck(root: string, lane: string, allowRepoCommands: boolean): RunCheck | { error: string; profiled?: boolean } {
   const base = resolveBaseBranch(root);
   const loaded = loadConfigFromBase(root, base);
-  if (isConfigUnavailable(loaded)) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is unreadable (${loaded.detail}); run profiles come only from the base` };
-  if (loaded.errors.length) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is invalid: ${loaded.errors.map(e => `${e.path}: ${e.message}`).join('; ')}` };
+  // Unknown profiles are treated as present: a lane is cleared unverified only once the base shows it has no profile.
+  if (isConfigUnavailable(loaded)) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is unreadable (${loaded.detail}); run profiles come only from the base`, profiled: true };
+  if (loaded.errors.length) return { error: `the base branch's ${PREGATE_CONFIG_PATH} is invalid: ${loaded.errors.map(e => `${e.path}: ${e.message}`).join('; ')}`, profiled: true };
   const repo = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(gitOut(root, ['remote', 'get-url', 'origin']) ?? '')?.[1];
   if (!repo) return { error: 'origin is not a github.com repository; run evidence is read from GitHub Actions', profiled: lane === REMOTE_GATE_LANE ? !!loaded.config.remote_gate_runs : !!loaded.config.run_profiles[lane] };
   return {
     repo, deps: ghRunDeps(repo, root), profiles: loaded.config.run_profiles, gateRuns: loaded.config.remote_gate_runs, now: new Date(),
-    inventory: command => {
+    inventory: (command, tree) => {
       if (!allowRepoCommands) return { error: 'the inventory command is a pin-file command; pass --allow-repo-commands' };
+      const at = () => { const fp = wtreeFingerprint({ cwd: root }); return 'tree' in fp ? fp.tree : null; };
+      if (at() !== tree) return { error: `the working tree is not pregate.json's tree ${tree.slice(0, 12)}; the inventory must list that tree's gate files` };
       const r = spawnSync('bash', ['-c', command], { cwd: root, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0 || r.error) return { error: `${command} exited ${r.status ?? r.error}: ${(r.stderr ?? '').trim().slice(0, 200)}` };
+      if (at() !== tree) return { error: `the working tree changed while ${command} ran` };
       return [...new Set(r.stdout.split('\n').map(l => l.trim()).filter(Boolean))];
     },
   };

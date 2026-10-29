@@ -11,7 +11,7 @@ const TREE = 'b'.repeat(40);
 const NOW = new Date('2026-10-29T12:00:00Z');
 const PROFILE: RunProfile = { workflow: 'test.yml', events: ['workflow_dispatch', 'push'], jobs: ['full-suite'], artifact: 'full-suite-tree' };
 
-interface World { run: ApiRun; others: ApiRun[]; jobs: ApiJob[]; artifact: TreeRecord | Error; trees: Record<string, string | null>; throwOn?: 'run' }
+interface World { run: ApiRun; others: ApiRun[]; jobs: ApiJob[]; artifact: TreeRecord | Error; trees: Record<string, string | null>; throwOn?: 'run'; later?: ApiRun }
 function world(over: Partial<World> = {}): World {
   const run: ApiRun = {
     id: 100, run_attempt: 1, status: 'completed', conclusion: 'success', event: 'workflow_dispatch', head_sha: HEAD,
@@ -25,8 +25,9 @@ function world(over: Partial<World> = {}): World {
   };
 }
 function deps(w: World): RunDeps {
+  let reads = 0;
   return {
-    run: id => { if (w.throwOn === 'run') throw new Error('HTTP 502'); if (id !== w.run.id) throw new Error('HTTP 404'); return w.run; },
+    run: id => { if (w.throwOn === 'run') throw new Error('HTTP 502'); if (id !== w.run.id) throw new Error('HTTP 404'); return reads++ && w.later ? w.later : w.run; },
     runsForHead: (_wf, sha) => [w.run, ...w.others].filter(r => r.head_sha === sha),
     jobs: () => w.jobs,
     artifact: () => { if (w.artifact instanceof Error) throw w.artifact; return w.artifact; },
@@ -105,6 +106,21 @@ describe('verifyRun', () => {
     expect(reason(world({ others: [red] }), { vetoHeads: [other] })).toBe('newer_run_vetoes');
   });
 
+  test('the run is read again after the evidence: a newer attempt of the same run, seen or started meanwhile, refuses', () => {
+    const w = world();
+    expect(reason(world({ later: { ...w.run, run_attempt: 2, status: 'in_progress', conclusion: null } }))).toBe('run_changed');
+    expect(reason(world({ others: [{ ...w.run, run_attempt: 2, run_started_at: '2026-10-29T11:00:00Z', status: 'completed', conclusion: 'failure' }] }))).toBe('newer_run_vetoes');
+  });
+
+  test('tree.json counts and file lists must be well formed', () => {
+    const art = world().artifact as TreeRecord;
+    expect(reason(world({ artifact: { ...art, tests: -1 } }))).toBe('artifact_mismatch');
+    expect(reason(world({ artifact: { ...art, tests: 1.5 } }))).toBe('artifact_mismatch');
+    expect(reason(world({ artifact: { ...art, files: 'test/a.test.ts' } }))).toBe('artifact_mismatch');
+    const v = check(world({ artifact: { ...art, files: ['./test/a.test.ts'], tests: undefined } }));
+    expect(v.ok && [v.evidence.files, v.evidence.tests]).toEqual([['test/a.test.ts'], null]);
+  });
+
   test('a profile that names an OS needs the artifact to record it', () => {
     const w = world();
     expect(reason(w, { profile: { ...PROFILE, os: 'Linux' } })).toBe('os_mismatch');
@@ -123,12 +139,14 @@ describe('profiles, coverage and receipts', () => {
     expect(runProfileErrors({ test: PROFILE, e2e: { ...PROFILE, workflow: 'e2e.yml', jobs: ['e2e-full-suite'], artifact: 'e2e-full-suite-tree', os: 'Linux', max_age_hours: 12 } }, { profiles: ['test', 'e2e'], inventory: 'bash scripts/pregate-remote-gate.sh --list' })).toEqual([]);
     const errors = runProfileErrors({ bad: { workflow: '../x.yml', events: ['pull_request'], jobs: [], artifact: '', max_age_hours: 0, os: 'BeOS', extra: 1 } }, { profiles: ['missing'], inventory: 'a\nb' }).map(e => e.path);
     expect(errors).toEqual(expect.arrayContaining(['run_profiles["bad"].extra', 'run_profiles["bad"].workflow', 'run_profiles["bad"].events', 'run_profiles["bad"].jobs', 'run_profiles["bad"].artifact', 'run_profiles["bad"].max_age_hours', 'run_profiles["bad"].os', 'remote_gate_runs.profiles', 'remote_gate_runs.inventory']));
+    expect(runProfileErrors({ test: PROFILE }, { profiles: ['test', 'test'], inventory: 'true' })).toEqual([{ path: 'remote_gate_runs.profiles', message: 'names each profile once' }]);
   });
 
   test('uncoveredFiles lists the inventory files no run recorded', () => {
     const ev = (files: string[]) => ({ run_id: 1, run_attempt: 1, head_sha: HEAD, tree: TREE, profile: 'p', event: 'push', finished_at: '', files, tests: null });
     expect(uncoveredFiles(['a', 'b', 'c'], [ev(['a']), ev(['b'])])).toEqual(['c']);
     expect(uncoveredFiles(['a'], [ev(['a', 'z'])])).toEqual([]);
+    expect(uncoveredFiles(['./test/x.test.ts'], [ev(['test/x.test.ts'])])).toEqual([]);
   });
 
   test('the receipt fields round-trip and keep the tree prefix verify reads', () => {
