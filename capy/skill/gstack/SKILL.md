@@ -44,6 +44,8 @@ Capy checklist for `/autoplan`: drive `gstack-autoplan`, never a hand adaptation
 
 Token caps on /ship: pass a brief's cap as `--token-cap <n>`. /ship reads `cost.tokens` from `tools.thread.get({ thread_id: "this" })` (one execute program returning only that number) into `gstack-ship-budget --reading <n>` and obeys `verdict=` (`docs/ship-budget.md`).
 
+/ship reviewers on Capy (`docs/review-policy.md#reviewer-packets`): one execute program runs `gstack-review-packet build` with the plan run's flags, creates one subagent per `PACKET:` line with `machine: "shared"` on the lane's model at reasoning `medium` (red-team and adversarial keep the lane's reasoning; a cross-family outside voice stays as it is), each briefed only with the packet brief plus "run `install.sh --check --for review-voice` in the same bash call that reads the packet", and starts at most the free slots of the 8-running-subagent cap per batch. The same program polls `tools.subagent.get` every ~20 s until every reviewer settles, bounded by a timeout, then runs `gstack-review-packet collect --dir <dir>` and returns only its output; never read a reviewer's transcript.
+
 ## Plan, approve, ship
 
 Every Capy thread that uses gstack follows these for new work, under a Captain or on its own. The rule in full is `docs/captain.md`, "Plan before build"; the lane side is section 3 of captain.md in this folder.
