@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+**A new page shows how gstack and Capy run as a software factory, with measured numbers.** `capy/README.md` explains how Capy Captains, their crews and gstack's skills fit together, from the plan-first approval loop and `/ship` before READY to merge trains, fix waves, the daily flaky pass and peer Captains. It compares the 14 days after 2026-10-15 with the 14 days before: 197 PRs merged to gstack's main against 65, and 194 versions shipped against 62. It also says what those numbers leave out. The median PR shrank from 1,292 changed lines to 422, and the median time from opening a PR to merging it grew from 1.1 hours to 5.6, because trains batch merges. A footnote names the windows and queries behind every figure, and the page ends with tips and how Garry uses the setup day to day.
+
+### Docs
+- **`capy/README.md`**: the new page (how the pieces fit, the measured before/after, why we think it works, tips, and how Garry uses it).
+- The documentation table in `README.md` and the introduction of `docs/captain.md` link to it.
+
 ## [1.91.322.0] - 2026-10-29
 
 **A PR screen no longer runs the whole paid gate just because a changed file sits on every case's import path.** Editing a file like `lib/restamp.ts` reached all 113 gate cases through the derived-reference closure, so 19 of the 41 full screens between Oct 20 and 29 ran the full $33 gate for that reason alone. A narrow screen (`gstack-ship-queue ready --screen`, and `bun run eval:bg:pr`) now leaves such a file's cases to the train gate's full census, which runs every case before anything merges. Replayed on those 41 screens with today's maps, this saves about $457 a week, and the screens that caught real PR-caused reds (#3434, #3453) still run the full gate.
