@@ -241,6 +241,20 @@ function caseSessions(rows: SessionLedgerRow[], id: string, onlyCase: boolean): 
   return rows.filter(row => row.case === id || (!row.case && (onlyCase || row.test_name === id || row.test_name === CASE_TEST_NAMES[id])));
 }
 
+/** Cases that run no model (a binary data flow): with no record and no session they cost a known $0. test/paid-report-cost.test.ts pins each body model-free. */
+export const MODEL_FREE_CASES: ReadonlySet<string> = new Set(['timeline-event-flow']);
+
+/** A trial's cost: its records' sum; with no record, its sessions' billed or streamed cost; a model-free case with neither, $0. */
+export function caseCost(id: string, records: any[], sessions: SessionLedgerRow[]): { cost_usd: number; cost_known?: false } {
+  const cents = (values: number[]) => Math.round(values.reduce((sum, value) => sum + value, 0) * 100) / 100;
+  if (records.length) return { cost_usd: cents(records.map(r => Number(r.cost_usd) || 0)), ...trialCostKnown(records, sessions) };
+  if (sessions.length) {
+    const costs = sessions.map(s => s.billed !== false ? s.cost_usd : s.streamed_cost_usd);
+    return costs.every(c => typeof c === 'number' && Number.isFinite(c)) ? { cost_usd: cents(costs as number[]) } : { cost_usd: 0, cost_known: false };
+  }
+  return MODEL_FREE_CASES.has(id) ? { cost_usd: 0 } : { cost_usd: 0, cost_known: false };
+}
+
 /** The artifact holding a slice's shards: the downloaded directory's own name when it is one. */
 /** The red-census guide the report and every eval:pass-rates view link. */
 export const CENSUS_RED_GUIDE = 'docs/evals/census-red.md';
@@ -277,11 +291,14 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
         const caseOutcome: TrialOutcome = failed ? 'failed' : cases.some(tc => tc.outcome === 'passed') ? 'passed' : 'skipped';
         // A record is named by its case id or carries case_id; an E2E record named by its display label ("/qa fix loop") is
         // the shard's only case's when the shard ran one case, else it stays unattributed and the trial's cost unknown.
-        const mine = records.filter((r: any) => r?.name === id || r?.case_id === id || (byCase.size === 1 && !r?.case_id));
-        const failedRecord = mine.find((r: any) => r.passed === false);
+        // A display-label record whose runSkillTest testName is this case (cost_case_id) adds its cost only: the failed record stays the named one.
+        const named = records.filter((r: any) => r?.name === id || r?.case_id === id || (byCase.size === 1 && !r?.case_id));
+        const mine = [...named, ...records.filter((r: any) => r?.cost_case_id === id && !named.includes(r) && !byCase.has(r?.name))];
+        const failedRecord = named.find((r: any) => r.passed === false);
         const recorded: TrialFailureClass | undefined = !failed ? undefined
           : failed.failureType === 'TimeoutError' ? 'timeout' : failedRecord ? failureClassOf(failedRecord) : 'assertion';
         const sessions = caseSessions(ledger, id, byCase.size === 1);
+        const cost = caseCost(id, mine, sessions);
         const credentials = failed && recorded !== 'contract' ? credentialRejection({ error: `${failedRecord?.error ?? ''}\n${failed.message ?? ''}`, sessions }) : undefined;
         const failureClass = credentials ? 'infra' : recorded;
         const rawError = credentials ? `credentials rejected: ${credentials}` : failedRecord?.error ?? failed?.message;
@@ -295,7 +312,7 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
           census.skipped.push(`◌ ${id}  ${key} (${cases.map(tc => tc.name).join('; ')}): ${RUNTIME_SKIP_REASON}`);
         }
         census.ruleCases.push({ id, kind, outcome: caseOutcome, key, slice: result.sliceIndex, ...(failureClass ? { failureClass } : {}), ...(error && failed ? { error } : {}),
-          costUsd: Math.round(mine.reduce((sum: number, r: any) => sum + (Number(r.cost_usd) || 0), 0) * 100) / 100, costKnown: trialCostKnown(mine, sessions).cost_known !== false,
+          costUsd: cost.cost_usd, costKnown: cost.cost_known !== false,
           ...(failed ? { line: `✗ ${id}  ${kind}  FAIL  ${failureClass}${failedRecord?.exit_reason === 'timeout' && failedRecord?.timeout_at_turn !== undefined ? ` at turn ${failedRecord.timeout_at_turn}` : ''}${error ? ` — ${error}` : ''}`
             + `${diagnosisText(diagnosis, error)}  [slice ${result.sliceIndex}, attempt ${result.attempt ?? 1}]`
             + `${evidencePointer(sliceArtifactName(root, result.sliceIndex, result.attempt ?? 1), key, typeof base.run_id === 'string' ? base.run_id : undefined, id)}`
@@ -303,7 +320,7 @@ export function junitCensus(manifest: PaidRunManifest, artifacts: ReportArtifact
         census.history.push({ ...base, case: id, file: shardFile(key), kind, trial: 1, panel: { n: 1, k: 1 }, outcome: caseOutcome,
           ...(failureClass ? { failure_class: failureClass } : {}), ...(failedRecord?.exit_reason ? { exit_reason: String(failedRecord.exit_reason) } : {}),
           ...(error && failed ? { error } : {}), ...diagnosis, ...trialSessions(sessions), duration_ms: Math.min(cases.reduce((sum, tc) => sum + tc.timeMs, 0), outcome.elapsedMs),
-          cost_usd: Math.round(mine.reduce((sum: number, r: any) => sum + (Number(r.cost_usd) || 0), 0) * 100) / 100, ...trialCostKnown(mine, sessions),
+          ...cost,
           ...(typeof mine[0]?.model === 'string' ? { model: mine[0].model } : {}), ...(cliVersion ? { cli_version: cliVersion } : {}),
           quarantined: false, execution: outcome.reused ? 'reused' : 'executed', source: 'junit' } as TrialOutcomeRecord);
       }
