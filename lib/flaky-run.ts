@@ -152,13 +152,17 @@ export function unreportedFailures(runner: JunitRunner, output: string, reported
 /**
  * Why the first run cannot be trusted to have run every test, so a rerun must
  * repeat the whole command; null when the runner's own output proves it
- * complete. A run that stopped early reports only the tests it reached, and a
- * targeted rerun would never run the rest.
+ * complete and its exit status explained by the failed tests alone. A run that
+ * stopped early reports only the tests it reached, and a targeted rerun would
+ * never run the rest; a coverage threshold or a fail-on-flaky policy fails the
+ * run for a reason a narrowed rerun cannot reproduce.
  */
-export function incompleteRun(runner: JunitRunner, output: string, exit: number): string | null {
+export function incompleteRun(runner: JunitRunner, output: string, exit: number, command: string[] = [], runnerFlaky = 0): string | null {
   if (runner === 'generic') return 'a generic runner cannot prove every test ran';
   if (exit !== 1) return `the command exited ${exit}, not the runner's test-failure status 1`;
   const text = plain(output);
+  if (command.some(a => a === '--coverage' || a.startsWith('--coverage=')) || /%\s*Funcs\s*\|\s*%\s*Lines|coverage threshold/i.test(text)) return 'coverage is measured, and a narrowed rerun cannot reproduce a coverage failure';
+  if (runnerFlaky) return `the runner retried ${runnerFlaky} flaky test(s), which a fail-on-flaky policy can fail the run on`;
   if (runner === 'bun') {
     if (/Bailed out after/.test(text)) return 'bun stopped early (--bail)';
     if (!/^\s*Ran \d+ tests? across \d+ files?/m.test(text)) return 'bun printed no run summary';
@@ -281,7 +285,7 @@ export async function runFlaky(opts: RunOptions): Promise<RunResult> {
     else if (failed.length > opts.maxReruns) outcomes.push({ test: t, status: 'fail', attempts: t.attempts, reason: `${failed.length} tests failed, more than --max-reruns ${opts.maxReruns}; not rerun` });
     else eligible.push(t);
   }
-  const wholeRerun = eligible.length ? incompleteRun(report.runner, first.output, first.exit) ?? undefined : undefined;
+  const wholeRerun = eligible.length ? incompleteRun(report.runner, first.output, first.exit, opts.command, runnerFlaky.length) ?? undefined : undefined;
   const junit = path.resolve(cwd, opts.junit);
   const firstXml = fs.readFileSync(junit);
   let reruns = 0;

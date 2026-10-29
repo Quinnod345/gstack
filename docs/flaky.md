@@ -60,7 +60,10 @@ one argument, so a title with shell or regex characters selects only itself.
   `interrupted`, `Testing stopped early` or a global timeout. Otherwise the
   rerun repeats the whole command (`FLAKY_RERUN: scope=command (<why>)`), so
   a test the first run never reached (`--bail`, `--max-failures`, `-x`)
-  still has to pass. When the run is already red for another test, a
+  still has to pass. Coverage (`--coverage`, a coverage table in the output)
+  and runner-flaky tests in the same run also force a whole-command rerun: a
+  coverage threshold or `--fail-on-flaky-tests` fails the run for a reason a
+  narrowed rerun cannot reproduce. When the run is already red for another test, a
   whole-command rerun is skipped.
 - **A rerun clears a test only cleanly.** The rerun's command must exit 0 and
   the test must run once and pass on its first attempt; a rerun the runner
@@ -74,7 +77,10 @@ one argument, so a title with shell or regex characters selects only itself.
   rerun.
 - **Reports.** After the run, `--junit` holds the first run's report, so a
   later upload or test reporter sees what failed. Each rerun's report is kept
-  beside it as `<name>.rerun-<n>.xml`.
+  beside it as `<name>.rerun-<n>.xml`. Other reporters' outputs (Playwright's
+  `test-results/` and HTML report) are rewritten by a rerun; upload the JUnit
+  report as the record. An existing `--junit` file that is not a JUnit report
+  is refused (usage, exit 2), never deleted.
 - **Ids.** A test is `<file>::<project>::<describe > title>`, with the project
   empty outside Playwright, so a test in two browser projects is two tests.
   `gstack-flaky ids --junit <file>` prints them.

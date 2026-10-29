@@ -95,6 +95,8 @@ if (sub !== 'run') die(`unknown command ${sub}\n${USAGE}`);
 const o = parse(rest);
 if (!o.junit) die('run needs --junit <file.xml>');
 if (!/\.xml$/i.test(o.junit) || fs.statSync(o.junit, { throwIfNoEntry: false })?.isDirectory()) die(`--junit must name a .xml file (it is deleted before every attempt), got ${JSON.stringify(o.junit)}`);
+const existing = fs.statSync(o.junit, { throwIfNoEntry: false }) && fs.readFileSync(o.junit, 'utf-8').slice(0, 4096);
+if (existing && existing.trim() && !/<testsuites?[\s>/]/.test(existing)) die(`--junit ${JSON.stringify(o.junit)} exists and is not a JUnit report; gstack-flaky deletes that path before every attempt, so it refuses to touch it`);
 if (!o.command.length) die('run needs the test command after --');
 let result;
 try {

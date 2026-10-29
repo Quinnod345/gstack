@@ -91,6 +91,9 @@ describe('complete-run proof for a targeted rerun', () => {
     expect(incompleteRun('playwright', 'Timed out waiting 600s for the test suite to run\nTimed out waiting 600s for the entire test run\n  1 failed\n', 1)).toContain('stopped early');
     expect(incompleteRun('playwright', '', 1)).toContain('no summary');
     expect(incompleteRun('generic', 'Ran 5 tests', 1)).toContain('generic');
+    expect(incompleteRun('bun', 'All files | % Funcs | % Lines |\nRan 5 tests across 2 files.\n', 1)).toContain('coverage');
+    expect(incompleteRun('bun', 'Ran 5 tests across 2 files.\n', 1, ['bun', 'test', '--coverage'])).toContain('coverage');
+    expect(incompleteRun('playwright', '  1 failed\n  1 flaky\n  4 passed\n', 1, [], 1)).toContain('fail-on-flaky');
   });
 });
 
@@ -120,6 +123,22 @@ const fail = (name: string, msg = 'boom') => `<testcase name="${name}" classname
 describe('runFlaky', () => {
   const base = (spawn: ReturnType<typeof fakeRun>, dir: string, extra: Partial<Parameters<typeof runFlaky>[0]> = {}) =>
     runFlaky({ command: ['bun', 'test'], junit: 'r.xml', maxReruns: 3, cwd: dir, spawn: spawn.spawn('r.xml'), env: {}, now: () => new Date('2026-10-29T00:00:00Z'), ...extra });
+
+  test('a green run with no failures is green and reruns nothing', async () => {
+    const dir = tmp();
+    const f = fakeRun(() => suite(pass('a') + pass('b')), () => 0);
+    expect(await base(f, dir)).toMatchObject({ exitCode: 0, reruns: 0, ledger: [] });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  test('a coverage failure beside a flaky test is not cleared by a narrowed rerun', async () => {
+    const dir = tmp();
+    const cov = () => '----|---------|---------|\nAll files | % Funcs | % Lines |\nRan 2 tests across 1 file.\n';
+    const f = fakeRun((_a, n) => n === 1 ? suite(pass('a') + fail('b')) : suite(pass('a') + pass('b')), () => 1, cov);
+    const r = await base(f, dir);
+    expect(f.calls[1]).toEqual(['bun', 'test']);
+    expect(r).toMatchObject({ exitCode: 1, wholeRerun: 'coverage is measured, and a narrowed rerun cannot reproduce a coverage failure' });
+  });
 
   test('a failed test that passes on rerun is a flaky pass and goes on the ledger', async () => {
     const dir = tmp();
@@ -362,6 +381,9 @@ describe('bin/gstack-flaky', () => {
     fs.writeFileSync(path.join(dir, 'keep.ts'), 'x');
     expect(spawnSync(bin, ['run', '--junit', 'keep.ts', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
     expect(fs.existsSync(path.join(dir, 'keep.ts'))).toBe(true);
+    fs.writeFileSync(path.join(dir, 'pom.xml'), '<project><modelVersion>4.0.0</modelVersion></project>');
+    expect(spawnSync(bin, ['run', '--junit', 'pom.xml', '--', 'true'], { cwd: dir, encoding: 'utf-8', timeout: 30_000 }).status).toBe(2);
+    expect(fs.existsSync(path.join(dir, 'pom.xml'))).toBe(true);
     const missing = spawnSync(bin, ['run', '--junit', 'r.xml', '--', path.join(dir, 'no-such-runner')], { cwd: dir, encoding: 'utf-8', timeout: 30_000 });
     expect(missing.status).toBe(3);
     expect(missing.stderr).toContain('(FLAKY_COMMAND_NOT_STARTED)');
