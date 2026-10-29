@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**An install check run from inside /ship no longer upgrades gstack under it.** /ship's docs step runs `scripts/install.sh --for document-release`. That run fast-forwarded the checkout from 1.91.298 to 1.91.299 in the middle of a lane's /ship, so the receipt writer's rules changed partway through the run (#3571).
+
+### Fixed
+- **`bin/gstack-capy-session`**: in install mode, a live workflow lease held by the caller's own process chain now skips the self-upgrade: `SELF_UPGRADE: skipped (this session's own gstack run holds a workflow lease on this installation: pid <p> (<age>m <command>), so the upgrade is deferred until the run ends; …(UPGRADE_BUSY))`. The install still certifies the installed revision and the trailer stays ok with `behind=`. `bin/gstack-upgrade` deliberately ignores the caller's own lease, and an install started from inside the run passed that check. A run with no live lease of its own upgrades as before, and `GSTACK_UPGRADE_FORCE=1` still overrides.
+
+### Tests
+- `test/capy-skill-wrapper.test.ts`: an install run under a shell that holds the lease leaves HEAD where it was and stays ok. The same install after that shell exits upgrades. Before this change the first run printed `SELF_UPGRADE: done 1.0.1 -> 1.0.2`.
+
 ## [1.91.301.0] - 2026-10-29
 
 **Four paid gate cases that went red on 2026-10-28 without a product defect now pass on the runs that failed them.** Each repair replays the failing run as a free test that fails without it.
