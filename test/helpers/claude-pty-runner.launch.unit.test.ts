@@ -58,7 +58,9 @@ process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
   fallback: await argv({}, undefined), env: await argv({}, 'env-model'), explicit: await argv({ model: 'opts-model' }, 'env-model'),
   extra: await argv({ extraArgs: ['--model', 'override'] }, undefined),
   pinned: await argv({ extraArgs: ['--session-id', '11111111-2222-4333-8444-555555555555'] }, undefined),
-  resumed: await argv({ extraArgs: ['--resume', 'prior'] }, undefined) }));
+  resumed: await argv({ extraArgs: ['--resume', 'prior'] }, undefined),
+  pinnedEq: await argv({ extraArgs: ['--session-id=11111111-2222-4333-8444-555555555555'] }, undefined),
+  resumedEq: await argv({ extraArgs: ['--resume=prior'] }, undefined) }));
 `);
       const run = (hermetic: string) => {
         const result = spawnSync(process.execPath, [worker], { cwd: join(import.meta.dir, '../..'), encoding: 'utf8', timeout: 30_000,
@@ -81,6 +83,8 @@ process.stdout.write(JSON.stringify({ capture: resolveEvalModel('capture'),
       expect(sessionIds(hermetic.extra)).toHaveLength(1);
       expect(sessionIds(hermetic.pinned)).toEqual(['11111111-2222-4333-8444-555555555555']);
       expect(sessionIds(hermetic.resumed)).toEqual([]);
+      expect(hermetic.pinnedEq.filter((arg: string) => arg.startsWith('--session-id'))).toEqual(['--session-id=11111111-2222-4333-8444-555555555555']);
+      expect(sessionIds(hermetic.resumedEq)).toEqual([]);
       expect(sessionIds(run('0').fallback)).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);

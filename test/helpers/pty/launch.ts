@@ -290,9 +290,10 @@ function prepareLaunch(opts: ClaudePtyOptions): LaunchSetup {
   const hermetic = isHermeticEnabled();
   if (hermetic) args.push('--strict-mcp-config');
   const extra = opts.extraArgs ?? [];
-  const resumes = extra.some(arg => ['--resume', '-r', '--continue', '-c'].includes(arg));
-  let sessionId = extra.includes('--session-id') ? extra[extra.indexOf('--session-id') + 1] : undefined;
-  if (hermetic && !sessionId && !resumes) args.push('--session-id', sessionId = randomUUID());
+  const resumes = extra.some(arg => /^(--resume|--continue|-r|-c)(=|$)/.test(arg));
+  const pinned = extra.findIndex(arg => /^--session-id(=|$)/.test(arg));
+  let sessionId = pinned < 0 ? undefined : extra[pinned].startsWith('--session-id=') ? extra[pinned].slice('--session-id='.length) : extra[pinned + 1];
+  if (hermetic && pinned < 0 && !resumes) args.push('--session-id', sessionId = randomUUID());
   if (opts.extraArgs) args.push(...opts.extraArgs);
 
   // Hermetic by default (test/helpers/hermetic-env.ts): operator session

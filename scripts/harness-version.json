@@ -38,7 +38,7 @@
     "test/helpers/pty/classify.ts": {"blob":"3f2daa12ff6484f96b8d28d910a50231c4bb3ae8","since":6},
     "test/helpers/pty/fake-session.ts": {"blob":"554e064ef259b8444280eddfe9b0db93c66a8202","since":6},
     "test/helpers/pty/judge.ts": {"blob":"81c5bb4c48ab928aca2f186a1ade9df7169d7fbe","since":6},
-    "test/helpers/pty/launch.ts": {"blob":"d2e51418ce284815a26e174d777ca8b47ffd7e68","since":6,"nonBehavioral":"PTY sessions price their ledger row from the session transcript; the launcher pins a random --session-id (Claude otherwise picks its own random one) when the caller passes none and is not resuming; no prompt, answer, timeout or verdict changes"},
+    "test/helpers/pty/launch.ts": {"blob":"11bbba2ed8425edd91a6214c05ecb32b33a00c41","since":6,"nonBehavioral":"the launcher also recognises --session-id= and --resume= forms before pinning a session id; no prompt, answer, timeout or verdict changes"},
     "test/helpers/pty/plan-native.ts": {"blob":"ddba9cb68c7c0da935cff7c1cea258dee2dff740","since":6},
     "test/helpers/pty/runners/counting.ts": {"blob":"8c5c05e54abf961259d34d9c3d77db67138d7794","since":6},
     "test/helpers/pty/runners/floor.ts": {"blob":"54e2145832bb98913644d10ff303792d67f9362e","since":6,"nonBehavioral":"Removes the plan-design 0D focus picker from the shared harness; floor.ts gains an optional pickSetupChoice hook that no other caller passes, so no other case's input or verdict can change. plan-design-finding-floor, the only case whose seed raises that menu, passes the picker from its owned fixture test/fixtures/design-floor-focus-picker.ts, so its owned bytes start its own new series."},
