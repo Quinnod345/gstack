@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+**A PR screen no longer runs the whole paid gate just because a changed file sits on every case's import path.** Editing a file like `lib/restamp.ts` reached all 113 gate cases through the derived-reference closure, so 19 of the 41 full screens between Oct 20 and 29 ran the full $33 gate for that reason alone. A narrow screen (`gstack-ship-queue ready --screen`, and `bun run eval:bg:pr`) now leaves such a file's cases to the train gate's full census, which runs every case before anything merges. Replayed on those 41 screens with today's maps, this saves about $457 a week, and the screens that caught real PR-caused reds (#3434, #3453) still run the full gate.
+
+### Changed
+- **Narrow screens** (`scripts/test-pr-profile.ts`, `scripts/lib/paid-select.ts`): a changed file whose derived references reach every gate case and that nothing narrower selects is a hub file. On a narrow screen it selects no case or judge; the paid plan's reason and the coverage summary name it and say the train gate runs those cases. Full-gate files, shared runtime and build inputs, paid-runner inputs, files the derivation cannot place and files deleted by the PR select exactly what they did before. `ready --screen --broad`, `pull_request` runs (the merge gate when the base has no `train` block), the train gate, `eval:bg:gate`, periodic and release runs are unchanged.
+- **The READY screen preview** (`lib/ship-queue-train-ready.ts`) and the per-push screening summary now show the narrow screen's selection.
+- **`test/size-ledger/**`** is a touchfile of the 20 cases that read `test/helpers/size-ledger.ts` (all periodic or marathon), so a size-ledger baseline change no longer restores the full gate. `careful/bin/mask-commit-message.awk`, loaded only by the free-tested `check-careful.sh` hook, is free-only.
+
+### Tests
+- `test/pr-dependencies.test.ts`: a hub-only diff selects nothing on a narrow screen and every gate case on a broad one or with no policy set; a hub beside a shared runtime input, an unknown file or a full-gate file still runs the full gate; a hub beside a direct edit keeps that edit's cases; a deleted file is never a hub; the PR workflow plans narrow only for dispatches; size-ledger baselines select no gate case.
+
 ## [1.91.304.0] - 2026-10-29
 
 **Running the Capy installer for a second workflow on the same machine no longer takes away the first one's admission.** /ship's docs step runs `scripts/install.sh --for document-release`, and that run replaced the `--for ship` install verdict with its narrower one, so the rest of /ship refused with "the install verdict certified for=document-release, which does not cover codex that ship needs" until someone reran `--for ship` (#3561, seen on gstack-evals#13).
